@@ -64,6 +64,7 @@ import {
   type CustomFieldRejection,
 } from "./task-fields.js";
 import { validateSettingValuePatch, WorkflowSettingRejectionError } from "./workflow-settings.js";
+import { applyPromptOverridesToIr } from "./workflow-prompt-overrides.js";
 // Side-effect import: registers the 14 built-in trait DEFINITIONS into the
 // shared trait registry on load (the flag-ON path resolves traits by id).
 import "./builtin-traits.js";
@@ -8130,6 +8131,88 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     }
   }
 
+
+  // ── Built-in workflow prompt overrides (FN-6893) ───────────────────────────
+  //
+  // FNXC:CustomWorkflows 2026-06-21-19:07:
+  // Built-in workflow graphs remain read-only, but prompt-bearing prompt/gate nodes need project-scoped text overrides with reset-to-default. Keep this as a separate authority from updateWorkflowDefinition so structure edits remain blocked.
+
+  private parseWorkflowPromptOverrideJson(raw: string | null | undefined): Record<string, string> {
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+      const out: Record<string, string> = {};
+      for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+        if (typeof value !== "string") continue;
+        const trimmed = value.trim();
+        if (trimmed.length === 0) continue;
+        out[key] = value;
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  }
+
+  /** Enumerate every stored prompt override row for THIS project, returned as
+   *  `workflowId → { nodeId: prompt }`. Corrupt rows and blank prompt entries are
+   *  skipped so callers only see runnable override text. */
+  listWorkflowPromptOverridesForProject(): Record<string, Record<string, string>> {
+    const projectId = this.getWorkflowSettingsProjectId();
+    const rows = this.db
+      .prepare("SELECT workflowId, overrides FROM workflow_prompt_overrides WHERE projectId = ?")
+      .all(projectId) as Array<{ workflowId: string; overrides: string }>;
+    const out: Record<string, Record<string, string>> = {};
+    for (const row of rows) {
+      out[row.workflowId] = this.parseWorkflowPromptOverrideJson(row.overrides);
+    }
+    return out;
+  }
+
+  /** Read the raw stored prompt override map for `(workflowId, projectId)`.
+   *  Returns `{}` when no row exists. Empty/whitespace prompts are treated as
+   *  absent because a blank override would blank an agent run. */
+  getWorkflowPromptOverrides(workflowId: string, projectId: string): Record<string, string> {
+    const row = this.db
+      .prepare("SELECT overrides FROM workflow_prompt_overrides WHERE workflowId = ? AND projectId = ?")
+      .get(workflowId, projectId) as { overrides: string } | undefined;
+    return this.parseWorkflowPromptOverrideJson(row?.overrides);
+  }
+
+  /** Merge prompt override updates into `(workflowId, projectId)`. A `null`,
+   *  non-string, empty, or whitespace value deletes that nodeId override, which
+   *  is the reset-to-default operation. */
+  updateWorkflowPromptOverrides(
+    workflowId: string,
+    projectId: string,
+    patch: Record<string, string | null | undefined>,
+  ): Record<string, string> {
+    return this.db.transactionImmediate(() => {
+      const current = this.getWorkflowPromptOverrides(workflowId, projectId);
+      const next: Record<string, string> = { ...current };
+      for (const [nodeId, value] of Object.entries(patch)) {
+        if (typeof value !== "string" || value.trim().length === 0) {
+          delete next[nodeId];
+        } else {
+          next[nodeId] = value;
+        }
+      }
+
+      const now = new Date().toISOString();
+      this.db
+        .prepare(
+          `INSERT INTO workflow_prompt_overrides (workflowId, projectId, overrides, updatedAt)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(workflowId, projectId)
+           DO UPDATE SET overrides = excluded.overrides, updatedAt = excluded.updatedAt`,
+        )
+        .run(workflowId, projectId, JSON.stringify(next), now);
+      this.db.bumpLastModified();
+      return next;
+    });
+  }
+
   /**
    * Write setting VALUES for `(workflowId, projectId)`. The patch is validated
    * against the NAMED workflow's declarations via {@link validateSettingValuePatch};
@@ -14599,6 +14682,13 @@ ${stepsSection}`;
     return this.workflowDefinitionsCache;
   }
 
+  private applyBuiltInPromptOverridesSync(workflowId: string, ir: WorkflowIr): WorkflowIr {
+    if (!isBuiltinWorkflowId(workflowId)) return ir;
+    const projectId = this.getWorkflowSettingsProjectId();
+    const overrides = this.getWorkflowPromptOverrides(workflowId, projectId);
+    return applyPromptOverridesToIr(ir, overrides);
+  }
+
   /** Get a single workflow definition by id, or undefined when absent. */
   async getWorkflowDefinition(
     id: string,
@@ -14609,7 +14699,7 @@ ${stepsSection}`;
         const requiredPluginId = getRequiredPluginIdForBuiltinWorkflow(id);
         if (!requiredPluginId || !(await this.isPluginInstalled(requiredPluginId))) return undefined;
       }
-      return builtin;
+      return { ...builtin, ir: this.applyBuiltInPromptOverridesSync(id, builtin.ir) };
     }
     const row = this.db.prepare("SELECT * FROM workflows WHERE id = ?").get(id) as
       | {
@@ -14807,6 +14897,7 @@ ${stepsSection}`;
     // via the resolver and read built-in declarations + built-in values, so no
     // unreachable orphan value rows remain.
     this.db.prepare("DELETE FROM workflow_settings WHERE workflowId = ?").run(id);
+    this.db.prepare("DELETE FROM workflow_prompt_overrides WHERE workflowId = ?").run(id);
 
     // Cascade: clear the project default when it pointed at this workflow.
     try {
@@ -15581,10 +15672,10 @@ ${stepsSection}`;
   private resolveTaskWorkflowIrSync(taskId: string): WorkflowIr {
     const selection = this.getTaskWorkflowSelection(taskId);
     const workflowId = selection?.workflowId;
-    if (!workflowId) return BUILTIN_CODING_WORKFLOW_IR;
+    if (!workflowId) return this.applyBuiltInPromptOverridesSync("builtin:coding", BUILTIN_CODING_WORKFLOW_IR);
     if (isBuiltinWorkflowId(workflowId)) {
       const builtin = getBuiltinWorkflow(workflowId);
-      return builtin?.ir ?? BUILTIN_CODING_WORKFLOW_IR;
+      return this.applyBuiltInPromptOverridesSync(workflowId, builtin?.ir ?? BUILTIN_CODING_WORKFLOW_IR);
     }
     try {
       const row = this.db

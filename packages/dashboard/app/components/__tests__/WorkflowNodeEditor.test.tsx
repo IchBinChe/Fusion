@@ -54,6 +54,8 @@ vi.mock("../../api", () => ({
   updateGlobalSettings: vi.fn(),
   fetchWorkflowSettingValues: vi.fn().mockResolvedValue({ stored: {}, effective: {}, orphaned: [] }),
   updateWorkflowSettingValues: vi.fn().mockResolvedValue({ stored: {}, effective: {}, orphaned: [] }),
+  fetchWorkflowPromptOverrides: vi.fn().mockResolvedValue({ stored: {}, effective: {}, defaults: {} }),
+  updateWorkflowPromptOverrides: vi.fn().mockResolvedValue({ stored: {}, effective: {}, defaults: {} }),
 }));
 
 import { fireEvent } from "@testing-library/react";
@@ -76,6 +78,8 @@ import {
   fetchAgents,
   fetchConfig,
   fetchSettings,
+  fetchWorkflowPromptOverrides,
+  updateWorkflowPromptOverrides,
 } from "../../api";
 import type { TraitCatalogEntry } from "../../api";
 import type { WorkflowStepTemplate } from "@fusion/core";
@@ -122,6 +126,8 @@ viBeforeEach(() => {
   vi.mocked(fetchConfig).mockResolvedValue({ maxConcurrent: 2, rootDir: "." });
   vi.mocked(fetchSettings).mockResolvedValue({} as never);
   vi.mocked(fetchAgents).mockResolvedValue([]);
+  vi.mocked(fetchWorkflowPromptOverrides).mockResolvedValue({ stored: {}, effective: {}, defaults: {} });
+  vi.mocked(updateWorkflowPromptOverrides).mockResolvedValue({ stored: {}, effective: {}, defaults: {} });
 });
 
 const TRAIT_CATALOG: TraitCatalogEntry[] = [
@@ -803,8 +809,92 @@ describe("WorkflowNodeEditor", () => {
     fireEvent.click(await screen.findByTestId("wf-node-start"));
 
     const inspector = await screen.findByTestId("wf-node-inspector");
-    expect(within(inspector).getByText(/Read-only built-in/i)).toBeInTheDocument();
+    expect(within(inspector).getByText(/structure is read-only/i)).toBeInTheDocument();
     expect(within(inspector).getByTestId("wf-start-entry-column")).toBeDisabled();
+  });
+
+  it("edits and resets built-in prompt overrides from the node inspector", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef()]);
+    vi.mocked(fetchWorkflowPromptOverrides).mockResolvedValue({
+      stored: {},
+      effective: { execute: "Default execute prompt" },
+      defaults: { execute: "Default execute prompt" },
+    });
+    vi.mocked(updateWorkflowPromptOverrides)
+      .mockResolvedValueOnce({
+        stored: { execute: "Custom execute prompt" },
+        effective: { execute: "Custom execute prompt" },
+        defaults: { execute: "Default execute prompt" },
+      })
+      .mockResolvedValueOnce({
+        stored: {},
+        effective: { execute: "Default execute prompt" },
+        defaults: { execute: "Default execute prompt" },
+      });
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    await selectBuiltinExecutePromptNode();
+    const inspector = await screen.findByTestId("wf-node-inspector");
+    const prompt = within(inspector).getByLabelText("Prompt") as HTMLTextAreaElement;
+    expect(prompt).not.toHaveAttribute("readonly");
+    expect(within(inspector).getByRole("button", { name: "Reset to default" })).toBeDisabled();
+
+    fireEvent.change(prompt, { target: { value: "Custom execute prompt" } });
+    fireEvent.blur(prompt);
+
+    await waitFor(() =>
+      expect(updateWorkflowPromptOverrides).toHaveBeenCalledWith("builtin:coding", { execute: "Custom execute prompt" }, undefined),
+    );
+    expect(await within(inspector).findByTestId("wf-prompt-overridden")).toHaveTextContent("Overridden");
+    const reset = within(inspector).getByRole("button", { name: "Reset to default" });
+    expect(reset).not.toBeDisabled();
+
+    fireEvent.click(reset);
+    await waitFor(() =>
+      expect(updateWorkflowPromptOverrides).toHaveBeenLastCalledWith("builtin:coding", { execute: null }, undefined),
+    );
+    await waitFor(() => expect(prompt).toHaveValue("Default execute prompt"));
+  });
+
+  it("edits gate prompts and shows reset controls in mobile built-in panels", async () => {
+    mockWorkflowEditorViewport("mobile");
+    const gateWorkflow: WorkflowDefinition = {
+      ...builtinDef(),
+      ir: {
+        version: "v2",
+        name: "Gate built-in",
+        columns: [],
+        nodes: [
+          { id: "start", kind: "start" },
+          { id: "security", kind: "gate", config: { prompt: "Default security prompt" } },
+          { id: "end", kind: "end" },
+        ],
+        edges: [
+          { from: "start", to: "security", condition: "success" },
+          { from: "security", to: "end", condition: "success" },
+        ],
+      },
+      layout: {},
+    };
+    vi.mocked(fetchWorkflows).mockResolvedValue([gateWorkflow]);
+    vi.mocked(fetchWorkflowPromptOverrides).mockResolvedValue({
+      stored: { security: "Custom security prompt" },
+      effective: { security: "Custom security prompt" },
+      defaults: { security: "Default security prompt" },
+    });
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Default coding workflow" }));
+    fireEvent.click(within(await screen.findByTestId("mobile-wf-node-security")).getAllByRole("button")[0]);
+
+    const inspector = await screen.findByTestId("wf-node-inspector");
+    const prompt = within(inspector).getByLabelText("Prompt") as HTMLTextAreaElement;
+    expect(prompt).not.toHaveAttribute("readonly");
+    expect(prompt).toHaveValue("Custom security prompt");
+    expect(within(inspector).getByTestId("wf-prompt-overridden")).toHaveTextContent("Overridden");
+    expect(within(inspector).getByRole("button", { name: "Reset to default" })).not.toBeDisabled();
   });
 
   it("opens the start node inspector from the mobile node-detail stage", async () => {
@@ -1036,6 +1126,50 @@ describe("WorkflowNodeEditor", () => {
     fireEvent.click(within(fullscreenPromptEditor!).getByRole("button", { name: "Collapse prompt editor" }));
 
     expect(getPromptFullscreenOverlay()).toBeNull();
+  });
+
+  it("edits and resets built-in prompt overrides in the fullscreen editor", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef()]);
+    vi.mocked(fetchWorkflowPromptOverrides).mockResolvedValue({
+      stored: { execute: "Existing execute override" },
+      effective: { execute: "Existing execute override" },
+      defaults: { execute: "Default execute prompt" },
+    });
+    vi.mocked(updateWorkflowPromptOverrides)
+      .mockResolvedValueOnce({
+        stored: { execute: "Fullscreen execute override" },
+        effective: { execute: "Fullscreen execute override" },
+        defaults: { execute: "Default execute prompt" },
+      })
+      .mockResolvedValueOnce({
+        stored: {},
+        effective: { execute: "Default execute prompt" },
+        defaults: { execute: "Default execute prompt" },
+      });
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    await selectBuiltinExecutePromptNode();
+    fireEvent.click(await screen.findByRole("button", { name: "Expand prompt editor" }));
+
+    const fullscreenPromptEditor = getPromptFullscreenOverlay();
+    expect(fullscreenPromptEditor).toBeInTheDocument();
+    const textarea = getPromptFullscreenTextarea();
+    expect(textarea).not.toHaveAttribute("readonly");
+    expect(textarea).toHaveValue("Existing execute override");
+    expect(within(fullscreenPromptEditor!).getByTestId("wf-prompt-overridden")).toHaveTextContent("Overridden");
+
+    fireEvent.change(textarea, { target: { value: "Fullscreen execute override" } });
+    fireEvent.blur(textarea);
+    await waitFor(() =>
+      expect(updateWorkflowPromptOverrides).toHaveBeenCalledWith("builtin:coding", { execute: "Fullscreen execute override" }, undefined),
+    );
+
+    fireEvent.click(within(fullscreenPromptEditor!).getByRole("button", { name: "Reset to default" }));
+    await waitFor(() =>
+      expect(updateWorkflowPromptOverrides).toHaveBeenLastCalledWith("builtin:coding", { execute: null }, undefined),
+    );
+    await waitFor(() => expect(textarea).toHaveValue("Default execute prompt"));
   });
 
   it("opens and collapses the fullscreen prompt editor for builtin workflows on mobile", async () => {

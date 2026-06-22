@@ -120,6 +120,13 @@ export { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
 export { BUILTIN_MARKETING_WORKFLOW_IR } from "./builtin-marketing-workflow-ir.js";
 export { resolveWorkflowOptionalSteps } from "./workflow-optional-steps.js";
 export type { ResolvedWorkflowOptionalStep } from "./workflow-optional-steps.js";
+export {
+  applyPromptOverridesToIr,
+  enumeratePromptBearingWorkflowNodes,
+  isPromptBearingWorkflowNode,
+  normalizeWorkflowPromptOverrides,
+} from "./workflow-prompt-overrides.js";
+export type { WorkflowPromptDefault, WorkflowPromptOverrides } from "./workflow-prompt-overrides.js";
 export { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "./builtin-stepwise-coding-workflow-ir.js";
 export { BUILTIN_PR_WORKFLOW_IR } from "./builtin-pr-workflow-ir.js";
 export { BUILTIN_LEAD_GENERATION_WORKFLOW_IR } from "./builtin-lead-generation-workflow-ir.js";

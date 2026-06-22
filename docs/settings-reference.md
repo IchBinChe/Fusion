@@ -223,6 +223,8 @@ default — so an untuned project behaves exactly as before. Switching a project
 **new** custom workflow starts that workflow from its own declaration defaults, not
 the project's prior customized values.
 
+**Built-in prompt overrides.** Built-in workflow prompt/gate node text has a similar project-scoped persistence model, but it is separate from workflow settings: prompt overrides are stored per `(workflowId, nodeId, projectId)` and resolve as `stored prompt ?? shipped prompt`. Resetting a prompt deletes the stored node override and restores the built-in IR text; graph structure and setting declarations remain read-only for built-ins. See [Workflow Steps → Overriding built-in workflow prompts](./workflow-steps.md#overriding-built-in-workflow-prompts).
+
 **Agents.** `fn_workflow_create`/`fn_workflow_update` accept `settings` declarations,
 and the `fn_workflow_settings` tool reads and writes values with the same typed
 validation as the editor (invalid values are rejected, never persisted). See

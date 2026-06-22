@@ -45,7 +45,25 @@ Decision-only or investigation tasks can also declare `noCommitsExpected` / `**N
 
 ### Custom workflow authoring
 
-Use the dashboard [Workflow Editor](./workflow-editor.md) to inspect read-only built-ins, duplicate them, or author custom workflows. Custom workflows can declare graph nodes and edges, columns/traits, task fields, typed workflow settings, model lanes, optional workflow-step templates, and author-time validation. Use this page for runtime semantics; use the editor guide for the visual authoring surface.
+Use the dashboard [Workflow Editor](./workflow-editor.md) to inspect built-ins, tune built-in prompts, duplicate workflows, or author custom workflows. Custom workflows can declare graph nodes and edges, columns/traits, task fields, typed workflow settings, model lanes, optional workflow-step templates, and author-time validation. Use this page for runtime semantics; use the editor guide for the visual authoring surface.
+
+### Overriding built-in workflow prompts
+
+<!--
+FNXC:Docs 2026-06-21-21:22:
+Built-in workflows stay structurally read-only while prompt/gate node text is project-tunable, so operators need a resettable prompt-override model without implying graph topology edits are allowed.
+-->
+
+Built-in workflow graph structure is still shipped and read-only: nodes, edges, columns, traits, executor configuration, and workflow setting declarations cannot be edited in place. Prompt-bearing nodes are the exception. In the workflow editor, select any `prompt` or `gate` node in a built-in workflow and edit its **Prompt** field to create a project-scoped override.
+
+Prompt overrides are stored per `(workflowId, nodeId, projectId)`. At runtime Fusion resolves the effective prompt as:
+
+1. the stored override for that workflow/node/project, when present and non-empty; otherwise
+2. the shipped prompt text from the built-in workflow IR.
+
+This same overlay is used by the dashboard preview, seam prompt resolution during live task runs, synchronous workflow IR resolution used by lifecycle movement, and workflow-step materialization for non-seam prompt/gate nodes. Empty or whitespace-only prompt edits are treated as reset/delete operations, never as blank prompts.
+
+Use **Reset to default** on an overridden prompt to delete the stored override and return to the shipped built-in prompt. Duplicating a built-in remains the path when you need to change topology, columns, traits, settings declarations, or non-prompt configuration.
 
 ## Workflow IR (v1)
 

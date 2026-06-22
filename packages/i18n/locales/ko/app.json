@@ -8207,7 +8207,15 @@
     "skillsLoadFailed": "",
     "skipFirstRunApproval": "",
     "waitForUserInput": "",
-    "waitForUserInputNote": ""
+    "waitForUserInputNote": "",
+    "promptOverrideSaved": "Prompt override saved",
+    "promptOverrideSaveFailed": "Failed to save prompt override",
+    "promptOverrideReset": "Prompt reset to default",
+    "promptOverrideResetFailed": "Failed to reset prompt",
+    "promptOverridesLoadFailed": "Failed to load prompt overrides",
+    "promptOverridden": "Overridden",
+    "promptSaving": "Saving…",
+    "resetPromptDefault": "Reset to default"
   },
   "workflowFields": {
     "add": "필드 추가",
@@ -8345,7 +8353,7 @@
     "conditionFailure": "",
     "conditionSuccess": "",
     "nodeInspector": "",
-    "readOnlyDuplicateToEdit": ""
+    "readOnlyDuplicateToEdit": "Built-in structure is read-only — prompts on prompt and gate nodes can be edited here."
   },
   "workflows": {
     "aiEdit": "AI로 디자인",
@@ -8395,7 +8403,7 @@
     "mobileSelectNote": "",
     "nameLabel": "워크플로 이름",
     "newWorkflow": "새 워크플로",
-    "readOnlyBuiltin": "",
+    "readOnlyBuiltin": "Built-in workflow: structure is read-only, prompts are editable.",
     "saved": "",
     "savedNotCompilable": "",
     "saveFailed": "",

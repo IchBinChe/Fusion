@@ -947,6 +947,35 @@ React Flow ships white default controls and mini-map chrome, but the workflow ed
   padding-right: calc(var(--space-xl) + var(--space-md));
 }
 
+/*
+FNXC:WorkflowEditor 2026-06-21-20:18:
+Built-in workflow prompts need visible override state and a reset action without making graph controls editable; keep the controls outside disabled fieldsets and use shared button/token styles.
+*/
+.wf-prompt-override-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+  padding-right: calc(var(--space-xl) + var(--space-md));
+}
+
+.wf-prompt-override-actions--fullscreen {
+  justify-content: space-between;
+  padding-right: 0;
+}
+
+.wf-prompt-override-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-pill);
+  color: var(--color-warning);
+  padding: calc(var(--space-xs) / 2) var(--space-sm);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 .wf-inspector-note {
   margin: 0;
   font-size: 0.78rem;
@@ -1728,6 +1757,12 @@ Column trait toggles are left-sidebar workflow controls; keep their enabled and 
 @media (max-width: 768px) {
   .wf-prompt-editor--fullscreen {
     padding: var(--space-sm);
+  }
+
+  .wf-prompt-override-actions {
+    align-items: stretch;
+    flex-direction: column;
+    padding-right: 0;
   }
 
   .modal-overlay:has(.wf-editor-modal),

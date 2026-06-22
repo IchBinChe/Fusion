@@ -148,7 +148,7 @@ Navigation:
 
 Behavior:
 - Opens a workflow node editor with a workflow list/sidebar, canvas, inspector, and settings/authoring panels
-- Read-only built-in workflows are inspectable in the same canvas as custom workflows, including connected success, failure, and rework edges for their graph topology.
+- Built-in workflows are inspectable in the same canvas as custom workflows, including connected success, failure, and rework edges for their graph topology. Their graph structure stays read-only, but prompt/gate node Prompt fields can be edited per project and reset to the shipped default from the node inspector or expanded prompt editor.
 - Custom workflows can be created from blank, duplicated from built-ins/custom definitions, imported/exported, AI-designed, validated, and saved from the editor.
 - The Settings panel is value-first for built-in workflows and groups workflow settings by Models, Review & Approval, Step Execution, and Advanced. Known workflow model values use the same model dropdown picker as **Settings → Project Models** so provider/model pairs are saved together; custom or non-model string values can still use typed inputs. Definitions remain available for custom workflow schema authoring.
 - The main Settings modal also exposes the default workflow's Plan/Triage, Executor, and Reviewer model lanes from **Project Models**; the modal's primary **Save** action writes those dropdown values as workflow setting values for the active default workflow.

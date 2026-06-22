@@ -8207,7 +8207,15 @@
     "skillsLoadFailed": "Failed to load skills",
     "skipFirstRunApproval": "Skip first-run approval (runs without pausing)",
     "waitForUserInput": "Wait for user input",
-    "waitForUserInputNote": "This node pauses the task until you reply in the task's comments and unpause. The Prompt field above is shown to the user as the question."
+    "waitForUserInputNote": "This node pauses the task until you reply in the task's comments and unpause. The Prompt field above is shown to the user as the question.",
+    "promptOverrideSaved": "Prompt override saved",
+    "promptOverrideSaveFailed": "Failed to save prompt override",
+    "promptOverrideReset": "Prompt reset to default",
+    "promptOverrideResetFailed": "Failed to reset prompt",
+    "promptOverridesLoadFailed": "Failed to load prompt overrides",
+    "promptOverridden": "Overridden",
+    "promptSaving": "Saving…",
+    "resetPromptDefault": "Reset to default"
   },
   "workflowFields": {
     "add": "Add field",
@@ -8345,7 +8353,7 @@
     "conditionFailure": "failure",
     "conditionSuccess": "success",
     "nodeInspector": "Node",
-    "readOnlyDuplicateToEdit": "Read-only built-in — duplicate the workflow to edit nodes."
+    "readOnlyDuplicateToEdit": "Built-in structure is read-only — prompts on prompt and gate nodes can be edited here."
   },
   "workflows": {
     "aiEdit": "Design with AI",
@@ -8395,7 +8403,7 @@
     "mobileSelectNote": "Select a workflow to edit.",
     "nameLabel": "Workflow name",
     "newWorkflow": "New workflow",
-    "readOnlyBuiltin": "Read-only built-in workflow",
+    "readOnlyBuiltin": "Built-in workflow: structure is read-only, prompts are editable.",
     "saved": "Workflow saved",
     "savedNotCompilable": "Workflow saved but cannot be compiled",
     "saveFailed": "Failed to save workflow",

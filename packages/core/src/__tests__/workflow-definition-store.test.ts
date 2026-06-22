@@ -167,6 +167,31 @@ describe("TaskStore workflow definitions (U1)", () => {
     expect((await store.listWorkflowDefinitions()).filter((w) => !isBuiltinWorkflowId(w.id))).toHaveLength(0);
   });
 
+  it("persists, resets, and cascades workflow prompt overrides", async () => {
+    const projectId = store.getWorkflowSettingsProjectId();
+    const created = await store.createWorkflowDefinition({ name: "Promptable", ir: makeIr() });
+
+    expect(store.getWorkflowPromptOverrides(created.id, projectId)).toEqual({});
+    expect(store.updateWorkflowPromptOverrides(created.id, projectId, { lint: "Run a stricter lint review" })).toEqual({
+      lint: "Run a stricter lint review",
+    });
+    expect(store.getWorkflowPromptOverrides(created.id, projectId)).toEqual({
+      lint: "Run a stricter lint review",
+    });
+
+    expect(
+      store.updateWorkflowPromptOverrides(created.id, projectId, {
+        lint: "   ",
+        missing: null,
+        review: "Review carefully",
+      }),
+    ).toEqual({ review: "Review carefully" });
+    expect(store.listWorkflowPromptOverridesForProject()[created.id]).toEqual({ review: "Review carefully" });
+
+    await store.deleteWorkflowDefinition(created.id);
+    expect(store.getWorkflowPromptOverrides(created.id, projectId)).toEqual({});
+  });
+
   it("throws when deleting a non-existent workflow", async () => {
     await expect(store.deleteWorkflowDefinition("WF-999")).rejects.toThrow(/not found/i);
   });

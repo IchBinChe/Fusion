@@ -5232,6 +5232,15 @@ export interface WorkflowSettingValuesPayload {
   orphaned: Array<{ id: string; value: unknown }>;
 }
 
+/** Per-project workflow prompt override payload. `defaults` is the shipped prompt
+ *  by node id, `stored` is the persisted override map, and `effective` is the
+ *  prompt text the editor/executor sees after stored-over-default resolution. */
+export interface WorkflowPromptOverridesPayload {
+  stored: Record<string, string>;
+  effective: Record<string, string>;
+  defaults: Record<string, string>;
+}
+
 /** Read the setting VALUES (stored/effective/orphaned) for a workflow in the
  *  current project context (U6). The project is bound server-side to the
  *  scoped store. */
@@ -5258,6 +5267,31 @@ export function updateWorkflowSettingValues(
     {
       method: "PATCH",
       body: JSON.stringify({ values }),
+    },
+  );
+}
+
+/** Read per-node prompt overrides for a workflow in the current project context. */
+export function fetchWorkflowPromptOverrides(
+  id: string,
+  projectId?: string,
+): Promise<WorkflowPromptOverridesPayload> {
+  return api<WorkflowPromptOverridesPayload>(
+    withProjectId(`/workflows/${encodeURIComponent(id)}/prompt-overrides`, projectId),
+  );
+}
+
+/** Patch per-node prompt overrides. Null, empty, and whitespace values reset to the shipped default. */
+export function updateWorkflowPromptOverrides(
+  id: string,
+  overrides: Record<string, string | null>,
+  projectId?: string,
+): Promise<WorkflowPromptOverridesPayload> {
+  return api<WorkflowPromptOverridesPayload>(
+    withProjectId(`/workflows/${encodeURIComponent(id)}/prompt-overrides`, projectId),
+    {
+      method: "PATCH",
+      body: JSON.stringify({ overrides }),
     },
   );
 }

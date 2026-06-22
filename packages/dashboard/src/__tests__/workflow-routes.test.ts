@@ -753,6 +753,65 @@ describe("workflow routes (U4)", () => {
       expect(res.status).toBe(404);
     });
   });
+
+  describe("prompt-overrides routes (FN-6893)", () => {
+    it("GET returns shipped defaults and effective prompts for a built-in workflow", async () => {
+      const res = await get("/api/workflows/builtin:coding/prompt-overrides");
+      expect(res.status).toBe(200);
+      const body = res.body as { stored: Record<string, string>; defaults: Record<string, string>; effective: Record<string, string> };
+      expect(body.stored).toEqual({});
+      expect(body.defaults.execute).toContain("You are a task execution agent");
+      expect(body.effective.execute).toBe(body.defaults.execute);
+    });
+
+    it("PATCH sets and resets a built-in prompt override", async () => {
+      const set = await patch("/api/workflows/builtin:coding/prompt-overrides", {
+        overrides: { execute: "Execute route override" },
+      });
+      expect(set.status).toBe(200);
+      expect((set.body as { stored: Record<string, string>; effective: Record<string, string> }).stored.execute).toBe(
+        "Execute route override",
+      );
+      expect((set.body as { effective: Record<string, string> }).effective.execute).toBe("Execute route override");
+      expect(emitWorkflowSseEvent).toHaveBeenCalledWith(
+        "workflow:updated",
+        expect.objectContaining({ id: "builtin:coding" }),
+        "proj-workflow-routes",
+      );
+
+      const reset = await patch("/api/workflows/builtin:coding/prompt-overrides", {
+        overrides: { execute: null },
+      });
+      expect(reset.status).toBe(200);
+      const resetBody = reset.body as { stored: Record<string, string>; defaults: Record<string, string>; effective: Record<string, string> };
+      expect(resetBody.stored.execute).toBeUndefined();
+      expect(resetBody.effective.execute).toBe(resetBody.defaults.execute);
+    });
+
+    it("PATCH treats empty and whitespace prompt overrides as reset", async () => {
+      await patch("/api/workflows/builtin:coding/prompt-overrides", {
+        overrides: { execute: "Execute route override" },
+      });
+      const res = await patch("/api/workflows/builtin:coding/prompt-overrides", {
+        overrides: { execute: "   " },
+      });
+      expect(res.status).toBe(200);
+      expect((res.body as { stored: Record<string, string> }).stored.execute).toBeUndefined();
+    });
+
+    it("PATCH rejects node ids that are not prompt-bearing", async () => {
+      const res = await patch("/api/workflows/builtin:coding/prompt-overrides", {
+        overrides: { end: "No prompt here" },
+      });
+      expect(res.status).toBe(400);
+      expect((res.body as { details?: { nodeId?: string } }).details?.nodeId).toBe("end");
+    });
+
+    it("GET and PATCH return 404 for an unknown workflow id", async () => {
+      expect((await get("/api/workflows/WF-404/prompt-overrides")).status).toBe(404);
+      expect((await patch("/api/workflows/WF-404/prompt-overrides", { overrides: { execute: "x" } })).status).toBe(404);
+    });
+  });
 });
 
 // ── U6: write-time column-agent validation (existence + policy escalation) ────

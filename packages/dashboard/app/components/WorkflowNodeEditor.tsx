@@ -35,7 +35,10 @@ import {
   fetchDiscoveredSkills,
   fetchWorkflowStepTemplates,
   fetchPluginWorkflowStepTemplates,
+  fetchWorkflowPromptOverrides,
+  updateWorkflowPromptOverrides,
   type ModelInfo,
+  type WorkflowPromptOverridesPayload,
 } from "../api";
 import type { Agent } from "../api";
 import type { DiscoveredSkill } from "../api";
@@ -745,6 +748,10 @@ function InnerEditor({
   // managed by the panel's Values tab, not this declaration array.
   const [settings, setSettings] = useState<WorkflowSettingDefinition[]>([]);
   const [optionalSteps, setOptionalSteps] = useState<WorkflowOptionalStep[]>([]);
+  // FNXC:WorkflowEditor 2026-06-21-20:06:
+  // Built-in workflow graph structure remains read-only, but prompt/gate node prompts need a separate per-project override state so editing prompts does not mark structural graph edits dirty or use the read-only workflow PATCH authority.
+  const [promptOverrides, setPromptOverrides] = useState<WorkflowPromptOverridesPayload | null>(null);
+  const [promptOverrideSavingNodeId, setPromptOverrideSavingNodeId] = useState<string | null>(null);
   // Ref to the settings panel so a `?panel=settings` deep link can scroll it
   // into view on mount (U6/U9 redirect stubs).
   const settingsPanelRef = useRef<HTMLDivElement | null>(null);
@@ -1181,6 +1188,8 @@ function InnerEditor({
       setFields([]);
       setSettings([]);
       setOptionalSteps([]);
+      setPromptOverrides(null);
+      setPromptOverrideSavingNodeId(null);
       setName("");
       setDescription("");
       loadedSnapshotRef.current = null;
@@ -1235,6 +1244,41 @@ function InnerEditor({
   useEffect(() => {
     if (nodes.length > 0) canvasNodesMaterializedRef.current = true;
   }, [nodes]);
+
+  useEffect(() => {
+    if (!activeWorkflow || !isBuiltin) {
+      setPromptOverrides(null);
+      setPromptOverrideSavingNodeId(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchWorkflowPromptOverrides(activeWorkflow.id, projectId)
+      .then((payload) => {
+        if (cancelled) return;
+        setPromptOverrides(payload);
+        setNodes((ns) =>
+          ns.map((node) => {
+            if (node.data.kind !== "prompt" && node.data.kind !== "gate") return node;
+            const effective = payload.effective[node.id];
+            if (effective === undefined) return node;
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                config: { ...(node.data.config ?? {}), prompt: effective },
+              },
+            };
+          }),
+        );
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        addToast(getErrorMessage(err) || t("workflowEditor.promptOverridesLoadFailed", "Failed to load prompt overrides"), "error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkflow, isBuiltin, projectId, addToast, t, setNodes]);
 
   // `?panel=settings` deep link (U6/U9 redirect stubs): once the active workflow
   // has loaded, scroll the settings panel into view. Runs once per editor open.
@@ -1595,6 +1639,67 @@ function InnerEditor({
       );
     },
     [selectedNodeId, setNodes],
+  );
+
+  const applyPromptOverridePayloadToNode = useCallback(
+    (nodeId: string, payload: WorkflowPromptOverridesPayload) => {
+      setPromptOverrides(payload);
+      const effective = payload.effective[nodeId] ?? payload.defaults[nodeId] ?? "";
+      setNodes((ns) =>
+        ns.map((node) =>
+          node.id === nodeId
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  config: { ...(node.data.config ?? {}), prompt: effective },
+                },
+              }
+            : node,
+        ),
+      );
+    },
+    [setNodes],
+  );
+
+  const persistBuiltinPromptOverride = useCallback(
+    async (nodeId: string, prompt: string) => {
+      if (!activeWorkflow || !isBuiltin) return;
+      setPromptOverrideSavingNodeId(nodeId);
+      try {
+        const payload = await updateWorkflowPromptOverrides(activeWorkflow.id, { [nodeId]: prompt }, projectId);
+        applyPromptOverridePayloadToNode(nodeId, payload);
+        addToast(t("workflowEditor.promptOverrideSaved", "Prompt override saved"), "success");
+      } catch (err) {
+        addToast(getErrorMessage(err) || t("workflowEditor.promptOverrideSaveFailed", "Failed to save prompt override"), "error");
+        try {
+          const payload = await fetchWorkflowPromptOverrides(activeWorkflow.id, projectId);
+          applyPromptOverridePayloadToNode(nodeId, payload);
+        } catch {
+          // Best-effort rollback; a later workflow reload will reconcile.
+        }
+      } finally {
+        setPromptOverrideSavingNodeId((current) => (current === nodeId ? null : current));
+      }
+    },
+    [activeWorkflow, isBuiltin, projectId, addToast, t, applyPromptOverridePayloadToNode],
+  );
+
+  const resetBuiltinPromptOverride = useCallback(
+    async (nodeId: string) => {
+      if (!activeWorkflow || !isBuiltin) return;
+      setPromptOverrideSavingNodeId(nodeId);
+      try {
+        const payload = await updateWorkflowPromptOverrides(activeWorkflow.id, { [nodeId]: null }, projectId);
+        applyPromptOverridePayloadToNode(nodeId, payload);
+        addToast(t("workflowEditor.promptOverrideReset", "Prompt reset to default"), "success");
+      } catch (err) {
+        addToast(getErrorMessage(err) || t("workflowEditor.promptOverrideResetFailed", "Failed to reset prompt"), "error");
+      } finally {
+        setPromptOverrideSavingNodeId((current) => (current === nodeId ? null : current));
+      }
+    },
+    [activeWorkflow, isBuiltin, projectId, addToast, t, applyPromptOverridePayloadToNode],
   );
 
   // Edge inspector (KTD-4/5): mutate the selected edge's condition + rework
@@ -1985,9 +2090,39 @@ function InnerEditor({
     selectedNode && (selectedNode.data.kind === "prompt" || selectedNode.data.kind === "gate")
       ? String(
           selectedNode.data.config?.prompt
+            ?? promptOverrides?.effective[selectedNode.id]
             ?? (isBuiltin ? builtinSeamPrompt(selectedNode.data.config as Record<string, unknown> | undefined) : ""),
         )
       : "";
+  const selectedPromptDefault = selectedNode ? promptOverrides?.defaults[selectedNode.id] : undefined;
+  const selectedPromptStored = selectedNode ? promptOverrides?.stored[selectedNode.id] : undefined;
+  const selectedPromptHasOverride = selectedPromptStored !== undefined;
+  const selectedPromptIsOverridden =
+    selectedPromptHasOverride && selectedPromptDefault !== undefined && selectedPromptStored !== selectedPromptDefault;
+  const selectedPromptOverrideSaving = !!selectedNode && promptOverrideSavingNodeId === selectedNode.id;
+  const selectedNodePromptEditable =
+    !!selectedNode &&
+    (selectedNode.data.kind === "prompt" || selectedNode.data.kind === "gate") &&
+    (!isBuiltin || selectedPromptDefault !== undefined);
+  const handlePromptTextChange = useCallback(
+    (value: string) => {
+      if (!selectedNodePromptEditable) return;
+      updateSelectedData({ config: { prompt: value } });
+    },
+    [selectedNodePromptEditable, updateSelectedData],
+  );
+  const handlePromptTextBlur = useCallback(() => {
+    if (!isBuiltin || !selectedNode || (selectedNode.data.kind !== "prompt" && selectedNode.data.kind !== "gate")) return;
+    const stored = promptOverrides?.stored[selectedNode.id];
+    const defaultPrompt = promptOverrides?.defaults[selectedNode.id];
+    const nextPrompt = selectedNodePromptValue.trim() ? selectedNodePromptValue : "";
+    if ((stored === undefined && (defaultPrompt === undefined || nextPrompt === defaultPrompt)) || stored === nextPrompt) return;
+    void persistBuiltinPromptOverride(selectedNode.id, selectedNodePromptValue);
+  }, [isBuiltin, selectedNode, selectedNodePromptValue, promptOverrides, persistBuiltinPromptOverride]);
+  const handlePromptResetClick = useCallback(() => {
+    if (!selectedNode) return;
+    void resetBuiltinPromptOverride(selectedNode.id);
+  }, [selectedNode, resetBuiltinPromptOverride]);
   // The edge inspector renders different controls per source-node kind (KTD-2):
   // step-review → verdict controls; prompt/script/gate/code/foreach →
   // success/failure select; everything else → a read-only condition note.
@@ -2270,11 +2405,31 @@ function InnerEditor({
               <textarea
                 rows={undefined}
                 value={selectedNodePromptValue}
-                readOnly={isBuiltin}
-                onChange={(e) => updateSelectedData({ config: { prompt: e.target.value } })}
+                readOnly={!selectedNodePromptEditable}
+                onChange={(e) => handlePromptTextChange(e.target.value)}
+                onBlur={handlePromptTextBlur}
                 autoFocus
               />
             </label>
+            {isBuiltin ? (
+              <div className="wf-prompt-override-actions wf-prompt-override-actions--fullscreen">
+                {selectedPromptIsOverridden ? (
+                  <span className="wf-prompt-override-badge" data-testid="wf-prompt-overridden">
+                    {t("workflowEditor.promptOverridden", "Overridden")}
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={handlePromptResetClick}
+                  disabled={!selectedPromptHasOverride || selectedPromptOverrideSaving}
+                >
+                  {selectedPromptOverrideSaving
+                    ? t("workflowEditor.promptSaving", "Saving…")
+                    : t("workflowEditor.resetPromptDefault", "Reset to default")}
+                </button>
+              </div>
+            ) : null}
           </div>,
           document.body,
         )
@@ -2670,7 +2825,7 @@ function InnerEditor({
                         <div className="wf-mobile-add">
                           {isBuiltin ? (
                             <p className="wf-inspector-note wf-inspector-note--info">
-                              {t("workflows.readOnlyBuiltin", "Read-only built-in workflow")}
+                              {t("workflows.readOnlyBuiltin", "Built-in workflow: structure is read-only, prompts are editable.")}
                             </p>
                           ) : (
                             <>
@@ -2837,7 +2992,7 @@ function InnerEditor({
                           {isBuiltin ? (
                             <>
                               <p className="wf-inspector-note wf-inspector-note--info">
-                                {t("workflows.readOnlyBuiltin", "Read-only built-in workflow")}
+                                {t("workflows.readOnlyBuiltin", "Built-in workflow: structure is read-only, prompts are editable.")}
                               </p>
                               <button className="wf-editor-action" data-testid="wf-mobile-export" onClick={handleExport}>
                                 <Download size={15} /> {t("workflows.export", "Export")}
@@ -2917,7 +3072,7 @@ function InnerEditor({
                   // (not an overlay); the canvas below stays inspectable.
                   <div className="wf-editor-readonly-banner" role="status" data-testid="wf-readonly-banner">
                     <span className="wf-editor-readonly-note">
-                      {t("workflows.readOnlyBuiltin", "Read-only built-in workflow")}
+                      {t("workflows.readOnlyBuiltin", "Built-in workflow: structure is read-only, prompts are editable.")}
                     </span>
                     <button
                       className="wf-editor-action"
@@ -3331,7 +3486,7 @@ function InnerEditor({
               </div>
               {isBuiltin && (
                 <p className="wf-inspector-note wf-inspector-note--info">
-                  {t("workflowNodes.readOnlyDuplicateToEdit", "Read-only built-in — duplicate the workflow to edit nodes.")}
+                  {t("workflowNodes.readOnlyDuplicateToEdit", "Built-in structure is read-only — prompts on prompt and gate nodes can be edited here.")}
                 </p>
               )}
               <fieldset className="wf-inspector-fields" disabled={isBuiltin}>
@@ -3384,10 +3539,30 @@ function InnerEditor({
                     <textarea
                       rows={5}
                       value={selectedNodePromptValue}
-                      readOnly={isBuiltin}
-                      onChange={(e) => updateSelectedData({ config: { prompt: e.target.value } })}
+                      readOnly={!selectedNodePromptEditable}
+                      onChange={(e) => handlePromptTextChange(e.target.value)}
+                      onBlur={handlePromptTextBlur}
                     />
                   </label>
+                  <div className="wf-prompt-override-actions">
+                    {isBuiltin && selectedPromptIsOverridden ? (
+                      <span className="wf-prompt-override-badge" data-testid="wf-prompt-overridden">
+                        {t("workflowEditor.promptOverridden", "Overridden")}
+                      </span>
+                    ) : null}
+                    {isBuiltin ? (
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={handlePromptResetClick}
+                        disabled={!selectedPromptHasOverride || selectedPromptOverrideSaving}
+                      >
+                        {selectedPromptOverrideSaving
+                          ? t("workflowEditor.promptSaving", "Saving…")
+                          : t("workflowEditor.resetPromptDefault", "Reset to default")}
+                      </button>
+                    ) : null}
+                  </div>
                   {/* Expand button is outside <fieldset disabled={isBuiltin}> so it remains
                       clickable for builtin workflows. Root cause: HTML spec disables all
                       descendant buttons inside a disabled fieldset, including type="button". */}

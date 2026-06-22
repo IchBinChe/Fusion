@@ -96,7 +96,7 @@ import type {
 } from "@fusion/core";
 import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
 import type { GithubIssueAction, ScheduledTask, ScheduledTaskCreateInput, ScheduledTaskUpdateInput, AutomationRunResult, Routine, RoutineCreateInput, RoutineUpdateInput, RoutineExecutionResult } from "@fusion/core";
-import type { DiscoveredSkill, CatalogEntry, CatalogFetchResult, ToggleSkillResult, SkillContent, SkillFileEntry } from "@fusion/dashboard";
+import type { DiscoveredSkill, CatalogEntry, CatalogFetchResult, ToggleSkillResult, SkillContent, SkillFileEntry, SkillFileContent } from "@fusion/dashboard";
 import type { MilestoneValidationTelemetry, MissionInterviewDraftSummary } from "../components/mission-types";
 import type {
   ResearchAvailability,
@@ -113,7 +113,7 @@ import { dedupe, type DedupeOptions } from "./dedupe";
 export type FetchOptions = DedupeOptions;
 
 // Re-export skills types for use by hooks and components
-export type { DiscoveredSkill, CatalogEntry, CatalogFetchResult, ToggleSkillResult, SkillContent, SkillFileEntry };
+export type { DiscoveredSkill, CatalogEntry, CatalogFetchResult, ToggleSkillResult, SkillContent, SkillFileEntry, SkillFileContent };
 export type { CommitAssociationDiffBackfillReport };
 
 export class ApiRequestError extends Error {
@@ -9574,6 +9574,19 @@ export async function fetchSkillContent(skillId: string, projectId?: string): Pr
     withProjectId(`/skills/${encodeURIComponent(skillId)}/content`, projectId)
   );
   return response.content;
+}
+
+/*
+FNXC:Skills 2026-06-23-04:15:
+Fetch one supplementary file's content for the SkillsView detail-pane file viewer. The skill-dir-relative path is passed as an encoded `path` query param; the server resolves + traversal-guards it. Returns isText:false for binary/oversized files so the UI shows a non-previewable notice.
+*/
+export async function fetchSkillFileContent(skillId: string, relativePath: string, projectId?: string): Promise<SkillFileContent> {
+  const base = withProjectId(`/skills/${encodeURIComponent(skillId)}/file`, projectId);
+  const sep = base.includes("?") ? "&" : "?";
+  const response = await api<{ file: SkillFileContent }>(
+    `${base}${sep}path=${encodeURIComponent(relativePath)}`
+  );
+  return response.file;
 }
 
 // ── Chat API ─────────────────────────────────────────────────────────────────

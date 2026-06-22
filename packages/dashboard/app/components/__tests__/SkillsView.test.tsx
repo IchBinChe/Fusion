@@ -11,6 +11,7 @@ vi.mock("../../api", () => ({
   installSkill: vi.fn(),
   fetchSkillsCatalog: vi.fn(),
   fetchSkillContent: vi.fn(),
+  fetchSkillFileContent: vi.fn(),
 }));
 
 const mockFetchDiscoveredSkills = vi.mocked(apiModule.fetchDiscoveredSkills);
@@ -18,6 +19,7 @@ const mockToggleExecutionSkill = vi.mocked(apiModule.toggleExecutionSkill);
 const mockInstallSkill = vi.mocked(apiModule.installSkill);
 const mockFetchSkillsCatalog = vi.mocked(apiModule.fetchSkillsCatalog);
 const mockFetchSkillContent = vi.mocked(apiModule.fetchSkillContent);
+const mockFetchSkillFileContent = vi.mocked(apiModule.fetchSkillFileContent);
 
 describe("SkillsView", () => {
   const mockAddToast = vi.fn();
@@ -856,7 +858,12 @@ describe("SkillsView", () => {
       expect(mockFetchSkillContent).toHaveBeenCalledWith("npm::skills/test-skill", undefined);
     });
 
-    it("displays skill content when loaded", async () => {
+    it("displays skill content rendered as markdown when loaded", async () => {
+      // FNXC:Skills 2026-06-23-04:15: SKILL.md now renders via MailboxMessageContent
+      // (GitHub-flavored markdown) instead of a raw <pre>. Assert the markdown
+      // wrapper (.mailbox-markdown / data-testid="skills-view-detail-markdown")
+      // renders the heading text and the body, and that the (compact) files strip
+      // shows the supplementary files.
       render(<SkillsView addToast={mockAddToast} onClose={onClose} />);
 
       await waitFor(() => {
@@ -870,10 +877,15 @@ describe("SkillsView", () => {
       });
 
       await waitFor(() => {
-        const preElement = document.querySelector(".skills-view-detail-content");
-        expect(preElement).toBeTruthy();
-        expect(preElement!.textContent).toContain("# Test Skill");
-        expect(preElement!.textContent).toContain("This is the skill content.");
+        const markdown = screen.getByTestId("skills-view-detail-markdown");
+        expect(markdown).toBeTruthy();
+        expect(markdown.classList.contains("mailbox-markdown")).toBe(true);
+        // No raw <pre> for the SKILL.md body anymore.
+        expect(document.querySelector(".skills-view-detail-content")).toBeNull();
+        expect(markdown.textContent).toContain("Test Skill");
+        expect(markdown.textContent).toContain("This is the skill content.");
+        // Heading renders as a real <h1> (markdown), not a literal "# Test Skill".
+        expect(markdown.querySelector("h1")).toBeTruthy();
         const fileBadges = document.querySelectorAll(".skills-view-detail-files .badge");
         expect(fileBadges.length).toBe(2);
       });
@@ -897,7 +909,7 @@ describe("SkillsView", () => {
       });
 
       await waitFor(() => {
-        expect(document.querySelector(".skills-view-detail-content")).toBeTruthy();
+        expect(screen.getByTestId("skills-view-detail-markdown")).toBeTruthy();
       });
 
       // Click again to collapse
@@ -907,7 +919,7 @@ describe("SkillsView", () => {
 
       await waitFor(() => {
         expect(screen.queryByTestId("skill-detail")).toBeTruthy();
-        expect(document.querySelector(".skills-view-detail-content")).toBeNull();
+        expect(screen.queryByTestId("skills-view-detail-markdown")).toBeNull();
         expect(screen.getByTestId("skills-detail-empty")).toBeTruthy();
         expect(document.querySelector(".skills-view-item--selected")).toBeNull();
       });
@@ -960,9 +972,9 @@ describe("SkillsView", () => {
       });
 
       await waitFor(() => {
-        const preElement = document.querySelector(".skills-view-detail-content");
-        expect(preElement).toBeTruthy();
-        expect(preElement!.textContent).toContain("# Test Skill");
+        const markdown = screen.getByTestId("skills-view-detail-markdown");
+        expect(markdown).toBeTruthy();
+        expect(markdown.textContent).toContain("Test Skill");
       });
     });
 
@@ -1012,9 +1024,9 @@ describe("SkillsView", () => {
       });
 
       await waitFor(() => {
-        const preElement = document.querySelector(".skills-view-detail-content");
-        expect(preElement).toBeTruthy();
-        expect(preElement!.textContent).toContain("# Test Skill");
+        const markdown = screen.getByTestId("skills-view-detail-markdown");
+        expect(markdown).toBeTruthy();
+        expect(markdown.textContent).toContain("Test Skill");
       });
 
       expect(mockFetchSkillContent).toHaveBeenCalledTimes(2);
@@ -1034,7 +1046,7 @@ describe("SkillsView", () => {
       });
 
       await waitFor(() => {
-        expect(document.querySelector(".skills-view-detail-content")).toBeTruthy();
+        expect(screen.getByTestId("skills-view-detail-markdown")).toBeTruthy();
       });
 
       // Click close button (detail-pane close, not the view close)
@@ -1046,7 +1058,7 @@ describe("SkillsView", () => {
       // Close clears the selection so it returns to the empty-state placeholder.
       await waitFor(() => {
         expect(screen.queryByTestId("skill-detail")).toBeTruthy();
-        expect(document.querySelector(".skills-view-detail-content")).toBeNull();
+        expect(screen.queryByTestId("skills-view-detail-markdown")).toBeNull();
         expect(screen.getByTestId("skills-detail-empty")).toBeTruthy();
       });
     });
@@ -1068,7 +1080,7 @@ describe("SkillsView", () => {
       });
 
       await waitFor(() => {
-        expect(document.querySelector(".skills-view-detail-content")).toBeTruthy();
+        expect(screen.getByTestId("skills-view-detail-markdown")).toBeTruthy();
         expect(screen.getByTestId("skills-view").getAttribute("data-selected")).toBe("true");
       });
 
@@ -1081,7 +1093,7 @@ describe("SkillsView", () => {
 
       await waitFor(() => {
         expect(screen.getByTestId("skills-view").getAttribute("data-selected")).toBe("false");
-        expect(document.querySelector(".skills-view-detail-content")).toBeNull();
+        expect(screen.queryByTestId("skills-view-detail-markdown")).toBeNull();
         expect(screen.getByTestId("skills-detail-empty")).toBeTruthy();
         expect(document.querySelector(".skills-view-item--selected")).toBeNull();
       });
@@ -1145,6 +1157,171 @@ describe("SkillsView", () => {
 
       await waitFor(() => {
         expect(screen.getByText("(No SKILL.md found)")).toBeTruthy();
+      });
+    });
+  });
+
+  describe("skill file viewer", () => {
+    // FNXC:Skills 2026-06-23-04:15: click-to-view-file + back flow. The files
+    // strip lists ALL referenced files; file-type entries are clickable
+    // (data-testid="skill-file-item") and load their content into the detail
+    // pane (data-testid="skill-file-viewer"); a back affordance
+    // (data-testid="skill-file-back") returns to the SKILL.md markdown view.
+    const mockSkillContentWithFile: SkillContent = {
+      name: "test-skill",
+      skillMd: "# Test Skill\n\nSKILL body.",
+      files: [
+        { name: "reference.md", relativePath: "reference.md", type: "file" },
+        { name: "script.sh", relativePath: "script.sh", type: "file" },
+        { name: "references", relativePath: "references", type: "directory" },
+      ],
+    };
+
+    beforeEach(() => {
+      mockFetchSkillContent.mockResolvedValue(mockSkillContentWithFile);
+    });
+
+    async function openTestSkill() {
+      render(<SkillsView addToast={mockAddToast} onClose={onClose} />);
+      await waitFor(() => {
+        expect(screen.getByText("test-skill")).toBeTruthy();
+      });
+      const testSkillItem = screen.getByText("test-skill").closest(".skills-view-item");
+      await act(async () => {
+        fireEvent.click(testSkillItem!);
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("skills-view-detail-markdown")).toBeTruthy();
+      });
+    }
+
+    it("renders ALL referenced files in the strip (files clickable, directories static)", async () => {
+      await openTestSkill();
+
+      const fileItems = screen.getAllByTestId("skill-file-item");
+      // The two file entries are clickable buttons; the directory is not.
+      expect(fileItems.length).toBe(2);
+      expect(fileItems.map((el) => el.textContent)).toEqual(["reference.md", "script.sh"]);
+      // Directory still rendered (all files shown), just not as a skill-file-item.
+      expect(screen.getByText("references/")).toBeTruthy();
+    });
+
+    it("loads and renders a markdown file via MailboxMessageContent on click, then back returns to SKILL.md", async () => {
+      mockFetchSkillFileContent.mockResolvedValue({
+        name: "reference.md",
+        relativePath: "reference.md",
+        content: "## Reference\n\nFile body here.",
+        isText: true,
+      });
+
+      await openTestSkill();
+
+      const fileItems = screen.getAllByTestId("skill-file-item");
+      await act(async () => {
+        fireEvent.click(fileItems[0]!);
+      });
+
+      expect(mockFetchSkillFileContent).toHaveBeenCalledWith(
+        "npm::skills/test-skill",
+        "reference.md",
+        undefined,
+      );
+
+      await waitFor(() => {
+        const viewer = screen.getByTestId("skill-file-viewer");
+        expect(viewer).toBeTruthy();
+        // Markdown file -> rendered via MailboxMessageContent (mailbox-markdown wrapper).
+        const markdown = viewer.querySelector(".mailbox-markdown");
+        expect(markdown).toBeTruthy();
+        expect(markdown!.textContent).toContain("Reference");
+        expect(markdown!.textContent).toContain("File body here.");
+        expect(markdown!.querySelector("h2")).toBeTruthy();
+      });
+
+      // Back to SKILL.md
+      const back = screen.getByTestId("skill-file-back");
+      await act(async () => {
+        fireEvent.click(back);
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByTestId("skill-file-viewer")).toBeNull();
+        expect(screen.getByTestId("skills-view-detail-markdown")).toBeTruthy();
+        expect(screen.getByTestId("skills-view-detail-markdown").textContent).toContain("SKILL body.");
+      });
+    });
+
+    it("renders a non-markdown text file in a <pre>", async () => {
+      mockFetchSkillFileContent.mockResolvedValue({
+        name: "script.sh",
+        relativePath: "script.sh",
+        content: "#!/bin/sh\necho hi",
+        isText: true,
+      });
+
+      await openTestSkill();
+
+      const fileItems = screen.getAllByTestId("skill-file-item");
+      await act(async () => {
+        fireEvent.click(fileItems[1]!);
+      });
+
+      await waitFor(() => {
+        const viewer = screen.getByTestId("skill-file-viewer");
+        const pre = viewer.querySelector("pre.skills-view-detail-content");
+        expect(pre).toBeTruthy();
+        expect(pre!.textContent).toContain("echo hi");
+      });
+    });
+
+    it("shows a non-previewable notice for binary files", async () => {
+      mockFetchSkillFileContent.mockResolvedValue({
+        name: "script.sh",
+        relativePath: "script.sh",
+        content: "",
+        isText: false,
+      });
+
+      await openTestSkill();
+
+      const fileItems = screen.getAllByTestId("skill-file-item");
+      await act(async () => {
+        fireEvent.click(fileItems[1]!);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("This file cannot be previewed.")).toBeTruthy();
+      });
+    });
+
+    it("shows an error + retry when file fetch fails", async () => {
+      mockFetchSkillFileContent
+        .mockRejectedValueOnce(new Error("boom"))
+        .mockResolvedValueOnce({
+          name: "reference.md",
+          relativePath: "reference.md",
+          content: "ok",
+          isText: true,
+        });
+
+      await openTestSkill();
+
+      const fileItems = screen.getAllByTestId("skill-file-item");
+      await act(async () => {
+        fireEvent.click(fileItems[0]!);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("boom")).toBeTruthy();
+        expect(screen.getByText("Retry")).toBeTruthy();
+      });
+
+      await act(async () => {
+        fireEvent.click(screen.getByText("Retry"));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("skill-file-viewer").textContent).toContain("ok");
       });
     });
   });

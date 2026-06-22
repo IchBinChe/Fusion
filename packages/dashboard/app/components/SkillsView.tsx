@@ -3,14 +3,31 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } fr
 import { useTranslation } from "react-i18next";
 import { Zap, RefreshCw, X, ChevronRight, ChevronDown, AlertCircle, Loader2, ArrowLeft } from "lucide-react";
 import { ViewHeader } from "./ViewHeader";
+import { MailboxMessageContent } from "./MailboxMessageContent";
 import {
   fetchDiscoveredSkills,
   toggleExecutionSkill,
   installSkill,
   fetchSkillsCatalog,
   fetchSkillContent,
+  fetchSkillFileContent,
 } from "../api";
-import type { DiscoveredSkill, CatalogEntry, SkillContent } from "@fusion/dashboard";
+import type { DiscoveredSkill, CatalogEntry, SkillContent, SkillFileContent } from "@fusion/dashboard";
+
+/*
+FNXC:Skills 2026-06-23-04:15:
+Treat these extensions as markdown so the file viewer renders them via MailboxMessageContent (GitHub-flavored markdown + sanitized HTML + mermaid). Everything else renders as plain <pre> text (or a non-previewable notice when the server flags isText:false). SKILL.md itself always renders as markdown regardless of this set.
+*/
+const MARKDOWN_FILE_EXTENSIONS = new Set([".md", ".markdown", ".mdx"]);
+
+function isMarkdownFile(relativePath: string): boolean {
+  const lower = relativePath.toLowerCase();
+  const dot = lower.lastIndexOf(".");
+  if (dot < 0) {
+    return false;
+  }
+  return MARKDOWN_FILE_EXTENSIONS.has(lower.slice(dot));
+}
 import type { ToastType } from "../hooks/useToast";
 
 interface SkillsViewProps {
@@ -38,6 +55,15 @@ export function SkillsView({ projectId, addToast, onClose }: SkillsViewProps) {
   const [skillContent, setSkillContent] = useState<SkillContent | null>(null);
   const [isLoadingContent, setIsLoadingContent] = useState(false);
   const [contentError, setContentError] = useState<string | null>(null);
+
+  /*
+  FNXC:Skills 2026-06-23-04:15:
+  File-viewer state for the detail pane. `viewedFilePath` is the skill-dir-relative path of the file currently shown (null = the SKILL.md markdown view). When non-null the detail body renders the file's content with a "← Back to SKILL.md" affordance instead of the SKILL.md body. The files area stays reachable so the user can switch between files.
+  */
+  const [viewedFilePath, setViewedFilePath] = useState<string | null>(null);
+  const [viewedFile, setViewedFile] = useState<SkillFileContent | null>(null);
+  const [isLoadingFile, setIsLoadingFile] = useState(false);
+  const [fileError, setFileError] = useState<string | null>(null);
 
   // Debounce timer for catalog search
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -192,6 +218,10 @@ export function SkillsView({ projectId, addToast, onClose }: SkillsViewProps) {
     setIsLoadingContent(true);
     setContentError(null);
     setSkillContent(null);
+    // FNXC:Skills 2026-06-23-04:15: switching skills always returns to the SKILL.md view (clear any open file).
+    setViewedFilePath(null);
+    setViewedFile(null);
+    setFileError(null);
 
     try {
       const content = await fetchSkillContent(skillId, projectId);
@@ -217,6 +247,10 @@ export function SkillsView({ projectId, addToast, onClose }: SkillsViewProps) {
       setSelectedSkillId(null);
       setSkillContent(null);
       setContentError(null);
+      // FNXC:Skills 2026-06-23-04:15: collapsing the selected skill also drops any open file view.
+      setViewedFilePath(null);
+      setViewedFile(null);
+      setFileError(null);
       return;
     }
 
@@ -232,6 +266,34 @@ export function SkillsView({ projectId, addToast, onClose }: SkillsViewProps) {
   }, [loadSkillContent, selectedSkillId]);
 
   /*
+  FNXC:Skills 2026-06-23-04:15:
+  Load a single referenced file into the detail pane. Sets viewedFilePath immediately so the pane swaps to the file viewer (with the back affordance) while the body fetches. Markdown files render via MailboxMessageContent; other text files render as <pre>; binary/oversized files (isText:false) show a non-previewable notice.
+  */
+  const loadSkillFile = useCallback(async (skillId: string, relativePath: string) => {
+    setViewedFilePath(relativePath);
+    setViewedFile(null);
+    setFileError(null);
+    setIsLoadingFile(true);
+    try {
+      const file = await fetchSkillFileContent(skillId, relativePath, projectId);
+      setViewedFile(file);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : t("skills.loadFileError", "Failed to load file");
+      setFileError(message);
+    } finally {
+      setIsLoadingFile(false);
+    }
+  }, [projectId]);
+
+  // FNXC:Skills 2026-06-23-04:15: BACK affordance from a file view -> the SKILL.md markdown view (keeps the skill selected).
+  const backToSkillMd = useCallback(() => {
+    setViewedFilePath(null);
+    setViewedFile(null);
+    setFileError(null);
+    setIsLoadingFile(false);
+  }, []);
+
+  /*
   FNXC:Skills 2026-06-23-01:45:
   Master/detail clear. Returns the list from the narrow single-panel detail view (the BACK affordance) and also backs the detail-pane Close button. Mirrors DockFilesView's handleBack: drop the selection + cached content so the right pane shows its empty-state (wide) or the list reappears (narrow).
   */
@@ -239,6 +301,10 @@ export function SkillsView({ projectId, addToast, onClose }: SkillsViewProps) {
     setSelectedSkillId(null);
     setSkillContent(null);
     setContentError(null);
+    // FNXC:Skills 2026-06-23-04:15: leaving the detail pane also drops any open file view.
+    setViewedFilePath(null);
+    setViewedFile(null);
+    setFileError(null);
   }, []);
 
   // FNXC:Skills 2026-06-23-01:45: the detail pane renders the SELECTED skill's row data (name/path) alongside its fetched content. Resolve it once from the loaded list so the pane header stays correct even when the search filter would otherwise hide the row.
@@ -253,6 +319,48 @@ export function SkillsView({ projectId, addToast, onClose }: SkillsViewProps) {
   - WIDE (@container min-width: 640px): two-pane side-by-side. List pinned LEFT (clamped width, scrolls), detail flex:1 on the RIGHT (scrolls), empty-state until a skill is selected. Both always visible, so the BACK button is hidden (the list never disappears). Selecting a skill updates the right pane in place.
   - NARROW (default, e.g. embedded sidebar dock + mobile): single-panel master→detail stack. The list fills the root; selecting a skill (root [data-selected="true"]) reveals the detail pane ON TOP and hides the list. The BACK button (data-testid="skills-detail-back") returns to the list.
   `data-selected` on the root lets the container query distinguish "no skill selected" (narrow: detail hidden, list shows) from "skill selected" (narrow: detail covers the stack). When wide both panes are always visible regardless of this flag — same deterministic fallback path DockFilesView documents if the @container proves unreliable, except SkillsView always lives in a full-width main panel so the query fires reliably here.
+  */
+  /*
+  FNXC:Skills 2026-06-23-04:15:
+  Compact files strip rendered under BOTH the SKILL.md view and any open file view, so the user can switch between referenced files without leaving the detail pane. Renders ALL of skillContent.files (no cap/truncation). Files are clickable (data-testid="skill-file-item") and load into the viewer; directories are non-clickable (they have no previewable content). The active file is marked --active. The strip uses the compact `.skills-view-detail-files` styling (smaller padding/row height/font) so it no longer dominates the pane.
+  */
+  const renderFilesStrip = () => {
+    if (!skillContent || skillContent.files.length === 0) {
+      return null;
+    }
+    return (
+      <div className="skills-view-detail-files" data-testid="skill-files">
+        <span className="skills-view-detail-files-label">{t("skills.filesLabel", "Files")}:</span>
+        {skillContent.files.map((file) => {
+          if (file.type === "directory") {
+            return (
+              <span key={file.relativePath} className="badge badge--sm skills-view-detail-file--dir">
+                {file.name}/
+              </span>
+            );
+          }
+          const isActive = viewedFilePath === file.relativePath;
+          return (
+            <button
+              key={file.relativePath}
+              type="button"
+              data-testid="skill-file-item"
+              className={`badge badge--sm skills-view-detail-file${isActive ? " skills-view-detail-file--active" : ""}`}
+              onClick={() => selectedSkillId && void loadSkillFile(selectedSkillId, file.relativePath)}
+              aria-pressed={isActive}
+              aria-label={t("skills.viewFile", "View {{name}}", { name: file.name })}
+            >
+              {file.name}
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
+  /*
+  FNXC:Skills 2026-06-23-04:15:
+  Detail body branches: empty-state -> loading -> error -> [file viewer | SKILL.md]. The SKILL.md body now renders as MARKDOWN via MailboxMessageContent (GFM + sanitized HTML + mermaid) instead of a raw <pre>. The compact files strip renders below either content view so files stay reachable.
   */
   const renderDetailBody = () => {
     if (!selectedSkillId) {
@@ -284,27 +392,76 @@ export function SkillsView({ projectId, addToast, onClose }: SkillsViewProps) {
         </div>
       );
     }
-    if (skillContent) {
+    if (!skillContent) {
+      return null;
+    }
+
+    // FNXC:Skills 2026-06-23-04:15: file view — a referenced file is open. Back affordance returns to the SKILL.md markdown view.
+    if (viewedFilePath !== null) {
       return (
-        <>
-          <pre className="skills-view-detail-content">
-            {skillContent.skillMd || t("skills.noSkillMd", "(No SKILL.md found)")}
-          </pre>
-          {skillContent.files.length > 0 && (
-            <div className="skills-view-detail-files">
-              <span className="skills-view-detail-files-label">{t("skills.filesLabel", "Files")}:</span>
-              {skillContent.files.map((file) => (
-                <span key={file.relativePath} className="badge badge--sm">
-                  {file.name}
-                  {file.type === "directory" && "/"}
-                </span>
-              ))}
+        <div className="skills-view-file-viewer" data-testid="skill-file-viewer">
+          <div className="skills-view-file-viewer-bar">
+            <button
+              type="button"
+              className="btn btn-sm skills-view-file-back"
+              onClick={backToSkillMd}
+              data-testid="skill-file-back"
+              aria-label={t("skills.backToSkillMd", "Back to SKILL.md")}
+            >
+              <ArrowLeft size={14} />
+              {t("skills.backToSkillMd", "Back to SKILL.md")}
+            </button>
+            <span className="skills-view-file-viewer-name">{viewedFilePath}</span>
+          </div>
+          {isLoadingFile ? (
+            <div className="skills-view-detail-loading">
+              <Loader2 size={16} className="spin" />
+              {t("skills.loadingFile", "Loading file...")}
             </div>
-          )}
-        </>
+          ) : fileError ? (
+            <div className="skills-view-detail-error">
+              <AlertCircle size={14} />
+              <span>{fileError}</span>
+              <button
+                className="btn btn-sm"
+                onClick={() => selectedSkillId && void loadSkillFile(selectedSkillId, viewedFilePath)}
+              >
+                {t("common.retry", "Retry")}
+              </button>
+            </div>
+          ) : viewedFile && !viewedFile.isText ? (
+            <div className="skills-view-detail-empty">
+              {t("skills.fileNotPreviewable", "This file cannot be previewed.")}
+            </div>
+          ) : viewedFile ? (
+            isMarkdownFile(viewedFile.relativePath) ? (
+              <MailboxMessageContent
+                content={viewedFile.content || t("skills.emptyFile", "(Empty file)")}
+                className="skills-view-detail-markdown"
+                testId="skills-view-detail-markdown"
+              />
+            ) : (
+              <pre className="skills-view-detail-content">
+                {viewedFile.content || t("skills.emptyFile", "(Empty file)")}
+              </pre>
+            )
+          ) : null}
+          {renderFilesStrip()}
+        </div>
       );
     }
-    return null;
+
+    // FNXC:Skills 2026-06-23-04:15: SKILL.md view — rendered as markdown via the shared MailboxMessageContent.
+    return (
+      <>
+        <MailboxMessageContent
+          content={skillContent.skillMd || t("skills.noSkillMd", "(No SKILL.md found)")}
+          className="skills-view-detail-markdown"
+          testId="skills-view-detail-markdown"
+        />
+        {renderFilesStrip()}
+      </>
+    );
   };
 
   return (

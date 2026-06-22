@@ -432,18 +432,89 @@ Detail-pane header bar: BACK (narrow only) on the left, truncating skill name in
   overflow-y: auto;
 }
 
+/*
+FNXC:Skills 2026-06-23-04:15:
+Compact referenced-files strip. Smaller gap/padding and a smaller font so the section no longer dominates the detail pane. Holds ALL referenced files (no cap). File entries are clickable buttons; directories are static badges.
+*/
 .skills-view-detail-files {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-xs);
-  margin-top: var(--space-md);
-  padding-top: var(--space-sm);
+  gap: calc(var(--space-xs) / 2);
+  margin-top: var(--space-sm);
+  padding-top: var(--space-xs);
   border-top: 1px solid var(--border);
+  font-size: 0.85em;
 }
 
 .skills-view-detail-files-label {
   color: var(--text-muted);
+}
+
+/* FNXC:Skills 2026-06-23-04:15: clickable file badge in the compact strip. Reset native button chrome so the .badge styling reads as a chip; pointer + hover signal it loads the file. */
+.skills-view-detail-file {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.2;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.skills-view-detail-file:hover {
+  background: var(--card-hover);
+  border-color: var(--text-muted);
+}
+
+.skills-view-detail-file--active {
+  border-color: var(--todo);
+  background: var(--card-hover);
+}
+
+/* FNXC:Skills 2026-06-23-04:15: directories are not previewable -> static, dimmed badge. */
+.skills-view-detail-file--dir {
+  color: var(--text-dim);
+}
+
+/*
+FNXC:Skills 2026-06-23-04:15:
+File viewer column inside the detail body. Header bar carries the "← Back to SKILL.md" affordance + the open file's relative path; the content (markdown or <pre>) and the compact files strip follow.
+*/
+.skills-view-file-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.skills-view-file-viewer-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.skills-view-file-back {
+  flex-shrink: 0;
+}
+
+.skills-view-file-viewer-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* FNXC:Skills 2026-06-23-04:15: markdown render wrapper (SKILL.md + markdown files) reuses the shared .mailbox-markdown styling from MailboxMessageContent; this just bounds its width inside the pane. */
+.skills-view-detail-markdown {
+  min-width: 0;
+  word-break: break-word;
 }
 
 .skills-view-detail-loading {

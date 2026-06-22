@@ -17,6 +17,9 @@ vi.mock("../../api", () => ({
   fetchSkillsCatalog: (...args: unknown[]) => mockFetchSkillsCatalog(...args),
   toggleExecutionSkill: (...args: unknown[]) => mockToggleExecutionSkill(...args),
   fetchSkillContent: (...args: unknown[]) => mockFetchSkillContent(...args),
+  // FNXC:Skills 2026-06-23-04:15: SkillsView now imports fetchSkillFileContent for the file viewer; stub it so the mock module is complete.
+  fetchSkillFileContent: vi.fn().mockResolvedValue({ name: "", relativePath: "", content: "", isText: true }),
+  installSkill: vi.fn().mockResolvedValue({ success: true }),
 }));
 
 function extractRuleBlock(css: string, selector: string): string {

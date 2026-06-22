@@ -1926,6 +1926,10 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
                 <ChevronLeft size={18} />
               </button>
             )}
+            {/*
+            FNXC:Planning 2026-06-23-03:00:
+            Header icon mirrors MissionManager's <Target size={20} className="mission-manager__header-icon" />: same size (20) and same var(--todo) tint + flex-shrink:0, applied via the scoped .planning-modal--embedded .modal-header--embedded .detail-title-row > svg rule (it overrides the shared icon-triage brown so the two headers read as siblings).
+            */}
             <Lightbulb size={20} className="icon-triage" />
             <h3>{t("planning.title", "Planning Mode")}</h3>
           </div>

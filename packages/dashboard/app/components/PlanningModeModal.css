@@ -94,17 +94,33 @@ Embedded planning must blend into the main content like Command Center: no panel
 }
 
 /*
-FNXC:Planning 2026-06-23-02:00:
-The embedded planning header now matches MissionManager's inline header (mission-manager__header--inline) EXACTLY: var(--surface) background, padding var(--space-lg) var(--space-xl), no bottom divider, and the shared 1.125rem title metric. This aligns the top header and the spacing between header and the two-pane body with Missions (previously the header used 0 0 var(--space-md) padding + a transparent fill, which read inconsistently next to Missions).
+FNXC:Planning 2026-06-23-03:00:
+The embedded planning header must be a visual SIBLING of MissionManager's inline header (mission-manager__header--inline). Matched values, copied exactly from MissionManager.css:
+- background: var(--surface), padding: var(--space-lg) var(--space-xl) (= 16px 24px)
+- a single bottom divider border-bottom: 1px solid var(--border) — Missions renders exactly ONE divider under its header (verified: only .mission-manager__header carries it; the split/sidebar add none), so Planning matches that single clean line. Previously Planning had NO divider, which read inconsistently next to Missions.
+- title: 1.125rem / 600 / var(--text) via the h3 rule below (font-weight/color come from the base .modal-header h3).
+- icon: var(--todo) tint + flex-shrink:0, identical to .mission-manager__header-icon (the shared icon-triage tint was a different brown, so it is overridden here).
+- gap icon<->title: var(--space-sm) (= 8px), identical to .mission-manager__header-title. Scoped to the embedded planning header so the shared .detail-title-row (TaskDetailModal) keeps its own 10px gap.
 */
 .planning-modal--embedded .modal-header--embedded {
   padding: var(--space-lg) var(--space-xl);
   background: var(--surface);
-  border-bottom: none;
+  border-bottom: 1px solid var(--border);
+}
+
+.planning-modal--embedded .modal-header--embedded .detail-title-row {
+  gap: var(--space-sm);
+}
+
+.planning-modal--embedded .modal-header--embedded .detail-title-row > svg {
+  color: var(--todo);
+  flex-shrink: 0;
 }
 
 .planning-modal--embedded .modal-header--embedded h3 {
   font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text);
   letter-spacing: normal;
 }
 
@@ -506,6 +522,16 @@ The New session button must look EXACTLY like Missions' primary sidebar create b
   padding: 16px 24px 24px;
   border-top: 1px solid var(--border);
   flex-shrink: 0;
+}
+
+/*
+FNXC:Planning 2026-06-23-03:00:
+An empty footer must NOT reserve vertical space or paint its divider band. When .planning-view-footer renders with no children (e.g. the initial / no-active-session state once its action is absent), collapse it to zero so the embedded Planning view shows no dead footer band. Footers WITH content (the Start-Planning button in initial, and the .planning-actions composer in an active session) are untouched — :empty only matches when there are no element/text children.
+*/
+.planning-view-footer:empty {
+  display: none;
+  padding: 0;
+  border-top: none;
 }
 
 .planning-advanced-disclosure {

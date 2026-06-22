@@ -54,6 +54,10 @@
 }
 
 /* ── Header ── */
+/*
+FNXC:MissionManager 2026-06-23-03:00:
+Exactly ONE divider sits under the Missions header — this header's own border-bottom. The scroll body, split, sidebar, and detail-pane add NO border-top, so there is no doubled/extra divider line below the header (verified in DOM: only this element carries a horizontal border in the header region). Planning's embedded header is matched to this single-divider treatment. Do not add a second border-top to the body/split/sidebar.
+*/
 .mission-manager__header {
   flex-shrink: 0;
   display: flex;

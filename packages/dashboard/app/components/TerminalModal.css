@@ -833,6 +833,13 @@ The shortcut bar (modifier keys + arrow keys) must sit on ONE line, not stack in
   background: var(--surface);
   border-top: 1px solid var(--border);
   overflow-x: auto;
+  /*
+  FNXC:Terminal 2026-06-22-22:00:
+  On a narrow folded phone the modifier/arrow/letter keys exceed the viewport width, so the bar MUST scroll horizontally to keep every button reachable. touch-action: pan-x lets a horizontal swipe scroll the row (instead of the browser hijacking it as a page gesture), overscroll-behavior-x: contain stops the swipe from bleeding into page/back-navigation at the ends, and -webkit-overflow-scrolling: touch gives momentum scroll on iOS.
+  */
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .terminal-shortcut-modifier-row,
@@ -847,6 +854,11 @@ The shortcut bar (modifier keys + arrow keys) must sit on ONE line, not stack in
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /*
+  FNXC:Terminal 2026-06-22-22:00:
+  Keys keep their intrinsic width and never shrink/grow, so the row's total width exceeds a narrow viewport and the panel's overflow-x: auto produces a real horizontal scroll reaching the rightmost buttons. flex:1 / width:100% here would collapse every key to fit the viewport and defeat the scroll.
+  */
+  flex: 0 0 auto;
   min-width: calc(var(--space-xl) + var(--space-xs));
   min-height: calc(var(--space-xl) + var(--space-xs));
   padding: 0 var(--space-xs);

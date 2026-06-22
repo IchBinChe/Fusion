@@ -705,6 +705,33 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
       return;
     }
 
+    /*
+    FNXC:Terminal 2026-06-22-22:00:
+    On a very narrow folded phone the fold/orientation transition can fire a resize while the xterm container momentarily reports a transient sub-pixel width. We still call fit() (FitAddon no-ops at 0 width, so it can never collapse columns there), but when the container reports a real nonzero width we ALSO schedule one deferred re-fit so the column count re-settles after the fold geometry stabilizes to its final integer box — that deferred pass is what reflows the narrow terminal back to contiguous text instead of the wide-cell "C o p i e d" spaced render. The width probe is read-only and only adds the extra rAF, so jsdom (clientWidth 0) keeps its single synchronous fit and existing tests are unaffected.
+    */
+    const containerWidth = terminalRef.current?.clientWidth ?? 0;
+    if (containerWidth > 0) {
+      if (pendingFitRef.current !== null) {
+        cancelAnimationFrame(pendingFitRef.current);
+      }
+      pendingFitRef.current = requestAnimationFrame(() => {
+        pendingFitRef.current = null;
+        if (
+          (!expectedSessionId || xtermInitializedRef.current === expectedSessionId) &&
+          fitAddonRef.current &&
+          xtermRef.current &&
+          (terminalRef.current?.clientWidth ?? 0) > 0
+        ) {
+          try {
+            (fitAddonRef.current as InstanceType<typeof import("@xterm/addon-fit").FitAddon>).fit();
+            resizeRef.current?.(xtermRef.current.cols, xtermRef.current.rows);
+          } catch {
+            // Ignore fit errors during viewport transitions
+          }
+        }
+      });
+    }
+
     try {
       const fitAddon = currentFitAddon as InstanceType<typeof import("@xterm/addon-fit").FitAddon>;
       fitAddon.fit();
@@ -780,10 +807,16 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
     update(); // initial measurement
     vv.addEventListener("resize", update);
     vv.addEventListener("scroll", update);
+    /*
+    FNXC:Terminal 2026-06-22-22:00:
+    Folding/unfolding a foldable phone (and rotating) changes the terminal's available width without always emitting a visualViewport resize at the settled width. Listen to orientationchange too so xterm re-fits to the new narrow/wide column count after the fold completes; the deferred-fit guard in fitAndResizeForSession ensures the fit only lands once the container has a real width.
+    */
+    window.addEventListener("orientationchange", update);
 
     return () => {
       vv.removeEventListener("resize", update);
       vv.removeEventListener("scroll", update);
+      window.removeEventListener("orientationchange", update);
       // Cancel any pending deferred fit
       if (pendingFitRef.current !== null) {
         cancelAnimationFrame(pendingFitRef.current);
@@ -1086,6 +1119,23 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
         // Initial fit
         setTimeout(() => {
           fitAddon.fit();
+          // FNXC:Terminal 2026-06-22-22:00: After the first synchronous fit, schedule one deferred re-fit so a terminal opened mid-fold (narrow foldable, where the container width has not settled to its final integer box yet) re-measures columns once layout stabilizes — preventing the collapsed-column spaced-glyph render. Guarded by container width and live session so jsdom/tab-teardown paths stay no-ops.
+          if ((terminalRef.current?.clientWidth ?? 0) > 0) {
+            requestAnimationFrame(() => {
+              if (
+                xtermInitializedRef.current === currentSessionId &&
+                fitAddonRef.current === fitAddon &&
+                (terminalRef.current?.clientWidth ?? 0) > 0
+              ) {
+                try {
+                  fitAddon.fit();
+                  resizeRef.current?.(terminal.cols, terminal.rows);
+                } catch {
+                  // Ignore fit errors during viewport transitions
+                }
+              }
+            });
+          }
           // Re-focus after fit in case the DOM changed
           const textarea = terminalRef.current?.querySelector(
             ".xterm-helper-textarea",

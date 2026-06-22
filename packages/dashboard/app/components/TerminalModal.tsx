@@ -1833,13 +1833,11 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
       role="dialog"
       aria-modal="true"
       data-testid="terminal-modal-overlay"
-      style={
-        keyboardOverlap > 0
-          ? {
-              "--overlay-padding-top": "0px",
-            } as CSSProperties
-          : undefined
-      }
+      style={{
+        // FNXC:FloatingWindow 2026-06-22-23:00: In floating mode the z-index lives on the fixed overlay (it owns the stacking context); a panel z is trapped inside it and loses to page stacking contexts like the right dock (position:absolute z-index:20). Docked/mobile keep their CSS z.
+        ...(isFloatingMode ? { zIndex: floatingZ } : {}),
+        ...(keyboardOverlap > 0 ? { "--overlay-padding-top": "0px" } : {}),
+      } as CSSProperties}
     >
       <div
         ref={modalRef}

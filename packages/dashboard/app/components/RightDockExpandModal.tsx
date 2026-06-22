@@ -306,7 +306,7 @@ export function RightDockExpandModal({
 
   // FNXC:FloatingWindow 2026-06-22-22:30: Portaled to document.body so this floating modal shares the ONE root stacking context with the other floating modals (FloatingWindow/terminal/New Task) — the shared 10100+ z stack only orders correctly across types when they all live at the document root.
   return createPortal(
-    <div className="modal-overlay open right-dock-expand-modal-overlay" role="dialog" aria-modal="false" aria-label={`${entry.label} expanded`} data-testid="right-dock-expand-modal">
+    <div className="modal-overlay open right-dock-expand-modal-overlay" role="dialog" aria-modal="false" aria-label={`${entry.label} expanded`} data-testid="right-dock-expand-modal" style={{ zIndex }}>
       <div
         className="modal right-dock-expand-modal right-dock-expand-modal--floating"
         style={panelStyle}

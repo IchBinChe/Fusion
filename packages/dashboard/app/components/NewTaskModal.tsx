@@ -756,6 +756,8 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       aria-modal="false"
       aria-label={t("newTaskModal.title", "New Task")}
       data-testid="new-task-modal-overlay"
+      /* FNXC:FloatingWindow 2026-06-22-23:00: In floating mode the z-index lives on the fixed overlay (it owns the stacking context); a panel z is trapped and loses to page stacking contexts like the right dock. Mobile keeps its CSS z. */
+      style={isFloating ? { zIndex } : undefined}
     >
       <div
         className={`modal modal-lg new-task-modal${isFloating ? " new-task-modal--floating" : ""}`}

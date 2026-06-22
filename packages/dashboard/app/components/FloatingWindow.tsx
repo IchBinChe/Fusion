@@ -276,6 +276,8 @@ export function FloatingWindow({
       role="dialog"
       aria-modal="false"
       data-testid={`floating-window-overlay-${windowKey}`}
+      // FNXC:FloatingWindow 2026-06-22-23:00: The z-index MUST live on the position:fixed overlay (which creates a stacking context), not the panel. A panel z-index is trapped inside the overlay's context and loses to page elements that are stacking contexts in body's context (e.g. the right dock at position:absolute z-index:20). With z on the overlay, the whole window sits at the shared floating band in body's stacking context and reliably paints above page content + tap-to-front reorders correctly.
+      style={{ zIndex }}
     >
       <div
         className="floating-window"

@@ -61,6 +61,10 @@ sub-directories. Fusion discovers sub-repos at init time and records them in
 single root-level worktree; instead, the agent acquires per-repo worktrees
 on demand via `fn_acquire_repo_worktree`.
 
+Workspace-task merges are **non-atomic**: each sub-repo lands on its own local
+integration ref independently, so a partial-land window (some sub-repos merged,
+others not) is possible mid-task — this state is local and operator-resettable.
+
 ### Project Identity
 The durable identity a registered Project carries locally so it can be reattached to the central registry after central state is lost or rebuilt, preserving rows keyed by the same project id instead of minting a replacement.
 

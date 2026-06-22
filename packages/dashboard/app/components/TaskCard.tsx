@@ -35,6 +35,7 @@ import { extractDependencyDeleteConflict, extractLineageDeleteConflict } from ".
 import { MAX_AUTO_MERGE_RETRIES, type BlockerFanoutEntry } from "../hooks/useBlockerFanout";
 import { useRetryWarning } from "../context/RetryWarningContext";
 import { useColumnLabel } from "../i18n/labels";
+import { WorkspaceWorktreesSummary, isWorkspaceTask } from "./WorkspaceWorktreesSummary";
 
 /** Per-branch progress snapshot (U13). Surfaced as an optional additive field
  *  on the task payload for the parallel-window badge (U9). */
@@ -625,6 +626,10 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previousTask.blockedBy === nextTask.blockedBy &&
     previousTask.overlapBlockedBy === nextTask.overlapBlockedBy &&
     previousTask.worktree === nextTask.worktree &&
+    // FNXC:Workspace 2026-06-21-00:00: re-render the card when a workspace task acquires/
+    // releases sub-repo worktrees so the "N repos acquired" placeholder stays current (U3).
+    Object.keys(previousTask.workspaceWorktrees ?? {}).length ===
+      Object.keys(nextTask.workspaceWorktrees ?? {}).length &&
     previousTask.branch === nextTask.branch &&
     previousTask.baseBranch === nextTask.baseBranch &&
     previousTask.breakIntoSubtasks === nextTask.breakIntoSubtasks &&
@@ -2186,6 +2191,10 @@ function TaskCardComponent({
           </div>
         );
       })()}
+      {/* FNXC:Workspace 2026-06-21-00:00: workspace tasks have no singular task.branch,
+          so the branch-metadata row below renders nothing. Surface the acquired sub-repos
+          as a compact "N repos acquired" placeholder so the card isn't blank (U3/KTD5). */}
+      {isWorkspaceTask(task) && <WorkspaceWorktreesSummary task={task} compact />}
       {hasBranchMetadata && (
         <div className="card-branch-row" aria-label={t("tasks.branchMetadata", "Branch metadata")}>
           {branchMetadata.branch && (

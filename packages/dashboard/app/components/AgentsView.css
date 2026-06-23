@@ -1047,9 +1047,15 @@ FN-6774 removes the saturated left-edge status stripe from split-sidebar agent c
   transition: none;
 }
 
+/*
+FNXC:AgentsOrgChart 2026-06-22-03:05:
+AgentsView uses the measured SVG overlay as the single connector system so parent-child lines remain non-zero and aligned across horizontal/vertical layouts, desktop/mobile sizing, and pan/zoom transforms. Explicitly size the absolute SVG to fill the chart canvas instead of relying on the browser's default 300×150 SVG viewport.
+*/
 .agent-org-chart-connectors {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
   overflow: visible;
   pointer-events: none;
 }
@@ -1192,41 +1198,6 @@ FN-6774 removes the saturated left-edge status stripe from split-sidebar agent c
   gap: var(--org-chart-sibling-gap);
   padding-top: var(--org-chart-children-offset);
   margin-top: var(--org-chart-connector-gap);
-  --org-chart-first-child-center-offset: 50%;
-  --org-chart-last-child-center-offset: 50%;
-}
-
-.org-chart-children::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  height: var(--org-chart-children-offset, var(--space-md));
-  left: var(--org-chart-first-child-center-offset);
-  right: var(--org-chart-last-child-center-offset);
-  border-top: 1px solid var(--border);
-  pointer-events: none;
-}
-
-.org-chart-children > .org-chart-node::before {
-  content: "";
-  position: absolute;
-  top: calc(-1 * var(--org-chart-children-offset));
-  left: 50%;
-  width: 1px;
-  height: var(--org-chart-children-offset);
-  border-left: 1px solid var(--border);
-  pointer-events: none;
-}
-
-.agent-org-chart--vertical .org-chart-children::before {
-  top: 0;
-  left: var(--space-sm);
-  right: auto;
-  bottom: 0;
-  width: 1px;
-  height: auto;
-  border-top: none;
-  border-left: 1px solid var(--border);
 }
 
 .agent-org-chart--vertical {

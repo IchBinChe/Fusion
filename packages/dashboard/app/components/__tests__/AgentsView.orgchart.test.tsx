@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { AgentsView } from "../AgentsView";
@@ -26,6 +28,17 @@ vi.mock("../../api", async (importOriginal) => {
 
 const mockFetchOrgTree = vi.mocked((apiModule as any).fetchOrgTree);
 const mockFetchAgents = vi.mocked((apiModule as any).fetchAgents);
+const COMPONENTS_DIR = resolve(__dirname, "..");
+const AGENTS_VIEW_CSS = join(COMPONENTS_DIR, "AgentsView.css");
+
+function extractRuleBlock(css: string, selector: string): string {
+  const ruleStart = css.indexOf(`${selector} {`);
+  expect(ruleStart, `Expected ${selector} to exist in AgentsView.css`).toBeGreaterThanOrEqual(0);
+  const bodyStart = css.indexOf("{", ruleStart);
+  const bodyEnd = css.indexOf("\n}", bodyStart);
+  expect(bodyEnd, `Expected ${selector} rule to have a closing brace`).toBeGreaterThan(bodyStart);
+  return css.slice(bodyStart + 1, bodyEnd);
+}
 
 const orgTree = [{ agent: { id: "ceo", name: "CEO", role: "scheduler", state: "active", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), metadata: {} }, children: [
   { agent: { id: "cto", name: "CTO", role: "engineer", state: "active", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), metadata: {} }, children: [
@@ -59,6 +72,18 @@ describe("AgentsView org chart interactions", () => {
     mockFetchAgents.mockResolvedValue([]);
     mockFetchOrgTree.mockResolvedValue(orgTree);
     mockRects();
+  });
+
+  it("keeps SVG connectors explicitly sized and removes the broken CSS connector bus", () => {
+    const css = readFileSync(AGENTS_VIEW_CSS, "utf8");
+    const connectorBlock = extractRuleBlock(css, ".agent-org-chart-connectors");
+    expect(connectorBlock).toMatch(/width\s*:\s*100%\s*;/);
+    expect(connectorBlock).toMatch(/height\s*:\s*100%\s*;/);
+    expect(connectorBlock).toMatch(/overflow\s*:\s*visible\s*;/);
+    expect(css).not.toContain("--org-chart-first-child-center-offset");
+    expect(css).not.toContain("--org-chart-last-child-center-offset");
+    expect(css).not.toContain(".org-chart-children::before");
+    expect(css).not.toContain(".org-chart-children > .org-chart-node::before");
   });
 
   it("renders controls and supports transform interactions", async () => {
@@ -112,9 +137,26 @@ describe("AgentsView org chart interactions", () => {
 
     fireEvent.click(screen.getByLabelText("Vertical layout"));
     await waitFor(() => {
-      const firstPath = document.querySelector(".agent-org-chart-connectors path")?.getAttribute("d") ?? "";
+      const paths = document.querySelectorAll(".agent-org-chart-connectors path");
+      expect(paths.length).toBe(4);
+      const firstPath = paths[0]?.getAttribute("d") ?? "";
       expect(firstPath).toMatch(/^M\s\d+\s\d+\sL\s\d+\s\d+/);
     });
+  });
+
+  it("does not render connector paths for empty or single-root org chart data states", async () => {
+    mockFetchOrgTree.mockResolvedValueOnce([]);
+    const empty = render(<AgentsView addToast={vi.fn()} />);
+    fireEvent.click(await screen.findByLabelText("Org Chart view"));
+    await screen.findByText("No agents found");
+    expect(document.querySelectorAll(".agent-org-chart-connectors path")).toHaveLength(0);
+    empty.unmount();
+
+    mockFetchOrgTree.mockResolvedValueOnce([{ agent: { id: "solo", name: "Solo", role: "executor", state: "idle", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), metadata: {} }, children: [] }]);
+    render(<AgentsView addToast={vi.fn()} />);
+    fireEvent.click(await screen.findByLabelText("Org Chart view"));
+    await screen.findByText("Solo");
+    await waitFor(() => expect(document.querySelectorAll(".agent-org-chart-connectors path")).toHaveLength(0));
   });
 
   it("renders mobile controls", async () => {

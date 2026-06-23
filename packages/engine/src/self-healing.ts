@@ -30,7 +30,7 @@ import { setImmediate as setImmediateCb } from "node:timers";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, IN_REVIEW_STALL_TERMINAL_LOG_PREFIX, allowsAutoMergeProcessing, countRecentIdenticalStallEntries, detectDependencyCycle, detectSelfDefeatingDependency, evaluateNoCommitsNoOpFinalize, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, isMergeRequestContractShadowEnabled, isWorkflowColumnsEnabled, isSharedBranchGroupMemberIntegration, parseExplicitDuplicateMarker, resolveMaxAutoMergeRetries, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult } from "@fusion/core";
+import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, IN_REVIEW_STALL_TERMINAL_LOG_PREFIX, allowsAutoMergeProcessing, countRecentIdenticalStallEntries, detectDependencyCycle, detectSelfDefeatingDependency, evaluateNoCommitsNoOpFinalize, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, isMergeRequestContractShadowEnabled, isWorkflowColumnsEnabled, isSharedBranchGroupMemberIntegration, parseExplicitDuplicateMarker, resolveMaxAutoMergeRetries, type Agent, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult } from "@fusion/core";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { createLogger, schedulerLog } from "./logger.js";
 import { mergeEffectiveSettings } from "./effective-settings.js";
@@ -67,6 +67,7 @@ import {
 import type { GhostBugDecision } from "./triage-preflight.js";
 import { DependencyBlockedTodoReporter } from "./dependency-blocked-todo-reporter.js";
 import { filterPathsByIgnoreList, getUnmetSchedulingDependencies, isCoordinationOnlyTask, pathsOverlap } from "./scheduler.js";
+import { evaluateParkedAgentTaskLink, PARKED_AGENT_LINK_FRESH_RUN_MS } from "./task-agent-sync.js";
 
 const log = createLogger("self-healing");
 const worktreeMetadataReconcileLog = createLogger("worktree-metadata-reconcile");
@@ -451,7 +452,7 @@ const DEFAULT_UNBACKED_MERGING_FANOUT_GRACE_MS = 60_000;
 const DURABLE_ERROR_RECOVERY_MAX_RETRIES = 5;
 const DURABLE_ERROR_RECOVERY_BASE_COOLDOWN_MS = 30_000;
 const DURABLE_ERROR_RECOVERY_MAX_COOLDOWN_MS = 15 * 60_000;
-const RUNNING_ON_INACTIVE_TASK_STALE_RUN_MS = 5 * 60_000;
+const RUNNING_ON_INACTIVE_TASK_STALE_RUN_MS = PARKED_AGENT_LINK_FRESH_RUN_MS;
 
 function bumpTaskPriority(priority: TaskPriority | undefined): TaskPriority {
   switch (priority ?? "normal") {
@@ -8744,6 +8745,44 @@ export class SelfHealingManager {
     return Math.min(exponential, DURABLE_ERROR_RECOVERY_MAX_COOLDOWN_MS);
   }
 
+  private async emitStaleAgentAssignmentAudit(options: {
+    agent: Pick<Agent, "id" | "state">;
+    taskId: string;
+    linkedTask?: Task | null;
+    hadFreshRun: boolean;
+    hadActiveExecution: boolean;
+    reason: string;
+  }): Promise<void> {
+    try {
+      await createRunAuditor(this.store, {
+        runId: generateSyntheticRunId("self-healing-stale-agent-assignment", options.taskId),
+        agentId: "self-healing",
+        taskId: options.taskId,
+        taskLineageId: options.linkedTask?.lineageId,
+        phase: "reconcile-stale-agent-assignment",
+      }).database({
+        type: "task:reconcile-stale-agent-assignment" as DatabaseMutationType,
+        target: options.agent.id,
+        metadata: {
+          agentId: options.agent.id,
+          taskId: options.taskId,
+          taskColumn: options.linkedTask?.column ?? null,
+          agentState: options.agent.state,
+          status: options.linkedTask?.status ?? null,
+          blockedBy: options.linkedTask?.blockedBy ?? null,
+          overlapBlockedBy: options.linkedTask?.overlapBlockedBy ?? null,
+          hadFreshRun: options.hadFreshRun,
+          hadActiveExecution: options.hadActiveExecution,
+          reason: options.reason,
+        },
+      });
+    } catch (error) {
+      log.warn(
+        `Failed to emit stale agent assignment audit for ${options.agent.id}/${options.taskId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   async recoverAgentsRunningOnInactiveTasks(): Promise<number> {
     const agentStore = this.options.agentStore;
     if (!agentStore) {
@@ -8765,17 +8804,33 @@ export class SelfHealingManager {
       }
 
       const activeRun = await agentStore.getActiveHeartbeatRun(agent.id);
-      const runStartedAt = activeRun?.startedAt;
-      const runAgeMs = runStartedAt ? now - Date.parse(runStartedAt) : Number.POSITIVE_INFINITY;
-      const hasFreshRun = Boolean(activeRun) && Number.isFinite(runAgeMs) && runAgeMs <= RUNNING_ON_INACTIVE_TASK_STALE_RUN_MS;
-      if (hasFreshRun || this.options.hasActiveAgentExecution?.(agent.id) === true) {
+      const proof = evaluateParkedAgentTaskLink({
+        agent,
+        linkedTask: linkedTask ?? { column: "todo" } as Pick<Task, "column">,
+        activeRun,
+        hasActiveAgentExecution: this.options.hasActiveAgentExecution,
+        now,
+      });
+      if (proof.hasFreshRun || proof.hasActiveExecution) {
         continue;
       }
 
+      const reason = linkedTask
+        ? `running durable agent linked to inactive ${linkedTask.column} task without live execution proof`
+        : "running durable agent linked to missing task without live execution proof";
+      const staleAgentState = agent.state;
       await agentStore.updateAgentState(agent.id, "active");
       await agentStore.syncExecutionTaskLink(agent.id, undefined);
+      await this.emitStaleAgentAssignmentAudit({
+        agent: { id: agent.id, state: staleAgentState },
+        taskId: agent.taskId,
+        linkedTask,
+        hadFreshRun: proof.hasFreshRun,
+        hadActiveExecution: proof.hasActiveExecution,
+        reason,
+      });
       recoveredAgentIds.add(agent.id);
-      log.log(`Recovered running durable agent ${agent.id} on inactive task ${agent.taskId}`);
+      log.log(`Recovered running durable agent ${agent.id} on inactive task ${agent.taskId}; file-scope lease preserved when present`);
     }
 
     return recoveredAgentIds.size;
@@ -8800,6 +8855,8 @@ export class SelfHealingManager {
       const linkedTask = await this.store.getTask(linkedTaskId);
       let shouldClear = false;
       let reason = "";
+      let hadFreshRun = false;
+      let hadActiveExecution = false;
 
       if (!linkedTask) {
         shouldClear = true;
@@ -8812,13 +8869,18 @@ export class SelfHealingManager {
         reason = `linked task assigned to ${linkedTask.assignedAgentId}`;
       } else if (linkedTask.column === "todo" || linkedTask.column === "triage") {
         const activeRun = await agentStore.getActiveHeartbeatRun(agent.id);
-        const runStartedAt = activeRun?.startedAt;
-        const runAgeMs = runStartedAt ? now - Date.parse(runStartedAt) : Number.POSITIVE_INFINITY;
-        const hasFreshRun = Boolean(activeRun) && Number.isFinite(runAgeMs) && runAgeMs <= RUNNING_ON_INACTIVE_TASK_STALE_RUN_MS;
-        const hasActiveExecution = this.options.hasActiveAgentExecution?.(agent.id) === true;
-        if (!hasFreshRun && !hasActiveExecution) {
+        const proof = evaluateParkedAgentTaskLink({
+          agent,
+          linkedTask,
+          activeRun,
+          hasActiveAgentExecution: this.options.hasActiveAgentExecution,
+          now,
+        });
+        hadFreshRun = proof.hasFreshRun;
+        hadActiveExecution = proof.hasActiveExecution;
+        if (!proof.shouldPreserveParkedLink) {
           shouldClear = true;
-          reason = `linked task in queued column ${linkedTask.column} without fresh run`;
+          reason = `linked task in queued column ${linkedTask.column} without fresh run or active execution`;
         }
       }
 
@@ -8826,9 +8888,21 @@ export class SelfHealingManager {
         continue;
       }
 
+      const staleAgentState = agent.state;
+      if (agent.state === "running") {
+        await agentStore.updateAgentState(agent.id, "active");
+      }
       await agentStore.syncExecutionTaskLink(agent.id, undefined);
+      await this.emitStaleAgentAssignmentAudit({
+        agent: { id: agent.id, state: staleAgentState },
+        taskId: linkedTaskId,
+        linkedTask,
+        hadFreshRun,
+        hadActiveExecution,
+        reason,
+      });
       clearedAgentIds.add(agent.id);
-      log.log(`Cleared drifted durable agent task link for ${agent.id} (${linkedTaskId}): ${reason}`);
+      log.log(`Cleared drifted durable agent task link for ${agent.id} (${linkedTaskId}): ${reason}; file-scope lease preserved when present`);
     }
 
     log.log(`Recovered ${clearedAgentIds.size} drifted durable agent task link(s)`);

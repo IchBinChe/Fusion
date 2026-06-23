@@ -36,6 +36,7 @@ import { UnlinkedMissionsAdvisoryReporter } from "./unlinked-missions-advisory-r
 import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
 import { isWorkflowColumnsEnabled, DEFAULT_WORKFLOW_POOL_ID } from "@fusion/core";
 import { runHoldReleaseSweep, type SlotReservation } from "./hold-release.js";
+import { evaluateParkedAgentTaskLink } from "./task-agent-sync.js";
 
 function shouldRunWorkflowColumnScheduler(_settings: Settings): boolean {
   /*
@@ -446,6 +447,8 @@ export interface SchedulerOptions {
   semaphore?: AgentSemaphore;
   /** Optional AgentStore for durable-agent state rollback during overlap requeue. */
   agentStore?: AgentStore;
+  /** Optional live executor signal that preserves parked durable-agent links while work is truly active. */
+  hasActiveAgentExecution?: (agentId: string) => boolean;
   /** Called when scheduler starts a task */
   onSchedule?: (task: Task) => void;
   /** Called when a task is blocked by deps */
@@ -1068,13 +1071,29 @@ export class Scheduler {
     const agentStore = this.options.agentStore;
     if (!agentStore) return;
 
-    const runningAgents = await agentStore.listAgents({ state: "running", includeEphemeral: true });
+    const runningAgents = await agentStore.listAgents({ state: "running", includeEphemeral: false });
     const linkedAgents = runningAgents.filter((agent) => agent.taskId === taskId);
 
     for (const agent of linkedAgents) {
+      const activeRun = await agentStore.getActiveHeartbeatRun?.(agent.id);
+      const proof = evaluateParkedAgentTaskLink({
+        agent,
+        linkedTask: { column: "todo" } as Pick<Task, "column">,
+        activeRun,
+        hasActiveAgentExecution: this.options.hasActiveAgentExecution,
+      });
+      if (proof.shouldPreserveParkedLink) {
+        schedulerLog.log(
+          `Preserved running agent ${agent.id} for queued ${taskId}; live proof freshRun=${proof.hasFreshRun} activeExecution=${proof.hasActiveExecution}`,
+        );
+        continue;
+      }
+
       await agentStore.updateAgentState(agent.id, "active");
       await agentStore.syncExecutionTaskLink(agent.id, undefined);
-      schedulerLog.log(`Rolled back running agent ${agent.id} after overlap requeue of ${taskId}`);
+      schedulerLog.log(
+        `Cleared stale running agent ${agent.id} after overlap requeue of ${taskId}; file-scope lease remains queued`,
+      );
     }
   }
 
@@ -2513,6 +2532,7 @@ export class Scheduler {
                   blockedBy: null,
                   overlapBlockedBy: overlappingTaskId,
                 });
+                await this.rollbackRunningAgentsForQueuedTodoTask(task.id);
                 await this.logDispatchQueuedReason(
                   task.id,
                   `queued — blocked by active file-scope lease ${overlappingTaskId} (column=${activeLeaseColumn})`,

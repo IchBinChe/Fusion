@@ -190,6 +190,8 @@ describe("executeHeartbeat", () => {
       setLastBlockedState: vi.fn().mockResolvedValue(undefined),
       clearLastBlockedState: vi.fn().mockResolvedValue(undefined),
       appendRunLog: vi.fn().mockResolvedValue(undefined),
+      getActiveHeartbeatRun: vi.fn().mockResolvedValue(null),
+      syncExecutionTaskLink: vi.fn().mockResolvedValue(undefined),
       getAgentsByReportsTo: vi.fn().mockResolvedValue([]),
     } as unknown as AgentStore;
   }
@@ -234,6 +236,72 @@ describe("executeHeartbeat", () => {
       expect(section).toContain("agent-3");
       expect(section).toContain("| Name | State | Task | Last Heartbeat | Health |");
       expect(section).toContain("healthy");
+    });
+
+    it("FN-6954: buildReportsHealthSection suppresses running state for parked task with no live proof", async () => {
+      const now = new Date().toISOString();
+      const store = createStoreWithAgentForExec();
+      vi.mocked(store.getAgentsByReportsTo).mockResolvedValue([
+        { id: "agent-backend", name: "Backend Engineer", state: "running", taskId: "FN-6709", lastHeartbeatAt: now, updatedAt: now } as Agent,
+      ]);
+      vi.mocked(store.getActiveHeartbeatRun).mockResolvedValue(null);
+      mockTaskStore = createMockTaskStore({
+        getTask: vi.fn(async (taskId: string) => ({
+          id: taskId,
+          column: "todo",
+          status: "queued",
+          overlapBlockedBy: "FN-6827",
+          blockedBy: null,
+          dependencies: [],
+          log: [],
+          steps: [],
+          attachments: [],
+          createdAt: now,
+          updatedAt: now,
+        }) as unknown as TaskDetail),
+      });
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      const section = await (monitor as any).buildReportsHealthSection("agent-001", store);
+
+      expect(section).toContain("| Backend Engineer | active | FN-6709 (queued/no live run) |");
+      expect(section).toContain("**stale** assignment");
+      expect(section).not.toContain("| Backend Engineer | running | FN-6709 |");
+    });
+
+    it("FN-6954: buildReportsHealthSection preserves running state for parked task with fresh active run", async () => {
+      const now = new Date().toISOString();
+      const store = createStoreWithAgentForExec();
+      vi.mocked(store.getAgentsByReportsTo).mockResolvedValue([
+        { id: "agent-backend", name: "Backend Engineer", state: "running", taskId: "FN-6709", lastHeartbeatAt: now, updatedAt: now } as Agent,
+      ]);
+      vi.mocked(store.getActiveHeartbeatRun).mockResolvedValue({
+        id: "run-live",
+        agentId: "agent-backend",
+        startedAt: now,
+        status: "active",
+      } as AgentHeartbeatRun);
+      mockTaskStore = createMockTaskStore({
+        getTask: vi.fn(async (taskId: string) => ({
+          id: taskId,
+          column: "todo",
+          status: "queued",
+          overlapBlockedBy: "FN-6827",
+          dependencies: [],
+          log: [],
+          steps: [],
+          attachments: [],
+          createdAt: now,
+          updatedAt: now,
+        }) as unknown as TaskDetail),
+      });
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      const section = await (monitor as any).buildReportsHealthSection("agent-001", store);
+
+      expect(section).toContain("| Backend Engineer | running | FN-6709 |");
+      expect(section).not.toContain("queued/no live run");
+      expect(section).not.toContain("**stale** assignment");
     });
 
     it("buildReportsHealthSection classifies stuck agents", async () => {

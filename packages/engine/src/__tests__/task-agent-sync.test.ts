@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { AgentStore, type AgentCreateInput, type Task } from "@fusion/core";
+import { AgentStore, type Agent, type AgentCreateInput, type Task } from "@fusion/core";
 import { describe, expect, it, vi } from "vitest";
 
 import { attachAgentLinkSync } from "../task-agent-sync.js";
@@ -20,11 +20,17 @@ class EventedStore extends EventEmitter {
 const createInput: AgentCreateInput = { name: "durable-agent", role: "executor" };
 
 describe("FN-4296: task agent sync", () => {
-  const runCase = async (to: string, hasActiveAgentExecution = false) => {
+  const runCase = async (to: string, hasActiveAgentExecution = false, agentState: Agent["state"] = "active") => {
     const store = new EventedStore();
+    const agents = [{ id: "agent-1", taskId: "FN-1", state: agentState }];
     const agentStore = {
-      listAgents: vi.fn(async () => [{ id: "agent-1", taskId: "FN-1" }]),
-      syncExecutionTaskLink: vi.fn(async () => undefined),
+      listAgents: vi.fn(async () => agents),
+      updateAgentState: vi.fn(async (_agentId: string, state: Agent["state"]) => {
+        agents[0].state = state;
+      }),
+      syncExecutionTaskLink: vi.fn(async (_agentId: string, taskId?: string) => {
+        agents[0].taskId = taskId;
+      }),
       assignTask: vi.fn(async () => undefined),
     } as any;
 
@@ -39,7 +45,7 @@ describe("FN-4296: task agent sync", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    return { detach, agentStore };
+    return { detach, agentStore, agents };
   };
 
   it("FN-4296: task:moved → done clears linked durable agent's taskId", async () => {
@@ -57,14 +63,29 @@ describe("FN-4296: task agent sync", () => {
     expect(agentStore.syncExecutionTaskLink).toHaveBeenCalledWith("agent-1", undefined);
   });
 
+  it("FN-6954: task:moved in-progress → todo queued by overlap clears stale running state", async () => {
+    const { agentStore, agents } = await runCase("todo", false, "running");
+    expect(agentStore.updateAgentState).toHaveBeenCalledWith("agent-1", "active");
+    expect(agentStore.syncExecutionTaskLink).toHaveBeenCalledWith("agent-1", undefined);
+    expect(agents[0]).toMatchObject({ state: "active", taskId: undefined });
+  });
+
   it("FN-4296: task:moved → todo does NOT clear link when hasActiveAgentExecution=true", async () => {
-    const { agentStore } = await runCase("todo", true);
+    const { agentStore } = await runCase("todo", true, "running");
+    expect(agentStore.updateAgentState).not.toHaveBeenCalled();
     expect(agentStore.syncExecutionTaskLink).not.toHaveBeenCalled();
   });
 
   it("FN-4296: task:moved → triage clears link", async () => {
     const { agentStore } = await runCase("triage", false);
     expect(agentStore.syncExecutionTaskLink).toHaveBeenCalledWith("agent-1", undefined);
+  });
+
+  it("FN-6954: task:moved → triage queued behind overlap clears stale running link", async () => {
+    const { agentStore, agents } = await runCase("triage", false, "running");
+    expect(agentStore.updateAgentState).toHaveBeenCalledWith("agent-1", "active");
+    expect(agentStore.syncExecutionTaskLink).toHaveBeenCalledWith("agent-1", undefined);
+    expect(agents[0]).toMatchObject({ state: "active", taskId: undefined });
   });
 
   it("FN-4296: task:moved → in-review does NOT clear link", async () => {

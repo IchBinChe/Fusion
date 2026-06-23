@@ -96,12 +96,12 @@ describe("hold-release sweep (U6)", () => {
     return task.id;
   }
 
-  it("flag OFF: sweep is a no-op (legacy scheduler path untouched)", async () => {
+  it("ignores stale workflowColumns=false and still releases held default-workflow cards", async () => {
     await store.updateGlobalSettings({ experimentalFeatures: { workflowColumns: false } });
     const id = await seedTodoCard();
     const result = await runHoldReleaseSweep(store, noReserveDeps);
-    expect(result.released).toEqual([]);
-    expect((await store.getTask(id))?.column).toBe("todo");
+    expect(result.released).toEqual([id]);
+    expect((await store.getTask(id))?.column).toBe("in-progress");
   });
 
   it("two holds, one slot: exactly one releases; the other releases next sweep after the slot frees", async () => {

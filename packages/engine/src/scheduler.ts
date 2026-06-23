@@ -1212,18 +1212,49 @@ export class Scheduler {
       }
       this.wasEnginePaused = false;
 
-      // ── U6: hold/release sweep (flag-ON only) ──────────────────────────────
-      // Flag OFF: this is skipped entirely — the legacy pull-from-todo loop
-      // below is byte-identical. Flag ON: the sweep evaluates hold-column
-      // release conditions (manual/timer/capacity/dependency/external-event) and
-      // releases eligible cards via moveSource:"scheduler", serializing through
-      // the in-txn capacity check. For the DEFAULT workflow the legacy loop below
-      // still drives todo→in-progress pickup (parity); the sweep adds custom-
-      // workflow hold handling and the generalized capacity-release path.
+      // ── U6: hold/release sweep ─────────────────────────────────────────────
+      /*
+      FNXC:WorkflowScheduling 2026-06-23-10:32:
+      Workflow columns graduated from Experimental and are now the scheduler's only dispatch model. The hold/release sweep owns todo→in-progress pickup, so do not fall through into the legacy pull-from-todo dispatcher after the sweep runs.
+      */
       if (isWorkflowColumnsEnabled(settings)) {
         await this.runHoldReleaseSweepPass(tasks, settings);
         tasks = await this.store.listTasks({ slim: true, includeArchived: false, startupMemo: false });
         settings = await this.store.getSettings();
+        await this.emitHighOverlapFanoutWarnings(tasks);
+
+        const staleWarningWindows = [settings.staleInProgressWarningMs, settings.staleInReviewWarningMs]
+          .filter((value): value is number => typeof value === "number" && Number.isFinite(value) && value > 0);
+        const minWarningMs = staleWarningWindows.length > 0 ? Math.min(...staleWarningWindows) : 0;
+        if (minWarningMs > 0 && Date.now() - this.lastStaleTaskReportAt >= minWarningMs) {
+          try {
+            await this.staleTaskReporter.report();
+            this.lastStaleTaskReportAt = Date.now();
+          } catch (error) {
+            schedulerLog.warn("Stale task reporter failed", error);
+          }
+        }
+
+        if (settings.backlogPressureAlertEnabled !== false && Date.now() - this.lastBacklogPressureReportAt >= 60_000) {
+          try {
+            await this.backlogPressureReporter.report();
+          } catch (error) {
+            schedulerLog.warn("Backlog pressure reporter failed", error);
+          } finally {
+            this.lastBacklogPressureReportAt = Date.now();
+          }
+        }
+
+        if (Date.now() - this.lastUnlinkedMissionsAdvisoryReportAt >= 60_000) {
+          try {
+            await this.unlinkedMissionsAdvisoryReporter.report();
+          } catch (error) {
+            schedulerLog.warn("Unlinked missions advisory reporter failed", error);
+          } finally {
+            this.lastUnlinkedMissionsAdvisoryReportAt = Date.now();
+          }
+        }
+        return;
       }
 
       const maxConcurrent = settings.maxConcurrent ?? this.options.maxConcurrent ?? 2;

@@ -70,14 +70,16 @@ export default defineConfig({
             "src/__tests__/merger-diff-scope.test.ts",
             "src/__tests__/merger-landed-files-capture.test.ts",
             "src/__tests__/branch-attribution.test.ts",
-            "src/__tests__/executor-core.test.ts",
-            "src/__tests__/executor-recovery.test.ts",
+            /*
+            FNXC:EngineTests 2026-06-23-10:48:
+            Workflow columns and workflow graph execution are now the default runtime. Retire the legacy direct-dispatch executor/scheduler gate files and gate the new hold-release plus graph interpreter seams instead.
+            */
+            "src/__tests__/hold-release.test.ts",
+            "src/__tests__/workflow-graph-task-runner.test.ts",
+            "src/__tests__/workflow-graph-executor-parity.test.ts",
             "src/__tests__/executor-base-commit-capture.test.ts",
             "src/__tests__/executor-capture-modified-files-attribution.test.ts",
             "src/__tests__/triage-preflight.test.ts",
-            "src/__tests__/scheduler.test.ts",
-            "src/__tests__/scheduler-node-routing.test.ts",
-            "src/__tests__/scheduler-overlap-requeue.test.ts",
             "src/__tests__/mission-scheduler.test.ts",
             "src/__tests__/heartbeat-monitor.test.ts",
             "src/__tests__/workflow-node-handlers.test.ts",

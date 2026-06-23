@@ -185,15 +185,14 @@ describe("WorkflowGraphTaskRunner (CU-U2)", () => {
     expect(calls).toEqual(["custom:lint"]);
   });
 
-  it("falls back when the flag is off", async () => {
+  it("ignores stale workflowGraphExecutor=false and still runs the graph", async () => {
     const runner = new WorkflowGraphTaskRunner({
       store: storeWith(definition(fullLifecycleIr())),
       seams: recordingSeams([]),
       runCustomNode: async () => ({ outcome: "success" }),
     });
     const result = await runner.run(task, flagOff);
-    expect(result.disposition).toBe("fell-back");
-    expect(result.reason).toBe("flag-off");
+    expect(result.disposition).toBe("completed");
   });
 
   it("falls back when the task has no workflow selection", async () => {

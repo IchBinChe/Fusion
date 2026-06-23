@@ -1,5 +1,22 @@
 # @runfusion/fusion
 
+## 0.46.0
+
+### Minor Changes
+
+- 41f3b04: Add a Command Center Productivity control for previewing and applying historical LOC backfills from the dashboard.
+- efb94c8: Add editable global model pricing overrides, a one-click LiteLLM pricing refresh, and override-aware Command Center cost estimates.
+
+### Patch Changes
+
+- f6e9deb: Stop Planning Mode from automatically focusing the initial text entry when it opens, preventing mobile keyboards from appearing until the user explicitly focuses the textarea.
+- 466cf9c: Dispose completed spawned child agent sessions so execution memory is released promptly after `fn_spawn_agent` children finish, keep artifact registry listing metadata-only so large inline artifacts are not loaded during agent execution, bound structured tool-result log previews before serialization, reduce dashboard SSE keepalive churn, and keep the dashboard TUI performance timeline drained during long-running execution.
+- d06e316: Fix Command Center Recharts line and pie graphs rendering blank when their cards initially report unusable responsive dimensions.
+- a670f5c: Restore core task lifecycle compatibility for workflow-column transitions, deferred title summarization fixtures, workflow IR rollback persistence, and capacity-aware task movement.
+- fe536b2: Fix stale durable agent task assignments for tasks parked behind file-scope lease queues, including Reports Health Check rendering and self-healing reconciliation.
+- 736ec6d: Fix mobile mailbox message selection so stale deep links no longer override the user's selected message.
+- 945f0f1: Pass project fallback model settings into triage spec reviewer sessions so global default overrides are honored during review.
+
 ## 0.45.0
 
 ### Minor Changes

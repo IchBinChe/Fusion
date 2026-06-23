@@ -2,6 +2,78 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
+## 0.46.0
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- @fusion/core@0.46.0
+- @fusion/engine@0.46.0
+- @fusion/i18n@0.39.9
+- @fusion-plugin-examples/cli-printing-press@0.1.26
+- @fusion-plugin-examples/compound-engineering@0.1.9
+- @fusion-plugin-examples/dependency-graph@0.1.40
+- @fusion-plugin-examples/roadmap@0.1.28
+- @fusion-plugin-examples/cursor-runtime@0.1.28
+- @fusion-plugin-examples/droid-runtime@0.1.35
+- @fusion-plugin-examples/hermes-runtime@0.2.59
+- @fusion-plugin-examples/openclaw-runtime@0.2.59
+- @fusion-plugin-examples/paperclip-runtime@0.2.59
+
+### @fusion/desktop
+
+#### Patch Changes
+
+- @fusion/core@0.46.0
+- @fusion/dashboard@0.46.0
+- @fusion/engine@0.46.0
+
+### @fusion/engine
+
+#### Patch Changes
+
+- @fusion/core@0.46.0
+- @fusion/pi-claude-cli@0.46.0
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- @fusion/core@0.46.0
+
+### @runfusion/fusion
+
+#### Minor Changes
+
+- 41f3b04: Add a Command Center Productivity control for previewing and applying historical LOC backfills from the dashboard.
+- efb94c8: Add editable global model pricing overrides, a one-click LiteLLM pricing refresh, and override-aware Command Center cost estimates.
+
+#### Patch Changes
+
+- f6e9deb: Stop Planning Mode from automatically focusing the initial text entry when it opens, preventing mobile keyboards from appearing until the user explicitly focuses the textarea.
+- 466cf9c: Dispose completed spawned child agent sessions so execution memory is released promptly after `fn_spawn_agent` children finish, keep artifact registry listing metadata-only so large inline artifacts are not loaded during agent execution, bound structured tool-result log previews before serialization, reduce dashboard SSE keepalive churn, and keep the dashboard TUI performance timeline drained during long-running execution.
+- d06e316: Fix Command Center Recharts line and pie graphs rendering blank when their cards initially report unusable responsive dimensions.
+- a670f5c: Restore core task lifecycle compatibility for workflow-column transitions, deferred title summarization fixtures, workflow IR rollback persistence, and capacity-aware task movement.
+- fe536b2: Fix stale durable agent task assignments for tasks parked behind file-scope lease queues, including Reports Health Check rendering and self-healing reconciliation.
+- 736ec6d: Fix mobile mailbox message selection so stale deep links no longer override the user's selected message.
+- 945f0f1: Pass project fallback model settings into triage spec reviewer sessions so global default overrides are honored during review.
+
+### runfusion.ai
+
+#### Patch Changes
+
+- Updated dependencies [f6e9deb]
+- Updated dependencies [466cf9c]
+- Updated dependencies [d06e316]
+- Updated dependencies [a670f5c]
+- Updated dependencies [fe536b2]
+- Updated dependencies [736ec6d]
+- Updated dependencies [945f0f1]
+- Updated dependencies [41f3b04]
+- Updated dependencies [efb94c8]
+  - @runfusion/fusion@0.46.0
+
 ## 0.45.0
 
 ### @fusion/core
@@ -9664,6 +9736,14 @@ for reference.
 - Updated dependencies [a2ed6d0]
   - @runfusion/fusion@0.1.0
 
+## 0.39.9
+
+### @fusion/i18n
+
+#### Patch Changes
+
+- @fusion/core@0.46.0
+
 ## 0.39.8
 
 ### @fusion/i18n
@@ -9729,6 +9809,14 @@ for reference.
 #### Patch Changes
 
 - @fusion/core@0.40.0
+
+## 0.11.35
+
+### @fusion/droid-cli
+
+#### Patch Changes
+
+- @fusion-plugin-examples/droid-runtime@0.1.35
 
 ## 0.11.34
 

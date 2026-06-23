@@ -16,6 +16,8 @@ import {
   isValidSqliteDatabaseFile,
   readProjectIdentity,
   writeProjectIdentity,
+  detectWorkspaceRepos,
+  saveWorkspaceConfig,
   type RegisteredProject,
   type TaskStore,
 } from "@fusion/core";
@@ -625,6 +627,31 @@ export async function registerProjectInteractive(
 
   // Check for .fusion/ directory
   if (!isKbProject(absPath)) {
+    // Check if this is a non-git directory containing sub-repos (workspace mode)
+    const { spawnSync } = await import("node:child_process");
+    const gitCheck = spawnSync("git", ["-C", absPath, "rev-parse", "--is-inside-work-tree"], { encoding: "utf8" });
+    const isGitRepo = gitCheck.status === 0 && gitCheck.stdout.trim() === "true";
+
+    /*
+    FNXC:Workspace 2026-06-22-00:00:
+    Workspace detection only reports candidate sub-repos here; persistence is deferred until
+    after the user confirms init AND TaskStore.init() succeeds. Writing .fusion/workspace.json
+    before confirmation would leave a partial .fusion/ dir when the user declines or runs
+    non-interactively, polluting a plain non-git directory with stray Fusion state.
+    */
+    let detectedSubRepos: string[] | null = null;
+    if (!isGitRepo) {
+      const subRepos = await detectWorkspaceRepos(absPath);
+      if (subRepos.length > 0) {
+        console.log(`\n  Found ${subRepos.length} git repositories in ${absPath}:`);
+        subRepos.forEach((r: string) => console.log(`    • ${r}`));
+        console.log(`\n  Initializing as a Fusion workspace...\n`);
+        detectedSubRepos = subRepos;
+        // workspace.json is written below, only after a confirmed store.init() succeeds.
+      }
+      // else: fall through to existing error path
+    }
+
     if (interactive) {
       console.log(`\n  No .fusion/ directory found in ${absPath}`);
       const shouldInit = await promptConfirm("Initialize fn here first?", true);
@@ -634,6 +661,9 @@ export async function registerProjectInteractive(
         const { TaskStore } = await import("@fusion/core");
         const store = new TaskStore(absPath);
         await store.init();
+        if (detectedSubRepos) {
+          await saveWorkspaceConfig(absPath, { repos: detectedSubRepos });
+        }
         console.log(`  ✓ Initialized fn at ${absPath}`);
       } else {
         throw new ProjectResolutionError(

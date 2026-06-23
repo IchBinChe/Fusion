@@ -153,12 +153,16 @@ export {
 export {
   ensureGitRepositoryForProjectPath,
   GitRepositoryInitializationError,
+  detectWorkspaceRepos,
+  loadWorkspaceConfig,
+  saveWorkspaceConfig,
 } from "./git-repository.js";
 export type {
   GitRepositoryCommandResult,
   GitRepositoryCommandRunner,
   GitRepositoryEnsureOutcome,
   EnsureGitRepositoryOptions,
+  WorkspaceConfig,
 } from "./git-repository.js";
 
 // ── Trait model (U2) ─────────────────────────────────────────────────

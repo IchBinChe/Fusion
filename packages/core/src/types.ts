@@ -2241,6 +2241,11 @@ export interface Task {
   /** When true, this decision-only task is expected to complete without creating git commits. */
   noCommitsExpected?: boolean;
   worktree?: string;
+  /**
+   * Workspace mode only. Keyed by repo path relative to workspace rootDir.
+   * Each entry records the on-disk worktree path and git branch for one sub-repo.
+   */
+  workspaceWorktrees?: Record<string, { worktreePath: string; branch: string }>;
   steps: TaskStep[];
   currentStep: number;
   /**

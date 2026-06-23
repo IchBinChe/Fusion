@@ -821,12 +821,10 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     projectId,
   ]);
 
-  // Focus textarea when opening
-  useEffect(() => {
-    if (isOpen && view.type === "initial") {
-      textareaRef.current?.focus();
-    }
-  }, [isOpen, view.type]);
+  /*
+  FNXC:PlanningFocus 2026-06-23-00:00:
+  Viewing Planning Mode must not auto-focus the initial composer because mobile browsers open the keyboard before the user chooses to type. Keep the textarea ref for autosize and explicit user focus only; populated initialPlan handoffs still auto-start through the separate effect below.
+  */
 
   useEffect(() => {
     if (!isOpen) {

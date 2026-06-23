@@ -453,12 +453,14 @@ async function issueRelease(
 
     FNXC:WorkflowScheduling 2026-06-23-22:39:
     Eventless-release fallback is scoped to the current task. Other cards moving to the same target column during the same sweep must not disable this task's fallback and leak its reservation.
+
+    FNXC:WorkflowScheduling 2026-06-23-22:59:
+    Void-returning legacy stores are ambiguous: no event plus no returned task cannot prove the current task moved. Require a returned current-task row before keeping the reservation so same-column no-ops do not leak slots.
     */
     const returnedMovedTask = !sawMovedEventForTask
-      && (
-        result === undefined
-        || (result.id === task.id && result.column === target && originalColumn !== target)
-      );
+      && result?.id === task.id
+      && result.column === target
+      && originalColumn !== target;
     if (reservation && !movedTaskObjects.has(result) && !returnedMovedTask) {
       // Same-column no-op: a racing sweep already moved this card to the target.
       reservation.release();

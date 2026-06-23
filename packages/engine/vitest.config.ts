@@ -73,7 +73,11 @@ export default defineConfig({
             /*
             FNXC:EngineTests 2026-06-23-10:48:
             Workflow columns and workflow graph execution are now the default runtime. Retire the legacy direct-dispatch executor/scheduler gate files and gate the new hold-release plus graph interpreter seams instead.
+
+            FNXC:EngineTests 2026-06-23-23:04:
+            The cutover gate must also keep one direct executor recovery guard for graph execute self-requeue preservation. This protects the new marker path after retiring the broad legacy executor recovery gate file.
             */
+            "src/__tests__/executor-graph-requeue-gate.test.ts",
             "src/__tests__/hold-release.test.ts",
             "src/__tests__/workflow-graph-task-runner.test.ts",
             "src/__tests__/workflow-graph-executor-parity.test.ts",

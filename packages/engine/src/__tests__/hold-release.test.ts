@@ -146,6 +146,42 @@ describe("hold-release sweep (U6)", () => {
     expect(release).not.toHaveBeenCalled();
   });
 
+  it("releases reservations when an eventless move returns no task row", async () => {
+    const held = {
+      id: "FN-778",
+      title: "Held void",
+      description: "",
+      column: "todo",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as Task;
+    const release = vi.fn();
+    const fakeStore = {
+      getSettings: vi.fn(async () => ({
+        maxConcurrent: 4,
+        experimentalFeatures: { workflowColumns: true },
+      })),
+      listTasks: vi.fn(async () => [held]),
+      moveTask: vi.fn(async () => undefined),
+      getTaskWorkflowSelection: vi.fn(() => null),
+      on: vi.fn(),
+      off: vi.fn(),
+    } as unknown as TaskStore;
+
+    const result = await runHoldReleaseSweep(fakeStore, {
+      now: () => Date.now(),
+      reserveSlot: () => ({ release }),
+    });
+
+    expect(result.released).toEqual([]);
+    expect(result.held).toEqual([{ taskId: "FN-778", reason: "move-rejected-or-no-slot" }]);
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
   it("two holds, one slot: exactly one releases; the other releases next sweep after the slot frees", async () => {
     await store.updateSettings({ maxConcurrent: 1 } as Parameters<typeof store.updateSettings>[0]);
     const a = await seedTodoCard();

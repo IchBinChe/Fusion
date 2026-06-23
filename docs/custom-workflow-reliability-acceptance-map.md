@@ -6,6 +6,9 @@
 FNXC:CustomWorkflowReliability 2026-06-17-05:41:
 Goal G-MPW67VQR-0001-97S3 needs an end-to-end reliability acceptance map for the custom workflow system so authoring, selection, execution, recovery, and restart behavior can be verified by measurable criteria instead of ad hoc spot checks.
 This artifact distinguishes MVP/blocking requirements from nice-to-have enhancements and keeps implementation out of scope: confirmed gaps become focused follow-up tasks rather than product-code changes in this documentation task.
+
+FNXC:WorkflowRouting 2026-06-22-12:00:
+Workflow selection acceptance must distinguish operator intent and task creator ownership from executor opportunism. Agents can assign workflows when the user asked or when creating the task; executors cannot reroute the task under execution unless instructed.
 -->
 
 ## Purpose
@@ -49,9 +52,9 @@ Use this document to write engineering tasks, QA plans, and release checks. It i
 
 ### 3. Select a workflow for a task, board, or mission-derived feature task
 
-- **Actor / need:** An operator or triage agent needs to route work through the intended workflow at task creation or before execution, including tasks that originate from mission features.
+- **Actor / need:** An operator or task-creating agent needs to route work through the intended workflow at task creation or before execution, including tasks that originate from mission features.
 - **Trigger:** Use the dashboard task/board workflow selector, task detail **Workflow** tab, `fn_workflow_select`, `workflow_id` on `fn_task_create` / delegation tools, or mission feature triage/linking surfaces such as `fn_feature_link_task` where the created/linked task carries a workflow selection.
-- **Expected happy path + lifecycle transitions + feedback:** Unselected tasks resolve to `builtin:coding`; explicitly selected workflows persist on the task before scheduler pickup; newly created tasks enter the normal planning/todo path for their selected workflow; mission goal provenance remains derived through the mission/feature hierarchy rather than copied onto the task row. The UI shows the selected workflow and offers **Edit workflow** in the task workflow context.
+- **Expected happy path + lifecycle transitions + feedback:** Unselected tasks resolve to `builtin:coding`; explicitly selected workflows persist on the task before scheduler pickup; agents select/change workflows only when the user explicitly requested the workflow or when they created the task; executors do not reroute the task under execution unless instructed by the user; newly created tasks enter the normal planning/todo path for their selected workflow; mission goal provenance remains derived through the mission/feature hierarchy rather than copied onto the task row. The UI shows the selected workflow and offers **Edit workflow** in the task workflow context.
 - **Failure / recovery expectation:** A missing or corrupt explicit custom workflow fails closed as a workflow-resolution failure instead of silently falling back to `builtin:coding`. Invalid workflow IDs supplied through tools reject with a clear validation error. Mission links must preserve their own linked-task guards; deleting mission hierarchy cannot silently drop live linked tasks.
 - **Measurable success signal:** The task record/tool output shows the selected workflow ID; task detail shows the workflow context; runtime starts with the selected workflow; workflow-resolution failures park the task with an explicit error rather than executing the wrong workflow.
 - **Priority:** MVP/blocking for per-task selection and fail-closed resolution; nice-to-have for first-class mission-feature workflow defaults if not already supported by a triage entry point.

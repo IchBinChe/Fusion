@@ -16,6 +16,9 @@ The built-in catalog now includes a business lead-generation workflow with custo
 FNXC:WorkflowRouting 2026-06-21-04:25:
 Triage and planning agents must preserve the project default workflow unless the user explicitly requests a different workflow. No-commit markers describe expected artifact behavior only; they no longer imply automatic Quick fix workflow selection.
 
+FNXC:WorkflowRouting 2026-06-22-12:00:
+Agents may select or change a workflow only when the user explicitly requested that workflow or the agent created that specific task. Executor agents must not reroute the task they are executing unless the user asked, but they may set workflows on follow-up tasks they create.
+
 FNXC:Docs 2026-06-21-12:00:
 FN-6906 makes non-coding built-in prompts artifact-oriented: marketing drafts, lead enrichment/outreach, and design previews are persisted with fn_task_document_write, while fn_artifact_register remains conditional until the artifact tool is available.
 -->
@@ -30,7 +33,9 @@ Operators can select workflows in the dashboard wherever the task or board workf
 - `fn_workflow_select` — assign a workflow to the current or named task.
 - `workflow_id` on `fn_task_create` / delegation tools — create a task with a workflow already selected.
 
-Decision-only or investigation tasks can also declare `noCommitsExpected` / `**No commits expected:** true`; that marker does not change workflow selection by itself. Tasks without an explicit workflow request stay on the project default (`builtin:coding`).
+Agent-initiated workflow assignment is intentionally narrow: an agent may select or change a task's workflow only when the user explicitly requested that workflow, or when the agent created that task itself (for example by passing `workflow_id` to `fn_task_create` / delegation tools). Executors should not call `fn_workflow_select` to reroute the task they are currently executing unless that task's instructions or a user steering comment explicitly asks for the workflow change.
+
+Decision-only or investigation tasks can also declare `noCommitsExpected` / `**No commits expected:** true`; that marker does not change workflow selection by itself. Tasks without an explicit workflow request or creator-owned workflow selection stay on the project default (`builtin:coding`).
 
 ### Built-in workflow catalog
 
@@ -106,7 +111,7 @@ The default built-in catalog entry `builtin:coding` is backed by the canonical `
 
 `builtin:marketing` is a non-coding content workflow with marketing-specific columns (`ideation`, `backlog`, `drafting`, `editorial-review`, `published`, `archived`) and prompt seams for content brief, draft, and editorial review. Its draft stage saves the primary content deliverable as a task document for human review, while the workflow uses the same lifecycle traits (`intake`, `hold`, `wip`, `merge-blocker`, `human-review`, `complete`, `archived`) and the same merge-gate/branch-group/merge-attempt primitive region as coding workflows, so scheduler, capacity, review blocking, and merge orchestration behavior remain standard.
 
-During triage/planning sessions, agents can call `fn_workflow_list` to discover available built-in and custom workflows and read their descriptions before routing work. They can call `fn_workflow_select` to select a workflow for the task being specified, or pass `workflow_id` when creating child tasks with `fn_task_create`; decision-only or investigation tasks can also set `noCommitsExpected` / `**No commits expected:** true` when no code changes are expected. The built-in triage thresholds, decision-only verb list, and default routing IDs are workflow-native typed settings resolved from the selected workflow.
+During triage/planning sessions, agents can call `fn_workflow_list` to discover available built-in and custom workflows and read their descriptions before routing work. They can call `fn_workflow_select` only when the user explicitly requested a workflow or when selecting a workflow for a task they created, and they can pass `workflow_id` when creating child tasks with `fn_task_create`; decision-only or investigation tasks can also set `noCommitsExpected` / `**No commits expected:** true` when no code changes are expected. The built-in triage thresholds, decision-only verb list, and default routing IDs are workflow-native typed settings resolved from the selected workflow.
 
 #### Runtime invariant criterion
 

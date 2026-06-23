@@ -720,6 +720,9 @@ describe("Code review verdict enforcement - fn_task_update blocking", () => {
     expect(capturedSystemPrompt).toContain("Do NOT run the full/workspace-wide test suite as your normal verification path");
     expect(capturedSystemPrompt).toContain("A full/workspace-wide run is allowed ONLY when the task or workflow explicitly requires it");
     expect(capturedSystemPrompt).toContain("allowFullSuite: true");
+    expect(capturedSystemPrompt).toContain("Do not call `fn_workflow_select` to change the workflow of the task you are executing");
+    expect(capturedSystemPrompt).toContain("The only exception is when the user explicitly requested a specific workflow for this task");
+    expect(capturedSystemPrompt).toContain("You may still set the workflow on tasks you create via `fn_task_create` or `fn_delegate_task`");
   });
 
   // Note: The EXECUTOR_SYSTEM_PROMPT constant is tested indirectly via the buildExecutionPrompt test.

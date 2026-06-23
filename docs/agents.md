@@ -4,6 +4,11 @@
 
 Fusion uses multiple agent roles for planning, execution, review, and merge workflows.
 
+<!--
+FNXC:WorkflowRouting 2026-06-22-12:00:
+Agent-facing docs must preserve the workflow movement boundary: agents can assign workflows when the user explicitly asked or when creating a task, while executors cannot reroute the task under execution on their own initiative.
+-->
+
 ## CLI session actions
 
 The dashboard's CLI session banner uses authenticated `POST /api/cli-sessions/:id/*` routes for task-bound CLI sessions. `POST /api/cli-sessions/:id/relaunch` is project-scoped, rejects sessions that do not have a `taskId`, records a relaunch intent, and lets the engine listener clear resume linkage before moving the owning task back to `todo` for a fresh executor launch. This route backs the `resume-exhausted` banner's **Relaunch fresh** action; when a session summary has no `cliSessionId`, the client does not call the route.
@@ -27,6 +32,7 @@ fn chat <agent-id> [message…] [--once] [--non-interactive] [--poll-ms <n>]
 - Agent-acting session lanes share the same skill-injection contract as executor sessions: executor, merger, triage, reviewer, heartbeat, step-session, dashboard chat/room responders, CLI agent execution, planning, mission interview, milestone/slice interview, agent-onboarding interview, workflow design, memory dreams/insight extraction, and scheduled cron automation all request agent/fallback skills plus enabled plugin-contributed skills when a plugin runner is available. Utility-only lanes that only summarize/extract/generate JSON (title/PR summaries, memory compaction, subtask breakdown, text refinement, agent generation, PR metadata generation, evaluator/research synthesis, and similar one-shot helpers) intentionally stay exempt to avoid loading skills where no agent-style tool loop can use them.
 - In dashboard model-loop chat (main chat, QuickChat, and room responders), typing `/skill:{name}` requests that skill for the current AI session and strips the slash token from the prompt sent to the model. The requested skill is still subject to the normal enabled/disabled execution-skill filters; CLI-agent-backed PTY chat keeps raw terminal input semantics and does not interpret this command.
 - Dashboard chat and planning sessions with a scoped task store expose `fn_task_document_write` and `fn_task_document_read`; because neither lane has an ambient task, both tools require an explicit `task_id`.
+- Agent workflow-routing tools follow an intent boundary: agents may select or change a task workflow only when the user explicitly requested that workflow or when the agent created the task. Executors must not call `fn_workflow_select` to reroute the task they are executing unless the task instructions or a user steering comment explicitly asks for the workflow change.
 - Executor, heartbeat, and dashboard chat sessions expose artifact registry tools: `fn_artifact_register` publishes document/image/video/audio/other artifacts with inline `content` or a `uri`, `fn_artifact_list` discovers artifacts across agents/tasks with filters, and `fn_artifact_view` reads metadata plus inline content or URI references. Each successful registration sends a best-effort `system` → dashboard user inbox notification with artifact metadata; notification failures are logged but do not fail the registration. Planning sessions intentionally exclude artifact tools until they can thread the existing `MessageStore` dependency.
 
 ### Flags

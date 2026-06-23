@@ -253,6 +253,11 @@ These groups moved out of project settings and into workflow settings (built-in
 
 ### Workflow-native triage policy settings
 
+<!--
+FNXC:WorkflowRouting 2026-06-22-12:00:
+Triage workflow defaults are policy inputs, not permission to reroute tasks autonomously. Prompt guidance allows workflow selection only for explicit user requests or tasks the agent created.
+-->
+
 The built-in workflows also declare triage/spec policy settings that were **not** moved from project settings. They are workflow-native declarations: they never lived in `DEFAULT_PROJECT_SETTINGS`, are not `MOVED_SETTINGS_KEYS`, and resolve only through the workflow effective-settings path.
 
 | Setting | Default | Purpose |
@@ -267,8 +272,8 @@ The built-in workflows also declare triage/spec policy settings that were **not*
 | `triageSubtaskFileScopeThreshold` | `20` | File Scope entry count that signals broad work. |
 | `triageSubtaskRemediationBatchThreshold` | `30` | Large remediation batch threshold. |
 | `triageNoCommitsDecisionVerbs` | all seven built-ins | Decision-only verbs: Decide, Evaluate, Verify, Confirm, Audit, Review whether, Investigate and report. |
-| `triageDecisionOnlyWorkflowId` | `builtin:quick-fix` | Preferred workflow for decision-only/no-commit tasks. |
-| `triageDefaultWorkflowId` | `builtin:coding` | Default workflow for standard coding tasks. |
+| `triageDecisionOnlyWorkflowId` | `builtin:quick-fix` | Preferred workflow for decision-only/no-commit tasks when the user explicitly requests that routing or the agent is creating the task. |
+| `triageDefaultWorkflowId` | `builtin:coding` | Default workflow for standard coding tasks and for existing tasks without an explicit user-requested or creator-owned workflow selection. |
 | `leanPlanning` | `false` | Workflow-native fast-mode policy: select the lean `planning-fast` prompt variant instead of the full triage spec prompt. |
 | `autoApproveSpec` | `false` | Workflow-native fast-mode policy: auto-approve generated specs and skip the independent spec reviewer. |
 

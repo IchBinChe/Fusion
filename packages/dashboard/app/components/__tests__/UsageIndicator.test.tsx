@@ -501,7 +501,7 @@ describe("UsageIndicator", () => {
 
     const modal = screen.getByTestId("usage-modal") as HTMLElement;
     expect(modal).toHaveClass("usage-modal--popover");
-    expect(modal.style.top).toBe("60px");
+    expect(modal.style.top).toBe("88px");
     expect(Number.parseFloat(modal.style.top)).toBeLessThan(window.innerHeight / 2);
   });
 
@@ -527,11 +527,37 @@ describe("UsageIndicator", () => {
 
     const modal = screen.getByTestId("usage-modal") as HTMLElement;
     expect(modal).toHaveClass("usage-modal--popover");
-    expect(modal.style.top).toBe("200px");
-    expect(Number.parseFloat(modal.style.top)).toBeLessThan(window.innerHeight / 2);
+    expect(modal.style.top).toBe("96px");
+    expect(Number.parseFloat(modal.style.top)).toBeLessThan(window.innerHeight / 4);
     expect(modal.style.left).toBe("340px");
     expect(modal.style.width).toBe("600px");
     expect(modal.style.height).toBe("500px");
+  });
+
+  it("keeps the desktop popover near the board top on a tall viewport with a low anchor", () => {
+    setViewportSize({ width: 1280, height: 1440 });
+    mockUseUsageData.mockReturnValue(createUsageDataState({
+      providers: mockProviders,
+      loading: false,
+      error: null,
+      lastUpdated: new Date(),
+      refresh: mockRefresh,
+    }));
+
+    render(
+      <UsageIndicator
+        isOpen={true}
+        onClose={mockOnClose}
+        projectId={TEST_PROJECT_ID}
+        anchorRect={createAnchorRect({ top: 620, bottom: 650 })}
+      />
+    );
+
+    const modal = screen.getByTestId("usage-modal") as HTMLElement;
+    const top = Number.parseFloat(modal.style.top);
+    expect(modal).toHaveClass("usage-modal--popover");
+    expect(top).toBeLessThanOrEqual(96);
+    expect(top).toBeLessThan(window.innerHeight / 4);
   });
 
   it("renders as top-aligned full-screen modal when anchorRect is null", () => {
@@ -546,10 +572,11 @@ describe("UsageIndicator", () => {
     render(<UsageIndicator isOpen={true} onClose={mockOnClose} projectId={TEST_PROJECT_ID} anchorRect={null} />);
 
     const overlay = screen.getByTestId("usage-modal-overlay");
-    const modal = screen.getByTestId("usage-modal");
+    const modal = screen.getByTestId("usage-modal") as HTMLElement;
     expect(overlay).toHaveClass("modal-overlay", "open", "usage-modal-overlay");
     expect(modal).toHaveClass("modal");
     expect(modal).not.toHaveClass("usage-modal--popover");
+    expect(modal.style.top).toBe("");
     expect(modal.parentElement).toBe(overlay);
   });
 
@@ -600,7 +627,8 @@ describe("UsageIndicator", () => {
 
     const modal = screen.getByTestId("usage-modal") as HTMLElement;
     expect(modal).toHaveClass("usage-modal--popover");
-    expect(modal.style.top).toBe("60px");
+    expect(modal.style.top).toBe("96px");
+    expect(Number.parseFloat(modal.style.top)).toBeLessThan(window.innerHeight / 2);
     if (expectedText) {
       expect(screen.getByText(expectedText)).toBeInTheDocument();
     } else {

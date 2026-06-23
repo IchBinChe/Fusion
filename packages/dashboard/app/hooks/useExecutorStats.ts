@@ -21,9 +21,13 @@ export interface UseExecutorStatsResult {
 /**
  * Derive the executor state from globalPause, enginePaused, and runningTaskCount.
  * 
- * - "idle": globalPause is true OR (enginePaused is true AND runningTaskCount is 0)
+ * - "stopped": globalPause is true
+ * - "idle": (enginePaused is true AND runningTaskCount is 0) OR not paused with nothing running
  * - "paused": enginePaused is true AND runningTaskCount > 0
  * - "running": globalPause is false AND enginePaused is false AND runningTaskCount > 0
+ *
+ * FNXC:EngineControls 2026-06-22-00:00:
+ * `globalPause` dominates the footer state matrix so an operator-stopped engine is distinct from idle even if in-progress tasks still exist.
  */
 function deriveExecutorState(
   globalPause: boolean,
@@ -31,7 +35,7 @@ function deriveExecutorState(
   runningTaskCount: number
 ): ExecutorState {
   if (globalPause) {
-    return "idle";
+    return "stopped";
   }
   if (enginePaused && runningTaskCount === 0) {
     return "idle";
@@ -99,7 +103,7 @@ function deriveStatsFromTasks(tasks: Task[], taskStuckTimeoutMs?: number, lastFe
  * - Derives blockedTaskCount from tasks with blockedBy field set
  * - Derives stuckTaskCount using the project's `taskStuckTimeoutMs` setting;
  *   returns 0 when the setting is undefined/disabled
- * - Derives executorState from globalPause and enginePaused flags
+ * - Derives executorState from globalPause and enginePaused flags, with globalPause mapping to "stopped"
  * - Returns ExecutorStats object with reactive updates
  */
 export function useExecutorStats(tasks: Task[], projectId?: string, taskStuckTimeoutMs?: number, lastFetchTimeMs?: number): UseExecutorStatsResult {

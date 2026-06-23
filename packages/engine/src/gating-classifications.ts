@@ -80,6 +80,9 @@ export const ACTION_GATE_NETWORK_API_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 export const READONLY_FN_TOOLS: ReadonlySet<string> = new Set([
+  "fn_artifact_register",
+  "fn_artifact_list",
+  "fn_artifact_view",
   "fn_task_list",
   "fn_task_show",
   "fn_task_create",
@@ -125,6 +128,10 @@ export const COORDINATION_EXEMPT_TOOLS = [
   "fn_task_update",
   "fn_task_log",
   "fn_task_done",
+  /* FNXC:ArtifactRegistry 2026-06-21-00:00: Artifact registration mutates persisted registry state, but it is a low-risk coordination action classified like fn_task_document_write so permanent agents can publish discoverable deliverables without broad mutation approval. */
+  "fn_artifact_register",
+  "fn_artifact_list",
+  "fn_artifact_view",
   "fn_task_document_write",
   "fn_task_document_read",
   "fn_memory_search",

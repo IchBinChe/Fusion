@@ -1,7 +1,7 @@
 import "./PlanningModeModal.css";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo, type MouseEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Task, PlanningQuestion, PlanningSummary, TaskPriority } from "@fusion/core";
@@ -37,6 +37,7 @@ import {
 } from "../api";
 import { subscribeSse } from "../sse-bus";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
+import { useEmbeddedPresentation, type ModalPresentation } from "../hooks/useEmbeddedPresentation";
 import {
   savePlanningDescription,
   getPlanningDescription,
@@ -59,6 +60,15 @@ import { getSessionTabId } from "../utils/getSessionTabId";
 
 const WARNING_ICON = "⚠️";
 
+/*
+FNXC:Planning 2026-06-23-02:00:
+The embedded Planning sidebar is resizable exactly like Missions (MissionManager's MISSION_SIDEBAR_* constants). Default 300px matches Missions' default (calc(--space-lg 16px * 18.75)); min/max/storage mirror Missions so the two views resize identically and persist independently.
+*/
+const PLANNING_SIDEBAR_DEFAULT_WIDTH = 300;
+const PLANNING_SIDEBAR_MIN_WIDTH = 220;
+const PLANNING_SIDEBAR_MAX_WIDTH = 560;
+const PLANNING_SIDEBAR_STORAGE_KEY = "fusion:planning-sidebar-width";
+
 interface PlanningModeModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -71,6 +81,8 @@ interface PlanningModeModalProps {
   workflowId?: string | null;
   /** When set, reconnect to a persisted background session instead of starting fresh */
   resumeSessionId?: string;
+  /** Render without the full-screen modal chrome when Planning Mode is mounted as a top-level app view. */
+  presentation?: ModalPresentation;
 }
 
 interface QuestionResponse {
@@ -193,8 +205,12 @@ function parseModelSelection(value: string): { provider?: string; modelId?: stri
   };
 }
 
-export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreated, tasks, initialPlan: initialPlanProp, projectId, workflowId, resumeSessionId }: PlanningModeModalProps) {
+export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreated, tasks, initialPlan: initialPlanProp, projectId, workflowId, resumeSessionId, presentation = "modal" }: PlanningModeModalProps) {
   const { t } = useTranslation("app");
+  // FNXC:EmbeddedPresentation 2026-06-22-12:00: shared hook supplies isEmbedded (DOM branching) plus the modal-only gates.
+  // Note: the Escape handler intentionally does NOT gate on embedded here — embedded planning preserves its historical
+  // Escape-to-close behavior (the back-stack/onClose path), so escapeEnabled is deliberately not wired below.
+  const { isEmbedded, scrollLockEnabled, resizePersistEnabled } = useEmbeddedPresentation(presentation);
   const [initialPlan, setInitialPlan] = useState("");
   const [view, setView] = useState<ViewState>({ type: "initial" });
   const [error, setError] = useState<string | null>(null);
@@ -298,15 +314,86 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     modelId?: string;
   } | null>(null);
 
-  useModalResizePersist(modalRef, isOpen, "fusion:planning-modal-size");
+  useModalResizePersist(modalRef, isOpen && resizePersistEnabled, "fusion:planning-modal-size");
   const viewportMode = useViewportMode();
   const isMobile = viewportMode === "mobile";
   const { addToast } = useToast();
   const { pushNav } = useNavigationHistoryContext();
 
+  /*
+  FNXC:Planning 2026-06-23-02:00:
+  Resizable Planning sidebar — pointer-drag + arrow-key resize with localStorage persistence, mirroring MissionManager.handleSidebarResizeStart/handleSidebarResizeKeyDown. Width is clamped to PLANNING_SIDEBAR_MIN/MAX and applied as an inline width on the sidebar <aside>. Disabled on mobile where the sidebar stacks full-width.
+  */
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    if (typeof window === "undefined") return PLANNING_SIDEBAR_DEFAULT_WIDTH;
+    const stored = window.localStorage.getItem(PLANNING_SIDEBAR_STORAGE_KEY);
+    const parsed = stored ? Number(stored) : NaN;
+    if (!Number.isFinite(parsed)) return PLANNING_SIDEBAR_DEFAULT_WIDTH;
+    return Math.max(PLANNING_SIDEBAR_MIN_WIDTH, Math.min(PLANNING_SIDEBAR_MAX_WIDTH, parsed));
+  });
+
+  const persistSidebarWidth = useCallback((width: number) => {
+    try {
+      window.localStorage.setItem(PLANNING_SIDEBAR_STORAGE_KEY, String(width));
+    } catch {
+      // Ignore storage errors.
+    }
+  }, []);
+
+  const handleSidebarResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (isMobile) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const handle = event.currentTarget;
+    if (typeof handle.setPointerCapture === "function") {
+      handle.setPointerCapture(event.pointerId);
+    }
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    let latestWidth = startWidth;
+    document.body.style.userSelect = "none";
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      const deltaX = moveEvent.clientX - startX;
+      const nextWidth = Math.max(
+        PLANNING_SIDEBAR_MIN_WIDTH,
+        Math.min(PLANNING_SIDEBAR_MAX_WIDTH, startWidth + deltaX),
+      );
+      latestWidth = nextWidth;
+      setSidebarWidth(nextWidth);
+    };
+
+    const onPointerUp = (upEvent: PointerEvent) => {
+      if (typeof handle.releasePointerCapture === "function") {
+        handle.releasePointerCapture(upEvent.pointerId);
+      }
+      document.body.style.userSelect = "";
+      document.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+      persistSidebarWidth(latestWidth);
+    };
+
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
+  }, [isMobile, persistSidebarWidth, sidebarWidth]);
+
+  const handleSidebarResizeKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (isMobile) return;
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const step = event.shiftKey ? 50 : 10;
+    const delta = event.key === "ArrowLeft" ? -step : step;
+    const nextWidth = Math.max(
+      PLANNING_SIDEBAR_MIN_WIDTH,
+      Math.min(PLANNING_SIDEBAR_MAX_WIDTH, sidebarWidth + delta),
+    );
+    setSidebarWidth(nextWidth);
+    persistSidebarWidth(nextWidth);
+  }, [isMobile, persistSidebarWidth, sidebarWidth]);
+
   const { keyboardOverlap, viewportHeight, viewportOffsetTop, keyboardOpen } =
     useMobileKeyboard({ enabled: viewportMode === "mobile" });
-  useMobileScrollLock(viewportMode === "mobile" && isOpen);
+  useMobileScrollLock(viewportMode === "mobile" && isOpen && scrollLockEnabled);
 
   // Drive --vv-height / --keyboard-overlap / --vv-offset-top imperatively
   // rather than via React's style prop. Reason: when React removes a CSS
@@ -734,12 +821,10 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     projectId,
   ]);
 
-  // Focus textarea when opening
-  useEffect(() => {
-    if (isOpen && view.type === "initial") {
-      textareaRef.current?.focus();
-    }
-  }, [isOpen, view.type]);
+  /*
+  FNXC:PlanningFocus 2026-06-23-00:00:
+  Viewing Planning Mode must not auto-focus the initial composer because mobile browsers open the keyboard before the user chooses to type. Keep the textarea ref for autosize and explicit user focus only; populated initialPlan handoffs still auto-start through the separate effect below.
+  */
 
   useEffect(() => {
     if (!isOpen) {
@@ -1799,25 +1884,35 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const activeRemoteTab = activeLockInfo && activeLockInfo.tabId !== sessionTabId;
   const allowTakeover = isLockedByOther && (!activeRemoteTab || activeLockInfo.stale);
 
+  /*
+  FNXC:PlanningMode 2026-06-21-00:00:
+  FN-6886 keeps the existing Planning Mode workflow component but lets App mount it as an embedded main-content view. Embedded mode must not draw a full-screen overlay, close on backdrop clicks, lock mobile scrolling, or persist resizable modal dimensions.
+  */
   if (!isOpen) return null;
 
   return (
     <div
-      className="modal-overlay open"
-      onMouseDown={(e) => {
+      className={isEmbedded ? "planning-view open" : "modal-overlay open"}
+      data-testid={isEmbedded ? "planning-view" : undefined}
+      onMouseDown={isEmbedded ? undefined : (e: MouseEvent<HTMLDivElement>) => {
         overlayMouseDownOnSelfRef.current = e.target === e.currentTarget;
       }}
-      onClick={(e) => {
+      onClick={isEmbedded ? undefined : (e: MouseEvent<HTMLDivElement>) => {
         if (e.target === e.currentTarget && overlayMouseDownOnSelfRef.current) {
           handleClose();
         }
         overlayMouseDownOnSelfRef.current = false;
       }}
-      role="dialog"
-      aria-modal="true"
+      role={isEmbedded ? "region" : "dialog"}
+      aria-label={isEmbedded ? t("planning.title", "Planning Mode") : undefined}
+      aria-modal={isEmbedded ? undefined : "true"}
     >
-      <div className="modal modal-lg planning-modal" ref={modalRef}>
-        <div className="modal-header">
+      <div className={isEmbedded ? "modal modal-lg planning-modal planning-modal--embedded" : "modal modal-lg planning-modal"} ref={modalRef}>
+        {/*
+        FNXC:PlanningMode 2026-06-22-00:00:
+        Embedded planning is a main-content destination, not a dialog: it drops the modal close button and renders a plain common title (modal-header--embedded) matching other embedded views like Command Center. The mobile back affordance stays because it navigates the session list, not the view.
+        */}
+        <div className={isEmbedded ? "modal-header modal-header--embedded" : "modal-header"}>
           <div className="detail-title-row">
             {mobileShowDetail && (
               <button
@@ -1829,14 +1924,20 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
                 <ChevronLeft size={18} />
               </button>
             )}
+            {/*
+            FNXC:Planning 2026-06-23-03:00:
+            Header icon mirrors MissionManager's <Target size={20} className="mission-manager__header-icon" />: same size (20) and same var(--todo) tint + flex-shrink:0, applied via the scoped .planning-modal--embedded .modal-header--embedded .detail-title-row > svg rule (it overrides the shared icon-triage brown so the two headers read as siblings).
+            */}
             <Lightbulb size={20} className="icon-triage" />
             <h3>{t("planning.title", "Planning Mode")}</h3>
           </div>
-          <div className="modal-header-actions">
-            <button className="modal-close" onClick={handleClose} aria-label={t("common.close", "Close")}>
-              <X size={20} />
-            </button>
-          </div>
+          {!isEmbedded && (
+            <div className="modal-header-actions">
+              <button className="modal-close" onClick={handleClose} aria-label={t("common.close", "Close")}>
+                <X size={20} />
+              </button>
+            </div>
+          )}
         </div>
 
         <div
@@ -1850,6 +1951,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
             selectedSessionId={selectedSessionId}
             pendingDeleteId={pendingDeleteId}
             showArchived={showArchived}
+            sidebarWidth={isMobile ? undefined : sidebarWidth}
             onToggleShowArchived={() => setShowArchived((v) => !v)}
             onArchive={(id) => void handleArchiveSession(id)}
             onSelectSession={handleSelectSession}
@@ -1858,6 +1960,25 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
             onConfirmDelete={(id) => void handleDeleteSession(id)}
             onCancelDelete={() => setPendingDeleteId(null)}
           />
+
+          {/*
+          FNXC:Planning 2026-06-23-02:00:
+          Sidebar resize handle — parity with MissionManager's mission-manager__sidebar-resize-handle. Rendered only on desktop (sidebar stacks on mobile). Pointer-drag and arrow-key resize both clamp + persist width.
+          */}
+          {!isMobile && (
+            <div
+              className="planning-sidebar-resize-handle"
+              role="separator"
+              aria-orientation="vertical"
+              aria-valuemin={PLANNING_SIDEBAR_MIN_WIDTH}
+              aria-valuemax={PLANNING_SIDEBAR_MAX_WIDTH}
+              aria-valuenow={sidebarWidth}
+              aria-label={t("planning.resizeSidebar", "Resize planning sidebar")}
+              tabIndex={0}
+              onPointerDown={handleSidebarResizeStart}
+              onKeyDown={handleSidebarResizeKeyDown}
+            />
+          )}
 
           <div className="planning-detail">
           {error && <div className="form-error planning-error">{error}</div>}
@@ -3111,6 +3232,8 @@ interface PlanningSessionListProps {
   selectedSessionId: string | null;
   pendingDeleteId: string | null;
   showArchived: boolean;
+  /** Resizable sidebar width (px) on desktop; undefined on mobile where it stacks full-width. */
+  sidebarWidth?: number;
   onToggleShowArchived: () => void;
   onArchive: (id: string) => void;
   onSelectSession: (id: string) => void;
@@ -3126,6 +3249,7 @@ function PlanningSessionList({
   selectedSessionId,
   pendingDeleteId,
   showArchived,
+  sidebarWidth,
   onToggleShowArchived,
   onArchive,
   onSelectSession,
@@ -3136,18 +3260,15 @@ function PlanningSessionList({
 }: PlanningSessionListProps) {
   const { t } = useTranslation("app");
   return (
-    <aside className="planning-sidebar" aria-label={t("planning.planningSessions", "Planning sessions")}>
-      <div className="planning-sidebar-header">
-        <button
-          className={`planning-sidebar-new ${selectedSessionId === null ? "active" : ""}`}
-          onClick={onNewSession}
-          type="button"
-        >
-          <MessageSquarePlus size={16} />
-          <span>{t("planning.newSession", "New session")}</span>
-        </button>
-      </div>
-
+    <aside
+      className="planning-sidebar"
+      aria-label={t("planning.planningSessions", "Planning sessions")}
+      style={sidebarWidth === undefined ? undefined : { width: `${sidebarWidth}px` }}
+    >
+      {/*
+      FNXC:Planning 2026-06-23-01:15:
+      The embedded Planning view reads as a real two-pane layout matching Missions: the left sidebar is a full-height flex column whose session list scrolls and whose primary action ("New session") is pinned to a bottom footer (parity with MissionManager's mission-manager__sidebar-footer + sidebar-cta). The header that previously held the New session button is removed so the list owns the top of the sidebar like the Missions list.
+      */}
       <div className="planning-sidebar-list">
         {sessions.length === 0 && !loading && (
           <div className="planning-sidebar-empty text-muted">
@@ -3247,6 +3368,18 @@ function PlanningSessionList({
         })}
       </div>
       <div className="planning-sidebar-footer">
+        {/*
+        FNXC:Planning 2026-06-23-01:15:
+        The New session CTA mirrors Missions' primary sidebar action: it reuses the shared "btn btn-primary" look (same base button class MissionManager pairs with mission-manager__sidebar-cta) so size and color match the Missions create button exactly, full-width and bottom-anchored. The "active" state (no session selected) keeps a subtle accent so the user can tell they're on the new-session view.
+        */}
+        <button
+          className={`btn btn-primary planning-sidebar-new ${selectedSessionId === null ? "active" : ""}`}
+          onClick={onNewSession}
+          type="button"
+        >
+          <MessageSquarePlus size={16} />
+          <span>{t("planning.newSession", "New session")}</span>
+        </button>
         <a
           href="#"
           className="planning-sidebar-toggle-archived-link"

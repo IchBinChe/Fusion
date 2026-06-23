@@ -175,6 +175,10 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
     createdAt: BUILTIN_TS,
     updatedAt: BUILTIN_TS,
   },
+  /*
+   * FNXC:Workflows 2026-06-21-00:00:
+   * FN-6904 requires every compound-engineering stage prompt to name its /ce- slash command explicitly. The prompt body stays self-documenting and reinforces the skill invocation even when executor skill preambles change.
+   */
   linear({
     id: "builtin:compound-engineering",
     name: "Compound engineering (built-in)",
@@ -191,7 +195,7 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
           // fn_spawn_agent (registered only for coding-mode steps). It is not
           // meant to write — see the accepted write-capability posture (Risk-1).
           toolMode: "coding",
-          prompt: "Produce a short implementation plan for this task before any code is written.",
+          prompt: "Run /ce-plan to produce a short implementation plan for this task before any code is written.",
         },
       },
       {
@@ -205,10 +209,9 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
           // default and would strip them). ce-work does the implementation the
           // CE way instead of the generic executor seam.
           toolMode: "coding",
-          prompt: "Execute the plan for this task, following existing patterns and maintaining quality throughout.",
+          prompt: "Run /ce-work to execute the plan for this task, following existing patterns and maintaining quality throughout.",
         },
       },
-      { id: "review", kind: "prompt", config: builtinPromptConfig("review", "Review") },
       {
         id: "code-review",
         kind: "gate",
@@ -217,11 +220,15 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
           executor: "skill",
           skillName: "compound-engineering:ce-code-review",
           gateMode: "gate",
+          /*
+           * FNXC:Workflows 2026-06-21-00:00:
+           * FN-6891 requires the compound-engineering Review stage to invoke compound-engineering:ce-code-review directly. The prior generic reviewer seam was removed so CE review runs through the CE skill and still blocks merge as a gate.
+           */
           // Coding mode so ce-code-review can fan out to its reviewer-persona
           // subagents via fn_spawn_agent. As a gate step it still emits the
           // verdict JSON (KTD-6); it is not meant to write the tree (Risk-1).
           toolMode: "coding",
-          prompt: "Run a structured code review of the changes. Block merge on P0/P1 findings.",
+          prompt: "Run /ce-code-review to perform a structured code review of the changes. Block merge on P0/P1 findings.",
         },
       },
       {
@@ -236,7 +243,7 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
           // stays with Fusion's merge seam below (workflow-owned merge), so the
           // two never race the same branch state.
           toolMode: "coding",
-          prompt: "Commit the work in logical commits, push the branch, and open a pull request with a value-first description.",
+          prompt: "Run /ce-commit-push-pr to commit the work in logical commits, push the branch, and open a pull request with a value-first description.",
         },
       },
       {
@@ -250,7 +257,7 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
           // Resolves open PR review threads. On the first autonomous pass there
           // may be no feedback yet (review is async); the skill no-ops when there
           // are no threads, and a re-run picks up later feedback.
-          prompt: "Resolve open PR review feedback: evaluate each thread, fix valid issues, and reply.",
+          prompt: "Run /ce-resolve-pr-feedback to resolve open PR review feedback: evaluate each thread, fix valid issues, and reply.",
         },
       },
       { id: "merge", kind: "prompt", config: builtinPromptConfig("merge", "Merge boundary") },
@@ -264,7 +271,7 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
           // Coding mode so ce-compound can WRITE the learning doc into
           // docs/solutions (readonly would strip write tools).
           toolMode: "coding",
-          prompt: "Capture any reusable learnings from this task into docs/solutions.",
+          prompt: "Run /ce-compound to capture any reusable learnings from this task into docs/solutions.",
         },
       },
     ],
@@ -272,15 +279,13 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
   // The stepwise coding workflow (KTD-9) — step inversion as authored graph
   // structure (parse-steps → foreach{ step-execute → step-review } → review →
   // merge). Authored directly as a v2 IR (the `linear` helper only builds simple
-  // pipelines); it is read-only like every built-in. Requires the
-  // `workflowGraphExecutor` flag at run time (foreach/step-review/parse-steps are
-  // interpreter-only node kinds, KTD-8); under the flag-off compile path its
-  // step-inversion nodes are skipped, the same posture as the other seam nodes.
+  // pipelines); it is read-only like every built-in and runs on the default
+  // workflow graph runtime.
   {
     id: "builtin:stepwise-coding",
     name: "Stepwise coding (built-in)",
     description:
-      "Per-step plan, execute, and review modeled as graph structure: each planned step runs and is reviewed (approve / revise / rethink) before the next, with bounded rework. Requires the workflow graph executor.",
+      "Per-step plan, execute, and review modeled as graph structure: each planned step runs and is reviewed (approve / revise / rethink) before the next, with bounded rework.",
     kind: "workflow",
     ir: BUILTIN_STEPWISE_CODING_WORKFLOW_IR,
     layout: {
@@ -299,13 +304,25 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
   /**
    * FNXC:Workflows 2026-06-20-00:00:
    * Fusion needs a built-in design lane for UI-heavy work. Gate changes on the frontend-ux-design review criteria before the standard review and merge so visual hierarchy, spacing, typography, token consistency, component reuse, responsive behavior, and fit with the design language are checked without custom workflow assembly.
+   *
+   * FNXC:Workflows 2026-06-21-12:00:
+   * FN-6906 requires non-coding design execution to produce a user-facing preview artifact, not just code changes. The execute prompt must keep the execute seam while requiring fn_task_document_write key design-preview as the guaranteed review path and optional fn_artifact_register registration when the previewable-artifact tool exists.
    */
   linear({
     id: "builtin:design",
     name: "Design (built-in)",
     description: "Implement, then run a design/UX review gate before the standard review and merge — for UI-heavy work.",
     nodes: [
-      { id: "execute", kind: "prompt", config: builtinPromptConfig("execute", "Execute") },
+      {
+        id: "execute",
+        kind: "prompt",
+        config: {
+          seam: "execute",
+          name: "Execute",
+          prompt:
+            "You are a product-minded UI implementer for design-heavy work. Use the task description, existing UI patterns, relevant design tokens, component library conventions, and any prior planning output to implement the requested frontend/UI change while preserving the product design language. Structure your work output with: 1) implementation summary, 2) files or components changed, 3) design decisions and token/component reuse, 4) accessibility and responsive behavior considerations, and 5) verification notes. After implementation, produce a visual preview for the user: capture before/after states when possible via screenshots, a rendered HTML/markdown preview, or a Storybook story/reference that shows the changed state across relevant viewports. Persist the preview reference and notes as a task document using fn_task_document_write with key \"design-preview\" so the human can preview the UI change before review or merge. If an artifact-registry tool (fn_artifact_register) is available, also register the preview or deliverable as a previewable artifact. Good design execution is consistent, accessible, responsive, token-driven, and easy for the reviewer to inspect; avoid hardcoded visual one-offs, unreviewable screenshots with no context, and changes that cannot be previewed.",
+        },
+      },
       {
         id: "design-review",
         kind: "gate",
@@ -313,7 +330,7 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
           name: "Design review",
           gateMode: "gate",
           prompt:
-            "You are a UX design reviewer. Review frontend/UI changes for visual polish and consistency with existing UI patterns and design tokens. Check visual hierarchy and information flow; spacing, typography, margins, padding, gaps, and type scale; color and token consistency, including CSS custom properties/design tokens and no hardcoded colors; reuse of existing components instead of one-off styling or duplication; responsive behavior across viewports; and fit with the product design language, including border radius, shadows, transitions, and icon style. Block merge on real visual-quality regressions such as layout breaks, broken responsive behavior, hardcoded color/token violations, inconsistent component patterns, or design-language mismatches. Do not block or nit when the diff has no frontend/UI impact or no real design issue exists.",
+            "You are a UX design reviewer. Use the task description, implementation diff, existing UI patterns, design tokens, and the design-preview task document produced by the execute node to review frontend/UI changes for visual polish and consistency. Structure the review with: 1) verdict and whether the preview is sufficient for human inspection, 2) visual hierarchy and information-flow findings, 3) spacing, typography, margins, padding, gaps, and type-scale findings, 4) color and token consistency, including CSS custom properties/design tokens and no hardcoded colors, 5) component reuse versus one-off styling or duplication, 6) responsive behavior across relevant viewports, and 7) fit with the product design language, including border radius, shadows, transitions, and icon style. Good design review references the preview or explains why it is missing, focuses on user-visible regressions, and blocks merge on real visual-quality issues such as layout breaks, broken responsive behavior, hardcoded color/token violations, inconsistent component patterns, or design-language mismatches. Do not block or nit when the diff has no frontend/UI impact or no real design issue exists.",
         },
       },
       { id: "review", kind: "prompt", config: builtinPromptConfig("review", "Review") },
@@ -325,9 +342,8 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
   // (bounded rework loop) → auto-merge gate → pr-merge → end, with the await
   // states modeled as hold columns the U4 reconcile advances via external-event
   // releases. Authored directly as a v2 IR (the `linear` helper only builds
-  // simple pipelines); read-only like every built-in. Requires the
-  // `workflowGraphExecutor` flag at run time (pr-* node kinds, holds, and the
-  // top-level rework loop are interpreter-only).
+  // simple pipelines); read-only like every built-in and runs on the default
+  // workflow graph runtime.
   //
   // ADDITIVE: this is a NEW built-in alongside the unchanged default
   // `builtin:coding`. Full retirement of the legacy comment/monitor PR path is
@@ -337,7 +353,7 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
     id: "builtin:pr-workflow",
     name: "PR lifecycle (built-in)",
     description:
-      "The unified PR lifecycle as graph nodes: create the PR, await review, respond to changes (bounded rework loop), gate on auto-merge, then merge — with GitHub reconciliation advancing the await holds. Requires the workflow graph executor.",
+      "The unified PR lifecycle as graph nodes: create the PR, await review, respond to changes (bounded rework loop), gate on auto-merge, then merge — with GitHub reconciliation advancing the await holds.",
     kind: "fragment",
     ir: BUILTIN_PR_WORKFLOW_IR,
     layout: {
@@ -359,7 +375,7 @@ export const BUILTIN_WORKFLOWS: WorkflowDefinition[] = [
     id: "builtin:lead-generation",
     name: "Lead generation (built-in)",
     description:
-      "A business pipeline for sourcing, qualifying, enriching, and contacting leads with custom lead fields and stage columns. Requires the workflow graph executor for custom board columns.",
+      "A business pipeline for sourcing, qualifying, enriching, and contacting leads with custom lead fields and stage columns.",
     kind: "workflow",
     ir: BUILTIN_LEAD_GENERATION_WORKFLOW_IR,
     layout: {

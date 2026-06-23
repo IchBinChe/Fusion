@@ -1,40 +1,7 @@
 import os from "node:os";
 import v8 from "node:v8";
 import { appendFileSync } from "node:fs";
-import { findVitestProcessIds } from "@fusion/core";
-
-// `os.freemem()` on macOS only counts truly-free pages and excludes the large
-// "inactive"/cached pool that the OS will reclaim on demand — so total-free
-// reads ~95%+ used on an otherwise-idle machine. `process.availableMemory()`
-// (Node 22+ — NOT `os.availableMemory`, which does not exist and silently
-// fell through to the freemem trap this function was written to avoid)
-// reports memory the OS considers available, matching Activity Monitor's
-// notion of "used". The freemem fallback is flagged unreliable so pressure-
-// triggered actions can refuse to fire on a garbage ratio: with freemem, an
-// idle 256GB Mac reads ~99% used and the vitest auto-kill fired every 30s
-// regardless of real pressure (2026-06-03 incident).
-interface AvailableMemoryReading {
-  bytes: number;
-  /** False when only `os.freemem()` was available — unusable as a pressure signal. */
-  reliable: boolean;
-}
-
-export function getAvailableMemoryInfo(): AvailableMemoryReading {
-  const processFn = (process as unknown as { availableMemory?: () => number }).availableMemory;
-  if (typeof processFn === "function") {
-    try {
-      const v = processFn.call(process);
-      if (Number.isFinite(v) && v >= 0) return { bytes: v, reliable: true };
-    } catch {
-      // fall through
-    }
-  }
-  return { bytes: os.freemem(), reliable: false };
-}
-
-function getAvailableMemory(): number {
-  return getAvailableMemoryInfo().bytes;
-}
+import { findVitestProcessIds, getAvailableMemoryBytes, getAvailableMemoryInfo } from "@fusion/core";
 
 const TUI_DEBUG_LOG = process.env.FUSION_TUI_DEBUG_LOG;
 function tuiDebug(tag: string, data: Record<string, unknown>): void {
@@ -317,7 +284,7 @@ export class DashboardTUI {
       loadAvg: [load[0] ?? 0, load[1] ?? 0, load[2] ?? 0],
       cpuCount: os.cpus().length,
       systemTotalMem: os.totalmem(),
-      systemFreeMem: getAvailableMemory(),
+      systemFreeMem: getAvailableMemoryBytes(),
       pid: process.pid,
       nodeVersion: process.version,
       platform: `${process.platform}/${process.arch}`,

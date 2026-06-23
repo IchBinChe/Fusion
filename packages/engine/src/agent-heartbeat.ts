@@ -18,12 +18,12 @@
  */
 
 import type { AgentStore, AgentHeartbeatRun, HeartbeatInvocationSource, AgentHeartbeatConfig, AgentBudgetStatus, Message, MessageStore, TaskStore, TaskDetail, AgentRole, Agent, InboxTask, RunMutationContext, Settings, AgentConfigRevision, ReflectionStore, ChatStore, ChatRoom, ChatRoomMessage, AgentMemoryInclusionMode } from "@fusion/core";
-import { AutoClaimSnapshotManager, type AutoClaimCandidate } from "./auto-claim-snapshot.js";
+import { AutoClaimSnapshotManager, resolveFreshAutoClaimCandidates, type AutoClaimCandidate } from "./auto-claim-snapshot.js";
 import { ApprovalRequestStore, buildExecutionMemoryInstructions, isEphemeralAgent, hasAgentIdentity, resolveEffectiveAgentPermissionPolicy, canAgentTakeImplementationTask, canAgentTakeImplementationTaskForExplicitRouting, resolvePersistAgentThinkingLog, resolveAgentMemoryInclusionMode } from "@fusion/core";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "@earendil-works/pi-ai";
 import { createHash } from "node:crypto";
-import { createTaskCreateTool, createTaskLogToolWithContext, createTaskDocumentWriteTool, createTaskDocumentReadTool, createListAgentsTool, createDelegateTaskTool, createGetAgentConfigTool, createUpdateAgentConfigTool, createAgentCreateTool, createAgentDeleteTool, createSendMessageTool, createReadMessagesTool, createPostRoomMessageTool, createMemoryTools, createGoalRetrievalTools, createReadEvaluationsTool, createUpdateIdentityTool, createReflectOnPerformanceTool, createWebFetchTool, readAgentMemoryWorkspaceLongTerm, taskCreateParams } from "./agent-tools.js";
+import { createTaskCreateTool, createTaskLogToolWithContext, createTaskDocumentWriteTool, createTaskDocumentReadTool, createArtifactRegisterTool, createArtifactListTool, createArtifactViewTool, createListAgentsTool, createDelegateTaskTool, createGetAgentConfigTool, createUpdateAgentConfigTool, createAgentCreateTool, createAgentDeleteTool, createSendMessageTool, createReadMessagesTool, createPostRoomMessageTool, createMemoryTools, createGoalRetrievalTools, createReadEvaluationsTool, createUpdateIdentityTool, createReflectOnPerformanceTool, createWebFetchTool, readAgentMemoryWorkspaceLongTerm, taskCreateParams } from "./agent-tools.js";
 import { AgentLogger } from "./agent-logger.js";
 import {
   resolveAgentInstructionsWithRatings,
@@ -35,7 +35,7 @@ import { buildPromptLayers, collapsePromptLayers } from "./prompt-layers.js";
 import { resolveAndEmitGoalContext } from "./goal-injection-diagnostics.js";
 import { createLogger, heartbeatLog, formatError } from "./logger.js";
 import { acquireTaskWorktree } from "./worktree-acquisition.js";
-import { createRunAuditor, type EngineRunContext } from "./run-audit.js";
+import { createRunAuditor, generateSyntheticRunId, type DatabaseMutationType, type EngineRunContext } from "./run-audit.js";
 import { promptWithFallback } from "./pi.js";
 import { createResolvedAgentSession, extractRuntimeHint, resolveHeartbeatSessionModels } from "./agent-session-helpers.js";
 import type { AgentActionGateContext } from "./agent-action-gate.js";
@@ -44,6 +44,7 @@ import type { AgentReflectionService } from "./agent-reflection.js";
 import { trimPromptMd, trimTaskDescription, trimTriggeringComments } from "./heartbeat-prompt-trim.js";
 import { detectDeicticReference, extractAntecedentCandidates, renderAmbiguityPromptBlock, scoreReferentConfidence } from "./room-ambiguity.js";
 import { countActiveAgentMembers, decideRoomCoordination, detectTaskFilingIntent, renderRoomCoordinationPromptBlock } from "./room-coordination.js";
+import { evaluateParkedAgentTaskLink, isParkedTaskColumn, type AgentTaskLinkExecutionProof } from "./task-agent-sync.js";
 
 const promptSizeLog = createLogger("prompt-size");
 
@@ -1256,6 +1257,45 @@ export class HeartbeatMonitor {
     }, this.pollIntervalMs);
   }
 
+  private async emitStaleAgentAssignmentAudit(options: {
+    agent: Pick<Agent, "id" | "state">;
+    taskId: string;
+    linkedTask: TaskDetail | null;
+    hadFreshRun: boolean;
+    hadActiveExecution: boolean;
+    reason: string;
+  }): Promise<void> {
+    if (!this.taskStore) return;
+    try {
+      await createRunAuditor(this.taskStore, {
+        runId: generateSyntheticRunId("heartbeat-stale-agent-assignment", options.taskId),
+        agentId: "heartbeat-monitor",
+        taskId: options.taskId,
+        taskLineageId: options.linkedTask?.lineageId,
+        phase: "reconcile-stale-agent-assignment",
+      }).database({
+        type: "task:reconcile-stale-agent-assignment" as DatabaseMutationType,
+        target: options.agent.id,
+        metadata: {
+          agentId: options.agent.id,
+          taskId: options.taskId,
+          taskColumn: options.linkedTask?.column ?? null,
+          agentState: options.agent.state,
+          status: options.linkedTask?.status ?? null,
+          blockedBy: options.linkedTask?.blockedBy ?? null,
+          overlapBlockedBy: options.linkedTask?.overlapBlockedBy ?? null,
+          hadFreshRun: options.hadFreshRun,
+          hadActiveExecution: options.hadActiveExecution,
+          reason: options.reason,
+        },
+      });
+    } catch (error) {
+      heartbeatLog.warn(
+        `Failed to emit stale agent assignment audit for ${options.agent.id}/${options.taskId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   /**
    * Find agents in `state="running"` that are not actually running and flip
    * them to `"active"`. An agent is considered orphaned when either:
@@ -1273,8 +1313,8 @@ export class HeartbeatMonitor {
    * logged but do not block the caller.
    *
    * Complements SelfHealingManager.recoverAgentsRunningOnInactiveTasks():
-   * heartbeat reconciliation handles stale/no-run conditions, while self-healing
-   * handles task-column mismatches (for example running agents linked to todo tasks).
+   * heartbeat reconciliation handles stale/no-run conditions and the prompt-critical
+   * parked todo/triage assignment drift before Reports Health Check renders.
    */
   private async reconcileOrphanedRunningAgents(): Promise<void> {
     try {
@@ -1282,10 +1322,33 @@ export class HeartbeatMonitor {
       const now = Date.now();
       for (const agent of runningAgents) {
         let reason: string | null = null;
+        let clearTaskLink = false;
+        let taskIdToClear: string | null = null;
+        let parkedProof: AgentTaskLinkExecutionProof | null = null;
+        let linkedTask: TaskDetail | null = null;
         const activeRun = await this.store.getActiveHeartbeatRun(agent.id);
-        if (!activeRun) {
+        if (!isEphemeralAgent(agent) && agent.taskId && this.taskStore) {
+          linkedTask = await this.taskStore.getTask(agent.taskId);
+          parkedProof = evaluateParkedAgentTaskLink({
+            agent,
+            linkedTask,
+            activeRun,
+            hasActiveAgentExecution: (agentId) => this.trackedAgents.has(agentId),
+            now,
+          });
+          /*
+          FNXC:AgentTaskStateDrift 2026-06-23-09:02:
+          Reports Health Check must not render a durable direct report as running a parked todo/triage task unless a fresh heartbeat run or tracked executor signal proves live execution. Clearing Agent.taskId here preserves overlapBlockedBy on the task row; the file-scope lease remains the scheduler's source of truth.
+          */
+          if (isParkedTaskColumn(linkedTask) && !parkedProof.shouldPreserveParkedLink) {
+            reason = `parked ${linkedTask.column} task ${agent.taskId} without live execution proof`;
+            clearTaskLink = true;
+            taskIdToClear = agent.taskId;
+          }
+        }
+        if (!reason && !activeRun) {
           reason = "no active run";
-        } else if (!this.trackedAgents.has(agent.id)) {
+        } else if (!reason && activeRun && !this.trackedAgents.has(agent.id)) {
           const timeoutMs = this.resolveAgentConfig(agent.id).heartbeatTimeoutMs;
           const heartbeatAgeMs = getHeartbeatAgeMs(agent, now);
           // NOTE(FN-4278): this stale gate intentionally uses a per-run work-budget
@@ -1311,9 +1374,21 @@ export class HeartbeatMonitor {
         }
         if (!reason) continue;
         try {
+          const staleAgentState = agent.state;
           await this.store.updateAgentState(agent.id, "active");
+          if (clearTaskLink) {
+            await this.store.syncExecutionTaskLink(agent.id, undefined);
+            await this.emitStaleAgentAssignmentAudit({
+              agent: { id: agent.id, state: staleAgentState },
+              taskId: taskIdToClear!,
+              linkedTask,
+              hadFreshRun: parkedProof?.hasFreshRun ?? false,
+              hadActiveExecution: parkedProof?.hasActiveExecution ?? false,
+              reason,
+            });
+          }
           this.clearRunState(agent.id);
-          heartbeatLog.log(`Reconciled orphaned running agent ${agent.id} → active (${reason})`);
+          heartbeatLog.log(`Reconciled orphaned running agent ${agent.id} → active (${reason})${clearTaskLink ? "; stale task link cleared" : ""}`);
         } catch (err) {
           heartbeatLog.warn(`Failed to reconcile orphaned running agent ${agent.id}: ${err instanceof Error ? err.message : String(err)}`);
         }
@@ -2100,10 +2175,15 @@ export class HeartbeatMonitor {
         if (!taskId && canRunNoTaskHeartbeat && autoClaimEnabled && this.snapshotManager) {
           try {
             const snapshot = await this.snapshotManager.getSnapshot();
-            autoClaimSnapshotCandidateCount = snapshot.tasks.length;
-            autoClaimPromptCandidates = snapshot.tasks;
-            const roleCompatibleCandidates = snapshot.tasks.filter((candidate) => canAgentTakeImplementationTask(agent, candidate, { allowEngineer: engineerBacklogAutoClaim }));
-            const skippedIncompatibleCount = snapshot.tasks.length - roleCompatibleCandidates.length;
+            /*
+            FNXC:AutoClaim 2026-06-21-10:35:
+            FN-6850 requires the heartbeat consumer to re-resolve cached auto-claim candidates against canonical task rows before both ranking and prompt rendering, preventing superseded FN-6812-style triage tasks from being surfaced or claimed within the snapshot TTL.
+            */
+            const freshCandidates = await resolveFreshAutoClaimCandidates(taskStore, snapshot.tasks);
+            autoClaimSnapshotCandidateCount = freshCandidates.length;
+            autoClaimPromptCandidates = freshCandidates;
+            const roleCompatibleCandidates = freshCandidates.filter((candidate) => canAgentTakeImplementationTask(agent, candidate, { allowEngineer: engineerBacklogAutoClaim }));
+            const skippedIncompatibleCount = freshCandidates.length - roleCompatibleCandidates.length;
             autoClaimRoleFilteredCount = skippedIncompatibleCount;
             if (skippedIncompatibleCount > 0) {
               heartbeatLog.log(
@@ -3229,8 +3309,36 @@ export class HeartbeatMonitor {
       const lastHeartbeatTs = report.lastHeartbeatAt ? Date.parse(report.lastHeartbeatAt) : NaN;
       const heartbeatAgeMs = Number.isFinite(lastHeartbeatTs) ? Math.max(0, now - lastHeartbeatTs) : Infinity;
 
+      let renderedState = report.state;
+      let renderedTask = report.taskId ?? "—";
+      let staleParkedAssignment = false;
+      if (report.state === "running" && !isEphemeralAgent(report) && report.taskId && this.taskStore) {
+        try {
+          const linkedTask = await this.taskStore.getTask(report.taskId);
+          if (isParkedTaskColumn(linkedTask)) {
+            const activeRun = await agentStore.getActiveHeartbeatRun(report.id);
+            const proof = evaluateParkedAgentTaskLink({
+              agent: report,
+              linkedTask,
+              activeRun,
+              hasActiveAgentExecution: (candidateId) => this.trackedAgents.has(candidateId),
+              now,
+            });
+            if (!proof.shouldPreserveParkedLink) {
+              staleParkedAssignment = true;
+              renderedState = "active";
+              renderedTask = `${report.taskId} (queued/no live run)`;
+            }
+          }
+        } catch (error) {
+          heartbeatLog.warn(`[reports-health] failed to validate task link for ${report.id}/${report.taskId}: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
       let health = "healthy";
-      if (report.state === "paused") {
+      if (staleParkedAssignment) {
+        health = "**stale** assignment";
+      } else if (report.state === "paused") {
         health = report.pauseReason ? `paused (${report.pauseReason})` : "paused";
       } else if (report.state === "error") {
         health = "**stuck**";
@@ -3241,8 +3349,8 @@ export class HeartbeatMonitor {
         heartbeatLog.log(`[reports-health] stale report ${report.id} intervalSource=${intervalSource} staleThresholdMs=${staleThresholdMs} heartbeatAgeMs=${heartbeatAgeMs}`);
       }
 
-      const task = report.taskId ?? "—";
-      const state = report.state;
+      const task = renderedTask;
+      const state = renderedState;
       const heartbeat = formatRelativeTime(report.lastHeartbeatAt);
       return `| ${report.name} | ${state} | ${task} | ${heartbeat} | ${health} |`;
     }));
@@ -3345,6 +3453,10 @@ export class HeartbeatMonitor {
     // Document tools for persisting durable findings
     tools.push(createTaskDocumentWriteTool(taskStore, taskId));
     tools.push(createTaskDocumentReadTool(taskStore, taskId));
+    // Artifact registry tools for cross-agent deliverable discovery and notification.
+    tools.push(createArtifactRegisterTool(taskStore, agentId, messageStore));
+    tools.push(createArtifactListTool(taskStore));
+    tools.push(createArtifactViewTool(taskStore));
     // Agent delegation tools — discover and delegate work to other agents
     tools.push(createListAgentsTool(this.store));
     tools.push(createDelegateTaskTool(this.store, taskStore, { rootDir: this.rootDir }));

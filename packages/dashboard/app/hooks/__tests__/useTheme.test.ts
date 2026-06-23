@@ -19,6 +19,7 @@ vi.mock("../../api", () => ({
 const THEME_MODE_STORAGE_KEY = "kb-dashboard-theme-mode";
 const COLOR_THEME_STORAGE_KEY = "kb-dashboard-color-theme";
 const FONT_SCALE_STORAGE_KEY = "kb-dashboard-font-scale-pct";
+const SHADCN_CUSTOM_COLORS_STORAGE_KEY = "kb-dashboard-shadcn-custom-colors";
 
 const mockFetchGlobalSettings = vi.mocked(fetchGlobalSettings);
 const mockUpdateGlobalSettings = vi.mocked(updateGlobalSettings);
@@ -79,6 +80,9 @@ describe("useTheme", () => {
     document.documentElement.removeAttribute("data-theme");
     document.documentElement.removeAttribute("data-color-theme");
     document.documentElement.style.fontSize = "";
+    for (const cssVar of ["--accent", "--bg", "--surface", "--card", "--border", "--text", "--text-muted", "--todo", "--in-progress", "--in-review", "--triage", "--done", "--color-success", "--color-warning", "--color-error"]) {
+      document.documentElement.style.removeProperty(cssVar);
+    }
 
     // Reset static theme-data link to mirror index.html markup
     document.querySelectorAll('link[id="theme-data"]').forEach((link) => link.remove());
@@ -100,7 +104,7 @@ describe("useTheme", () => {
     const { result } = renderHook(() => useTheme());
 
     expect(result.current.themeMode).toBe("dark");
-    expect(result.current.colorTheme).toBe("default");
+    expect(result.current.colorTheme).toBe("ocean");
   });
 
   it("initializes from localStorage", () => {
@@ -111,6 +115,14 @@ describe("useTheme", () => {
 
     expect(result.current.themeMode).toBe("light");
     expect(result.current.colorTheme).toBe("ocean");
+  });
+
+  it("preserves explicit legacy default color theme from localStorage", () => {
+    localStorageMock[COLOR_THEME_STORAGE_KEY] = "default";
+
+    const { result } = renderHook(() => useTheme());
+
+    expect(result.current.colorTheme).toBe("default");
   });
 
   it("hydrates themeMode from backend on mount", async () => {
@@ -127,16 +139,16 @@ describe("useTheme", () => {
   });
 
   it("hydrates colorTheme from backend on mount", async () => {
-    mockFetchGlobalSettings.mockResolvedValue({ colorTheme: "ocean" });
+    mockFetchGlobalSettings.mockResolvedValue({ colorTheme: "forest" });
 
     const { result } = renderHook(() => useTheme());
 
-    expect(result.current.colorTheme).toBe("default");
+    expect(result.current.colorTheme).toBe("ocean");
 
     await waitFor(() => {
-      expect(result.current.colorTheme).toBe("ocean");
+      expect(result.current.colorTheme).toBe("forest");
     });
-    expect(localStorageMock[COLOR_THEME_STORAGE_KEY]).toBe("ocean");
+    expect(localStorageMock[COLOR_THEME_STORAGE_KEY]).toBe("forest");
   });
 
   it("hydrates dashboard font scale from backend on mount", async () => {
@@ -149,6 +161,28 @@ describe("useTheme", () => {
     });
     expect(localStorageMock[FONT_SCALE_STORAGE_KEY]).toBe("110");
     expect(document.documentElement.style.fontSize).toBe("110%");
+  });
+
+  it("hydrates shadcn custom colors from backend on mount", async () => {
+    localStorageMock[COLOR_THEME_STORAGE_KEY] = "shadcn-custom";
+    mockFetchGlobalSettings.mockResolvedValue({
+      colorTheme: "shadcn-custom",
+      shadcnCustomColors: {
+        "--accent": "#aabbcc",
+        "--bg": "url(bad)",
+        "--unknown": "#000000",
+      },
+    });
+
+    const { result } = renderHook(() => useTheme());
+
+    await waitFor(() => {
+      expect(result.current.shadcnCustomColors).toEqual({ "--accent": "#aabbcc" });
+    });
+    expect(result.current.colorTheme).toBe("shadcn-custom");
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#aabbcc");
+    expect(document.documentElement.style.getPropertyValue("--bg")).toBe("");
+    expect(JSON.parse(localStorageMock[SHADCN_CUSTOM_COLORS_STORAGE_KEY])).toEqual({ "--accent": "#aabbcc" });
   });
 
   it("prefers backend over localStorage on hydration", async () => {
@@ -551,14 +585,80 @@ describe("useTheme", () => {
     document.head.removeChild(style);
   });
 
+  it("applies sanitized shadcn-custom inline overrides and falls back for missing tokens", () => {
+    localStorageMock[COLOR_THEME_STORAGE_KEY] = "shadcn-custom";
+    localStorageMock[SHADCN_CUSTOM_COLORS_STORAGE_KEY] = JSON.stringify({
+      "--accent": "#123456",
+      "--bg": "red",
+      "--unknown": "#000000",
+    });
+
+    const { result } = renderHook(() => useTheme());
+
+    expect(result.current.colorTheme).toBe("shadcn-custom");
+    expect(result.current.shadcnCustomColors).toEqual({ "--accent": "#123456" });
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#123456");
+    expect(document.documentElement.style.getPropertyValue("--bg")).toBe("");
+  });
+
+  it("removes shadcn-custom inline overrides when switching away", () => {
+    localStorageMock[COLOR_THEME_STORAGE_KEY] = "shadcn-custom";
+    localStorageMock[SHADCN_CUSTOM_COLORS_STORAGE_KEY] = JSON.stringify({ "--accent": "#123456", "--bg": "#ffffff" });
+
+    const { result } = renderHook(() => useTheme());
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#123456");
+
+    act(() => {
+      result.current.setColorTheme("shadcn");
+    });
+
+    expect(document.documentElement.getAttribute("data-color-theme")).toBe("shadcn");
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("");
+    expect(document.documentElement.style.getPropertyValue("--bg")).toBe("");
+  });
+
+  it("persists sanitized shadcn-custom colors through the write-through setter", () => {
+    const { result } = renderHook(() => useTheme());
+
+    act(() => {
+      result.current.setShadcnCustomColors({ "--accent": "#fff", "--text": "url(bad)" });
+    });
+
+    expect(result.current.shadcnCustomColors).toEqual({ "--accent": "#fff" });
+    expect(JSON.parse(localStorageMock[SHADCN_CUSTOM_COLORS_STORAGE_KEY])).toEqual({ "--accent": "#fff" });
+    expect(mockUpdateGlobalSettings).toHaveBeenCalledWith({ shadcnCustomColors: { "--accent": "#fff" } });
+  });
+
+  it("hydrates partial shadcn-custom colors from backend without overriding in-flight user edits", async () => {
+    let resolveFetch: (value: Partial<Settings>) => void;
+    const pendingFetch = new Promise<Partial<Settings>>((resolve) => {
+      resolveFetch = resolve;
+    });
+    mockFetchGlobalSettings.mockReturnValue(pendingFetch);
+
+    const { result } = renderHook(() => useTheme());
+    act(() => {
+      result.current.setShadcnCustomColors({ "--accent": "#abcdef" });
+    });
+
+    resolveFetch!({ shadcnCustomColors: { "--accent": "#111111", "--bg": "#222222" } });
+    await waitFor(() => {
+      expect(mockFetchGlobalSettings).toHaveBeenCalledTimes(1);
+    });
+
+    expect(result.current.shadcnCustomColors).toEqual({ "--accent": "#abcdef" });
+  });
+
   it("applies representative shadcn color-family design tokens with neutralized glow effects", () => {
     const style = document.createElement("style");
     const baseCss = readFileSync(resolve(PACKAGE_ROOT, "app/styles.css"), "utf8");
     const themeDataCss = readFileSync(resolve(PACKAGE_ROOT, "app/public/theme-data.css"), "utf8");
     const shadcnVariants = [
       { id: "shadcn-blue", accent: "#3b82f6" },
-      { id: "shadcn-mono", accent: "#ef4444" },
+      { id: "shadcn-mono-red", accent: "#ef4444" },
+      { id: "shadcn-mono-blue", accent: "#3b82f6" },
       { id: "shadcn-black", accent: "#fafafa" },
+      { id: "shadcn-gray-blue", accent: "#64748b", card: "#0f172a" },
     ] as const;
     style.textContent = `${baseCss}\n${themeDataCss}`;
     document.head.appendChild(style);
@@ -569,25 +669,58 @@ describe("useTheme", () => {
       )?.groups?.body;
       expect(block).toBeDefined();
 
+      const variantStyle = document.createElement("style");
+      variantStyle.textContent = `:root[data-color-theme="${variant.id}"] {${block}}`;
+      document.head.appendChild(variantStyle);
+
       localStorageMock[COLOR_THEME_STORAGE_KEY] = variant.id;
       renderHook(() => useTheme());
 
       expect(document.documentElement.getAttribute("data-color-theme")).toBe(variant.id);
       expect(block).toContain("--btn-border-width: 1px;");
       expect(block).toContain(`--accent: ${variant.accent};`);
+      if ("card" in variant) {
+        expect(block).toContain(`--card: ${variant.card};`);
+      }
       expect(block).toContain("--shadow-glow: none;");
       expect(block).toContain("--cta-glow: none;");
       expect(block).not.toMatch(/--(?:shadow-glow|glow-success|glow-warning|glow-danger|cta-glow):\s*0 0/);
+
+      const resolvedStyle = getComputedStyle(document.documentElement);
+      expect(resolvedStyle.getPropertyValue("--accent").trim()).toBe(variant.accent);
+      expect(resolvedStyle.getPropertyValue("--shadow-glow").trim()).toBe("none");
+      expect(resolvedStyle.getPropertyValue("--cta-glow").trim()).toBe("none");
+      expect(resolvedStyle.getPropertyValue("--btn-border-width").trim()).toBe("1px");
+      if ("card" in variant) {
+        expect(resolvedStyle.getPropertyValue("--card").trim()).toBe(variant.card);
+      }
+
+      document.head.removeChild(variantStyle);
     }
 
     const blueBlock = themeDataCss.match(/\[data-color-theme="shadcn-blue"\] \{(?<body>[\s\S]*?)\n\}/)?.groups
       ?.body;
+    const monoRedBlock = themeDataCss.match(/\[data-color-theme="shadcn-mono-red"\] \{(?<body>[\s\S]*?)\n\}/)
+      ?.groups?.body;
+    const monoBlueBlock = themeDataCss.match(/\[data-color-theme="shadcn-mono-blue"\] \{(?<body>[\s\S]*?)\n\}/)
+      ?.groups?.body;
     const blackBlock = themeDataCss.match(/\[data-color-theme="shadcn-black"\] \{(?<body>[\s\S]*?)\n\}/)
       ?.groups?.body;
+    const grayBlueBlock = themeDataCss.match(/\[data-color-theme="shadcn-gray-blue"\] \{(?<body>[\s\S]*?)\n\}/)
+      ?.groups?.body;
     expect(blueBlock).toContain("--todo: #60a5fa;");
+    expect(monoRedBlock).toContain("--todo: #a1a1aa;");
+    expect(monoRedBlock).toContain("--in-progress: #71717a;");
+    expect(monoBlueBlock).toContain("--todo: #a1a1aa;");
+    expect(monoBlueBlock).toContain("--in-progress: #71717a;");
+    expect(monoBlueBlock).toContain("--color-error: #ef4444;");
+    expect(monoBlueBlock).not.toContain("--todo: #60a5fa;");
     expect(blackBlock).toContain("--todo: #d4d4d8;");
     expect(blackBlock).toContain("--in-progress: #a1a1aa;");
     expect(blackBlock).not.toContain("--todo: #60a5fa;");
+    expect(grayBlueBlock).toContain("--card: #0f172a;");
+    expect(grayBlueBlock).not.toContain("--card: #18181b;");
+    expect(grayBlueBlock).toContain("--accent: #64748b;");
 
     document.head.removeChild(style);
   });
@@ -622,12 +755,21 @@ describe("useTheme", () => {
     expect(result.current.themeMode).toBe("dark");
   });
 
+  it("remaps legacy shadcn mono color theme from localStorage", () => {
+    localStorageMock[COLOR_THEME_STORAGE_KEY] = "shadcn-mono";
+
+    const { result } = renderHook(() => useTheme());
+
+    expect(result.current.colorTheme).toBe("shadcn-mono-red");
+    expect(document.documentElement.getAttribute("data-color-theme")).toBe("shadcn-mono-red");
+  });
+
   it("ignores invalid color theme in localStorage", () => {
     localStorageMock[COLOR_THEME_STORAGE_KEY] = "invalid-theme";
 
     const { result } = renderHook(() => useTheme());
 
-    expect(result.current.colorTheme).toBe("default");
+    expect(result.current.colorTheme).toBe("ocean");
   });
 
   it("clamps invalid dashboard font scale values from localStorage", () => {
@@ -655,7 +797,7 @@ describe("useTheme", () => {
     const { result } = renderHook(() => useTheme());
 
     expect(result.current.themeMode).toBe("dark");
-    expect(result.current.colorTheme).toBe("default");
+    expect(result.current.colorTheme).toBe("ocean");
   });
 
   describe("dynamic theme-data.css loading", () => {
@@ -728,6 +870,7 @@ describe("getThemeInitScript", () => {
     expect(script).toContain(THEME_MODE_STORAGE_KEY);
     expect(script).toContain(COLOR_THEME_STORAGE_KEY);
     expect(script).toContain(FONT_SCALE_STORAGE_KEY);
+    expect(script).toContain(SHADCN_CUSTOM_COLORS_STORAGE_KEY);
   });
 
   it("includes every supported theme in the validated theme list", () => {
@@ -737,7 +880,8 @@ describe("getThemeInitScript", () => {
       expect(script).toContain(theme);
     });
     expect(script).toContain("validThemes");
-    expect(script).toContain("colorTheme = 'default'");
+    expect(script).toContain("if (colorTheme === 'shadcn-mono') colorTheme = 'shadcn-mono-red';");
+    expect(script).toContain("colorTheme = 'ocean'");
   });
 
   it("keeps index.html inline theme validation in sync with supported themes", () => {
@@ -755,6 +899,23 @@ describe("getThemeInitScript", () => {
     expect(script).toContain("prefers-color-scheme");
     expect(script).toContain("systemDark");
     expect(script).toContain("effectiveMode");
+  });
+
+  it("pre-hydration script applies only sanitized shadcn-custom overrides", () => {
+    const script = getThemeInitScript();
+    localStorage.setItem(COLOR_THEME_STORAGE_KEY, "shadcn-custom");
+    localStorage.setItem(SHADCN_CUSTOM_COLORS_STORAGE_KEY, JSON.stringify({
+      "--accent": "#FF8800",
+      "--bg": "red",
+      "--text": "#fff",
+    }));
+
+    window.eval(script);
+
+    expect(document.documentElement.getAttribute("data-color-theme")).toBe("shadcn-custom");
+    expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#FF8800");
+    expect(document.documentElement.style.getPropertyValue("--text")).toBe("#fff");
+    expect(document.documentElement.style.getPropertyValue("--bg")).toBe("");
   });
 
   it("pre-hydration script resolves theme-data path like runtime loader", () => {

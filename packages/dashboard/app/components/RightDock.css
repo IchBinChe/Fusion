@@ -1,0 +1,319 @@
+/*
+FNXC:Navigation 2026-06-21-00:00:
+The right dock CSS uses a mobile media query as a belt-and-suspenders guard only. The authoritative mobile gate is the JS `rightDockActive` value from `useViewportMode`, which also covers phone classes that a width-only query cannot classify reliably.
+*/
+/*
+FNXC:Navigation 2026-06-22-00:10:
+The right dock OVERLAYS the page content (floats over the right edge) instead of being a flex sibling that shrinks the main content. It is absolutely positioned against the project shell (which is position:relative) so opening/closing or resizing it never reflows the page beneath. z-index sits above content but below the docked terminal/modals.
+*/
+.right-dock {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: min(100%, var(--right-dock-min-width, calc(var(--space-2xl) * 8)));
+  /*
+  FNXC:RightDock 2026-06-23-00:50:
+  Raised the right-dock max-width default from calc(var(--space-2xl) * 22) (~704px) to calc(var(--space-2xl) * 40) (~1280px) so the dock can be dragged MUCH wider (matching the raised RIGHT_DOCK_MAX_WIDTH JS clamp) and the Files view has room for its tree|viewer two-pane split. The min(100%, ...) wrapper is kept so the dock can never exceed the viewport regardless of the larger cap.
+  */
+  max-width: min(100%, var(--right-dock-max-width, calc(var(--space-2xl) * 40)));
+  min-height: 0;
+  background: var(--surface);
+  /*
+  FNXC:RightDockChrome 2026-06-23-19:10:
+  Right-dock dividing lines should be invisible by default, including the shell edge, toolbar, and selected-view header. Use theme tokens instead of removing border geometry so themes can re-enable the dividers by setting --chrome-divider-color or the right-dock-specific aliases.
+  */
+  border-left: var(--chrome-divider-width, 1px) solid var(--right-dock-shell-divider-color, transparent);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+
+.right-dock--with-footer {
+  padding-bottom: var(--executor-footer-height);
+}
+
+.right-dock--collapsed {
+  width: calc(var(--space-2xl) + var(--space-sm));
+  min-width: calc(var(--space-2xl) + var(--space-sm));
+  max-width: calc(var(--space-2xl) + var(--space-sm));
+}
+
+.right-dock__resize-handle {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: calc(var(--space-xs) * -1);
+  z-index: 2;
+  width: var(--space-sm);
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.right-dock__resize-handle::before {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: calc(var(--space-xs) - var(--btn-border-width));
+  width: var(--btn-border-width);
+  background: transparent;
+  content: "";
+  transition: background var(--transition-fast);
+}
+
+.right-dock__resize-handle:hover::before,
+.right-dock__resize-handle:focus-visible::before {
+  background: var(--todo);
+}
+
+.right-dock__resize-handle:focus-visible {
+  outline: none;
+}
+
+.right-dock__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  border-bottom: var(--chrome-divider-width, 1px) solid var(--right-dock-toolbar-divider-color, transparent);
+}
+
+.right-dock--collapsed .right-dock__toolbar {
+  flex-direction: column;
+  justify-content: flex-start;
+  height: 100%;
+}
+
+.right-dock__tabs,
+.right-dock__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.right-dock__tabs {
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.right-dock--collapsed .right-dock__tabs,
+.right-dock--collapsed .right-dock__actions {
+  flex-direction: column;
+  overflow: visible;
+}
+
+.right-dock__tab {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.right-dock__tab--active,
+.right-dock__tab[aria-selected="true"] {
+  background: var(--status-todo-bg);
+  color: var(--todo);
+}
+
+.right-dock__header {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-bottom: var(--chrome-divider-width, 1px) solid var(--right-dock-view-header-divider-color, transparent);
+  color: var(--text);
+}
+
+.right-dock__title {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+FNXC:RightDockEmbedded 2026-06-22-00:00:
+The dock body is the shared narrow host (~280-420px) for embedded tool views while the viewport stays desktop.
+Make it an inline-size query container named `right-dock-body` so each hosted view can mirror its phone-width
+(@media max-width:768px) single-column layout off the DOCK width instead of the viewport, which the view's own
+@media rules can never see here. Views without their own `--embedded` variant (DevServerView, SecretsView,
+PullRequestView) attach their @container rules to this container; ActivityLog/GitManager use their own embedded
+container. NOTE: the wide right-dock expand modal is NOT this container, so its layout is unaffected.
+*/
+.right-dock__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  container-type: inline-size;
+  container-name: right-dock-body;
+}
+
+/*
+FNXC:RightDockEmbedded 2026-06-22-15:30:
+The hosted view is a flex child of the dock body; without min-height:0 it cannot shrink below its content height, so a tall view (e.g. DevServerView) blows past the dock and its own overflow-y:auto never engages. min-height:0 + min-block-size:0 lets the child bound itself so the view (or the dock body) actually scrolls vertically.
+*/
+.right-dock__body > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  min-block-size: 0;
+}
+
+/*
+FNXC:RightDock 2026-06-22-17:40:
+The right-dock pop-out is a FLOATING, DRAGGABLE, RESIZABLE, NON-BLOCKING window. The user positions it anywhere on screen and keeps using the app behind it. This overlay MUST out-specify the base `.modal-overlay` (which dims the page with a backdrop + blur). Both base and override are single-class selectors, so if styles.css loads after this file the dim/blur would win and the page would fade; qualify with `.modal-overlay` (two classes) so the pop-out reliably keeps a transparent, non-blurring, click-through backdrop regardless of stylesheet order. `pointer-events: none` lets behind-clicks pass through to the app; the floating panel re-enables `pointer-events: auto`.
+*/
+.modal-overlay.right-dock-expand-modal-overlay {
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0;
+  background: transparent;
+  backdrop-filter: none;
+  pointer-events: none;
+  /*
+  FNXC:FloatingWindow 2026-06-22-21:30:
+  Reset the base `.modal-overlay` z-index:100 to auto so this click-through overlay does NOT establish a stacking context. The floating panel carries an inline z-index from the SHARED floatingWindowStack (4000+); without this reset that inline z would be clamped inside the overlay's own stacking context and could never interleave with the other floating modal types (terminal, New Task, FloatingWindow) that all draw from the same stack.
+  */
+  z-index: auto;
+}
+
+.right-dock-expand-modal {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/*
+FNXC:RightDock 2026-06-22-17:40:
+Floating panel positioned by state-driven inline `left/top/width/height`. min/max keep content usable and the panel on-screen. `resize: none` because resizing is handled by the corner/edge handles (the native grip conflicts with the drag/resize pointer handlers). `pointer-events: auto` re-enables interaction on the panel only.
+*/
+.right-dock-expand-modal--floating {
+  --floating-window-shadow: var(--shadow-lg);
+  position: fixed;
+  min-width: calc(var(--space-2xl) * 7.5);
+  min-height: calc(var(--space-2xl) * 5.83);
+  max-width: calc(100vw - (var(--space-lg) * 2));
+  max-height: calc(100dvh - (var(--space-lg) * 2));
+  resize: none;
+  pointer-events: auto;
+  /*
+  FNXC:FloatingWindow 2026-06-23-23:32:
+  Floating modals share a gentle theme-controlled elevation token. Use the app shadow fallback instead of undefined --shadow-xl so themes can opt out or tune shadow strength consistently across Right Dock, New Task, Terminal, and shared FloatingWindow panels.
+  */
+  box-shadow: var(--floating-window-shadow, var(--shadow-lg));
+}
+
+/*
+FNXC:RightDock 2026-06-22-17:40:
+Header is the drag handle; grab/grabbing cursor and non-selectable text signal and protect the drag.
+
+FNXC:RightDock 2026-06-22-18:50:
+Touch dragging was janky because the browser claimed the header's touch stream for scroll/pan gestures. `touch-action: none` on the drag handle (matching the resize handles) hands the whole gesture to our pointer handlers so a finger drag stays smooth and never scrolls the page behind it. `cursor: grab/grabbing` is desktop-only signal; `touch-action` is what makes touch work. A comfortable `min-height` makes the header a forgiving touch target.
+*/
+.right-dock-expand-modal__header--draggable {
+  border-bottom-color: var(--right-dock-expand-header-divider-color, transparent);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  min-height: 44px;
+}
+
+.right-dock-expand-modal__header--draggable:active {
+  cursor: grabbing;
+}
+
+/*
+FNXC:RightDock 2026-06-22-17:40:
+Edge + corner resize handles. touch-action:none keeps the drag from being hijacked by scroll/gestures so resizing stays smooth.
+*/
+.right-dock-expand-resize-handle {
+  position: absolute;
+  z-index: 2;
+  touch-action: none;
+}
+
+.right-dock-expand-resize-handle--n,
+.right-dock-expand-resize-handle--s {
+  left: var(--space-sm);
+  right: var(--space-sm);
+  height: var(--space-sm);
+  cursor: ns-resize;
+}
+
+.right-dock-expand-resize-handle--n { top: 0; }
+.right-dock-expand-resize-handle--s { bottom: 0; }
+
+.right-dock-expand-resize-handle--e,
+.right-dock-expand-resize-handle--w {
+  top: var(--space-sm);
+  bottom: var(--space-sm);
+  width: var(--space-sm);
+  cursor: ew-resize;
+}
+
+.right-dock-expand-resize-handle--e { right: 0; }
+.right-dock-expand-resize-handle--w { left: 0; }
+
+.right-dock-expand-resize-handle--ne,
+.right-dock-expand-resize-handle--nw,
+.right-dock-expand-resize-handle--se,
+.right-dock-expand-resize-handle--sw {
+  width: var(--space-lg);
+  height: var(--space-lg);
+}
+
+.right-dock-expand-resize-handle--ne { top: 0; right: 0; cursor: nesw-resize; }
+.right-dock-expand-resize-handle--nw { top: 0; left: 0; cursor: nwse-resize; }
+.right-dock-expand-resize-handle--se { bottom: 0; right: 0; cursor: nwse-resize; }
+.right-dock-expand-resize-handle--sw { bottom: 0; left: 0; cursor: nesw-resize; }
+
+.right-dock-expand-modal__header,
+.right-dock-expand-modal__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.right-dock-expand-modal__title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+FNXC:RightDockFiles 2026-06-22-01:00:
+The expand body is a flex host that must let its single rendered view stretch to the FULL body width and height,
+not shrink to content. The child (e.g. .dock-files-view) gets flex:1 + min-width:0 so its CSS container query
+measures the real pop-out width and can flip to the wide two-pane layout. Keep min-width:0/min-height:0 here so a
+wide child cannot collapse the flex line.
+*/
+.right-dock-expand-modal__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+}
+
+.right-dock-expand-modal__body > * {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  min-block-size: 0;
+}
+
+@media (max-width: 768px) {
+  .right-dock {
+    display: none;
+  }
+}

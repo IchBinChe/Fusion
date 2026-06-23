@@ -1,5 +1,5 @@
 import type { Database } from "./db.js";
-import { costFor, type CostResult } from "./model-pricing.js";
+import { costFor, type CostResult, type ModelPricingOverrides } from "./model-pricing.js";
 import type { TaskTokenUsagePerModel } from "./types.js";
 
 /**
@@ -85,6 +85,8 @@ export interface TokenAnalyticsQuery {
    * cost is never marked stale. Pure: the module never reads the clock itself.
    */
   now?: number;
+  /** User-managed pricing overrides that take precedence over the built-in baseline. */
+  pricingOverrides?: ModelPricingOverrides;
 }
 
 function emptyTotals(): TokenTotals {
@@ -149,7 +151,12 @@ function emptyCostAccumulator(): CostAccumulator {
   return { usd: 0, anyPriced: false, anyUnavailable: false, anyStale: false };
 }
 
-function addRowCost(acc: CostAccumulator, row: TaskTokenRow, now?: number): void {
+function addRowCost(
+  acc: CostAccumulator,
+  row: TaskTokenRow,
+  now?: number,
+  pricingOverrides?: ModelPricingOverrides,
+): void {
   /*
    * FNXC:CommandCenter 2026-06-18-12:00:
    * Token cost attribution must use the actually-used model snapshot first, then legacy own-model columns, matching groupKeyFor so resolved-via-settings tasks show priced Command Center costs instead of unavailable groups.
@@ -166,6 +173,7 @@ function addRowCost(acc: CostAccumulator, row: TaskTokenRow, now?: number): void
       model: row.tokenUsageModelId ?? row.modelId,
     },
     now,
+    pricingOverrides,
   );
   if (result.stale) acc.anyStale = true;
   if (result.unavailable || result.usd === null) {
@@ -308,10 +316,11 @@ export function aggregateTokenAnalytics(
   const groupBy = query.groupBy;
   const granularity = query.granularity;
   const now = query.now;
+  const pricingOverrides = query.pricingOverrides;
 
   for (const row of rows) {
     addRow(totals, row);
-    addRowCost(totalCost, row, now);
+    addRowCost(totalCost, row, now, pricingOverrides);
     if (groupBy) {
       const groupRows = (groupBy === "model" || groupBy === "provider") ? parsePerModelRows(row) : [];
       const rowsForGroup = groupRows.length > 0 ? groupRows : [row];
@@ -324,7 +333,7 @@ export function aggregateTokenAnalytics(
           groupCostMap.set(key, emptyCostAccumulator());
         }
         addRow(group, groupRow);
-        addRowCost(groupCostMap.get(key)!, groupRow, now);
+        addRowCost(groupCostMap.get(key)!, groupRow, now, pricingOverrides);
       }
     }
     if (granularity) {
@@ -336,7 +345,7 @@ export function aggregateTokenAnalytics(
         seriesCostMap.set(bucket, emptyCostAccumulator());
       }
       addRow(point, row);
-      addRowCost(seriesCostMap.get(bucket)!, row, now);
+      addRowCost(seriesCostMap.get(bucket)!, row, now, pricingOverrides);
     }
   }
 

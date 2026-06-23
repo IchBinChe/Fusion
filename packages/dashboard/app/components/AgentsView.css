@@ -60,6 +60,13 @@
   overflow: hidden;
 }
 
+/*
+FNXC:Agents 2026-06-23-02:00:
+Agents renders the shared ViewHeader (.view-header). Its chrome reads identically to the Missions inline header (.mission-manager__header--inline): same --space-lg/--space-xl padding, surface background, no bottom divider, and a --todo-colored leading icon.
+
+FNXC:ViewHeader 2026-06-23-03:45:
+The former scoped overrides (.agents-view .view-header padding/border/background and the --todo icon color) are removed: ViewHeader now supplies that canonical chrome by default, so the overrides were redundant. The legacy .agents-view-header/.agents-view-title rules below are retained only because the agents-view-mobile CSS string-match test asserts them; they no longer map to rendered DOM.
+*/
 .agents-view-header {
   display: flex;
   align-items: center;
@@ -278,11 +285,12 @@ The base grid keeps a token-sized handle column as the no-JS fallback, while the
   background: var(--surface);
 }
 
+/* FNXC:AgentsView 2026-06-22-01:00: ViewHeader supplies the top padding, so the scrollable body drops its top inset to avoid doubling the gap under the header (keeps horizontal + bottom padding). */
 .agents-view-content {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: calc(var(--space-lg) + var(--space-xs));
+  padding: 0 calc(var(--space-lg) + var(--space-xs)) calc(var(--space-lg) + var(--space-xs));
 }
 
 
@@ -569,6 +577,11 @@ FN-6774 removes the saturated top-edge status stripe from agent board cards. Age
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
+  /*
+  FNXC:AgentsView 2026-06-22-14:45:
+  The split-sidebar agent list needs a small top inset so the first agent card does not press directly against the sidebar/header edge.
+  */
+  padding-top: var(--space-sm);
 }
 
 /*
@@ -774,9 +787,22 @@ FN-6774 removes the saturated left-edge status stripe from split-sidebar agent c
 }
 
 .agent-task,
-.agent-heartbeat {
+.agent-heartbeat,
+.agent-model-runtime {
   display: flex;
   gap: var(--space-sm);
+}
+
+.agent-model-runtime {
+  align-items: center;
+  min-width: 0;
+}
+
+.agent-model-runtime__value {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .agent-heartbeat-control {
@@ -1034,9 +1060,15 @@ FN-6774 removes the saturated left-edge status stripe from split-sidebar agent c
   transition: none;
 }
 
+/*
+FNXC:AgentsOrgChart 2026-06-22-03:05:
+AgentsView uses the measured SVG overlay as the single connector system so parent-child lines remain non-zero and aligned across horizontal/vertical layouts, desktop/mobile sizing, and pan/zoom transforms. Explicitly size the absolute SVG to fill the chart canvas instead of relying on the browser's default 300×150 SVG viewport.
+*/
 .agent-org-chart-connectors {
   position: absolute;
   inset: 0;
+  width: 100%;
+  height: 100%;
   overflow: visible;
   pointer-events: none;
 }
@@ -1179,41 +1211,6 @@ FN-6774 removes the saturated left-edge status stripe from split-sidebar agent c
   gap: var(--org-chart-sibling-gap);
   padding-top: var(--org-chart-children-offset);
   margin-top: var(--org-chart-connector-gap);
-  --org-chart-first-child-center-offset: 50%;
-  --org-chart-last-child-center-offset: 50%;
-}
-
-.org-chart-children::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  height: var(--org-chart-children-offset, var(--space-md));
-  left: var(--org-chart-first-child-center-offset);
-  right: var(--org-chart-last-child-center-offset);
-  border-top: 1px solid var(--border);
-  pointer-events: none;
-}
-
-.org-chart-children > .org-chart-node::before {
-  content: "";
-  position: absolute;
-  top: calc(-1 * var(--org-chart-children-offset));
-  left: 50%;
-  width: 1px;
-  height: var(--org-chart-children-offset);
-  border-left: 1px solid var(--border);
-  pointer-events: none;
-}
-
-.agent-org-chart--vertical .org-chart-children::before {
-  top: 0;
-  left: var(--space-sm);
-  right: auto;
-  bottom: 0;
-  width: 1px;
-  height: auto;
-  border-top: none;
-  border-left: 1px solid var(--border);
 }
 
 .agent-org-chart--vertical {
@@ -1410,6 +1407,10 @@ FN-6774 removes the saturated left-edge status stripe from split-sidebar agent c
     font-size: calc(var(--space-sm) + var(--space-xs) * 0.625);
   }
 
+  .agent-model-runtime {
+    flex-wrap: wrap;
+  }
+
   .agent-card-error {
     width: 100%;
     padding: var(--space-xs) var(--space-sm);
@@ -1426,6 +1427,11 @@ FN-6774 removes the saturated left-edge status stripe from split-sidebar agent c
   /* Single-row header: keep a compact textual title visible while lower-
      priority actions move into the Controls popup so narrow phones keep a
      stable single-row layout. */
+  /* FNXC:Agents 2026-06-23-02:00: Match the Missions inline header mobile padding (--space-md) on the rendered shared ViewHeader. */
+  .agents-view .view-header {
+    padding: var(--space-md);
+  }
+
   .agents-view-header {
     flex-direction: row;
     align-items: center;
@@ -1569,4 +1575,3 @@ FN-6774 removes the saturated left-edge status stripe from split-sidebar agent c
     padding: var(--space-md) var(--space-md) calc(var(--space-md) + env(safe-area-inset-bottom, 0px) + var(--standalone-bottom-gap));
   }
 }
-

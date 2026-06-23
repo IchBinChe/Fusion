@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import { Bar } from "../charts/Bar";
@@ -234,21 +234,47 @@ function numericAttribute(element: Element, name: string): number {
 }
 
 function expectLineChartPointsInsideViewBox(chart: Element): void {
+  const [, , viewBoxWidth, viewBoxHeight] = viewBoxNumbers(chart);
   for (const point of Array.from(chart.querySelectorAll(".cc-line-chart-point"))) {
     const cx = numericAttribute(point, "cx");
     const cy = numericAttribute(point, "cy");
     const r = numericAttribute(point, "r");
     expect(cx).toBeGreaterThanOrEqual(r);
-    expect(cx).toBeLessThanOrEqual(100 - r);
+    expect(cx).toBeLessThanOrEqual(viewBoxWidth - r);
     expect(cy).toBeGreaterThanOrEqual(r);
-    expect(cy).toBeLessThanOrEqual(100 - r);
+    expect(cy).toBeLessThanOrEqual(viewBoxHeight - r);
   }
 }
 
-function expectLineChartMarkersDistortionProof(chart: Element): void {
-  expect(chart.getAttribute("preserveAspectRatio")).toBe("xMidYMid meet");
-  expect(chart.getAttribute("preserveAspectRatio")).not.toBe("none");
+function viewBoxNumbers(chart: Element): [number, number, number, number] {
+  return (chart.getAttribute("viewBox") ?? "")
+    .split(/\s+/)
+    .map(Number) as [number, number, number, number];
+}
+
+function linePointTuples(line: Element): Array<[number, number]> {
+  return (line.getAttribute("points") ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((pair) => pair.split(",").map(Number) as [number, number]);
+}
+
+function expectLineChartFillsBoxAndKeepsRoundMarkers(chart: Element): void {
+  const [, , viewBoxWidth, viewBoxHeight] = viewBoxNumbers(chart);
+  expect(viewBoxWidth).toBeGreaterThan(viewBoxHeight);
+  expect(chart.getAttribute("preserveAspectRatio")).toBe("none");
+  expect(chart.getAttribute("viewBox")).not.toBe("0 0 100 100");
   expect(chart.querySelectorAll(".cc-line-chart-point").length).toBeGreaterThan(0);
+}
+
+function expectLineChartPathFillsPlotWidth(chart: Element): void {
+  const [, , viewBoxWidth] = viewBoxNumbers(chart);
+  const line = chart.querySelector(".cc-line-chart-path");
+  expect(line).toBeTruthy();
+  const points = linePointTuples(line!);
+  expect(points[0]?.[0]).toBe(3);
+  expect(points.at(-1)?.[0]).toBe(viewBoxWidth - 3);
 }
 
 describe("LineChart", () => {
@@ -263,14 +289,15 @@ describe("LineChart", () => {
     expect(points).not.toBe("");
     expect(points).not.toMatch(/NaN|Infinity/);
     expectLineChartPointsInsideViewBox(chart);
-    expectLineChartMarkersDistortionProof(chart);
+    expectLineChartFillsBoxAndKeepsRoundMarkers(chart);
+    expectLineChartPathFillsPlotWidth(chart);
   });
 
   it("uses uniform SVG scaling so marker circles cannot stretch into ovals", () => {
     render(<LineChart ariaLabel="mobile activity trend" series={[{ label: "agents", values: [1, 3, 2] }]} />);
 
     const chart = screen.getByRole("img", { name: "mobile activity trend" });
-    expectLineChartMarkersDistortionProof(chart);
+    expectLineChartFillsBoxAndKeepsRoundMarkers(chart);
   });
 
   it("keeps mobile sizing non-square while SVG geometry remains uniformly scaled", () => {
@@ -278,7 +305,31 @@ describe("LineChart", () => {
 
     render(<LineChart ariaLabel="narrow activity trend" series={[{ label: "nodes", values: [1, 2, 1] }]} />);
 
-    expectLineChartMarkersDistortionProof(screen.getByRole("img", { name: "narrow activity trend" }));
+    const chart = screen.getByRole("img", { name: "narrow activity trend" });
+    expectLineChartFillsBoxAndKeepsRoundMarkers(chart);
+    expectLineChartPathFillsPlotWidth(chart);
+  });
+
+  it("updates the viewBox from ResizeObserver so variable mobile boxes keep round markers", async () => {
+    const originalResizeObserver = globalThis.ResizeObserver;
+    class ImmediateResizeObserver {
+      constructor(private readonly callback: ResizeObserverCallback) {}
+      observe() {
+        this.callback([{ contentRect: { width: 320, height: 160 } as DOMRectReadOnly } as ResizeObserverEntry], this as unknown as ResizeObserver);
+      }
+      unobserve() {}
+      disconnect() {}
+    }
+    globalThis.ResizeObserver = ImmediateResizeObserver as unknown as typeof ResizeObserver;
+    try {
+      render(<LineChart ariaLabel="measured mobile activity trend" series={[{ label: "nodes", values: [1, 2, 1] }]} />);
+      const chart = screen.getByRole("img", { name: "measured mobile activity trend" });
+      await waitFor(() => expect(chart.getAttribute("viewBox")).toBe("0 0 320 160"));
+      expectLineChartFillsBoxAndKeepsRoundMarkers(chart);
+      expectLineChartPathFillsPlotWidth(chart);
+    } finally {
+      globalThis.ResizeObserver = originalResizeObserver;
+    }
   });
 
   it("renders all-zero values as valid baseline geometry without NaN or edge clipping", () => {
@@ -296,7 +347,7 @@ describe("LineChart", () => {
     const chart = screen.getByRole("img", { name: "single trend" });
     expect(chart.querySelector(".cc-line-chart-path")).toBeNull();
     const point = chart.querySelector(".cc-line-chart-point");
-    expect(point?.getAttribute("cx")).toBe("50");
+    expect(point?.getAttribute("cx")).toBe("125");
     expect(point?.getAttribute("cy")).not.toMatch(/NaN|Infinity/);
     expectLineChartPointsInsideViewBox(chart);
   });

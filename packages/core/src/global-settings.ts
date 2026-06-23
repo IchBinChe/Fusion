@@ -147,6 +147,24 @@ export class GlobalSettingsStore {
     }
   }
 
+  private async readRawForUpdate(): Promise<Record<string, unknown>> {
+    if (!existsSync(this.settingsPath)) {
+      return {};
+    }
+
+    try {
+      const raw = await readFile(this.settingsPath, "utf-8");
+      return JSON.parse(raw) as Record<string, unknown>;
+    } catch (error) {
+      /*
+      FNXC:SettingsPersistence 2026-06-23-00:37:
+      Existing global settings must never be overwritten with defaults because a read failed. Fail closed on update so a corrupt, partially-written, or temporarily unreadable ~/.fusion/settings.json can be inspected or recovered instead of being replaced by DEFAULT_GLOBAL_SETTINGS plus the new patch.
+      */
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Refusing to update global settings because ${this.settingsPath} could not be read as valid JSON: ${message}`);
+    }
+  }
+
   /**
    * Read global settings. Returns cached value if available, otherwise reads
    * from disk and caches the result. This avoids repeated filesystem reads for
@@ -181,7 +199,7 @@ export class GlobalSettingsStore {
    */
   async updateSettings(patch: Partial<GlobalSettings> & Record<string, unknown>): Promise<GlobalSettings> {
     return this.withLock(async () => {
-      const raw = await this.readRaw();
+      const raw = await this.readRawForUpdate();
 
       // Apply null-as-delete semantics: null means "remove this field"
       // Merge order: defaults → raw (disk) → patch

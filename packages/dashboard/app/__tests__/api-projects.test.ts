@@ -1169,11 +1169,12 @@ describe("ExecutorStats type", () => {
 
 describe("ExecutorState type", () => {
   it("has valid executor state values", () => {
-    const states: ExecutorState[] = ["idle", "running", "paused"];
+    const states: ExecutorState[] = ["idle", "running", "paused", "stopped"];
 
     expect(states).toContain("idle");
     expect(states).toContain("running");
     expect(states).toContain("paused");
+    expect(states).toContain("stopped");
   });
 });
 

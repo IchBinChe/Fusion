@@ -17,6 +17,14 @@
   resize: both;
 }
 
+/*
+FNXC:TaskDetail 2026-06-22-20:00:
+The gray top header band (task id + column badge) was over-padded. Trim its vertical padding for a more compact band, scoped to the task-detail header so the shared global .modal-header (used by other modals) is unaffected. Keep horizontal padding from --modal-padding; only the block padding shrinks.
+*/
+.task-detail-content > .modal-header {
+  padding-block: var(--space-sm);
+}
+
 .detail-title-row {
   display: flex;
   align-items: center;
@@ -121,16 +129,22 @@
   overflow: hidden;
 }
 
+/*
+FNXC:TaskDetail 2026-06-22-20:00:
+Summarize-as-title is an in-field affordance, not a separate full-width row: it sits inline with the title, pinned to the far right and bottom of the title area. Use a nowrap flex row where the title flexes to fill and the button is pushed right (margin-left:auto) and bottom-aligned (align-self:flex-end). The button shrinks to its content so it never steals title space.
+*/
 .detail-heading-row {
   display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
+  align-items: flex-end;
+  flex-wrap: nowrap;
   gap: var(--space-sm);
   margin-bottom: var(--space-md);
 }
 
 .detail-heading-row .detail-title {
   margin-bottom: 0;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .detail-summarize-title-btn {
@@ -143,7 +157,11 @@
   font-size: 0.8125rem;
   padding: 0;
   cursor: pointer;
-  text-align: left;
+  text-align: right;
+  margin-left: auto;
+  align-self: flex-end;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .detail-summarize-title-btn:hover:not(:disabled) {
@@ -257,8 +275,12 @@ The task-detail modal metadata must keep priority, execution mode, provenance, P
 }
 
 @media (max-width: 768px) {
+  /*
+  FNXC:TaskDetail 2026-06-22-20:00:
+  Keep summarize-as-title pinned bottom-right inline with the title on mobile too (no wrap to a separate row), matching the desktop in-field affordance.
+  */
   .detail-heading-row {
-    align-items: flex-start;
+    align-items: flex-end;
   }
 
   .detail-summarize-title-btn {
@@ -291,7 +313,11 @@ The task-detail modal metadata must keep priority, execution mode, provenance, P
 }
 
 .detail-meta-inline-controls {
-  --detail-priority-control-min-height: calc(var(--space-2xl) + var(--space-xs));
+  /*
+  FNXC:TaskDetail 2026-06-22-20:00:
+  Priority chip and speed (execution-mode) toggle share one min-height token so they render at identical, equal height. Reduced from the old calc(space-2xl + space-xs) (~too tall) to a compact 30px that stays legible and tappable. Both controls also get trimmed vertical padding to match.
+  */
+  --detail-priority-control-min-height: 30px;
 
   display: flex;
   align-items: stretch;
@@ -302,6 +328,7 @@ The task-detail modal metadata must keep priority, execution mode, provenance, P
 .detail-priority-chip {
   gap: var(--space-xs);
   min-height: var(--detail-priority-control-min-height);
+  padding-block: var(--space-xs);
   box-sizing: border-box;
 }
 
@@ -342,6 +369,7 @@ The task-detail modal metadata must keep priority, execution mode, provenance, P
   align-items: center;
   gap: var(--space-xs);
   min-height: var(--detail-priority-control-min-height);
+  padding-block: var(--space-xs);
   box-sizing: border-box;
 }
 
@@ -757,7 +785,14 @@ The task-detail modal metadata must keep priority, execution mode, provenance, P
 /*
 FNXC:TaskDetailChat 2026-06-16-22:13:
 Expanded chat should take over the modal except for the task title row, so users keep task ID and column context while tabs and modal actions stay hidden.
+
+FNXC:TaskDetailChat 2026-06-22-13:27:
+Expanded chat must also cover the task metadata row — priority, execution mode, provenance/Created by, and Created/Updated timestamps — so the chat grows all the way up to the title row instead of stopping below secondary metadata controls.
 */
+.task-detail-content--chat-expanded .detail-meta {
+  display: none;
+}
+
 .task-detail-content--chat-expanded .detail-tabs {
   display: none;
 }
@@ -1057,14 +1092,72 @@ FN-6500 fixes a tablet regression from FN-5599: the task-detail overlay offset a
   margin: 0;
 }
 
+/*
+FNXC:TaskDetail 2026-06-22-18:40:
+Embedded in the full-width board-card panel the detail content must be width-bounded so it cannot overflow and get clipped on the right. Constrain the embedded root and its header/body to the host width (width:100%; min-width:0; max-width:100%); min-width:0 lets inner flex rows (header title row, tabs, action bars) shrink and wrap instead of forcing horizontal overflow. Vertical scroll stays on .detail-body.
+*/
 .task-detail-content--embedded {
   height: 100%;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 
+.task-detail-content--embedded .modal-header,
+.task-detail-content--embedded .detail-body,
+.task-detail-content--embedded .detail-tabs,
+.task-detail-content--embedded .modal-actions {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* The gray header row must wrap (task id left, Back-to-board right) instead of overflowing on narrow panels. */
+.task-detail-content--embedded .modal-header {
+  flex-wrap: wrap;
+  row-gap: var(--space-xs);
+}
+
+.task-detail-content--embedded .detail-title-row {
+  min-width: 0;
+}
+
+.task-detail-content--embedded .modal-header-actions {
+  min-width: 0;
+}
+
+/*
+FNXC:TaskDetail 2026-06-22-18:40:
+"Back to board" affordance inside the gray header. margin-left:auto pushes it to the far right (across from the task id on the left); it shares the header-actions row but stays pinned right and wraps when space is tight. Theme tokens only.
+*/
+.task-detail-header-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-left: auto;
+  padding: var(--space-xs) var(--space-sm);
+  font-size: 13px;
+  color: var(--text-muted);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.task-detail-header-back-btn:hover {
+  color: var(--text);
+  background: var(--card-hover);
+}
+
+/*
+FNXC:TaskDetail 2026-06-22-20:15:
+The footer Actions/Move dropdown buttons sit at the BOTTOM of the embedded panel, so the menus must open UPWARD (above the button). The earlier embedded rule opened them downward (top:100%), which dropped the menu off the panel bottom where the body's overflow clipped it — the popups appeared to vanish. Anchor to bottom:100% so they always open above the trigger and stay on-screen.
+*/
 .task-detail-content--embedded .detail-actions-menu,
 .task-detail-content--embedded .detail-move-menu {
-  top: calc(100% + var(--space-xs));
-  bottom: auto;
+  bottom: calc(100% + var(--space-xs));
+  top: auto;
 }
 
 .detail-refine-title {
@@ -1816,13 +1909,29 @@ FN-6500 fixes a tablet regression from FN-5599: the task-detail overlay offset a
 }
 
 /* === Detail Tabs === */
+/*
+FNXC:TaskDetailTabs 2026-06-21-00:00:
+The mobile global `* { touch-action: pan-y; }` lock from FN-6365 prevents horizontal swipe gestures unless each known horizontal scroller opts back into pan-x.
+The overflowing task-detail tab strip must keep horizontal touch panning enabled so conditional and plugin tabs remain reachable on narrow touch viewports (FN-6864), matching the FN-6450 agent-detail tab precedent.
+
+FNXC:TaskDetailTabs 2026-06-22-18:00:
+Remove the divider between the tab selector and the detail area below. Keep the active-tab underline as the only local selection affordance.
+
+FNXC:TaskDetailTabs 2026-06-23-20:25:
+Narrow mobile task detail surfaces from both Board and List must allow horizontal tab scrolling. The tab strip is the horizontal scroller, not the detail body; bound it to the available inline size and preserve pan-x so parent overflow clipping does not trap hidden tabs.
+*/
 .detail-tabs {
   display: flex;
   gap: 0;
+  width: 100%;
+  max-inline-size: 100%;
+  min-width: 0;
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  touch-action: pan-x pan-y;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
-  border-bottom: 1px solid var(--border);
   margin-bottom: var(--space-md);
 }
 
@@ -2003,6 +2112,15 @@ FN-6500 fixes a tablet regression from FN-5599: the task-detail overlay offset a
   }
 
   .detail-tabs {
+    display: flex;
+    width: 100%;
+    max-inline-size: 100%;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    touch-action: pan-x pan-y;
+    -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
   }
 

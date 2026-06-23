@@ -506,6 +506,110 @@ describe("GitHubClient", () => {
     });
   });
 
+  // FNXC:GitHubImport 2026-06-22-12:00:
+  // Regression coverage for the human-vs-bot misclassification of GitHub App reviewers.
+  // `gh pr/issue view --json comments` surfaces only `{ login }` (no type, and an app bot's
+  // bare display login such as `coderabbitai`/`greptileai` WITHOUT the `[bot]` suffix), so the
+  // comment fetch must read the authoritative Actor `__typename` via `gh api graphql`.
+  // Surfaces: gh PR conversation, gh issue conversation, and the `[bot]`-login suffix fallback.
+  describe("getPullRequestDetail / getIssueDetail bot detection (FN bot-misclassification)", () => {
+    // Drive the two runGhJsonAsync calls in the gh PR path by inspecting the gh argv:
+    //  - ["api","graphql", ...] -> comments via Actor.__typename
+    //  - ["pr","view", ...]     -> statusCheckRollup
+    function mockGhPrDetail(commentNodes: unknown[]) {
+      mockRunGhJsonAsync.mockImplementation(async (args: string[]) => {
+        if (args[0] === "api" && args[1] === "graphql") {
+          return { data: { repository: { pullRequest: { comments: { nodes: commentNodes } } } } } as any;
+        }
+        return { statusCheckRollup: [] } as any;
+      });
+    }
+    function mockGhIssueDetail(commentNodes: unknown[]) {
+      mockRunGhJsonAsync.mockImplementation(async (args: string[]) => {
+        if (args[0] === "api" && args[1] === "graphql") {
+          return { data: { repository: { issue: { comments: { nodes: commentNodes } } } } } as any;
+        }
+        return {} as any;
+      });
+    }
+
+    it("flags a GitHub App reviewer (CodeRabbit) as bot via Actor __typename even with a bare login", async () => {
+      // CodeRabbit's gh-surfaced login has NO `[bot]` suffix — only __typename distinguishes it.
+      mockGhPrDetail([
+        { author: { __typename: "User", login: "alice", avatarUrl: "https://avatars/alice" }, body: "human review", createdAt: "2024-01-01T00:00:00Z" },
+        { author: { __typename: "Bot", login: "coderabbitai", avatarUrl: "https://avatars/cr" }, body: "automated review", createdAt: "2024-01-02T00:00:00Z" },
+        { author: { __typename: "Bot", login: "greptileai", avatarUrl: "https://avatars/gr" }, body: "greptile review", createdAt: "2024-01-03T00:00:00Z" },
+      ]);
+
+      const result = await client.getPullRequestDetail("owner", "repo", 42);
+
+      // The comment fetch must use `gh api graphql`, not `gh pr view --json comments`.
+      expect(mockRunGhJsonAsync).toHaveBeenCalledWith(
+        expect.arrayContaining(["api", "graphql"]),
+      );
+      const byAuthor = Object.fromEntries(result.comments.map((c) => [c.author, c]));
+      expect(byAuthor["alice"].authorIsBot).toBe(false);
+      expect(byAuthor["coderabbitai"].authorIsBot).toBe(true);
+      expect(byAuthor["greptileai"].authorIsBot).toBe(true);
+      // Bots keep the API avatar; humans get a github.com fallback.
+      expect(byAuthor["coderabbitai"].authorAvatarUrl).toBe("https://avatars/cr");
+      expect(byAuthor["alice"].authorAvatarUrl).toBe("https://avatars/alice");
+    });
+
+    it("flags a `[bot]`-suffixed login as bot via the suffix fallback", async () => {
+      mockGhPrDetail([
+        { author: { __typename: "Bot", login: "github-actions[bot]" }, body: "ci", createdAt: "2024-01-01T00:00:00Z" },
+      ]);
+      const result = await client.getPullRequestDetail("owner", "repo", 7);
+      expect(result.comments[0].authorIsBot).toBe(true);
+    });
+
+    it("keeps a normal user classified as human", async () => {
+      mockGhPrDetail([
+        { author: { __typename: "User", login: "bob" }, body: "hi", createdAt: "2024-01-01T00:00:00Z" },
+      ]);
+      const result = await client.getPullRequestDetail("owner", "repo", 8);
+      expect(result.comments[0].authorIsBot).toBe(false);
+    });
+
+    it("flags CodeRabbit on the issue conversation path too (surface: gh issue)", async () => {
+      mockGhIssueDetail([
+        { author: { __typename: "Bot", login: "coderabbitai" }, body: "issue triage", createdAt: "2024-01-02T00:00:00Z" },
+        { author: { __typename: "User", login: "carol" }, body: "real user", createdAt: "2024-01-03T00:00:00Z" },
+      ]);
+      const result = await client.getIssueDetail("owner", "repo", 99);
+      const byAuthor = Object.fromEntries(result.comments.map((c) => [c.author, c]));
+      expect(byAuthor["coderabbitai"].authorIsBot).toBe(true);
+      expect(byAuthor["carol"].authorIsBot).toBe(false);
+    });
+
+    it("flags bots on the REST token fallback via user.type and [bot] login", async () => {
+      // gh path fails -> token REST fallback. REST issues/{n}/comments has user.type + `[bot]` login.
+      mockRunGhJsonAsync.mockRejectedValue(new Error("gh failed"));
+      const clientWithToken = new GitHubClient("ghp_token");
+      const mockFetch = vi.fn().mockImplementation((url: string) => {
+        if (url.includes("/issues/") && url.includes("/comments")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve([
+              { user: { login: "dave", type: "User", avatar_url: "https://avatars/dave" }, body: "human", created_at: "2024-01-01T00:00:00Z" },
+              { user: { login: "coderabbitai[bot]", type: "Bot", avatar_url: "https://avatars/cr" }, body: "bot", created_at: "2024-01-02T00:00:00Z" },
+            ]),
+          });
+        }
+        // pulls/{n} -> no head sha -> checks degrade to []
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+      });
+      global.fetch = mockFetch as any;
+
+      const result = await clientWithToken.getPullRequestDetail("owner", "repo", 5);
+      const byAuthor = Object.fromEntries(result.comments.map((c) => [c.author, c]));
+      expect(byAuthor["dave"].authorIsBot).toBe(false);
+      expect(byAuthor["coderabbitai[bot]"].authorIsBot).toBe(true);
+      vi.restoreAllMocks();
+    });
+  });
+
   describe("listPrComments", () => {
     const mockComments = [
       {
@@ -1003,7 +1107,7 @@ describe("GitHubClient", () => {
         "--repo", "owner/repo",
         "--state", "open",
         "--limit", "30",
-        "--json", "number,title,body,url,labels,state,updatedAt",
+        "--json", "number,title,body,url,labels,state,updatedAt,author",
       ]);
       expect(result).toHaveLength(2);
       expect(result[0].number).toBe(1);

@@ -8,6 +8,8 @@ import {
   aggregateGithubIssueAnalytics,
   aggregateSignalsAnalytics,
   composeLiveSnapshot,
+  LITELLM_PRICING_SOURCE_URL,
+  parseLiteLLMPricing,
   type TokenGroupBy,
   type TokenTimeGranularity,
 } from "@fusion/core";
@@ -22,6 +24,7 @@ import {
   githubIssueAnalyticsToTable,
   type CsvTable,
 } from "../command-center-csv.js";
+import { invalidateAllGlobalSettingsCaches } from "../project-store-resolver.js";
 import type { ApiRouteRegistrar } from "./types.js";
 
 /**
@@ -138,6 +141,22 @@ function sendCsv(res: Response, filename: string, table: CsvTable): void {
   res.send(serializeCsv(table));
 }
 
+const PRICING_FETCH_TIMEOUT_MS = 10_000;
+
+async function fetchLatestLiteLLMPricing(): Promise<unknown> {
+  const response = await fetch(LITELLM_PRICING_SOURCE_URL, {
+    signal: AbortSignal.timeout(PRICING_FETCH_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new ApiError(
+      502,
+      `Failed to fetch pricing source: ${response.status} ${response.statusText}${body ? `: ${body.slice(0, 200)}` : ""}`,
+    );
+  }
+  return response.json() as Promise<unknown>;
+}
+
 export const registerCommandCenterRoutes: ApiRouteRegistrar = (ctx) => {
   const { router, getScopedStore, rethrowAsApiError } = ctx;
 
@@ -152,12 +171,14 @@ export const registerCommandCenterRoutes: ApiRouteRegistrar = (ctx) => {
       const range = resolveRange(req.query);
       const groupBy = resolveGroupBy(req.query);
       const granularity = resolveTokenGranularity(req.query);
+      const settings = await store.getGlobalSettingsStore().getSettings();
       const result = aggregateTokenAnalytics(store.getDatabase(), {
         from: range.from,
         to: range.to,
         groupBy,
         granularity,
         now: Date.now(),
+        pricingOverrides: settings.modelPricingOverrides,
       });
       if (wantsCsv(req.query)) {
         sendCsv(res, "command-center-tokens.csv", tokenAnalyticsToTable(result));
@@ -167,6 +188,41 @@ export const registerCommandCenterRoutes: ApiRouteRegistrar = (ctx) => {
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err;
       rethrowAsApiError(err, "Failed to aggregate token analytics");
+    }
+  });
+
+  /**
+   * POST /api/command-center/pricing/fetch
+   * Fetch + persist user-editable model-pricing overrides from LiteLLM.
+   *
+   * FNXC:CommandCenter 2026-06-22-00:00:
+   * Operators need a one-click refresh from the pinned LiteLLM JSON dataset without adding HTTP to core pricing. Preserve existing overrides on fetch/parse failures and invalidate global settings caches after a successful write so Command Center cost reads use the refreshed rates immediately.
+   */
+  router.post("/command-center/pricing/fetch", async (req, res) => {
+    try {
+      const store = await getScopedStore(req);
+      const json = await fetchLatestLiteLLMPricing();
+      const parsed = parseLiteLLMPricing(json);
+      if (parsed.count === 0) {
+        throw new ApiError(502, "No chat-mode pricing entries found in fetched LiteLLM data");
+      }
+
+      const settings = await store.getGlobalSettingsStore().getSettings();
+      const fetchedAt = new Date().toISOString();
+      await store.updateGlobalSettings({
+        modelPricingOverrides: {
+          ...(settings.modelPricingOverrides ?? {}),
+          ...parsed.overrides,
+        },
+        modelPricingFetchedAt: fetchedAt,
+        modelPricingSource: LITELLM_PRICING_SOURCE_URL,
+      });
+      invalidateAllGlobalSettingsCaches();
+
+      res.json({ count: parsed.count, fetchedAt, source: LITELLM_PRICING_SOURCE_URL });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err, "Failed to fetch model pricing");
     }
   });
 
@@ -244,6 +300,26 @@ export const registerCommandCenterRoutes: ApiRouteRegistrar = (ctx) => {
   });
 
   /**
+   * POST /api/command-center/productivity/backfill-loc
+   * Explicit operator action to backfill historical commit-association LOC stats.
+   *
+   * FNXC:CommandCenterLocBackfill 2026-06-21-00:00:
+   * The LOC backfill must never run during render-time analytics reads. Keep it an authenticated operator POST, resolve the project-scoped store before invoking the git-backed store method, and default to dry-run so operators can preview historical NULL-only updates before writing.
+   */
+  router.post("/command-center/productivity/backfill-loc", async (req, res) => {
+    try {
+      const store = await getScopedStore(req);
+      const body = (req.body ?? {}) as { dryRun?: unknown };
+      const dryRun = typeof body.dryRun === "boolean" ? body.dryRun : true;
+      const result = await store.backfillCommitAssociationDiffStats({ dryRun });
+      res.json(result);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err, "Failed to backfill productivity LOC stats");
+    }
+  });
+
+  /**
    * GET /api/command-center/team
    * Per-agent store-derived tokens/cost, files changed, task counts, and live identity.
    *
@@ -254,10 +330,12 @@ export const registerCommandCenterRoutes: ApiRouteRegistrar = (ctx) => {
     try {
       const store = await getScopedStore(req);
       const range = resolveRange(req.query);
+      const settings = await store.getGlobalSettingsStore().getSettings();
       const result = aggregateTeamAnalytics(store.getDatabase(), {
         from: range.from,
         to: range.to,
         now: Date.now(),
+        pricingOverrides: settings.modelPricingOverrides,
       });
       res.json(result);
     } catch (err: unknown) {

@@ -8,7 +8,7 @@ import type {
   WorkflowIrNodeKind,
   WorkflowNodeExtensionResult,
 } from "@fusion/core";
-import { BUILTIN_CODING_WORKFLOW_IR, WorkflowIrError, getWorkflowExtensionRegistry, isExperimentalFeatureEnabled, resolveMaxReworkCycles } from "@fusion/core";
+import { BUILTIN_CODING_WORKFLOW_IR, WorkflowIrError, getWorkflowExtensionRegistry, resolveMaxReworkCycles } from "@fusion/core";
 
 import {
   createDefaultNodeHandlers,
@@ -166,13 +166,6 @@ export interface WorkflowGraphExecutorResult {
   visitedNodeIds: string[];
 }
 
-const TERMINAL_FAILURE: WorkflowGraphExecutorResult = {
-  executed: false,
-  outcome: "failure",
-  context: {},
-  visitedNodeIds: [],
-};
-
 /**
  * Engine-local mirror of core's workflow-owned merge/retry/recovery primitive
  * region. Until the workflow interpreter owns merge policy end-to-end, graph
@@ -278,10 +271,6 @@ export class WorkflowGraphExecutor {
     settings: Pick<Settings, "experimentalFeatures"> | undefined,
     ir: WorkflowIr = BUILTIN_CODING_WORKFLOW_IR,
   ): Promise<WorkflowGraphExecutorResult> {
-    if (!isExperimentalFeatureEnabled(settings, "workflowGraphExecutor")) {
-      return TERMINAL_FAILURE;
-    }
-
     const startNode = ir.nodes.find((node) => node.kind === "start");
     if (!startNode) throw new WorkflowIrError("Workflow IR missing start node");
 

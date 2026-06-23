@@ -24,7 +24,6 @@ export interface UseAuthOnboardingOptions {
  * - Already configured: no auto-open
  */
 export function useAuthOnboarding({
-  projectId,
   setupWizardOpen,
   openModelOnboarding,
   openSettings,
@@ -41,13 +40,11 @@ export function useAuthOnboarding({
     // Defer auto-triggering while setup wizard is open.
     // Important: this must run before consuming the one-shot flag.
     if (setupWizardOpen) return;
-    // Hold off until the user has a project. On a fresh install the setup
-    // wizard opens ~500ms after mount, so without this gate the effect would
-    // race ahead, lock the one-shot flag, and (a) potentially stack both
-    // modals, or (b) never re-trigger model onboarding once the wizard
-    // closes. With a project in scope, either the wizard already finished
-    // or it was never going to open.
-    if (!projectId) return;
+    /*
+    FNXC:Onboarding 2026-06-22-05:06:
+    Brand-new users should be prompted to set up AI and GitHub before project details, then continue through Project, Agent, and First Task.
+    Allow model onboarding to auto-open without a projectId; its Project step owns opening the project-only setup wizard when needed.
+    */
     // Skip if we've already triggered (one-shot guard)
     if (hasTriggeredRef.current) return;
     // Mark as triggered immediately to prevent any race condition on re-runs
@@ -106,5 +103,5 @@ export function useAuthOnboarding({
         // Fail silently - non-blocking behavior preserves dashboard usability.
         // Onboarding can be manually triggered later via Settings if needed.
       });
-  }, [projectId, setupWizardOpen, openModelOnboarding, openSettings]);
+  }, [setupWizardOpen, openModelOnboarding, openSettings]);
 }

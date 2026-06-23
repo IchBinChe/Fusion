@@ -11,14 +11,16 @@ export interface ExperimentalSectionProps extends SectionBaseProps {
     getCanonicalKey: (key: string) => string;
     /** Whether a feature is enabled, honoring legacy aliases. */
     isFeatureEnabled: (features: Record<string, boolean>, key: string) => boolean;
+    /** Feature keys that are supported internally but should not render as user toggles. */
+    hiddenFeatureKeys?: ReadonlySet<string>;
 }
-export function ExperimentalSection({ scopeBanner, form, setForm, knownFeatures, legacyAliases, getCanonicalKey, isFeatureEnabled, }: ExperimentalSectionProps) {
+export function ExperimentalSection({ scopeBanner, form, setForm, knownFeatures, legacyAliases, getCanonicalKey, isFeatureEnabled, hiddenFeatureKeys, }: ExperimentalSectionProps) {
     const { t } = useTranslation("app");
     const experimentalFeatures = form.experimentalFeatures ?? {};
     const allFeatureKeys = Array.from(new Set([
         ...Object.keys(knownFeatures),
         ...Object.keys(experimentalFeatures).map(getCanonicalKey),
-    ])).sort((a, b) => a.localeCompare(b));
+    ])).filter((key) => !hiddenFeatureKeys?.has(key)).sort((a, b) => a.localeCompare(b));
     const featureFlags = allFeatureKeys.map((key) => [key, isFeatureEnabled(experimentalFeatures, key)] as const);
     return (<>
       {scopeBanner}

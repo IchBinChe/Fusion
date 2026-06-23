@@ -1,10 +1,14 @@
 /* === DevServerView === */
 
+/*
+FNXC:DevServer 2026-06-22-01:00:
+Header migrated to the shared ViewHeader (.view-header), which supplies the --space-lg top/side and --space-md bottom padding. The view no longer adds its own top padding (was causing a doubled gap under the header); only the side and bottom padding remain.
+*/
 .dev-server-view {
   display: flex;
   flex-direction: column;
   gap: var(--space-md);
-  padding: var(--space-lg);
+  padding: 0 var(--space-lg) var(--space-lg);
   min-height: 0;
   height: 100%;
   overflow-y: auto;
@@ -12,28 +16,43 @@
   overscroll-behavior: contain;
 }
 
-.dev-server-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: var(--space-md);
-  padding: var(--space-md);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--card);
+/*
+FNXC:DevServer 2026-06-22-01:00:
+.dev-server-header-title now wraps just the status badge inside ViewHeader's actions slot; the mobile flex-wrap rule keeps it from overflowing on narrow widths.
+*/
+/*
+FNXC:RightDockEmbedded 2026-06-22-19:05:
+DevServerView is a right-dock tool with no --embedded variant; it renders directly inside the dock body
+(.right-dock__body) and inside the pop-out (.right-dock-expand-modal__body). In both, the chrome already labels the
+view — the dock tab strip names it, and the pop-out's RightDockExpandModal supplies its own header — so the view's own
+shared ViewHeader (.view-header) is redundant title chrome there. Hide it in those two host contexts. The header stays
+in the DOM; only display is suppressed. The base view is a flex column, so the panels fill the freed space (the header
+slot was auto-height, not a fixed reserve). The standalone full-page and Settings-section renders are NOT inside these
+ancestors, so their header stays visible.
+*/
+.right-dock__body .dev-server-view > .view-header,
+.right-dock-expand-modal__body .dev-server-view > .view-header {
+  display: none;
+}
+
+/*
+FNXC:RightDockEmbedded 2026-06-22-19:05:
+On real mobile-narrow the view goes full-screen with no dock tab strip or pop-out header, so it must own its title
+again. The viewport @media (max-width:768px) fires only on a true narrow viewport (never in the desktop dock/pop-out,
+where the @container right-dock-body query drives layout instead), so restoring the header here brings the title back
+exactly when the surrounding chrome is gone.
+*/
+@media (max-width: 768px) {
+  .right-dock__body .dev-server-view > .view-header,
+  .right-dock-expand-modal__body .dev-server-view > .view-header {
+    display: flex;
+  }
 }
 
 .dev-server-header-title {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-}
-
-.dev-server-header-title h2 {
-  margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
-  color: var(--text);
 }
 
 .dev-server-header-actions {
@@ -132,6 +151,49 @@
 
 .dev-server-empty-state code {
   font-family: var(--font-mono);
+}
+
+.dev-server-task-picker {
+  width: 100%;
+  min-width: 0;
+}
+
+.dev-server-task-descriptor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+  padding: var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 84%, var(--text));
+}
+
+.dev-server-task-descriptor-header {
+  display: flex;
+  min-width: 0;
+}
+
+.dev-server-task-description {
+  margin: 0;
+  max-height: calc(var(--space-2xl) * 4);
+  overflow-y: auto;
+  color: var(--text);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.dev-server-task-worktree {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.dev-server-task-worktree code {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
 }
 
 .dev-server-section {
@@ -542,7 +604,7 @@
     grid-template-rows: auto auto 1fr;
   }
 
-  .dev-server-header {
+  .dev-server-view > .view-header {
     grid-column: 1 / -1;
   }
 
@@ -572,12 +634,7 @@
   .dev-server-view {
     display: flex;
     flex-direction: column;
-    padding: var(--space-md);
-  }
-
-  .dev-server-header {
-    flex-direction: column;
-    align-items: flex-start;
+    padding: 0 var(--space-md) var(--space-md);
   }
 
   .dev-server-header-title {
@@ -635,6 +692,15 @@
 
   .dev-server-candidate-source {
     margin-left: 0;
+  }
+
+  .dev-server-task-picker,
+  .dev-server-task-descriptor {
+    width: 100%;
+  }
+
+  .dev-server-task-description {
+    max-height: calc(var(--space-2xl) * 3);
   }
 
   .dev-server-config {
@@ -733,5 +799,131 @@
 
   .chat-tool-call-status-text {
     font-size: 0.625rem;
+  }
+}
+
+/*
+FNXC:RightDockEmbedded 2026-06-22-00:00:
+When DevServerView is hosted in the narrow right dock, the dock body's `right-dock-body` query container drives this
+block. The viewport is desktop, so the desktop min-width:769px two-column grid above also fires and would overflow
+the narrow dock — here we override it back to a single scrollable column and mirror the phone-width max-width:768px
+stacking: the config and preview panels stack full-width, the section sheds its max-width cap, preview header/url/
+actions wrap, candidate rows wrap, and logs/preview keep a bounded min-height. The whole view already scrolls
+vertically (.dev-server-view overflow-y:auto), so each panel just needs to be full-width and not overflow.
+*/
+@container right-dock-body (max-width: 768px) {
+  /*
+  FNXC:DevServer 2026-06-22-15:30:
+  In the narrow right dock the view is a flex child of .right-dock__body. Force the single-column flex layout and make
+  the view the bounded vertical scroll owner (flex:1 + min-height:0 + overflow-y:auto, inherited from base) so a tall
+  panel scrolls within the dock instead of overflowing it.
+  */
+  .dev-server-view {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 var(--space-md) var(--space-md);
+  }
+
+  .dev-server-view > .view-header {
+    grid-column: auto;
+  }
+
+  .dev-server-header-title {
+    flex-wrap: wrap;
+  }
+
+  .dev-server-header-actions {
+    width: 100%;
+  }
+
+  .dev-server-config {
+    grid-column: auto;
+    grid-row: auto;
+    max-height: min(48vh, calc(var(--space-2xl) * 13));
+  }
+
+  .dev-server-content {
+    grid-column: auto;
+    grid-row: auto;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .devserver-preview-panel {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .dev-server-section {
+    padding: var(--space-md);
+    max-width: none;
+  }
+
+  .devserver-preview-header {
+    flex-wrap: wrap;
+  }
+
+  .devserver-preview-url-badge {
+    order: 2;
+    flex: 1 1 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .devserver-preview-actions {
+    order: 3;
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-end;
+  }
+
+  .dev-server-preview-override {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .dev-server-candidate,
+  .dev-server-selected {
+    flex-wrap: wrap;
+  }
+
+  .dev-server-candidate-command {
+    flex: 1 1 100%;
+    max-width: 100%;
+    white-space: normal;
+    word-break: break-word;
+  }
+
+  .dev-server-candidate-source {
+    margin-left: 0;
+  }
+
+  .dev-server-candidates {
+    max-height: min(32vh, calc(var(--space-2xl) * 7));
+  }
+
+  .dev-server-task-picker,
+  .dev-server-task-descriptor {
+    width: 100%;
+  }
+
+  .dev-server-task-description {
+    max-height: calc(var(--space-2xl) * 3);
+  }
+
+  .dev-server-logs,
+  .devserver-preview-container,
+  .devserver-preview-iframe {
+    min-height: calc(var(--space-2xl) * 4 + var(--space-md));
+    max-height: none;
+  }
+
+  .devserver-preview-blocked-panel,
+  .devserver-preview-error-panel,
+  .devserver-preview-external-only {
+    word-break: break-word;
   }
 }

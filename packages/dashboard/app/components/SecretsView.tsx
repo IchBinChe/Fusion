@@ -1,7 +1,8 @@
 import "./SecretsView.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, Copy, Eye, EyeOff, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, Eye, EyeOff, Lock, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { ViewHeader } from "./ViewHeader";
 
 type ToastKind = "info" | "success" | "error";
 type SecretScope = "project" | "global";
@@ -73,6 +74,13 @@ export const SecretsView = ({ addToast }: SecretsViewProps) => {
   const [syncPassphrase, setSyncPassphrase] = useState("");
   const [syncPassphraseConfirm, setSyncPassphraseConfirm] = useState("");
   const [syncSaving, setSyncSaving] = useState(false);
+  /*
+  FNXC:Secrets 2026-06-23-01:30:
+  The cross-node sync passphrase is an advanced, rarely-touched setting, so it now lives BELOW the secrets list and is
+  collapsed behind a disclosure that is closed by default. Users click the toggle to expand the passphrase status/actions
+  + description. All set/rotate/clear functionality is unchanged; only relocated and gated behind this toggle.
+  */
+  const [syncDisclosureOpen, setSyncDisclosureOpen] = useState(false);
   const revealTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const copyTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
@@ -278,29 +286,20 @@ export const SecretsView = ({ addToast }: SecretsViewProps) => {
 
   return (
     <section className="secrets-view">
-      <div className="secrets-header">
-        <h2>{t("secrets.title", "Secrets")}</h2>
-        <div className="secrets-header-actions">
-          <button className="btn btn-sm" onClick={() => void loadSecrets()}><RefreshCw {...actionIconProps} /> {t("secrets.refresh", "Refresh")}</button>
-          <button className="btn btn-primary btn-sm" onClick={openCreate}><Plus {...actionIconProps} /> {t("secrets.addSecret", "Add Secret")}</button>
-        </div>
-      </div>
-
-      <article className="card secrets-sync-card">
-        <div className="secrets-sync-header">
-          <div>
-            <h3>{t("secrets.syncPassphraseTitle", "Cross-Node Sync Passphrase")}</h3>
-            <p className="secrets-sync-status"><span className={`status-dot ${syncPassphraseConfigured ? "status-dot--online" : "status-dot--pending"}`} aria-hidden="true" /> {syncPassphraseConfigured ? t("secrets.syncConfigured", "Configured") : t("secrets.syncNotConfigured", "Not configured")}</p>
-          </div>
-          <div className="secrets-sync-actions">
-            <button className="btn" onClick={() => setSyncModalOpen(true)}>{syncPassphraseConfigured ? t("secrets.rotateSyncPassphrase", "Rotate") : t("secrets.setPassphrase", "Set passphrase")}</button>
-            {syncPassphraseConfigured ? <button className="btn btn-danger" onClick={() => void clearSyncPassphraseHandler()}>{t("secrets.clearSyncPassphrase", "Clear")}</button> : null}
-          </div>
-        </div>
-        <p className="secrets-sync-copy">
-          {t("secrets.syncPassphraseDescription", "Shared passphrase used to wrap cross-node secret bundles. Both nodes in a sync pair must share the same value. Stored locally only; never transmitted.")}
-        </p>
-      </article>
+      {/*
+        FNXC:ViewHeader 2026-06-23-03:45:
+        Secrets now renders the shared canonical ViewHeader (Lock icon matches the right-dock nav). The Refresh/Add actions ride in the header actions cluster as btn btn-sm so they match every other view's header buttons. The right-dock/pop-out hosts still hide this title row via the `.secrets-view > .view-header` selector since those chromes label the view themselves.
+      */}
+      <ViewHeader
+        icon={Lock}
+        title={t("secrets.title", "Secrets")}
+        actions={
+          <>
+            <button className="btn btn-sm" onClick={() => void loadSecrets()}><RefreshCw {...actionIconProps} /> {t("secrets.refresh", "Refresh")}</button>
+            <button className="btn btn-primary btn-sm" onClick={openCreate}><Plus {...actionIconProps} /> {t("secrets.addSecret", "Add Secret")}</button>
+          </>
+        }
+      />
 
       {error ? <div className="form-error">{error}</div> : null}
       {loading ? <div className="secrets-loading"><RefreshCw {...spinningActionIconProps} /> {t("secrets.loading", "Loading…")}</div> : null}
@@ -354,6 +353,39 @@ export const SecretsView = ({ addToast }: SecretsViewProps) => {
           );
         })}
       </div>
+
+      {/*
+        FNXC:Secrets 2026-06-23-01:30:
+        Disclosure (closed by default) sits below the secrets list. The toggle button carries aria-expanded/aria-controls
+        and a rotating chevron; the passphrase status, set/rotate/clear actions, and description only render when expanded.
+      */}
+      <article className="card secrets-sync-card secrets-sync-disclosure">
+        <button
+          type="button"
+          className="secrets-sync-disclosure-toggle"
+          data-testid="secrets-passphrase-disclosure"
+          aria-expanded={syncDisclosureOpen}
+          aria-controls="secrets-sync-disclosure-panel"
+          onClick={() => setSyncDisclosureOpen((open) => !open)}
+        >
+          {syncDisclosureOpen ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronRight size={16} aria-hidden="true" />}
+          <span>{t("secrets.syncPassphraseTitle", "Cross-Node Sync Passphrase")}</span>
+        </button>
+        {syncDisclosureOpen ? (
+          <div id="secrets-sync-disclosure-panel" className="secrets-sync-disclosure-panel">
+            <div className="secrets-sync-header">
+              <p className="secrets-sync-status"><span className={`status-dot ${syncPassphraseConfigured ? "status-dot--online" : "status-dot--pending"}`} aria-hidden="true" /> {syncPassphraseConfigured ? t("secrets.syncConfigured", "Configured") : t("secrets.syncNotConfigured", "Not configured")}</p>
+              <div className="secrets-sync-actions">
+                <button className="btn" onClick={() => setSyncModalOpen(true)}>{syncPassphraseConfigured ? t("secrets.rotateSyncPassphrase", "Rotate") : t("secrets.setPassphrase", "Set passphrase")}</button>
+                {syncPassphraseConfigured ? <button className="btn btn-danger" onClick={() => void clearSyncPassphraseHandler()}>{t("secrets.clearSyncPassphrase", "Clear")}</button> : null}
+              </div>
+            </div>
+            <p className="secrets-sync-copy">
+              {t("secrets.syncPassphraseDescription", "Shared passphrase used to wrap cross-node secret bundles. Both nodes in a sync pair must share the same value. Stored locally only; never transmitted.")}
+            </p>
+          </div>
+        ) : null}
+      </article>
 
       {syncModalOpen ? (
         <div className="modal-overlay open" role="presentation">

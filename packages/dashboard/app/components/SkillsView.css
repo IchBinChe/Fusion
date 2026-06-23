@@ -1,47 +1,147 @@
 /* === Skills View === */
+/*
+FNXC:SkillsView 2026-06-22-16:15:
+Skills mounts as a flex child of the flex-row .project-content. A flex item with no flex-grow collapses to its intrinsic content width, so the Skills content rendered narrow instead of spanning the main panel. Grow into available space, zero the min-width floor, and pin width:100% — mirroring the GoalsView/SecretsView (FN-6446/FN-6789) fix — so the view fills the full panel width.
+*/
 .skills-view {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
   height: 100%;
+  min-width: 0;
+  width: 100%;
+  overflow: hidden;
+  /*
+  FNXC:Skills 2026-06-23-01:45:
+  Establish the query container so the master/detail body can switch between the single-panel stack (narrow) and the two-pane split (wide) based on the view's OWN width — not the global viewport. Modeled on DockFilesView (container-name: dock-files). SkillsView always fills the full main panel, so the inline-size query fires reliably (unlike the right-dock pop-out, which needed DockFilesView's deterministic fallback).
+  */
+  container-type: inline-size;
+  container-name: skills-view;
+}
+
+/*
+FNXC:Skills 2026-06-23-01:45:
+Master/detail body below the shared ViewHeader. Holds BOTH always-rendered panes.
+- NARROW default: single column. The list (.skills-view__list) fills the body; the detail (.skills-view__detail) is hidden until a skill is selected, then it covers the stack (BACK returns to the list).
+- WIDE (@container >=640px below): flex-row two-pane — list pinned left (clamped, scrolls), detail flex:1 right (scrolls).
+*/
+.skills-view-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 
-.skills-view-header {
+/* FNXC:Skills 2026-06-23-01:45: NARROW default — master list fills the body as the single panel. */
+.skills-view__list {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/*
+FNXC:Skills 2026-06-23-01:45: NARROW default — detail is the stacked second panel.
+Hidden until a skill is selected; when selected ([data-selected="true"]) it overlays the list as the single visible panel.
+*/
+.skills-view__detail {
+  display: none;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.skills-view[data-selected="true"] .skills-view__list {
+  display: none;
+}
+
+.skills-view[data-selected="true"] .skills-view__detail {
+  display: flex;
+}
+
+/* FNXC:Skills 2026-06-23-01:45: detail content scrolls inside the pane body so the SKILL.md pre + file badges never overflow the pane. */
+.skills-view-detail-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   padding: var(--space-lg);
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  flex-wrap: wrap;
-  gap: var(--space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
 }
 
-.skills-view-title {
+/* FNXC:Skills 2026-06-23-01:45: empty-state placeholder shown in the wide right pane until a skill is selected. */
+.skills-view-detail-placeholder {
   display: flex;
   align-items: center;
-  gap: var(--space-sm);
+  justify-content: center;
+  flex: 1 1 auto;
+  text-align: center;
+  color: var(--text-muted);
 }
 
-.skills-view-title h2 {
-  font-weight: 600;
-  margin: 0;
+.skills-view-detail-back {
+  flex-shrink: 0;
+}
+
+/*
+FNXC:Skills 2026-06-23-01:45:
+WIDE container (>=640px): two-pane side-by-side master/detail. Both panes always visible (data-selected no longer toggles visibility here), so the BACK button is hidden — the list never disappears. Mirrors DockFilesView's @container rule.
+*/
+@container skills-view (min-width: 640px) {
+  .skills-view-body {
+    flex-direction: row;
+  }
+
+  /* List pinned LEFT: clamped, scrolls independently, divider against the detail pane. */
+  .skills-view__list {
+    display: flex;
+    flex: 0 0 clamp(280px, 38%, 460px);
+    min-width: 0;
+    overflow: hidden;
+    border-right: 1px solid var(--border);
+  }
+
+  /* Detail fills the remaining width; always visible (empty-state until a skill is selected). */
+  .skills-view__detail,
+  .skills-view[data-selected="true"] .skills-view__detail {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .skills-view[data-selected="true"] .skills-view__list {
+    display: flex;
+  }
+
+  /* BACK is meaningless when the list is always visible. */
+  .skills-view__detail .skills-view-detail-back {
+    display: none;
+  }
 }
 
 .skills-view-count {
   color: var(--text-muted);
 }
 
-.skills-view-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-}
+/*
+FNXC:Navigation 2026-06-22-02:00:
+The shared ViewHeader already supplies the top + side --space-lg padding, so the content area must NOT repeat the top padding (that doubled the gap under the header). Side + bottom padding only, aligned with the header.
 
+FNXC:Skills 2026-06-22-14:23:
+The search controls at the top of the Skills list need breathing room below the shared header. Restore a single --space-lg top inset on the scrollable content so the search box does not visually bump into the header.
+*/
 .skills-view-content {
   flex: 1;
   overflow-y: auto;
-  padding: var(--space-lg);
+  padding: var(--space-lg) var(--space-lg) var(--space-lg);
 }
 
 .skills-view-section {
@@ -294,17 +394,22 @@
   padding: var(--space-lg);
 }
 
+/*
+FNXC:Skills 2026-06-23-01:45:
+Detail-pane header bar: BACK (narrow only) on the left, truncating skill name in the middle, Close on the right. Mirrors DockFilesView's viewer header. Now a flex:0 bar inside the detail pane (the pane itself carries no padding; the header + body each supply their own).
+*/
 .skills-view-detail-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-md);
-  margin-bottom: var(--space-md);
-  padding-bottom: var(--space-md);
+  gap: var(--space-sm);
+  flex: 0 0 auto;
+  padding: var(--space-sm) var(--space-lg);
   border-bottom: 1px solid var(--border);
 }
 
 .skills-view-detail-title {
+  flex: 1 1 auto;
+  min-width: 0;
   font-weight: 600;
   color: var(--text);
   overflow: hidden;
@@ -330,18 +435,89 @@
   overflow-y: auto;
 }
 
+/*
+FNXC:Skills 2026-06-23-04:15:
+Compact referenced-files strip. Smaller gap/padding and a smaller font so the section no longer dominates the detail pane. Holds ALL referenced files (no cap). File entries are clickable buttons; directories are static badges.
+*/
 .skills-view-detail-files {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-xs);
-  margin-top: var(--space-md);
-  padding-top: var(--space-sm);
+  gap: calc(var(--space-xs) / 2);
+  margin-top: var(--space-sm);
+  padding-top: var(--space-xs);
   border-top: 1px solid var(--border);
+  font-size: 0.85em;
 }
 
 .skills-view-detail-files-label {
   color: var(--text-muted);
+}
+
+/* FNXC:Skills 2026-06-23-04:15: clickable file badge in the compact strip. Reset native button chrome so the .badge styling reads as a chip; pointer + hover signal it loads the file. */
+.skills-view-detail-file {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  line-height: 1.2;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.skills-view-detail-file:hover {
+  background: var(--card-hover);
+  border-color: var(--text-muted);
+}
+
+.skills-view-detail-file--active {
+  border-color: var(--todo);
+  background: var(--card-hover);
+}
+
+/* FNXC:Skills 2026-06-23-04:15: directories are not previewable -> static, dimmed badge. */
+.skills-view-detail-file--dir {
+  color: var(--text-dim);
+}
+
+/*
+FNXC:Skills 2026-06-23-04:15:
+File viewer column inside the detail body. Header bar carries the "← Back to SKILL.md" affordance + the open file's relative path; the content (markdown or <pre>) and the compact files strip follow.
+*/
+.skills-view-file-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.skills-view-file-viewer-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+}
+
+.skills-view-file-back {
+  flex-shrink: 0;
+}
+
+.skills-view-file-viewer-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* FNXC:Skills 2026-06-23-04:15: markdown render wrapper (SKILL.md + markdown files) reuses the shared .mailbox-markdown styling from MailboxMessageContent; this just bounds its width inside the pane. */
+.skills-view-detail-markdown {
+  min-width: 0;
+  word-break: break-word;
 }
 
 .skills-view-detail-loading {
@@ -371,19 +547,9 @@
 }
 
 @media (max-width: 768px) {
-  .skills-view-header {
-    padding: var(--space-sm) var(--space-md);
-  }
-
   .skills-view-content {
     padding: var(--space-md);
   }
-
-  .skills-view-title h2 {
-    }
-
-  .skills-view-count {
-    }
 
   .skills-view-section {
     margin-bottom: var(--space-md);
@@ -465,4 +631,3 @@
     min-height: calc(var(--space-lg) + var(--space-md) + var(--space-xs));
   }
 }
-

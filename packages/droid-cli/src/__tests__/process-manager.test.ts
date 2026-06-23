@@ -748,52 +748,44 @@ describe("discoverDroidModels", () => {
     vi.clearAllMocks();
   });
 
-  it("parses model ids from JSON output", async () => {
+  it("parses model ids from droid exec --help output", async () => {
     (spawn as any).mockImplementationOnce(() => {
       const EventEmitter = require("node:events");
       const proc = new EventEmitter();
       proc.stdout = new EventEmitter();
       proc.stderr = new EventEmitter();
       setTimeout(() => {
-        proc.stdout.emit("data", Buffer.from('[{"id":"droid-pro"},{"name":"droid-max"}]'));
+        proc.stdout.emit("data", Buffer.from(`Usage: droid exec [options] [prompt]
+
+Available Models:
+  droid-pro                 Droid Pro
+  droid-max                 Droid Max
+
+Model details:
+  - Droid Pro: prose, not a model id
+`));
         proc.emit("exit", 0);
       }, 0);
       return proc;
     });
 
     await expect(discoverDroidModels()).resolves.toEqual(["droid-pro", "droid-max"]);
+    expect(spawn).toHaveBeenCalledWith("droid", ["exec", "--help"], expect.anything());
   });
 
-  it("falls back across attempts and parses newline output", async () => {
-    (spawn as any)
-      .mockImplementationOnce(() => {
-        const EventEmitter = require("node:events");
-        const proc = new EventEmitter();
-        proc.stdout = new EventEmitter();
-        proc.stderr = new EventEmitter();
-        setTimeout(() => proc.emit("exit", 1), 0);
-        return proc;
-      })
-      .mockImplementationOnce(() => {
-        const EventEmitter = require("node:events");
-        const proc = new EventEmitter();
-        proc.stdout = new EventEmitter();
-        proc.stderr = new EventEmitter();
-        setTimeout(() => proc.emit("exit", 1), 0);
-        return proc;
-      })
-      .mockImplementationOnce(() => {
-        const EventEmitter = require("node:events");
-        const proc = new EventEmitter();
-        proc.stdout = new EventEmitter();
-        proc.stderr = new EventEmitter();
-        setTimeout(() => {
-          proc.stdout.emit("data", Buffer.from("droid-lite\ndroid-lite\ndroid-pro\n"));
-          proc.emit("exit", 0);
-        }, 0);
-        return proc;
-      });
+  it("returns [] when droid exec --help exits without a model section", async () => {
+    (spawn as any).mockImplementationOnce(() => {
+      const EventEmitter = require("node:events");
+      const proc = new EventEmitter();
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      setTimeout(() => {
+        proc.stdout.emit("data", Buffer.from("Usage: droid exec\n\nOptions:\n  --help\n"));
+        proc.emit("exit", 0);
+      }, 0);
+      return proc;
+    });
 
-    await expect(discoverDroidModels()).resolves.toEqual(["droid-lite", "droid-pro"]);
+    await expect(discoverDroidModels()).resolves.toEqual([]);
   });
 });

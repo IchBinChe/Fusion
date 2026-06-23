@@ -74,9 +74,9 @@ describe("Header", () => {
     expect(container.querySelector(".shell-connection-status")).toBeNull();
   });
 
-  it("renders action buttons", () => {
+  it("renders desktop non-tool action buttons without toolbar tools", () => {
     renderHeader();
-    expect(screen.getByTitle("Import from GitHub")).toBeDefined();
+    expect(screen.queryByTitle("Import from GitHub")).toBeNull();
     expect(screen.getByTitle("Settings")).toBeDefined();
   });
 
@@ -104,9 +104,10 @@ describe("Header", () => {
     expect(screen.queryByTitle("Import from GitHub")).toBeNull();
   });
 
-  it("keeps GitHub import for mobile shell host", () => {
-    renderHeader({ shellHost: { kind: "mobile-shell" } });
-    expect(screen.getByTitle("Import from GitHub")).toBeDefined();
+  it("keeps GitHub import in compact overflow for mobile shell host", () => {
+    renderHeader({ shellHost: { kind: "mobile-shell" } }, "mobile");
+    fireEvent.click(screen.getByTitle("More header actions"));
+    expect(screen.getByText("Import from GitHub")).toBeDefined();
   });
 
   it("calls onOpenSettings when settings button is clicked", () => {
@@ -116,21 +117,27 @@ describe("Header", () => {
     expect(onOpenSettings).toHaveBeenCalled();
   });
 
-  it("calls onOpenFiles with zero arguments from desktop files button", () => {
-    const onOpenFiles = vi.fn();
-    renderHeader({ onOpenFiles }, "desktop");
-
-    fireEvent.click(screen.getByTestId("files-toggle-btn"));
-
-    expect(onOpenFiles).toHaveBeenCalledTimes(1);
-    expect(onOpenFiles.mock.calls[0]).toEqual([]);
+  it("does not render the desktop files button", () => {
+    renderHeader({ onOpenFiles: vi.fn() }, "desktop");
+    expect(screen.queryByTestId("files-toggle-btn")).toBeNull();
   });
 
-  it("calls onOpenGitHubImport when import button is clicked", () => {
-    const onOpenGitHubImport = vi.fn();
-    renderHeader({ onOpenGitHubImport });
-    fireEvent.click(screen.getByTitle("Import from GitHub"));
-    expect(onOpenGitHubImport).toHaveBeenCalled();
+  it("does not render the desktop GitHub import button", () => {
+    renderHeader({ onOpenGitHubImport: vi.fn() }, "desktop");
+    expect(screen.queryByTitle("Import from GitHub")).toBeNull();
+  });
+
+  it("does not render the desktop Git Manager button", () => {
+    renderHeader({ onOpenGitManager: noop, stashOrphanCount: 5 }, "desktop");
+    expect(screen.queryByTestId("git-manager-btn")).toBeNull();
+  });
+
+  it("shows the stash orphan badge on the compact Git Manager overflow item", () => {
+    renderHeader({ onOpenGitManager: noop, stashOrphanCount: 6 }, "mobile");
+    fireEvent.click(screen.getByTitle("More header actions"));
+    const item = screen.getByTestId("overflow-git-btn");
+    expect(item).toHaveTextContent("Git Manager");
+    expect(item.querySelector(".btn-badge")?.textContent).toBe("6");
   });
 
   describe("view toggle", () => {
@@ -160,11 +167,14 @@ describe("Header", () => {
       expect(screen.queryByTitle("List view")).toBeNull();
     });
 
-    it("does not render the workflow portal slot on mobile sidebar nav", () => {
-      renderHeader({ onChangeView: noop, leftSidebarNavActive: true }, "mobile");
-      expect(screen.queryByTestId("header-workflow-slot")).toBeNull();
-      expect(screen.queryByTitle("Board view")).not.toBeNull();
-      expect(screen.queryByTitle("List view")).not.toBeNull();
+    it("renders the workflow portal slot in the mobile top header when mobile nav owns view switching", () => {
+      renderHeader({ onChangeView: noop, leftSidebarNavActive: true, mobileNavEnabled: true }, "mobile");
+      const workflowSlot = screen.getByTestId("header-workflow-slot");
+      expect(workflowSlot).toBeInTheDocument();
+      expect(workflowSlot).toHaveClass("header-workflow-slot--mobile");
+      expect(workflowSlot.closest(".header-left")).toBeInTheDocument();
+      expect(screen.getByTestId("mobile-view-toggle-board")).toBeInTheDocument();
+      expect(screen.getByTestId("mobile-view-toggle-list")).toBeInTheDocument();
     });
 
     it("shows board view as active by default", () => {
@@ -251,9 +261,52 @@ describe("Header", () => {
     });
 
     it("shows the Todos entry in view overflow when todos are enabled", () => {
-      renderHeader({ onChangeView: noop, onOpenTodos: vi.fn(), todosEnabled: true });
+      renderHeader({ onChangeView: noop, todosEnabled: true });
       fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
       expect(screen.getByTestId("view-overflow-todos")).toBeInTheDocument();
+    });
+
+    it("does not render the retired Stash Recovery view overflow item", () => {
+      renderHeader({ onChangeView: noop, todosEnabled: true, stashOrphanCount: 4 });
+      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+      expect(screen.queryByTestId("view-overflow-stash-recovery")).toBeNull();
+    });
+
+    it.each(["desktop", "tablet"] as const)("keeps More views as a chevron dropdown instead of a right-dock toggle on %s", (tier) => {
+      renderHeader({ onChangeView: noop, todosEnabled: true }, tier);
+
+      const trigger = screen.getByTestId("view-toggle-overflow-trigger");
+      expect(trigger.querySelector(".lucide-chevron-down")).toBeTruthy();
+      expect(trigger.querySelector(".lucide-panel-right")).toBeNull();
+      expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+      expect(trigger).not.toHaveAttribute("aria-pressed");
+      fireEvent.click(trigger);
+      expect(screen.getByRole("menu", { name: "More views" })).toBeInTheDocument();
+    });
+
+    it.each(["desktop", "tablet"] as const)("renders no duplicate Header right-dock toggle when left sidebar hides view nav on %s", (tier) => {
+      renderHeader({
+        onChangeView: noop,
+        leftSidebarNavActive: true,
+        todosEnabled: true,
+      }, tier);
+
+      expect(screen.queryByTestId("view-toggle-overflow-trigger")).toBeNull();
+      expect(document.querySelector(".header-right-dock-toggle")).toBeNull();
+    });
+
+    it("keeps the legacy chevron dropdown on mobile", () => {
+      renderHeader({
+        onChangeView: noop,
+        mobileNavEnabled: false,
+      }, "mobile");
+
+      const trigger = screen.getByTestId("view-toggle-overflow-trigger");
+      expect(trigger.querySelector(".lucide-chevron-down")).toBeTruthy();
+      expect(trigger.querySelector(".lucide-panel-right")).toBeNull();
+      expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+      fireEvent.click(trigger);
+      expect(screen.getByRole("menu", { name: "More views" })).toBeInTheDocument();
     });
 
     it("shows secrets in overflow and routes to secrets view", () => {
@@ -316,10 +369,10 @@ describe("Header", () => {
       expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeDefined();
     });
 
-    it("keeps desktop Documents and Command Center inline without Command Center overflow", () => {
+    it("keeps desktop Artifacts and Command Center inline without Command Center overflow", () => {
       renderHeader({ onChangeView: noop, showAgentsTab: true }, "desktop");
 
-      expect(screen.getByTitle("Documents view")).toBeInTheDocument();
+      expect(screen.getByTitle("Artifacts view")).toBeInTheDocument();
       const agentsButton = screen.getByTitle("Agents view");
       const commandCenterButton = screen.getByTestId("view-toggle-command-center");
       expect(commandCenterButton.previousElementSibling).toBe(agentsButton);
@@ -329,16 +382,16 @@ describe("Header", () => {
       expect(screen.queryByTestId("view-overflow-documents")).toBeNull();
     });
 
-    it("promotes Command Center after Agents and moves Documents to overflow on tablet", () => {
+    it("promotes Command Center after Agents and moves Artifacts to overflow on tablet", () => {
       renderHeader({ onChangeView: noop, showAgentsTab: true }, "tablet");
 
       const agentsButton = screen.getByTitle("Agents view");
       const commandCenterButton = screen.getByTestId("view-toggle-command-center");
       expect(commandCenterButton.previousElementSibling).toBe(agentsButton);
-      expect(screen.queryByTitle("Documents view")).toBeNull();
+      expect(screen.queryByTitle("Artifacts view")).toBeNull();
 
       fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
-      expect(screen.getByTestId("view-overflow-documents")).toBeInTheDocument();
+      expect(screen.getByTestId("view-overflow-documents")).toHaveTextContent("Artifacts view");
       expect(screen.queryByTestId("view-overflow-command-center")).toBeNull();
     });
 
@@ -412,116 +465,32 @@ describe("Header", () => {
     });
   });
 
-  describe("terminal split button", () => {
-    it("renders terminal main button and scripts chevron on desktop", () => {
+  describe("terminal launcher relocation", () => {
+    it("does not render the terminal launcher or scripts chevron in the desktop header", () => {
       renderHeader({ onToggleTerminal: noop, onOpenScripts: noop, onRunScript: noop }, "desktop");
-      expect(screen.getByTitle("Open Terminal")).toBeDefined();
-      expect(screen.getByTestId("scripts-btn")).toBeDefined();
-    });
-
-    it("does not render terminal button inline on mobile", () => {
-      renderHeader({ onToggleTerminal: noop }, "mobile");
       expect(screen.queryByTitle("Open Terminal")).toBeNull();
+      expect(screen.queryByTestId("terminal-toggle-btn")).toBeNull();
+      expect(screen.queryByTestId("scripts-btn")).toBeNull();
+      expect(screen.queryByTestId("terminal-split-btn")).toBeNull();
     });
 
-    it("clicking main button calls onToggleTerminal without opening scripts dropdown", () => {
-      const onToggleTerminal = vi.fn();
-      renderHeader({ onToggleTerminal, onOpenScripts: noop, onRunScript: noop }, "desktop");
-      fireEvent.click(screen.getByTestId("terminal-toggle-btn"));
-      expect(onToggleTerminal).toHaveBeenCalledTimes(1);
-      expect(screen.queryByTestId("quick-scripts-dropdown")).toBeNull();
-    });
-
-    it("clicking scripts chevron opens dropdown without calling onToggleTerminal", async () => {
-      const onToggleTerminal = vi.fn();
-      renderHeader({ onToggleTerminal, onOpenScripts: noop, onRunScript: noop }, "desktop");
-
-      fireEvent.click(screen.getByTestId("scripts-btn"));
-
-      expect(onToggleTerminal).not.toHaveBeenCalled();
-      await waitFor(() => {
-        expect(screen.getByTestId("quick-scripts-dropdown")).toBeDefined();
-      });
-    });
-
-    it("fetches scripts and runs selected script from dropdown", async () => {
-      mockFetchScripts.mockResolvedValue({ build: "pnpm build" });
-      const onRunScript = vi.fn();
-
-      renderHeader({ onToggleTerminal: noop, onOpenScripts: noop, onRunScript, projectId: "proj-1" }, "desktop");
-      fireEvent.click(screen.getByTestId("scripts-btn"));
-
-      await waitFor(() => {
-        expect(screen.getByTestId("quick-script-item-build")).toBeDefined();
-      });
-
-      fireEvent.click(screen.getByTestId("quick-script-item-build"));
-      expect(onRunScript).toHaveBeenCalledWith("build", "pnpm build");
-      expect(screen.queryByTestId("quick-scripts-dropdown")).toBeNull();
-    });
-
-    it("shows loading state while scripts are fetching", () => {
-      mockFetchScripts.mockImplementation(() => new Promise(() => {}));
-      renderHeader({ onToggleTerminal: noop, onOpenScripts: noop, onRunScript: noop }, "desktop");
-      fireEvent.click(screen.getByTestId("scripts-btn"));
-      expect(screen.getByTestId("quick-scripts-loading")).toBeDefined();
-    });
-
-    it("shows empty state when no scripts are configured", async () => {
-      mockFetchScripts.mockResolvedValue({});
-      renderHeader({ onToggleTerminal: noop, onOpenScripts: noop, onRunScript: noop }, "desktop");
-      fireEvent.click(screen.getByTestId("scripts-btn"));
-      await waitFor(() => {
-        expect(screen.getByTestId("quick-scripts-empty")).toBeDefined();
-      });
-    });
-
-    it("shows manage scripts footer when scripts exist", async () => {
-      mockFetchScripts.mockResolvedValue({ test: "pnpm test" });
-      renderHeader({ onToggleTerminal: noop, onOpenScripts: noop, onRunScript: noop }, "desktop");
-      fireEvent.click(screen.getByTestId("scripts-btn"));
-      await waitFor(() => {
-        expect(screen.getByTestId("quick-scripts-manage")).toBeDefined();
-      });
-    });
-
-    it("supports keyboard navigation in scripts dropdown", async () => {
-      mockFetchScripts.mockResolvedValue({ alpha: "echo alpha", beta: "echo beta" });
-      const onRunScript = vi.fn();
-
-      renderHeader({ onToggleTerminal: noop, onOpenScripts: noop, onRunScript }, "desktop");
-      fireEvent.click(screen.getByTestId("scripts-btn"));
-
-      await waitFor(() => {
-        expect(screen.getByTestId("quick-script-item-alpha")).toBeDefined();
-      });
-
-      const menu = screen.getByTestId("quick-scripts-dropdown");
-      fireEvent.keyDown(menu, { key: "ArrowDown" });
-      fireEvent.keyDown(menu, { key: "Enter" });
-      expect(onRunScript).toHaveBeenCalledWith("alpha", "echo alpha");
-
-      fireEvent.click(screen.getByTestId("scripts-btn"));
-      await waitFor(() => {
-        expect(screen.getByTestId("quick-scripts-dropdown")).toBeDefined();
-      });
-      fireEvent.keyDown(screen.getByTestId("quick-scripts-dropdown"), { key: "Escape" });
-      await waitFor(() => {
-        expect(screen.queryByTestId("quick-scripts-dropdown")).toBeNull();
-      });
-    });
-
-    it("is always enabled regardless of task state", () => {
-      renderHeader({ onToggleTerminal: noop }, "desktop");
-      const btn = screen.getByTitle("Open Terminal");
-      expect(btn.hasAttribute("disabled")).toBe(false);
+    it("does not render terminal launcher affordances in the mobile header overflow", () => {
+      renderHeader({ onToggleTerminal: noop, onOpenScripts: noop, onRunScript: noop }, "mobile");
+      fireEvent.click(screen.getByTitle("More header actions"));
+      expect(screen.queryByTitle("Open Terminal")).toBeNull();
+      expect(screen.queryByTestId("terminal-toggle-btn")).toBeNull();
+      expect(screen.queryByTestId("scripts-btn")).toBeNull();
+      expect(screen.queryByTestId("terminal-split-btn")).toBeNull();
+      expect(screen.queryByTestId("overflow-terminal-primary-btn")).toBeNull();
+      expect(screen.queryByTestId("overflow-terminal-submenu-toggle")).toBeNull();
     });
   });
 
   describe("files button", () => {
-    it("renders files button on desktop when handler is provided", () => {
+    it("does not render files button on desktop when handler is provided", () => {
       renderHeader({ onOpenFiles: vi.fn() }, "desktop");
-      expect(screen.getByTitle("Browse files")).toBeDefined();
+      expect(screen.queryByTitle("Browse files")).toBeNull();
+      expect(screen.queryByTestId("files-toggle-btn")).toBeNull();
     });
 
     it("does not render files button on desktop when handler is omitted", () => {
@@ -529,16 +498,16 @@ describe("Header", () => {
       expect(screen.queryByTitle("Browse files")).toBeNull();
     });
 
-    it("calls onOpenFiles when desktop files button is clicked", () => {
+    it("does not call onOpenFiles from the removed desktop files button", () => {
       const onOpenFiles = vi.fn();
       renderHeader({ onOpenFiles }, "desktop");
-      fireEvent.click(screen.getByTitle("Browse files"));
-      expect(onOpenFiles).toHaveBeenCalled();
+      expect(screen.queryByTitle("Browse files")).toBeNull();
+      expect(onOpenFiles).not.toHaveBeenCalled();
     });
 
-    it("applies active class when files modal is open", () => {
+    it("does not render an active files shell when files modal is open on desktop", () => {
       renderHeader({ onOpenFiles: vi.fn(), filesOpen: true }, "desktop");
-      expect(screen.getByTitle("Browse files").className).toContain("btn-icon--active");
+      expect(screen.queryByTitle("Browse files")).toBeNull();
     });
 
     it("shows files action in mobile overflow menu", () => {
@@ -559,7 +528,7 @@ describe("Header", () => {
   describe("todos navigation", () => {
     for (const tier of ["desktop", "tablet"] as const) {
       it(`shows Todos only in More views and Mailbox only top-level on ${tier}`, () => {
-        renderHeader({ onChangeView: noop, onOpenTodos: vi.fn(), todosEnabled: true }, tier);
+        renderHeader({ onChangeView: noop, todosEnabled: true }, tier);
 
         expect(screen.queryByTestId("todos-toggle-btn")).toBeNull();
         expect(screen.getByTitle("Mailbox view")).toBeInTheDocument();
@@ -572,17 +541,25 @@ describe("Header", () => {
     }
 
     it("does not show Todos entry in More views when disabled", () => {
-      renderHeader({ onChangeView: noop, onOpenTodos: vi.fn(), todosEnabled: false }, "desktop");
+      renderHeader({ onChangeView: noop, todosEnabled: false }, "desktop");
       fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
       expect(screen.queryByTestId("view-overflow-todos")).toBeNull();
     });
 
-    it("calls onOpenTodos from More views", () => {
-      const onOpenTodos = vi.fn();
-      renderHeader({ onChangeView: noop, onOpenTodos, todosEnabled: true }, "desktop");
-      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
-      fireEvent.click(screen.getByTestId("view-overflow-todos"));
-      expect(onOpenTodos).toHaveBeenCalled();
+    it("routes to todos from More views and marks active state", () => {
+      const onChangeView = vi.fn();
+      renderHeader({ onChangeView, view: "todos", todosEnabled: true }, "desktop");
+
+      const trigger = screen.getByTestId("view-toggle-overflow-trigger");
+      expect(trigger.className).toContain("active");
+      fireEvent.click(trigger);
+
+      const todosItem = screen.getByTestId("view-overflow-todos");
+      expect(todosItem.className).toContain("active");
+      fireEvent.click(todosItem);
+
+      expect(onChangeView).toHaveBeenCalledWith("todos");
+      expect(screen.queryByTestId("view-overflow-todos")).toBeNull();
     });
   });
 
@@ -606,10 +583,24 @@ describe("Header", () => {
       expect(screen.queryByTitle("View usage")).toBeNull();
     });
 
-    it("renders usage button with correct title when onOpenUsage is provided on desktop", () => {
-      renderHeader({ onOpenUsage: vi.fn() }, "desktop");
-      expect(screen.getByTitle("View usage")).toBeDefined();
-      expect(screen.getByTestId("desktop-header-usage-btn")).toBeDefined();
+    it("renders the header usage button to the left of the right-dock toggle on desktop when onOpenUsage is provided", () => {
+      renderHeader({ onOpenUsage: vi.fn(), rightDockAvailable: true, onToggleRightDock: noop }, "desktop");
+      const usageBtn = screen.getByTestId("header-usage-btn");
+      expect(usageBtn.getAttribute("title")).toBe("View usage");
+      // Retired legacy toolbar testid stays gone.
+      expect(screen.queryByTestId("desktop-header-usage-btn")).toBeNull();
+      // Sits immediately to the left of the right-dock toggle.
+      expect(usageBtn.nextElementSibling).toBe(screen.getByTestId("header-right-dock-toggle"));
+    });
+
+    it("fires onOpenUsage with button bounds from the desktop header usage button", () => {
+      const onOpenUsage = vi.fn();
+      renderHeader({ onOpenUsage }, "desktop");
+      const usageBtn = screen.getByTestId("header-usage-btn") as HTMLButtonElement;
+      const mockRect = { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+      usageBtn.getBoundingClientRect = vi.fn(() => mockRect);
+      fireEvent.click(usageBtn);
+      expect(onOpenUsage).toHaveBeenCalledWith(mockRect);
     });
 
     it("does not render usage button inline on mobile when onOpenUsage is provided", () => {
@@ -625,26 +616,11 @@ describe("Header", () => {
       expect(screen.getByTestId("overflow-usage-btn")).toBeDefined();
     });
 
-    it("calls onOpenUsage with button bounds when usage button is clicked on desktop", () => {
+    it("does not call onOpenUsage from the removed desktop toolbar button", () => {
       const onOpenUsage = vi.fn();
       renderHeader({ onOpenUsage }, "desktop");
-
-      const usageButton = screen.getByTestId("desktop-header-usage-btn") as HTMLButtonElement;
-      const mockRect = {
-        top: 12,
-        bottom: 52,
-        left: 820,
-        right: 860,
-        width: 40,
-        height: 40,
-        x: 820,
-        y: 12,
-        toJSON: () => ({}),
-      } as DOMRect;
-      usageButton.getBoundingClientRect = vi.fn(() => mockRect);
-
-      fireEvent.click(usageButton);
-      expect(onOpenUsage).toHaveBeenCalledWith(mockRect);
+      expect(screen.queryByTestId("desktop-header-usage-btn")).toBeNull();
+      expect(onOpenUsage).not.toHaveBeenCalled();
     });
 
     it("calls onOpenUsage with button bounds when usage button in overflow menu is clicked", () => {
@@ -682,9 +658,9 @@ describe("Header", () => {
       expect(screen.queryByTitle("View Activity Log")).toBeNull();
     });
 
-    it("renders activity log button with correct title when onOpenActivityLog is provided on desktop", () => {
+    it("does not render activity log button inline on desktop when onOpenActivityLog is provided", () => {
       renderHeader({ onOpenActivityLog: vi.fn() }, "desktop");
-      expect(screen.getByTitle("View Activity Log")).toBeDefined();
+      expect(screen.queryByTitle("View Activity Log")).toBeNull();
     });
 
     it("does not render activity log button inline on mobile when onOpenActivityLog is provided", () => {
@@ -699,11 +675,11 @@ describe("Header", () => {
       expect(screen.getByTestId("overflow-activity-log-btn")).toBeDefined();
     });
 
-    it("calls onOpenActivityLog when activity log button is clicked on desktop", () => {
+    it("does not call onOpenActivityLog from the removed desktop toolbar button", () => {
       const onOpenActivityLog = vi.fn();
       renderHeader({ onOpenActivityLog }, "desktop");
-      fireEvent.click(screen.getByTitle("View Activity Log"));
-      expect(onOpenActivityLog).toHaveBeenCalled();
+      expect(screen.queryByTitle("View Activity Log")).toBeNull();
+      expect(onOpenActivityLog).not.toHaveBeenCalled();
     });
 
     it("calls onOpenActivityLog when activity log button in overflow menu is clicked", () => {
@@ -716,95 +692,19 @@ describe("Header", () => {
   });
 
   describe("planning button", () => {
-    it("renders planning button with correct title on desktop", () => {
-      renderHeader({ onOpenPlanning: vi.fn() }, "desktop");
-      expect(screen.getByTitle("Create a task with AI planning")).toBeDefined();
-    });
-
-    it("does not render planning button inline on mobile", () => {
-      renderHeader({ onOpenPlanning: vi.fn() }, "mobile");
+    it("does not render legacy planning affordances in the header on desktop", () => {
+      renderHeader({}, "desktop");
       expect(screen.queryByTitle("Create a task with AI planning")).toBeNull();
+      expect(screen.queryByTitle("Resume planning session")).toBeNull();
+      expect(screen.queryByTestId("planning-btn")).toBeNull();
+      expect(screen.queryByTestId("planning-badge")).toBeNull();
     });
 
-    it("calls onOpenPlanning when planning button is clicked", () => {
-      const onOpenPlanning = vi.fn();
-      renderHeader({ onOpenPlanning }, "desktop");
-      fireEvent.click(screen.getByTitle("Create a task with AI planning"));
-      expect(onOpenPlanning).toHaveBeenCalled();
-    });
-
-    it("has correct data-testid for testing on desktop", () => {
-      renderHeader({ onOpenPlanning: vi.fn() }, "desktop");
-      expect(screen.getByTestId("planning-btn")).toBeDefined();
-    });
-
-    describe("active session badge", () => {
-      it("does not render badge when activePlanningSessionCount is 0", () => {
-        renderHeader({ onOpenPlanning: vi.fn(), activePlanningSessionCount: 0 }, "desktop");
-        expect(screen.queryByTestId("planning-badge")).toBeNull();
-      });
-
-      it("does not render badge when activePlanningSessionCount is undefined", () => {
-        renderHeader({ onOpenPlanning: vi.fn() }, "desktop");
-        expect(screen.queryByTestId("planning-badge")).toBeNull();
-      });
-
-      it("renders badge when activePlanningSessionCount > 0", () => {
-        renderHeader({ onOpenPlanning: vi.fn(), activePlanningSessionCount: 1 }, "desktop");
-        expect(screen.getByTestId("planning-badge")).toBeDefined();
-      });
-
-      it("badge shows correct count", () => {
-        renderHeader({ onOpenPlanning: vi.fn(), activePlanningSessionCount: 3 }, "desktop");
-        expect(screen.getByTestId("planning-badge").textContent).toBe("3");
-      });
-
-      it("updates title to 'Resume planning session' when count > 0", () => {
-        renderHeader({ onOpenPlanning: vi.fn(), activePlanningSessionCount: 1 }, "desktop");
-        expect(screen.getByTitle("Resume planning session")).toBeDefined();
-        expect(screen.queryByTitle("Create a task with AI planning")).toBeNull();
-      });
-
-      it("keeps original title when count is 0", () => {
-        renderHeader({ onOpenPlanning: vi.fn(), activePlanningSessionCount: 0 }, "desktop");
-        expect(screen.getByTitle("Create a task with AI planning")).toBeDefined();
-      });
-
-      it("calls onResumePlanning when clicked with active sessions", () => {
-        const onResumePlanning = vi.fn();
-        const onOpenPlanning = vi.fn();
-        renderHeader({ onOpenPlanning, onResumePlanning, activePlanningSessionCount: 2 }, "desktop");
-        fireEvent.click(screen.getByTitle("Resume planning session"));
-        expect(onResumePlanning).toHaveBeenCalled();
-        expect(onOpenPlanning).not.toHaveBeenCalled();
-      });
-
-      it("calls onOpenPlanning when clicked with no active sessions", () => {
-        const onResumePlanning = vi.fn();
-        const onOpenPlanning = vi.fn();
-        renderHeader({ onOpenPlanning, onResumePlanning, activePlanningSessionCount: 0 }, "desktop");
-        fireEvent.click(screen.getByTitle("Create a task with AI planning"));
-        expect(onOpenPlanning).toHaveBeenCalled();
-        expect(onResumePlanning).not.toHaveBeenCalled();
-      });
-
-      it("calls onOpenPlanning when clicked with active sessions but no onResumePlanning", () => {
-        const onOpenPlanning = vi.fn();
-        renderHeader({ onOpenPlanning, activePlanningSessionCount: 1 }, "desktop");
-        // Without onResumePlanning, falls back to onOpenPlanning even with active sessions
-        fireEvent.click(screen.getByTitle("Resume planning session"));
-        expect(onOpenPlanning).toHaveBeenCalled();
-      });
-
-      it("badge has correct aria-label", () => {
-        renderHeader({ onOpenPlanning: vi.fn(), activePlanningSessionCount: 2 }, "desktop");
-        expect(screen.getByTestId("planning-badge").getAttribute("aria-label")).toBe("2 active planning sessions");
-      });
-
-      it("badge aria-label uses singular for count of 1", () => {
-        renderHeader({ onOpenPlanning: vi.fn(), activePlanningSessionCount: 1 }, "desktop");
-        expect(screen.getByTestId("planning-badge").getAttribute("aria-label")).toBe("1 active planning session");
-      });
+    it("does not render legacy planning affordances in the header on mobile", () => {
+      renderHeader({}, "mobile");
+      expect(screen.queryByTitle("Create a task with AI planning")).toBeNull();
+      expect(screen.queryByTestId("overflow-planning-btn")).toBeNull();
+      expect(screen.queryByTestId("overflow-planning-badge")).toBeNull();
     });
   });
 
@@ -819,174 +719,14 @@ describe("Header", () => {
       expect(screen.queryByTitle("More header actions")).toBeNull();
     });
 
-    it("shows terminal group in overflow menu on mobile", () => {
-      renderHeader({ onToggleTerminal: noop }, "mobile");
+    it("does not render terminal or scripts affordances in mobile header overflow", () => {
+      renderHeader({ onToggleTerminal: noop, onOpenScripts: noop, onRunScript: noop }, "mobile");
       fireEvent.click(screen.getByTitle("More header actions"));
-      expect(screen.getByTestId("overflow-terminal-primary-btn")).toBeDefined();
-      expect(screen.getByTestId("overflow-terminal-submenu-toggle")).toBeDefined();
-    });
-
-    it("shows terminal submenu items when terminal group is expanded on mobile", async () => {
-      renderHeader({ onToggleTerminal: noop, onOpenScripts: noop }, "mobile");
-      fireEvent.click(screen.getByTitle("More header actions"));
-      fireEvent.click(screen.getByTestId("overflow-terminal-submenu-toggle"));
-      await waitFor(() => {
-        expect(screen.getByTestId("overflow-scripts-manage")).toBeDefined();
-      });
-    });
-
-    it("shows scripts manage in terminal submenu on mobile when onOpenScripts is provided", async () => {
-      renderHeader({ onOpenScripts: noop }, "mobile");
-      fireEvent.click(screen.getByTitle("More header actions"));
-      fireEvent.click(screen.getByTestId("overflow-terminal-submenu-toggle"));
-      await waitFor(() => {
-        expect(screen.getByTestId("overflow-scripts-manage")).toBeDefined();
-      });
-    });
-
-    it("does not show scripts manage in terminal submenu when onOpenScripts is undefined", () => {
-      renderHeader({ onToggleTerminal: noop }, "mobile");
-      fireEvent.click(screen.getByTitle("More header actions"));
-      fireEvent.click(screen.getByTestId("overflow-terminal-submenu-toggle"));
-      expect(screen.queryByTestId("overflow-scripts-manage")).toBeNull();
-    });
-
-    it("calls onToggleTerminal from primary terminal button on mobile", () => {
-      const onToggleTerminal = vi.fn();
-      renderHeader({ onToggleTerminal }, "mobile");
-      fireEvent.click(screen.getByTitle("More header actions"));
-      fireEvent.click(screen.getByTestId("overflow-terminal-primary-btn"));
-      expect(onToggleTerminal).toHaveBeenCalled();
-    });
-
-    it("calls onOpenScripts from terminal submenu manage on mobile", async () => {
-      const onOpenScripts = vi.fn();
-      renderHeader({ onOpenScripts }, "mobile");
-      fireEvent.click(screen.getByTitle("More header actions"));
-      fireEvent.click(screen.getByTestId("overflow-terminal-submenu-toggle"));
-      await waitFor(() => {
-        expect(screen.getByTestId("overflow-scripts-manage")).toBeDefined();
-      });
-      fireEvent.click(screen.getByTestId("overflow-scripts-manage"));
-      expect(onOpenScripts).toHaveBeenCalled();
-    });
-
-    it("primary terminal button opens terminal directly without expanding submenu", () => {
-      const onToggleTerminal = vi.fn();
-      renderHeader({ onToggleTerminal }, "mobile");
-      fireEvent.click(screen.getByTitle("More header actions"));
-      // Click primary button — should open terminal and NOT expand submenu
-      fireEvent.click(screen.getByTestId("overflow-terminal-primary-btn"));
-      expect(onToggleTerminal).toHaveBeenCalled();
-      // Overflow menu should close after action
-      expect(screen.queryByRole("menu")).toBeNull();
-    });
-
-    it("chevron toggle expands submenu without opening terminal", () => {
-      const onToggleTerminal = vi.fn();
-      renderHeader({ onToggleTerminal, onOpenScripts: noop }, "mobile");
-      fireEvent.click(screen.getByTitle("More header actions"));
-      // Click chevron — should expand submenu but NOT call onToggleTerminal
-      fireEvent.click(screen.getByTestId("overflow-terminal-submenu-toggle"));
-      expect(onToggleTerminal).not.toHaveBeenCalled();
-      // Overflow menu should still be open (check by primary button still being visible)
-      expect(screen.getByTestId("overflow-terminal-primary-btn")).toBeDefined();
-    });
-
-    it("renders one script item per fetched script in submenu", async () => {
-      mockFetchScripts.mockResolvedValue({ build: "pnpm build", test: "pnpm test" });
-      const onRunScript = vi.fn();
-      renderHeader({ onToggleTerminal: noop, onRunScript, onOpenScripts: noop, projectId: "test-project" }, "mobile");
-      fireEvent.click(screen.getByTitle("More header actions"));
-      fireEvent.click(screen.getByTestId("overflow-terminal-submenu-toggle"));
-      await waitFor(() => {
-        expect(screen.getByTestId("overflow-script-item-build")).toBeDefined();
-        expect(screen.getByTestId("overflow-script-item-test")).toBeDefined();
-      });
-    });
-
-    it("clicking a script entry calls onRunScript and closes overflow", async () => {
-      mockFetchScripts.mockResolvedValue({ build: "pnpm build" });
-      const onRunScript = vi.fn();
-      renderHeader({ onToggleTerminal: noop, onRunScript, onOpenScripts: noop, projectId: "test-project" }, "mobile");
-      fireEvent.click(screen.getByTitle("More header actions"));
-      fireEvent.click(screen.getByTestId("overflow-terminal-submenu-toggle"));
-      await waitFor(() => {
-        expect(screen.getByTestId("overflow-script-item-build")).toBeDefined();
-      });
-      fireEvent.click(screen.getByTestId("overflow-script-item-build"));
-      expect(onRunScript).toHaveBeenCalledWith("build", "pnpm build");
-      // Overflow menu should close after running script
-      expect(screen.queryByRole("menu")).toBeNull();
-    });
-
-    it("does not render old overflow-scripts-btn item", async () => {
-      mockFetchScripts.mockResolvedValue({ build: "pnpm build" });
-      renderHeader({ onToggleTerminal: noop, onRunScript: noop, onOpenScripts: noop, projectId: "test-project" }, "mobile");
-      fireEvent.click(screen.getByTitle("More header actions"));
-      fireEvent.click(screen.getByTestId("overflow-terminal-submenu-toggle"));
-      await waitFor(() => {
-        expect(screen.getByTestId("overflow-script-item-build")).toBeDefined();
-      });
-      // The old generic scripts button should not exist
+      expect(screen.queryByTestId("overflow-terminal-primary-btn")).toBeNull();
+      expect(screen.queryByTestId("overflow-terminal-submenu-toggle")).toBeNull();
       expect(screen.queryByTestId("overflow-scripts-btn")).toBeNull();
-      // The old terminal submenu "Open Terminal" button should not exist
       expect(screen.queryByTestId("overflow-terminal-btn")).toBeNull();
-    });
-
-    it("shows loading state while fetching scripts", () => {
-      mockFetchScripts.mockImplementation(() => new Promise(() => {}));
-      renderHeader({ onToggleTerminal: noop, onOpenScripts: noop, projectId: "test-project" }, "mobile");
-      fireEvent.click(screen.getByTitle("More header actions"));
-      fireEvent.click(screen.getByTestId("overflow-terminal-submenu-toggle"));
-      expect(screen.getByTestId("overflow-scripts-loading")).toBeDefined();
-    });
-
-    it("shows manage scripts link when no scripts are configured", async () => {
-      mockFetchScripts.mockResolvedValue({});
-      renderHeader({ onToggleTerminal: noop, onOpenScripts: noop, projectId: "test-project" }, "mobile");
-      fireEvent.click(screen.getByTitle("More header actions"));
-      fireEvent.click(screen.getByTestId("overflow-terminal-submenu-toggle"));
-      await waitFor(() => {
-        expect(screen.getByTestId("overflow-scripts-manage")).toBeDefined();
-      });
-    });
-
-    it("does not show manage scripts link when onOpenScripts is undefined", async () => {
-      mockFetchScripts.mockResolvedValue({});
-      renderHeader({ onToggleTerminal: noop, projectId: "test-project" }, "mobile");
-      fireEvent.click(screen.getByTitle("More header actions"));
-      fireEvent.click(screen.getByTestId("overflow-terminal-submenu-toggle"));
-      await waitFor(() => {
-        expect(screen.queryByTestId("overflow-scripts-manage")).toBeNull();
-      });
-    });
-
-    it("handles missing onRunScript gracefully", async () => {
-      mockFetchScripts.mockResolvedValue({ build: "pnpm build" });
-      renderHeader({ onToggleTerminal: noop, onOpenScripts: noop, projectId: "test-project" }, "mobile");
-      fireEvent.click(screen.getByTitle("More header actions"));
-      fireEvent.click(screen.getByTestId("overflow-terminal-submenu-toggle"));
-      await waitFor(() => {
-        expect(screen.getByTestId("overflow-script-item-build")).toBeDefined();
-      });
-      // Clicking script without onRunScript should not throw
-      expect(() => {
-        fireEvent.click(screen.getByTestId("overflow-script-item-build"));
-      }).not.toThrow();
-      // Overflow menu should still close
-      expect(screen.queryByRole("menu")).toBeNull();
-    });
-
-    it("shows Manage Scripts after script entries when scripts exist", async () => {
-      mockFetchScripts.mockResolvedValue({ build: "pnpm build" });
-      renderHeader({ onToggleTerminal: noop, onRunScript: noop, onOpenScripts: noop, projectId: "test-project" }, "mobile");
-      fireEvent.click(screen.getByTitle("More header actions"));
-      fireEvent.click(screen.getByTestId("overflow-terminal-submenu-toggle"));
-      await waitFor(() => {
-        expect(screen.getByTestId("overflow-script-item-build")).toBeDefined();
-        expect(screen.getByTestId("overflow-scripts-manage")).toBeDefined();
-      });
+      expect(screen.queryByTestId("overflow-scripts-manage")).toBeNull();
     });
 
     it("shows GitHub import in overflow menu on mobile", () => {
@@ -995,39 +735,46 @@ describe("Header", () => {
       expect(screen.getByText("Import from GitHub")).toBeDefined();
     });
 
-    it("shows planning in overflow menu on mobile", () => {
-      renderHeader({ onOpenPlanning: noop }, "mobile");
+    it("keeps Mailbox in the compact overflow with unread and approval badges", () => {
+      const onOpenMailbox = vi.fn();
+      renderHeader({ onOpenMailbox, mailboxUnreadCount: 3, mailboxPendingApprovalCount: 2 }, "mobile");
       fireEvent.click(screen.getByTitle("More header actions"));
-      expect(screen.getByTestId("overflow-planning-btn")).toBeDefined();
+
+      const mailboxButton = screen.getByTestId("overflow-mailbox-btn");
+      expect(mailboxButton).toHaveTextContent("Mailbox (3)");
+      expect(screen.getByTestId("overflow-mailbox-approval-badge")).toHaveTextContent("2");
+
+      fireEvent.click(mailboxButton);
+      expect(onOpenMailbox).toHaveBeenCalledTimes(1);
     });
 
-    it("shows planning badge in overflow menu when activePlanningSessionCount > 0", () => {
-      renderHeader({ onOpenPlanning: noop, activePlanningSessionCount: 1 }, "mobile");
+    it("keeps compact overflow tool ordering from before terminal moved to the footer launcher", () => {
+      renderHeader({ onOpenGitManager: noop, onOpenSchedules: noop, onOpenActivityLog: noop, onOpenMailbox: noop, onOpenUsage: noop, onOpenWorkflowEditor: noop }, "mobile");
       fireEvent.click(screen.getByTitle("More header actions"));
-      expect(screen.getByTestId("overflow-planning-badge")).toBeDefined();
-      expect(screen.getByTestId("overflow-planning-badge").textContent).toBe("1");
+
+      const menu = screen.getByRole("menu", { name: "Additional header actions" });
+      const orderedItems = [
+        "overflow-git-btn",
+        "overflow-schedules-btn",
+        "overflow-activity-log-btn",
+        "overflow-mailbox-btn",
+        "overflow-usage-btn",
+        "overflow-workflow-steps-btn",
+      ].map((testId) => screen.getByTestId(testId));
+
+      expect(menu).toContainElement(orderedItems[0]);
+      for (let index = 1; index < orderedItems.length; index += 1) {
+        expect(orderedItems[index - 1].compareDocumentPosition(orderedItems[index]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      }
     });
 
-    it("does not show planning badge in overflow menu when count is 0", () => {
-      renderHeader({ onOpenPlanning: noop, activePlanningSessionCount: 0 }, "mobile");
+    it("omits planning from the header overflow menu on mobile", () => {
+      renderHeader({}, "mobile");
       fireEvent.click(screen.getByTitle("More header actions"));
+      expect(screen.queryByTestId("overflow-planning-btn")).toBeNull();
       expect(screen.queryByTestId("overflow-planning-badge")).toBeNull();
-    });
-
-    it("calls onResumePlanning from overflow menu when active sessions exist", () => {
-      const onResumePlanning = vi.fn();
-      const onOpenPlanning = vi.fn();
-      renderHeader({ onOpenPlanning, onResumePlanning, activePlanningSessionCount: 2 }, "mobile");
-      fireEvent.click(screen.getByTitle("More header actions"));
-      fireEvent.click(screen.getByTestId("overflow-planning-btn"));
-      expect(onResumePlanning).toHaveBeenCalled();
-      expect(onOpenPlanning).not.toHaveBeenCalled();
-    });
-
-    it("shows resume text in overflow menu when active sessions exist", () => {
-      renderHeader({ onOpenPlanning: noop, activePlanningSessionCount: 1 }, "mobile");
-      fireEvent.click(screen.getByTitle("More header actions"));
-      expect(screen.getByText("Resume planning session (1)")).toBeDefined();
+      expect(screen.queryByText("Create a task with AI planning")).toBeNull();
+      expect(screen.queryByText("Resume planning session (1)")).toBeNull();
     });
 
     it("shows settings in overflow menu on mobile", () => {
@@ -1038,10 +785,9 @@ describe("Header", () => {
   });
 
   describe("nodes button", () => {
-    it("omits Nodes button from desktop overflow because Nodes lives in Command Center", () => {
+    it("omits the empty desktop overflow trigger after Nodes and Automation moved elsewhere", () => {
       renderHeader({}, "desktop");
-      expect(screen.getByTestId("desktop-overflow-trigger")).toBeDefined();
-      fireEvent.click(screen.getByTestId("desktop-overflow-trigger"));
+      expect(screen.queryByTestId("desktop-overflow-trigger")).toBeNull();
       expect(screen.queryByTestId("desktop-overflow-nodes-btn")).toBeNull();
     });
 
@@ -1066,6 +812,39 @@ describe("Header", () => {
     it("renders search toggle button when onSearchChange and view='list' are provided", () => {
       renderHeader({ onSearchChange: vi.fn(), view: "list" });
       expect(screen.getByTestId("desktop-header-search-btn")).toBeDefined();
+    });
+
+    it("renders the desktop search toggle after the empty workflow portal slot", () => {
+      renderHeader({ onSearchChange: vi.fn(), onChangeView: noop, view: "board", leftSidebarNavActive: true }, "desktop");
+      const workflowSlot = screen.getByTestId("header-workflow-slot");
+      const searchToggle = screen.getByTestId("desktop-header-search-btn");
+
+      expect(screen.getAllByTestId("desktop-header-search-btn")).toHaveLength(1);
+      expect(workflowSlot.compareDocumentPosition(searchToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("keeps the desktop search toggle after a populated workflow portal slot", () => {
+      renderHeader({ onSearchChange: vi.fn(), onChangeView: noop, view: "board", leftSidebarNavActive: true }, "desktop");
+      const workflowSlot = screen.getByTestId("header-workflow-slot");
+      const workflowSwitcher = document.createElement("button");
+      workflowSwitcher.type = "button";
+      workflowSwitcher.dataset.testid = "mock-workflow-switcher";
+      workflowSwitcher.textContent = "Coding workflow";
+      workflowSlot.appendChild(workflowSwitcher);
+      const searchToggle = screen.getByTestId("desktop-header-search-btn");
+
+      expect(screen.getAllByTestId("desktop-header-search-btn")).toHaveLength(1);
+      expect(workflowSlot.compareDocumentPosition(searchToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(workflowSwitcher.compareDocumentPosition(searchToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("keeps the tablet search toggle after the workflow portal slot", () => {
+      renderHeader({ onSearchChange: vi.fn(), onChangeView: noop, view: "board", leftSidebarNavActive: true }, "tablet");
+      const workflowSlot = screen.getByTestId("header-workflow-slot");
+      const searchToggle = screen.getByTestId("desktop-header-search-btn");
+
+      expect(screen.getAllByTestId("desktop-header-search-btn")).toHaveLength(1);
+      expect(workflowSlot.compareDocumentPosition(searchToggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it("does not render search toggle when view is 'agents'", () => {
@@ -1244,11 +1023,10 @@ describe("Header", () => {
   });
 
   describe("automation button", () => {
-    it("renders automation button in desktop overflow", () => {
+    it("does not render automation in a desktop overflow shell", () => {
       renderHeader({ onOpenSchedules: vi.fn() }, "desktop");
-      expect(screen.getByTestId("desktop-overflow-trigger")).toBeDefined();
-      fireEvent.click(screen.getByTestId("desktop-overflow-trigger"));
-      expect(screen.getByTestId("desktop-overflow-schedules-btn")).toBeDefined();
+      expect(screen.queryByTestId("desktop-overflow-trigger")).toBeNull();
+      expect(screen.queryByTestId("desktop-overflow-schedules-btn")).toBeNull();
     });
 
     it("does not render automation button inline on mobile", () => {
@@ -1256,18 +1034,16 @@ describe("Header", () => {
       expect(screen.queryByTitle("Automation")).toBeNull();
     });
 
-    it("calls onOpenSchedules when automation button is clicked from desktop overflow", () => {
+    it("does not call onOpenSchedules from the removed desktop overflow", () => {
       const onOpenSchedules = vi.fn();
       renderHeader({ onOpenSchedules }, "desktop");
-      fireEvent.click(screen.getByTestId("desktop-overflow-trigger"));
-      fireEvent.click(screen.getByTestId("desktop-overflow-schedules-btn"));
-      expect(onOpenSchedules).toHaveBeenCalled();
+      expect(screen.queryByTestId("desktop-overflow-schedules-btn")).toBeNull();
+      expect(onOpenSchedules).not.toHaveBeenCalled();
     });
 
-    it("has correct data-testid for testing on desktop", () => {
+    it("removes the desktop automation data-testid with the empty overflow trigger", () => {
       renderHeader({ onOpenSchedules: vi.fn() }, "desktop");
-      fireEvent.click(screen.getByTestId("desktop-overflow-trigger"));
-      expect(screen.getByTestId("desktop-overflow-schedules-btn")).toBeDefined();
+      expect(screen.queryByTestId("desktop-overflow-schedules-btn")).toBeNull();
     });
 
     it("includes automation in overflow menu on mobile", () => {
@@ -1361,11 +1137,16 @@ describe("Header", () => {
     });
 
     it("can open mobile search when mobileNavEnabled is true", () => {
-      renderHeader({ view: "board", searchQuery: "", onSearchChange: vi.fn(), onChangeView: noop }, "mobile");
+      renderHeader({ view: "board", searchQuery: "", onSearchChange: vi.fn(), onChangeView: noop, mobileNavEnabled: true }, "mobile");
       // Should show the trigger button
-      expect(screen.getByTestId("mobile-header-search-btn")).toBeDefined();
-      // Expanded search should not be visible initially
+      const mobileSearchTrigger = screen.getByTestId("mobile-header-search-btn");
+      expect(mobileSearchTrigger).toBeDefined();
+      expect(screen.getByTestId("header-workflow-slot")).toBeInTheDocument();
+      expect(screen.queryByTestId("desktop-header-search-btn")).toBeNull();
+      // Expanded search should not be visible initially, then opens from the unchanged mobile trigger.
       expect(screen.queryByPlaceholderText("Search tasks...")).toBeNull();
+      fireEvent.click(mobileSearchTrigger);
+      expect(screen.getByPlaceholderText("Search tasks...")).toBeDefined();
     });
 
     it("closes mobile search and clears query when close button clicked with mobileNavEnabled", () => {
@@ -1635,7 +1416,11 @@ describe("Header", () => {
   });
 
   describe("action ordering", () => {
-    it("Settings is the last inline action on desktop after engine controls moved to the footer", () => {
+    it("places only the Usage button after Settings on desktop after engine controls moved to the footer", () => {
+      /*
+      FNXC:Navigation 2026-06-22-12:00:
+      Usage moved back to the top header (left of the right-dock toggle), so it now renders after Settings in the inline header actions. Settings is the last inline action ONLY among the primary controls; the trailing Usage button (and the right-dock toggle when available) intentionally follow it.
+      */
       const { container } = renderHeader({
         onOpenUsage: noop,
         onOpenActivityLog: noop,
@@ -1660,7 +1445,8 @@ describe("Header", () => {
       expect(settingsIdx).toBeGreaterThanOrEqual(0);
 
       const itemsAfterSettings = inlineItems.slice(settingsIdx + 1);
-      expect(itemsAfterSettings).toHaveLength(0);
+      // Only the relocated Usage button trails Settings (no right-dock toggle without rightDockAvailable).
+      expect(itemsAfterSettings.map((el) => el.getAttribute("data-testid"))).toEqual(["header-usage-btn"]);
     });
 
     it("Settings is the last item in the mobile overflow menu", () => {

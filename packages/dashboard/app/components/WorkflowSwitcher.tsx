@@ -12,6 +12,8 @@ export interface WorkflowSwitcherProps {
   value: string;
   onChange: (id: string) => void;
   counts: Map<string, WorkflowStatusCounts>;
+  /** Fired each time the dropdown transitions from closed to open so consumers can refresh count data. */
+  onOpen?: () => void;
   label?: string;
   onEditWorkflow?: (workflowId: string) => void;
   onCreateWorkflow?: () => void;
@@ -24,7 +26,37 @@ interface DropdownPosition {
   maxHeight: number;
 }
 
-const ZERO_COUNTS: WorkflowStatusCounts = { todo: 0, inProgress: 0, done: 0 };
+const ZERO_COUNTS: WorkflowStatusCounts = { todo: 0, inProgress: 0, done: 0, merging: 0 };
+const DEFAULT_MENU_HORIZONTAL_PADDING = 16;
+const DEFAULT_MENU_MIN_WIDTH = 240;
+
+/**
+ * FNXC:WorkflowSwitcher 2026-06-21-18:34:
+ * The open listbox must expose full workflow names for comparison while the collapsed trigger remains intentionally narrow and ellipsized.
+ * Size the menu from measured name content plus option decorations, then clamp to the viewport so the trigger width can prevent shrinking but cannot force long names to stay truncated.
+ * OPTION_DECORATIONS_WIDTH budgets the option row padding/gaps, three count badges plus separators, an optional btn-icon edit affordance, and scrollbar allowance from the existing token-sized CSS.
+ */
+export const OPTION_DECORATIONS_WIDTH = 200;
+
+export interface ComputeMenuWidthInput {
+  longestNameWidth: number;
+  triggerWidth: number;
+  viewportWidth: number;
+  horizontalPadding?: number;
+  minWidth?: number;
+}
+
+export function computeMenuWidth({
+  longestNameWidth,
+  triggerWidth,
+  viewportWidth,
+  horizontalPadding = DEFAULT_MENU_HORIZONTAL_PADDING,
+  minWidth = DEFAULT_MENU_MIN_WIDTH,
+}: ComputeMenuWidthInput): number {
+  const contentWidth = Math.max(0, longestNameWidth) + OPTION_DECORATIONS_WIDTH;
+  const desired = Math.max(triggerWidth, contentWidth, minWidth);
+  return Math.min(desired, viewportWidth - horizontalPadding * 2);
+}
 
 function getCounts(counts: Map<string, WorkflowStatusCounts>, workflowId: string): WorkflowStatusCounts {
   return counts.get(workflowId) ?? ZERO_COUNTS;
@@ -42,13 +74,18 @@ function getCounts(counts: Map<string, WorkflowStatusCounts>, workflowId: string
  * FNXC:WorkflowSwitcher 2026-06-20-15:34:
  * Workflow edit and creation affordances moved into the shared dropdown so Board and ListView cannot leave separate toolbar icon shells behind.
  * Each option row owns a sibling edit button, and New workflow remains visible in a non-scrolling footer while long workflow lists scroll.
+ *
+ * FNXC:WorkflowSwitcher 2026-06-21-00:00:
+ * Opening the dropdown must refresh workflow count data because task-to-workflow assignments do not emit board-workflows invalidation events.
+ * Fire onOpen only on closed-to-open transitions so consumers can refetch without close-time calls or render loops.
  */
-export function WorkflowSwitcher({ workflows, value, onChange, counts, label: labelProp, onEditWorkflow, onCreateWorkflow }: WorkflowSwitcherProps) {
+export function WorkflowSwitcher({ workflows, value, onChange, counts, onOpen, label: labelProp, onEditWorkflow, onCreateWorkflow }: WorkflowSwitcherProps) {
   const { t } = useTranslation("app");
   const label = labelProp ?? t("workflowSwitcher.label", "Workflow");
   const todoLabel = t("workflowSwitcher.todo", "Todo");
   const inProgressLabel = t("workflowSwitcher.inProgress", "In Progress");
   const doneLabel = t("workflowSwitcher.done", "Done");
+  const mergingLabel = t("workflowSwitcher.merging", "Merging");
   const editWorkflowLabel = t("workflowSwitcher.editWorkflow", "Edit workflow");
   const newWorkflowLabel = t("workflowSwitcher.newWorkflow", "New workflow");
   const listboxId = useId();
@@ -62,10 +99,23 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const measurementCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const onOpenRef = useRef(onOpen);
 
   const selectedIndex = useMemo(() => Math.max(0, workflows.findIndex((workflow) => workflow.id === value)), [value, workflows]);
   const selectedWorkflow = workflows[selectedIndex] ?? workflows[0] ?? null;
   const selectedCounts = selectedWorkflow ? getCounts(counts, selectedWorkflow.id) : ZERO_COUNTS;
+
+  const measureLongestOptionNameWidth = useCallback((names: string[]) => {
+    const trigger = triggerRef.current;
+    if (!trigger) return 0;
+    const canvas = measurementCanvasRef.current ?? document.createElement("canvas");
+    measurementCanvasRef.current = canvas;
+    const context = canvas.getContext("2d");
+    if (!context) return 0;
+    context.font = getComputedStyle(trigger).font;
+    return names.reduce((longestWidth, name) => Math.max(longestWidth, context.measureText(name).width), 0);
+  }, []);
 
   const updateDropdownPosition = useCallback(() => {
     const trigger = triggerRef.current;
@@ -75,7 +125,7 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
     const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
     const offsetTop = window.visualViewport?.offsetTop ?? 0;
     const offsetLeft = window.visualViewport?.offsetLeft ?? 0;
-    const horizontalPadding = 16;
+    const horizontalPadding = DEFAULT_MENU_HORIZONTAL_PADDING;
     const verticalPadding = 16;
     const gap = 4;
     const preferredHeight = Math.min(viewportHeight * 0.6, 320);
@@ -87,14 +137,19 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
     const openUpward = spaceBelow < preferredHeight && spaceAbove > spaceBelow;
     const availableHeight = Math.max((openUpward ? spaceAbove : spaceBelow) - verticalPadding - gap, 160);
     const maxHeight = Math.max(Math.min(availableHeight, preferredHeight), 160);
-    const width = Math.min(Math.max(rect.width, 240), viewportWidth - horizontalPadding * 2);
+    const longestNameWidth = measureLongestOptionNameWidth(workflows.map((workflow) => workflow.name));
+    const width = computeMenuWidth({ longestNameWidth, triggerWidth: rect.width, viewportWidth, horizontalPadding });
     const left = Math.min(Math.max(triggerLeft, horizontalPadding), viewportWidth - horizontalPadding - width) + offsetLeft;
     const top = openUpward
       ? Math.max(verticalPadding + offsetTop, triggerTop - maxHeight - gap + offsetTop)
       : Math.min(triggerBottom + gap + offsetTop, viewportHeight + offsetTop - verticalPadding - maxHeight);
 
     setDropdownPosition({ top, left, width, maxHeight });
-  }, []);
+  }, [measureLongestOptionNameWidth, workflows]);
+
+  useEffect(() => {
+    onOpenRef.current = onOpen;
+  }, [onOpen]);
 
   useEffect(() => {
     setPortalRoot(document.body);
@@ -141,6 +196,21 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
     }
   }, [highlightedIndex, isOpen]);
 
+  const openDropdown = useCallback(() => {
+    if (isOpen) return;
+    onOpenRef.current?.();
+    setIsOpen(true);
+  }, [isOpen]);
+
+  const toggleDropdown = useCallback(() => {
+    if (isOpen) {
+      setIsOpen(false);
+      return;
+    }
+    onOpenRef.current?.();
+    setIsOpen(true);
+  }, [isOpen]);
+
   const selectWorkflow = useCallback((workflowId: string) => {
     onChange(workflowId);
     setIsOpen(false);
@@ -164,7 +234,7 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
       case "ArrowDown":
         event.preventDefault();
         if (!isOpen) {
-          setIsOpen(true);
+          openDropdown();
         } else {
           setHighlightedIndex((current) => (workflows.length ? (current + 1) % workflows.length : 0));
         }
@@ -172,7 +242,7 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
       case "ArrowUp":
         event.preventDefault();
         if (!isOpen) {
-          setIsOpen(true);
+          openDropdown();
         } else {
           setHighlightedIndex((current) => (workflows.length ? (current - 1 + workflows.length) % workflows.length : 0));
         }
@@ -184,7 +254,7 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
           const workflow = workflows[highlightedIndex];
           if (workflow) selectWorkflow(workflow.id);
         } else {
-          setIsOpen(true);
+          openDropdown();
         }
         break;
       case "Escape":
@@ -195,12 +265,18 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
         setIsOpen(false);
         break;
     }
-  }, [highlightedIndex, isOpen, selectWorkflow, workflows]);
+  }, [highlightedIndex, isOpen, openDropdown, selectWorkflow, workflows]);
 
   if (!selectedWorkflow) return null;
 
   const renderCountBadges = (workflowCounts: WorkflowStatusCounts, variant: "trigger" | "option") => (
     <span className={`workflow-switcher-counts workflow-switcher-counts--${variant}`} aria-hidden="true">
+      {workflowCounts.merging > 0 ? (
+        <span
+          className="workflow-switcher-merging-indicator"
+          title={t("workflowSwitcher.mergingTitle", "{{count}} merging", { count: workflowCounts.merging })}
+        />
+      ) : null}
       <span className="workflow-switcher-count workflow-switcher-count--todo" title={`${todoLabel}: ${workflowCounts.todo}`}>{workflowCounts.todo}</span>
       <span className="workflow-switcher-count-separator">·</span>
       <span className="workflow-switcher-count workflow-switcher-count--in-progress" title={`${inProgressLabel}: ${workflowCounts.inProgress}`}>{workflowCounts.inProgress}</span>
@@ -211,13 +287,14 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
 
   const renderAccessibleCounts = (workflowCounts: WorkflowStatusCounts) => (
     <span className="visually-hidden">
-      {t("workflowSwitcher.countsAria", "{{todoLabel}}: {{todo}}, {{inProgressLabel}}: {{inProgress}}, {{doneLabel}}: {{done}}", {
+      {t("workflowSwitcher.countsAria", "{{todoLabel}}: {{todo}}, {{inProgressLabel}}: {{inProgress}}, {{doneLabel}}: {{done}}{{mergingSuffix}}", {
         todoLabel,
         todo: workflowCounts.todo,
         inProgressLabel,
         inProgress: workflowCounts.inProgress,
         doneLabel,
         done: workflowCounts.done,
+        mergingSuffix: workflowCounts.merging > 0 ? `, ${mergingLabel}: ${workflowCounts.merging}` : "",
       })}
     </span>
   );
@@ -310,7 +387,7 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
         aria-expanded={isOpen}
         aria-controls={isOpen ? listboxId : undefined}
         aria-label={t("workflowSwitcher.triggerAria", "Select workflow. Current workflow: {{name}}", { name: selectedWorkflow.name })}
-        onClick={() => setIsOpen((open) => !open)}
+        onClick={toggleDropdown}
         onKeyDown={handleKeyDown}
       >
         <span className="workflow-switcher-trigger-main">
@@ -318,7 +395,7 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
           {isOpen ? renderCountBadges(selectedCounts, "trigger") : null}
           {isOpen ? renderAccessibleCounts(selectedCounts) : null}
         </span>
-        <ChevronDown className="workflow-switcher-chevron" aria-hidden="true" />
+        <ChevronDown size={14} className="workflow-switcher-chevron" aria-hidden="true" />
       </button>
       {dropdown}
     </div>

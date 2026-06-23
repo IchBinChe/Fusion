@@ -123,18 +123,21 @@ describe("MobileNavBar", () => {
     mockViewport("mobile");
   });
 
-  it("renders eight tab buttons (tasks + agents + missions + chat + mailbox + command center + skills + more) when showSkillsTab is true", () => {
+  it("renders seven top-level tab buttons (command center + tasks + agents + missions + chat + mailbox + more) and keeps skills in More when showSkillsTab is true", () => {
     render(<MobileNavBar {...createDefaultProps()} showSkillsTab={true} />);
 
+    expect(screen.getByTestId("mobile-nav-tab-command-center")).toBeDefined();
     expect(screen.getByTestId("mobile-nav-tab-tasks")).toBeDefined();
     expect(screen.getByTestId("mobile-nav-tab-agents")).toBeDefined();
     expect(screen.getByTestId("mobile-nav-tab-missions")).toBeDefined();
     expect(screen.getByTestId("mobile-nav-tab-chat")).toBeDefined();
     expect(screen.getByTestId("mobile-nav-tab-mailbox")).toBeDefined();
-    expect(screen.getByTestId("mobile-nav-tab-command-center")).toBeDefined();
-    expect(screen.getByTestId("mobile-nav-tab-skills")).toBeDefined();
+    expect(screen.queryByTestId("mobile-nav-tab-skills")).toBeNull();
     expect(screen.queryByTestId("mobile-nav-tab-roadmaps")).toBeNull();
     expect(screen.getByTestId("mobile-nav-tab-more")).toBeDefined();
+
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    expect(screen.getByTestId("mobile-more-item-skills")).toBeDefined();
   });
 
   it("does not render legacy roadmaps tab", () => {
@@ -142,23 +145,24 @@ describe("MobileNavBar", () => {
     expect(screen.queryByTestId("mobile-nav-tab-roadmaps")).toBeNull();
   });
 
-  it("keeps skills available without rendering legacy roadmaps destinations", () => {
+  it("keeps skills available in More without rendering legacy roadmaps destinations", () => {
     render(<MobileNavBar {...createDefaultProps()} showSkillsTab={true} experimentalFeatures={{}} />);
 
-    expect(screen.getByTestId("mobile-nav-tab-skills")).toBeDefined();
+    expect(screen.queryByTestId("mobile-nav-tab-skills")).toBeNull();
     expect(screen.queryByTestId("mobile-nav-tab-roadmaps")).toBeNull();
 
     fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    expect(screen.getByTestId("mobile-more-item-skills")).toBeDefined();
     expect(screen.queryByTestId("mobile-more-item-roadmaps")).toBeNull();
   });
 
-  it("keeps skills top-level regardless of legacy roadmaps view value", () => {
+  it("keeps skills in the More sheet regardless of legacy roadmaps view value", () => {
     render(<MobileNavBar {...createDefaultProps()} view="board" showSkillsTab={true} experimentalFeatures={{}} />);
 
-    expect(screen.getByTestId("mobile-nav-tab-skills")).toBeDefined();
+    expect(screen.queryByTestId("mobile-nav-tab-skills")).toBeNull();
 
     fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
-    expect(screen.queryByTestId("mobile-more-item-skills")).toBeNull();
+    expect(screen.getByTestId("mobile-more-item-skills")).toBeDefined();
   });
 
   it("does not render skills tab when showSkillsTab is false", () => {
@@ -189,7 +193,9 @@ describe("MobileNavBar", () => {
     expect(screen.getByTestId("mobile-nav-tab-mailbox").querySelector(".mobile-nav-tab-badge")?.textContent).toBe("7");
     sevenTabRender.unmount();
 
-    const eightTabRender = render(
+    // Skills is never a top-level tab, so enabling it keeps the top-level column count at seven
+    // and the skills destination, plus its active view, lives in the More sheet.
+    const skillsEnabledRender = render(
       <MobileNavBar
         {...createDefaultProps()}
         showSkillsTab={true}
@@ -199,10 +205,13 @@ describe("MobileNavBar", () => {
         mailboxPendingApprovalCount={1}
       />,
     );
-    expectUniformMobileNavColumns(eightTabRender.container, 8);
-    expect(screen.getByTestId("mobile-nav-tab-skills").className).toContain("mobile-nav-tab--active");
+    expectUniformMobileNavColumns(skillsEnabledRender.container, 7);
+    expect(screen.queryByTestId("mobile-nav-tab-skills")).toBeNull();
+    expect(screen.getByTestId("mobile-nav-tab-more").className).toContain("mobile-nav-tab--active");
     expect(screen.getByTestId("mobile-nav-tab-mailbox").querySelector(".mobile-nav-tab-badge")?.textContent).toBe("99+");
-    eightTabRender.unmount();
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    expect(screen.getByTestId("mobile-more-item-skills")).toBeDefined();
+    skillsEnabledRender.unmount();
 
     const pluginVariantRender = render(
       <MobileNavBar
@@ -216,18 +225,17 @@ describe("MobileNavBar", () => {
         ]}
       />,
     );
-    expectUniformMobileNavColumns(pluginVariantRender.container, 8);
+    expectUniformMobileNavColumns(pluginVariantRender.container, 7);
     expect(screen.queryByTestId("mobile-nav-tab-plugin-fusion-plugin-spacing-check-wide")).toBeNull();
     fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
     expect(screen.getByTestId("mobile-more-item-plugin-fusion-plugin-spacing-check-wide")).toBeDefined();
   });
 
-  it("keeps Todos in the mobile More sheet when todoView is enabled", () => {
-    const onOpenTodos = vi.fn();
+  it("keeps Todos in the mobile More sheet and routes to the todos view", () => {
+    const props = createDefaultProps();
     render(
       <MobileNavBar
-        {...createDefaultProps()}
-        onOpenTodos={onOpenTodos}
+        {...props}
         experimentalFeatures={{ todoView: true }}
       />,
     );
@@ -235,7 +243,7 @@ describe("MobileNavBar", () => {
     fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
     fireEvent.click(screen.getByTestId("mobile-more-item-todos"));
 
-    expect(onOpenTodos).toHaveBeenCalled();
+    expect(props.onChangeView).toHaveBeenCalledWith("todos");
   });
 
   it("Mailbox is a primary tab and is not duplicated in the More sheet", () => {
@@ -251,7 +259,6 @@ describe("MobileNavBar", () => {
     render(
       <MobileNavBar
         {...createDefaultProps()}
-        onOpenTodos={vi.fn()}
         experimentalFeatures={{ todoView: true }}
       />,
     );
@@ -260,6 +267,29 @@ describe("MobileNavBar", () => {
 
     fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
     expect(screen.getByTestId("mobile-more-item-todos")).toBeInTheDocument();
+  });
+
+  it("marks the mobile More tab active for the todos view", () => {
+    render(
+      <MobileNavBar
+        {...createDefaultProps()}
+        view="todos"
+        experimentalFeatures={{ todoView: true }}
+      />,
+    );
+
+    expect(screen.getByTestId("mobile-nav-tab-more")).toHaveClass("mobile-nav-tab--active");
+  });
+
+  it("shows Artifacts in More and routes to the stable documents view", () => {
+    const props = createDefaultProps();
+    render(<MobileNavBar {...props} />);
+
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    expect(screen.getByTestId("mobile-more-item-documents")).toHaveTextContent("Artifacts");
+    fireEvent.click(screen.getByTestId("mobile-more-item-documents"));
+
+    expect(props.onChangeView).toHaveBeenCalledWith("documents");
   });
 
   it("shows secrets in More and routes to secrets view", () => {
@@ -394,9 +424,9 @@ describe("MobileNavBar", () => {
     expect(props.onChangeView).toHaveBeenCalledWith("mailbox");
   });
 
-  it("places Command Center after Mailbox while primary plugins stay More-only", () => {
+  it("places Command Center as the first mobile tab while primary plugins stay More-only", () => {
     const props = createDefaultProps();
-    render(
+    const { container } = render(
       <MobileNavBar
         {...props}
         view="board"
@@ -413,8 +443,9 @@ describe("MobileNavBar", () => {
 
     const mailboxTab = screen.getByTestId("mobile-nav-tab-mailbox");
     const commandCenterTab = screen.getByTestId("mobile-nav-tab-command-center");
-    expect(mailboxTab.compareDocumentPosition(commandCenterTab) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(commandCenterTab.previousElementSibling).toBe(mailboxTab);
+    // Command Center is now the first top-level tab, before Tasks.
+    expect(commandCenterTab).toBe(container.querySelector(".mobile-nav-bar > .mobile-nav-tab"));
+    expect(commandCenterTab.previousElementSibling).toBeNull();
     expect(mailboxTab.querySelector(".mobile-nav-tab-badge")?.textContent).toBe("3");
     expect(screen.queryByTestId("mobile-nav-tab-plugin-fusion-plugin-compound-engineering-compound-engineering")).toBeNull();
 
@@ -518,22 +549,27 @@ describe("MobileNavBar", () => {
     expect(screen.queryByLabelText("Unread chat response")).toBeNull();
   });
 
-  it("skills tab calls onChangeView with 'skills'", () => {
+  it("skills More-sheet item calls onChangeView with 'skills'", () => {
     const props = createDefaultProps();
     render(<MobileNavBar {...props} view="board" showSkillsTab={true} />);
 
-    fireEvent.click(screen.getByTestId("mobile-nav-tab-skills"));
+    expect(screen.queryByTestId("mobile-nav-tab-skills")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    fireEvent.click(screen.getByTestId("mobile-more-item-skills"));
     expect(props.onChangeView).toHaveBeenCalledWith("skills");
   });
 
-  it("skills tab is active when view is 'skills'", () => {
+  it("marks the More tab active when view is 'skills' since skills lives only in More", () => {
     render(<MobileNavBar {...createDefaultProps()} view="skills" showSkillsTab={true} />);
-    expect(screen.getByTestId("mobile-nav-tab-skills").className).toContain("mobile-nav-tab--active");
+    expect(screen.queryByTestId("mobile-nav-tab-skills")).toBeNull();
+    expect(screen.getByTestId("mobile-nav-tab-more").className).toContain("mobile-nav-tab--active");
   });
 
-  it("skills tab is not active when view is 'board'", () => {
+  it("does not mark the More tab active for skills when view is 'board'", () => {
     render(<MobileNavBar {...createDefaultProps()} view="board" showSkillsTab={true} />);
-    expect(screen.getByTestId("mobile-nav-tab-skills").className).not.toContain("mobile-nav-tab--active");
+    expect(screen.queryByTestId("mobile-nav-tab-skills")).toBeNull();
+    expect(screen.getByTestId("mobile-nav-tab-more").className).not.toContain("mobile-nav-tab--active");
   });
 
   it("opens and toggles the more sheet", () => {
@@ -568,6 +604,7 @@ describe("MobileNavBar", () => {
     expect(screen.getByTestId("mobile-nav-tab-mailbox")).toBeDefined();
     expect(screen.getByTestId("mobile-more-item-activity")).toBeDefined();
     expect(screen.getByTestId("mobile-more-item-git")).toBeDefined();
+    expect(screen.queryByTestId("mobile-more-item-stash-recovery")).toBeNull();
     expect(screen.getByTestId("mobile-more-item-terminal")).toBeDefined();
     expect(screen.getByTestId("mobile-more-item-files")).toBeDefined();
     expect(screen.getByTestId("mobile-more-item-planning")).toBeDefined();
@@ -583,14 +620,23 @@ describe("MobileNavBar", () => {
     expect(screen.getByTestId("mobile-more-item-settings")).toBeDefined();
   });
 
+  it("shows the stash orphan badge on the Git Manager item instead of a Stash Recovery item", () => {
+    render(<MobileNavBar {...createDefaultProps()} stashOrphanCount={8} />);
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+
+    const gitItem = screen.getByTestId("mobile-more-item-git");
+    expect(gitItem.querySelector(".mobile-more-item-badge")?.textContent).toBe("8");
+    expect(screen.queryByTestId("mobile-more-item-stash-recovery")).toBeNull();
+  });
+
   it("does not show legacy roadmaps in more sheet", () => {
     render(<MobileNavBar {...createDefaultProps()} experimentalFeatures={{}} />);
     fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
     expect(screen.queryByTestId("mobile-more-item-roadmaps")).toBeNull();
   });
 
-  it("renders Compound Engineering primary plugin only in the More sheet while Command Center follows Mailbox", () => {
-    render(
+  it("renders Compound Engineering primary plugin only in the More sheet while Command Center is the first tab", () => {
+    const { container } = render(
       <MobileNavBar
         {...createDefaultProps()}
         pluginDashboardViews={[
@@ -602,7 +648,9 @@ describe("MobileNavBar", () => {
       />,
     );
 
-    expect(screen.getByTestId("mobile-nav-tab-command-center").previousElementSibling).toBe(screen.getByTestId("mobile-nav-tab-mailbox"));
+    // Command Center is the first top-level tab, before Tasks.
+    expect(screen.getByTestId("mobile-nav-tab-command-center")).toBe(container.querySelector(".mobile-nav-bar > .mobile-nav-tab"));
+    expect(screen.getByTestId("mobile-nav-tab-command-center").previousElementSibling).toBeNull();
     expect(screen.queryByTestId("mobile-nav-tab-plugin-fusion-plugin-compound-engineering-compound-engineering")).toBeNull();
 
     fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));

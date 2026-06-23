@@ -64,12 +64,20 @@ type ProjectSettingsSchema = Omit<ProjectSettings, MovedProjectSettingsKey>;
 /** Default values for global (user-level) settings. */
 export const DEFAULT_GLOBAL_SETTINGS = {
   themeMode: "dark",
-  colorTheme: "default",
+  /*
+  FNXC:DashboardTheming 2026-06-22-18:36:
+  New users and unset installs should start on Ocean. Existing users who explicitly stored colorTheme "default" must remain on that legacy theme, so the id stays valid and only the absence/default seed changes to "ocean".
+  */
+  colorTheme: "ocean",
+  shadcnCustomColors: undefined,
   dashboardFontScalePct: 100,
   language: undefined,
   defaultProvider: undefined,
   defaultModelId: undefined,
   testMode: undefined,
+  modelPricingOverrides: undefined,
+  modelPricingFetchedAt: undefined,
+  modelPricingSource: undefined,
   modelRouterEnabled: undefined,
   modelRouterCheapProvider: undefined,
   modelRouterCheapModelId: undefined,
@@ -229,7 +237,16 @@ export const DEFAULT_GLOBAL_SETTINGS = {
     onFailure: "fail",
   },
   owningNodeHandoffPolicy: "reassign-to-local",
-  experimentalFeatures: {},
+  /*
+  FNXC:WorkflowSettings 2026-06-22-18:05:
+  New installs default dual-observe parity diagnostics explicitly off unless an operator opts in outside the normal Settings UI.
+
+  FNXC:WorkflowSettings 2026-06-22-18:00:
+  workflowGraphExecutor and workflowColumns are no longer experimental settings. The workflow graph engine and workflow-defined columns are the default runtime paths; stale persisted values are tolerated but no default flags are emitted.
+  */
+  experimentalFeatures: {
+    workflowInterpreterDualObserve: false,
+  },
   cliAgents: {},
 } satisfies CompleteSettings<GlobalSettings>;
 
@@ -468,6 +485,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   reflectionIntervalMs: 3_600_000,
   reflectionAfterTask: true,
   // reviewHandoffPolicy MOVED to workflow settings (U4) — see MOVED_SETTINGS_KEYS.
+  quickChatButtonMode: "off",
   showQuickChatFAB: false,
   chatAutoCleanupDays: 0,
   mailAutoCleanupDays: 0,

@@ -1300,6 +1300,20 @@ describe("Board", () => {
       expect(screen.getByTestId("column-done").getAttribute("data-has-archive-all")).toBe("yes");
       expect(screen.getByTestId("column-todo").getAttribute("data-has-archive-all")).toBe("no");
     });
+
+    it("re-fetches board-workflows when the workflow switcher opens", async () => {
+      enableFlag({ "FN-1": "builtin:coding" }, [DEFAULT_WORKFLOW, CUSTOM_WORKFLOW]);
+      renderBoard({ projectId: "proj-1", tasks: [mkTask({ id: "FN-1", column: "todo" })] });
+
+      const trigger = await screen.findByTestId("workflow-switcher");
+      await waitFor(() => expect(fetchBoardWorkflowsMock).toHaveBeenCalledTimes(1));
+      fetchBoardWorkflowsMock.mockClear();
+
+      fireEvent.click(trigger);
+
+      expect(fetchBoardWorkflowsMock).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("listbox", { name: "Workflow" })).toBeInTheDocument();
+    });
   });
 
   describe("workflow:updated SSE invalidation (#1406)", () => {

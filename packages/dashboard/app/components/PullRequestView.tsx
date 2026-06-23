@@ -13,6 +13,7 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { api } from "../api";
+import { ViewHeader } from "./ViewHeader";
 import "./PullRequestView.css";
 
 // Mirrors the route's serialized entity (register-pull-requests-routes.ts).
@@ -108,6 +109,8 @@ export function PullRequestView(props: PullRequestViewProps) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<ActionKind | null>(null);
   const [confirmingMerge, setConfirmingMerge] = useState(false);
+  // FNXC:PullRequests 2026-06-23-00:45: `loading` is true ONLY while a fetch is in flight. Previously detail===null always rendered the spinner, so with no pullRequestId (nothing to load) the view hung on "Loading PR…" forever. Now no-id → empty state, and the fetch is time-bounded so a hung request surfaces an error instead of spinning indefinitely.
+  const [loading, setLoading] = useState(false);
 
   const load = loadPullRequest ?? defaultLoad(projectId);
   const dispatch = onAction ?? defaultAction(projectId);
@@ -117,12 +120,26 @@ export function PullRequestView(props: PullRequestViewProps) {
       setDetail(detailProp);
       return;
     }
-    if (!pullRequestId) return;
+    if (!pullRequestId) {
+      // Nothing to load — show the empty state, never an indefinite spinner.
+      setError(null);
+      setLoading(false);
+      setDetail(null);
+      return;
+    }
     try {
       setError(null);
-      setDetail(await load(pullRequestId));
+      setLoading(true);
+      // Time-bound the fetch (15s) so a hung request resolves into an error state.
+      const PR_LOAD_TIMEOUT_MS = 15000;
+      const timeout = new Promise<PrDetail>((_, reject) =>
+        setTimeout(() => reject(new Error("Timed out loading pull request")), PR_LOAD_TIMEOUT_MS),
+      );
+      setDetail(await Promise.race([load(pullRequestId), timeout]));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load PR");
+    } finally {
+      setLoading(false);
     }
   }, [detailProp, pullRequestId, load]);
 
@@ -166,19 +183,34 @@ export function PullRequestView(props: PullRequestViewProps) {
     );
   }
   if (!detail) {
+    // FNXC:PullRequests 2026-06-23-00:45: Only show the spinner while actually fetching; otherwise (no PR id / nothing to load / timed out) show the empty state so the view never hangs on an endless "Loading PR…".
+    if (loading) {
+      return (
+        <div className="pr-view pr-view--loading" data-testid="pr-view-loading">
+          {t("pr.view.loading", "Loading PR…")}
+        </div>
+      );
+    }
     return (
-      <div className="pr-view pr-view--loading" data-testid="pr-view-loading">
-        {t("pr.view.loading", "Loading PR…")}
+      <div className="pr-view pr-view--empty" data-testid="pr-view-empty">
+        <GitPullRequest size={16} /> {t("pr.view.empty", "No pull request to show.")}
       </div>
     );
   }
 
   const { state, summary } = detail;
 
+  /*
+  FNXC:PullRequests 2026-06-22-01:00:
+  Added the shared ViewHeader (GitPullRequest icon, matching the left-sidebar nav) at the top of every populated PR state so the view reads consistently with other main-content views. The PR-specific identity row (repo/number/branch/state) stays below it. ViewHeader supplies the standard --space-lg top/side padding; the view body must not repeat the top padding.
+  */
+  const viewHeader = <ViewHeader icon={GitPullRequest} title={t("pr.view.title", "Pull Requests")} />;
+
   // ── creating ───────────────────────────────────────────────────────────────
   if (state === "creating") {
     return (
       <div className="pr-view" data-testid="pr-view" data-state="creating">
+        {viewHeader}
         <PrIdentityHeader detail={detail} />
         <div className="pr-placeholder" data-testid="pr-creating">
           <Clock size={16} /> {t("pr.view.creating", "Creating PR…")}
@@ -191,6 +223,7 @@ export function PullRequestView(props: PullRequestViewProps) {
   if (state === "failed") {
     return (
       <div className="pr-view" data-testid="pr-view" data-state="failed">
+        {viewHeader}
         <PrIdentityHeader detail={detail} />
         <div className="pr-error-reason" data-testid="pr-failed">
           <AlertTriangle size={16} className="pr-icon-failure" />
@@ -216,6 +249,7 @@ export function PullRequestView(props: PullRequestViewProps) {
   if (detail.unverified) {
     return (
       <div className="pr-view" data-testid="pr-view" data-state="unverified">
+        {viewHeader}
         <PrIdentityHeader detail={detail} />
         <div className="pr-notice pr-notice--unverified" data-testid="pr-unverified">
           <Clock size={16} /> {t("pr.view.verifyingGithub", "Verifying with GitHub…")}
@@ -240,6 +274,7 @@ export function PullRequestView(props: PullRequestViewProps) {
 
   return (
     <div className="pr-view" data-testid="pr-view" data-state={state}>
+      {viewHeader}
       <PrIdentityHeader detail={detail} />
 
       {/* responding banner */}

@@ -46,11 +46,20 @@ function relativeTime(iso: string): string {
   return `${Math.floor(diffMs / 86_400_000)}d ago`;
 }
 
+/*
+FNXC:Automations 2026-06-22-12:00:
+Trigger-type badge colors must use the design system's THEME COLOR TOKENS so the Automations screen follows the
+active theme (including light theme) instead of fixed hex literals. The previous values referenced undefined tokens
+(--color-blue/-purple/-green/-gray) with hardcoded hex fallbacks that never resolved to a real token and never
+adapted to the theme. Mapped to the closest defined semantic tokens from styles.css: cron→--todo (blue status),
+webhook→--accent (brand purple), api→--color-success (green), manual→--text-muted (neutral). The badge applies this
+to both border and text via inline style on .routine-trigger-badge.
+*/
 const TRIGGER_TYPE_COLORS: Record<RoutineTriggerType, string> = {
-  cron: "var(--color-blue, #3b82f6)",
-  webhook: "var(--color-purple, #a855f7)",
-  api: "var(--color-green, #22c55e)",
-  manual: "var(--color-gray, #6b7280)",
+  cron: "var(--todo)",
+  webhook: "var(--accent)",
+  api: "var(--color-success)",
+  manual: "var(--text-muted)",
 };
 
 const TRIGGER_TYPE_LABELS: Record<RoutineTriggerType, string> = {

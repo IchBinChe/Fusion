@@ -5,7 +5,7 @@ import { OnboardingResumeCard } from "../OnboardingResumeCard";
 // Mock the model-onboarding-state module
 vi.mock("../model-onboarding-state", () => ({
   getOnboardingResumeStep: vi.fn(),
-  ONBOARDING_FLOW_STEPS: ["ai-setup", "github", "project-setup", "first-task"],
+  ONBOARDING_FLOW_STEPS: ["ai-setup", "github", "project-setup", "agent", "first-task"],
 }));
 
 const mockTrackOnboardingEvent = vi.fn();
@@ -184,7 +184,7 @@ describe("OnboardingResumeCard", () => {
       });
       render(<OnboardingResumeCard onResume={vi.fn()} />);
       // Uses singular "step" for 1 completed
-      expect(screen.getByText(/1 of 4 step complete/)).toBeInTheDocument();
+      expect(screen.getByText(/1 of 5 step complete/)).toBeInTheDocument();
     });
 
     it("shows completed step count text with 2 completed steps (plural)", () => {
@@ -195,7 +195,7 @@ describe("OnboardingResumeCard", () => {
       });
       render(<OnboardingResumeCard onResume={vi.fn()} />);
       // Uses plural "steps" for 2 completed
-      expect(screen.getByText(/2 of 4 steps complete/)).toBeInTheDocument();
+      expect(screen.getByText(/2 of 5 steps complete/)).toBeInTheDocument();
     });
   });
 

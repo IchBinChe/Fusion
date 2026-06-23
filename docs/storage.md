@@ -65,11 +65,15 @@
 
 ### Artifact registry (FN-6777)
 
-- `artifacts` is the first-class metadata registry for generated or uploaded task artifacts. Rows store title/description, media type, author identity, optional task linkage, metadata JSON, textual content, a relative URI, and size; binary bytes are not stored in SQLite.
+- `artifacts` is the first-class metadata registry for generated or uploaded task artifacts. Rows store ID, `type` (`document`, `image`, `video`, `audio`, or `other`), title/description, MIME type, size, author identity/type, optional task linkage, metadata JSON, textual `content`, a relative `uri`, and timestamps; binary bytes are not stored in SQLite.
 - `TaskStore.registerArtifact()` writes task-scoped binary payloads under `<rootDir>/.fusion/tasks/{ID}/artifacts/` and task-less registry payloads under `<rootDir>/.fusion/artifacts/`, then records a relative `artifacts/<file>` URI in SQLite. If the DB insert fails after a binary write, the store removes the orphaned file before surfacing the error.
+- Inline text/document artifacts may store `content` directly in SQLite and therefore have no media file. The dashboard media route streams `GET /api/artifacts/:id/media` from disk when `uri` is present, or returns inline `content` with the persisted MIME type when no `uri` exists.
 - `getArtifact(id)` returns metadata by ID, `getArtifacts(taskId)` returns active-task artifacts newest-first, and `listArtifacts(...)` is the cross-agent query path with type/author/task/search filters and pagination. List reads hide artifacts whose parent task is soft-deleted while preserving task-less artifacts.
 - Task-linked artifact registration requires an active, non-archived task. Archived tasks are read-only for artifact writes; soft-deleted or missing tasks are rejected.
-- Worktree DB hydration copies artifact metadata so isolated agents can query the registry shape locally, but binary payload files remain in the source project storage.
+- Retention follows the existing task lifecycle rather than a separate artifact policy: soft-deleted parent tasks keep artifact rows/files for forensics but normal live-reader APIs hide them; hard deletion from the active `tasks` table cascades artifact metadata through the `taskId` foreign key, and archive cleanup removes the task directory that contains task-scoped artifact binaries. Task-less artifacts live under `<rootDir>/.fusion/artifacts/` and are not tied to task archival cleanup.
+- Worktree DB hydration copies task-scoped artifact metadata for the current task/dependency graph alongside task rows and `task_documents`. It intentionally does not copy binary payload files, and it intentionally excludes task-less registry artifacts because dependency hydration is scoped to the active task graph.
+
+Agent-facing registration tools are documented in [Artifact registry tools](./agents.md#artifact-registry-tools), and the dashboard browsing surface is documented in [Artifacts View](./dashboard-guide.md#artifacts-view).
 
 ### Task-ID integrity detection
 
@@ -410,13 +414,13 @@ The `tasks.tokenUsage*` columns store cumulative per-task token usage for analyt
 
 The nullable `tasks.tokenUsagePerModel` JSON column (migration 125) stores the per-task, per-runtime-model breakdown behind those cumulative totals. Each bucket records provider/model, token counts, and first/last use timestamps. Command Center model/provider analytics expand these buckets so multi-model tasks appear under every model they actually used; task-level totals, cost, time series, node grouping, and agent grouping still read the top-level aggregate so grand `nTasks` is not double-counted. Empty, missing, or malformed per-model JSON falls back to the legacy single-snapshot grouping path.
 
-The `task_commit_associations.additions` and `task_commit_associations.deletions` columns (migration 123) store nullable merge-time git shortstat counts for the associated commit. Command Center Productivity uses `SUM(additions + deletions)` as the Lines changed source when at least one in-range association has non-null stats, then derives estimated `hoursSaved` as `round(loc / HUMAN_LINES_PER_HOUR, 1)`. `NULL` means stats were unknown or unavailable for that association, not zero; ranges with no non-null stats keep the unavailable `—` sentinel for both LOC and hours saved instead of reporting `0`.
+The `task_commit_associations.additions` and `task_commit_associations.deletions` columns (migration 123) store nullable merge-time git shortstat counts for the associated commit. Command Center Productivity uses `SUM(additions + deletions)` as the Lines changed source when at least one in-range association has non-null stats, then derives estimated `hoursSaved` as `round(loc / HUMAN_LINES_PER_HOUR, 1)`. `NULL` means stats were unknown or unavailable for that association, not zero; ranges with no non-null stats keep the unavailable `—` sentinel for both LOC and hours saved instead of reporting `0`. Historical rows created before diff-stat capture can be backfilled from local git with the explicit operator action `POST /api/command-center/productivity/backfill-loc` (dry-run by default). The backfill only updates rows where both columns are `NULL`; it validates commit SHAs before invoking git, leaves malformed or locally unavailable commit objects as `NULL`, and never overwrites already-populated stats.
 
 The `tasks.cumulativeActiveMs` and `tasks.executionCompletedAt` columns are the Command Center Productivity task-duration source. Duration analytics select `column = 'done'` tasks completed in the requested range (`executionCompletedAt`) and include only positive `cumulativeActiveMs` values, then compute completed count, average, median, p90, and total active execution time. Missing, zero, or historical untracked duration values remain unavailable (`—`) rather than being serialized or rendered as `0`.
 | `config` | Single-row project configuration (`nextId`, settings payload, workflow step counters). |
 | `workflow_steps` | Workflow step definitions (`prompt`/`script`) with phase, template metadata, and model overrides. |
 | `activityLog` | Per-project activity/event log with timestamp/type/task indexes. |
-| `task_commit_associations` | Commit-to-task-lineage associations for canonical and legacy landed-commit attribution. Includes nullable `additions`/`deletions` diff-stat columns captured at merge time for Command Center Productivity LOC and derived estimated `hoursSaved`; `NULL` means stats unknown, not zero. |
+| `task_commit_associations` | Commit-to-task-lineage associations for canonical and legacy landed-commit attribution. Includes nullable `additions`/`deletions` diff-stat columns captured at merge time or by the explicit NULL-only local-git backfill for Command Center Productivity LOC and derived estimated `hoursSaved`; `NULL` means stats unknown, not zero. |
 | `archivedTasks` | Archived task snapshots (compact JSON payload + archive timestamp). |
 | `automations` | Scheduled automation definitions, run state, and run history. |
 | `agents` | Agent registry/state/task assignment metadata. |
@@ -426,6 +430,7 @@ The `tasks.cumulativeActiveMs` and `tasks.executionCompletedAt` columns are the 
 | `secrets` | Encrypted secret KV rows (`key` unique) with raw BLOB `value_ciphertext` + per-row random `nonce` (AES-256-GCM), per-secret `access_policy` CHECK (`auto`/`prompt`/`deny`), env-materialization metadata (`env_exportable`, `env_export_key`), and read-audit fields (`last_read_at`, `last_read_by`). Plaintext is never written to the database. |
 | `task_documents` | Task-scoped document metadata/content keyed by `(taskId, key)` with current revision pointer. |
 | `task_document_revisions` | Immutable revision history for task documents (content snapshots by revision). |
+| `artifacts` | Artifact registry metadata for inline text and on-disk media artifacts. Stores type/title/description, MIME type/size, author identity, optional task linkage, metadata JSON, inline `content`, relative `uri`, and timestamps; binary media bytes live under task or registry `artifacts/` directories instead of SQLite. |
 | `__meta` | Schema version + monotonic `lastModified` change detector, plus one-time bootstrap metadata such as `bootstrappedAt` and `projectIdentity`. |
 | `goals` | Strategic intent records (`title`, optional `description`, `status`, timestamps) that can outlive mission timelines. |
 | `mission_goals` | Many-to-many join between missions and goals with composite PK `(missionId, goalId)`, `createdAt`, and cascade-delete foreign keys to both parents. |
@@ -627,7 +632,8 @@ Fusion now auto-hydrates the worktree DB during executor startup at three points
 Hydration copies only:
 - current task row,
 - transitive dependency task rows (BFS, depth cap 5, max 50 unique task IDs),
-- `task_documents` rows for that same task-id set.
+- `task_documents` rows for that same task-id set,
+- task-scoped `artifacts` metadata rows for that same task-id set.
 
 Implementation uses in-process SQLite streaming (`DatabaseSync`), source-side `SELECT`, destination-side `INSERT OR REPLACE` inside a destination transaction. Column lists are built from source/destination schema intersection (`PRAGMA table_info`), so schema drift degrades gracefully (dropped columns are logged once, and defaults apply on destination-only columns).
 
@@ -636,12 +642,13 @@ Example shape of the destination write:
 ```sql
 INSERT OR REPLACE INTO tasks (<shared-columns...>) VALUES (<placeholders...>);
 INSERT OR REPLACE INTO task_documents (<shared-columns...>) VALUES (<placeholders...>);
+INSERT OR REPLACE INTO artifacts (<shared-columns...>) VALUES (<placeholders...>);
 ```
 
 Expected executor log entry on success:
 
 ```text
-Hydrated worktree DB: 4 tasks, 12 task_documents
+Hydrated worktree DB: 4 tasks, 12 task_documents, 3 artifacts
 ```
 
 A concrete recovered failure mode now covered by tests: when a worktree directory exists but its local `.fusion/` scratch state is missing, opening `DatabaseSync(<worktree>/.fusion/fusion.db)` can fail with `unable to open database file`. Hydration now performs destination bootstrap (`mkdir -p .fusion` + schema init) and retries the destination open once before degrading.

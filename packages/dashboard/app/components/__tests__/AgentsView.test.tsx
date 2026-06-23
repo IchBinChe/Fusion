@@ -265,6 +265,56 @@ describe("AgentsView", () => {
       expect(screen.getByText("review")).toHaveAttribute("title", "auto::skills/../../.agents/skills/review/SKILL.md");
     });
 
+    it("renders model and runtime labels on list-view agent cards", async () => {
+      const modelAgents: Agent[] = [
+        {
+          ...mockAgents[0],
+          id: "agent-provider-model",
+          name: "Provider Model Agent",
+          runtimeConfig: { modelProvider: "openai", modelId: "gpt-4.1" },
+        },
+        {
+          ...mockAgents[0],
+          id: "agent-legacy-model",
+          name: "Legacy Model Agent",
+          runtimeConfig: { model: "anthropic/claude-sonnet" },
+        },
+        {
+          ...mockAgents[0],
+          id: "agent-runtime",
+          name: "Plugin Runtime Agent",
+          runtimeConfig: { runtimeHint: "hermes-local" },
+        },
+        {
+          ...mockAgents[0],
+          id: "agent-auto",
+          name: "Auto Model Agent",
+          runtimeConfig: undefined,
+        },
+      ];
+      mockFetchAgents.mockResolvedValueOnce(modelAgents);
+      mockFetchAgentStats.mockResolvedValueOnce({ total: 4, byState: {}, byRole: {} });
+
+      const { container } = render(<AgentsView addToast={mockAddToast} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Provider Model Agent")).toBeInTheDocument();
+      });
+
+      const getCardModelRow = (agentId: string) => {
+        const card = Array.from(container.querySelectorAll<HTMLElement>(".agent-card")).find((element) => element.textContent?.includes(agentId));
+        expect(card).toBeTruthy();
+        const row = card?.querySelector<HTMLElement>(".agent-model-runtime");
+        expect(row).toBeTruthy();
+        return row;
+      };
+
+      expect(getCardModelRow("agent-provider-model").textContent).toMatch(/Model:\s*openai\/gpt-4\.1/);
+      expect(getCardModelRow("agent-legacy-model").textContent).toMatch(/Model:\s*claude-sonnet/);
+      expect(getCardModelRow("agent-runtime").textContent).toMatch(/Runtime:\s*hermes-local/);
+      expect(getCardModelRow("agent-auto").textContent).toMatch(/Model:\s*Auto/);
+    });
+
     it("renders cross-pane overview above split layout", async () => {
       const { container } = render(<AgentsView addToast={mockAddToast} />);
 
@@ -282,6 +332,12 @@ describe("AgentsView", () => {
       expect(container.querySelector(".agents-split-detail")).toBeTruthy();
       expect(screen.getByText("Select an agent")).toBeInTheDocument();
       expect(screen.getByText("Choose an agent from the sidebar to view details")).toBeInTheDocument();
+    });
+
+    it("adds top breathing room to the split-sidebar agent list", () => {
+      const css = loadAllAppCss();
+
+      expect(css).toMatch(/\.agent-list\s*\{[^}]*padding-top:\s*var\(--space-sm\);/);
     });
 
     it("opens inline detail pane and marks selected card", async () => {

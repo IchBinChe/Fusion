@@ -5,6 +5,8 @@ FN-6441 rescued this orphaned component test after standalone dashboard-app exec
 FNXC:DashboardTests 2026-06-14-08:32:
 PlanningModeModal calls useToast(), which throws without a ToastProvider. These tests render it bare, so the hook stays mocked in the same style as PlanningModeModal.autosize.test.tsx instead of introducing broad provider wiring during skip-list rescue.
 */
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("../../hooks/useToast", () => ({
@@ -217,6 +219,115 @@ describe("PlanningModeModal", () => {
   });
 
   describe("Loading state", () => {
+    function getPlanningLoadingSpinner(container: HTMLElement): SVGSVGElement {
+      const spinner = container.querySelector<SVGSVGElement>(".planning-loading svg.spin");
+      expect(spinner).not.toBeNull();
+      return spinner!;
+    }
+
+    async function startPlanningAndHoldLoading(container: HTMLElement): Promise<SVGSVGElement> {
+      mockConnectPlanningStream.mockImplementationOnce(() => ({
+        close: vi.fn(),
+        isConnected: vi.fn().mockReturnValue(true),
+      }));
+
+      const textarea = screen.getByPlaceholderText(/e.g., Build a user authentication/);
+      fireEvent.change(textarea, { target: { value: "Build auth system" } });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Generating next question...")).toBeDefined();
+      });
+
+      return getPlanningLoadingSpinner(container);
+    }
+
+    it.each([
+      { presentation: "modal" as const, viewport: "desktop" as const },
+      { presentation: "modal" as const, viewport: "mobile" as const },
+      { presentation: "embedded" as const, viewport: "desktop" as const },
+      { presentation: "embedded" as const, viewport: "mobile" as const },
+    ])("keeps the first loading-frame spinner animated for $presentation on $viewport", async ({ presentation, viewport }) => {
+      mockViewport(viewport);
+
+      const { container } = render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          presentation={presentation}
+        />
+      );
+
+      const spinner = await startPlanningAndHoldLoading(container);
+
+      expect(spinner).toHaveClass("spin");
+      expect(spinner).toHaveClass("icon-todo");
+      expect(spinner.style.animation).toBe("");
+      expect(spinner.style.animationName).toBe("");
+    });
+
+    it("uses SVG-safe spin geometry so the first Planning loading paint rotates", () => {
+      const styles = readFileSync(resolve(process.cwd(), "app/styles.css"), "utf8");
+      const sharedSvgSpinRule = styles.match(/svg\.animate-spin,\s*\nsvg\.spin\s*\{[^}]*\}/)?.[0] ?? "";
+
+      expect(sharedSvgSpinRule).toContain("transform-box: fill-box");
+    });
+
+    it("keeps the streaming loading-frame spinner on the same animation contract", async () => {
+      let streamHandlers: any = null;
+
+      mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
+        streamHandlers = handlers;
+        return {
+          close: vi.fn(),
+          isConnected: vi.fn().mockReturnValue(true),
+        };
+      });
+
+      const { container } = render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          presentation="embedded"
+        />
+      );
+
+      const textarea = screen.getByPlaceholderText(/e.g., Build a user authentication/);
+      fireEvent.change(textarea, { target: { value: "Build auth system" } });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Generating next question...")).toBeDefined();
+      });
+
+      act(() => {
+        streamHandlers.onThinking?.("Analyzing requirements...");
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("AI is thinking...")).toBeDefined();
+      });
+
+      const spinner = getPlanningLoadingSpinner(container);
+      expect(spinner).toHaveClass("spin");
+      expect(spinner.style.animation).toBe("");
+      expect(spinner.style.animationName).toBe("");
+    });
+
+    it("keeps other Planning Mode Loader2 spin affordances wired", () => {
+      const source = readFileSync(resolve(process.cwd(), "app/components/PlanningModeModal.tsx"), "utf8");
+
+      expect(source).toContain('className="spin planning-sidebar-status-icon planning-sidebar-status-generating"');
+      expect(source).toContain('className="spin icon-mr-8"');
+      expect(source).toContain('className="spin icon-mr-6"');
+    });
+
     it("shows 'Generating next question...' text when loading without streaming content", async () => {
       // Mock to delay the question response so we stay in loading state
       mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
@@ -745,6 +856,83 @@ describe("PlanningModeModal", () => {
       // The mobile-only back button should NOT be visible (it's gated on mobileShowDetail,
       // which stays false on desktop since the routing effect skips non-mobile viewports).
       expect(container.querySelector(".planning-mobile-back")).toBeNull();
+    });
+  });
+
+  /*
+  FNXC:Planning 2026-06-23-02:00:
+  The embedded Planning sidebar is resizable like Missions: a desktop-only drag handle (role=separator) drives an inline width on .planning-sidebar that persists to localStorage and is clamped to the PLANNING_SIDEBAR_MIN/MAX range. These tests assert the handle exists on desktop, persists a clamped width on arrow-key resize, restores from localStorage, and is absent on mobile (where the sidebar stacks full-width).
+  */
+  describe("Resizable sidebar (Missions parity)", () => {
+    const STORAGE_KEY = "fusion:planning-sidebar-width";
+
+    beforeEach(() => {
+      window.localStorage.removeItem(STORAGE_KEY);
+    });
+
+    function renderEmbedded() {
+      return render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          presentation="embedded"
+        />,
+      );
+    }
+
+    it("renders a desktop resize handle and defaults the sidebar to 300px", () => {
+      mockViewport("desktop");
+      const { container } = renderEmbedded();
+
+      const handle = container.querySelector(".planning-sidebar-resize-handle");
+      expect(handle).not.toBeNull();
+      expect(handle?.getAttribute("role")).toBe("separator");
+      expect(handle?.getAttribute("aria-orientation")).toBe("vertical");
+
+      const sidebar = container.querySelector<HTMLElement>(".planning-sidebar");
+      expect(sidebar?.style.width).toBe("300px");
+    });
+
+    it("clamps and persists width on arrow-key resize", () => {
+      mockViewport("desktop");
+      const { container } = renderEmbedded();
+
+      const handle = container.querySelector<HTMLElement>(".planning-sidebar-resize-handle")!;
+      // Shift+ArrowRight steps +50 -> 350px, persisted.
+      fireEvent.keyDown(handle, { key: "ArrowRight", shiftKey: true });
+
+      const sidebar = container.querySelector<HTMLElement>(".planning-sidebar");
+      expect(sidebar?.style.width).toBe("350px");
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBe("350");
+
+      // ArrowLeft below the minimum clamps to PLANNING_SIDEBAR_MIN_WIDTH (220).
+      for (let i = 0; i < 20; i += 1) {
+        fireEvent.keyDown(handle, { key: "ArrowLeft", shiftKey: true });
+      }
+      expect(sidebar?.style.width).toBe("220px");
+      expect(window.localStorage.getItem(STORAGE_KEY)).toBe("220");
+    });
+
+    it("restores a persisted clamped width from localStorage", () => {
+      window.localStorage.setItem(STORAGE_KEY, "9999");
+      mockViewport("desktop");
+      const { container } = renderEmbedded();
+
+      // Out-of-range stored value clamps to PLANNING_SIDEBAR_MAX_WIDTH (560).
+      const sidebar = container.querySelector<HTMLElement>(".planning-sidebar");
+      expect(sidebar?.style.width).toBe("560px");
+    });
+
+    it("omits the resize handle and inline width on mobile", () => {
+      mockViewport("mobile");
+      const { container } = renderEmbedded();
+
+      expect(container.querySelector(".planning-sidebar-resize-handle")).toBeNull();
+      const sidebar = container.querySelector<HTMLElement>(".planning-sidebar");
+      expect(sidebar?.style.width).toBe("");
     });
   });
 

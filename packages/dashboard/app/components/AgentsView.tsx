@@ -9,6 +9,7 @@ import { fetchAgents, updateAgent, updateAgentState, deleteAgent, startAgentRun,
 const AgentDetailView = lazy(() => import("./AgentDetailView").then((m) => ({ default: m.AgentDetailView })));
 import { AgentTokenStatsPanel } from "./AgentTokenStatsPanel";
 import { AgentsOverviewBar } from "./AgentsOverviewBar";
+import { ViewHeader } from "./ViewHeader";
 import { AgentEmptyState } from "./AgentEmptyState";
 import { useAgents } from "../hooks/useAgents";
 import { useConfirm } from "../hooks/useConfirm";
@@ -120,6 +121,37 @@ function getStateCardClass(
   }
 }
 
+interface AgentModelLabel {
+  label: string | null;
+  isRuntime: boolean;
+}
+
+/*
+FNXC:AgentsView 2026-06-23-04:00:
+Agent list cards must expose the configured model or plugin runtime without requiring a detail-view open.
+Use the same runtimeHint/modelProvider+modelId/legacy model fallback order as the detail view and leave no-override agents as Auto at render time.
+*/
+function getAgentModelLabel(agent: Agent): AgentModelLabel {
+  const runtimeConfig = agent.runtimeConfig ?? {};
+  const runtimeHint = typeof runtimeConfig.runtimeHint === "string" ? runtimeConfig.runtimeHint : "";
+  if (runtimeHint) {
+    return { label: runtimeHint, isRuntime: true };
+  }
+
+  const modelProvider = typeof runtimeConfig.modelProvider === "string" ? runtimeConfig.modelProvider : "";
+  const modelId = typeof runtimeConfig.modelId === "string" ? runtimeConfig.modelId : "";
+  if (modelProvider && modelId) {
+    return { label: `${modelProvider}/${modelId}`, isRuntime: false };
+  }
+
+  const legacyModel = typeof runtimeConfig.model === "string" ? runtimeConfig.model : "";
+  if (legacyModel.includes("/")) {
+    const slashIdx = legacyModel.indexOf("/");
+    return { label: legacyModel.slice(slashIdx + 1), isRuntime: false };
+  }
+
+  return { label: null, isRuntime: false };
+}
 
 function getOrgChartLeafCount(node: OrgTreeNode): number {
   if (node.children.length === 0) {
@@ -1227,11 +1259,17 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
 
   return (
     <div className="agents-view">
-      <div className="agents-view-header">
-        <div className="agents-view-title">
-          <Bot size={24} />
-          <h2>{t("agents.title", "Agents")}</h2>
-        </div>
+      {/*
+      FNXC:Navigation 2026-06-22-01:10:
+      Agents adopts the shared ViewHeader (Command Center-modeled) title row for cross-view consistency. The deeply-integrated controls (view-toggle, controls popup, refresh, import, new-agent) keep working by passing the existing agents-view-controls cluster through the header actions prop. The agents-view-controls / agents-view-primary-actions class names are preserved so existing scoped CSS (incl. mobile rules covered by the CSS string-match test) still applies.
+
+      FNXC:Agents 2026-06-23-02:00:
+      The Agents header must read identically to the Missions header. Both use icon size 20 + a 1.125rem/600 title via ViewHeader / .mission-manager__title. To fully match, AgentsView.css scopes .agents-view .view-header to the Missions inline header chrome (--space-lg/--space-xl padding, border-bottom, surface background) and colors the leading icon --todo (the same token .mission-manager__header-icon uses), since the shared ViewHeader leaves the icon at --text.
+      */}
+      <ViewHeader
+        icon={Bot}
+        title={t("agents.title", "Agents")}
+        actions={
         <div className="agents-view-controls">
           <div className="view-toggle">
             <button
@@ -1480,7 +1518,8 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
             )}
           </div>
         </div>
-      </div>
+        }
+      />
 
       <NewAgentDialog
         isOpen={isCreating}
@@ -1712,6 +1751,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
               const configuredIntervalMs = resolveHeartbeatIntervalMs(agent.runtimeConfig?.heartbeatIntervalMs);
               const heartbeatOptions = getHeartbeatIntervalOptions(configuredIntervalMs);
               const isUpdatingHeartbeat = updatingHeartbeatAgentId === agent.id;
+              const modelLabel = getAgentModelLabel(agent);
               return (
                 <div
                   key={agent.id}
@@ -1825,6 +1865,12 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
                   </div>
 
                   <div className="agent-card-body">
+                    <div className="agent-model-runtime">
+                      <span className="text-secondary">{modelLabel.isRuntime ? t("agents.runtime", "Runtime") : t("agents.model", "Model")}:</span>
+                      <span className="badge agent-model-runtime__value" title={modelLabel.label ?? t("agents.auto", "Auto")}>
+                        {modelLabel.label ?? t("agents.auto", "Auto")}
+                      </span>
+                    </div>
                     {agent.state === "error" && agent.lastError ? (
                       <AgentErrorIndicator
                         errorText={agent.lastError}

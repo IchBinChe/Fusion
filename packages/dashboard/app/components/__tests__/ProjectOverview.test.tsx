@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import fs from "fs";
+import path from "path";
 import { ProjectOverview } from "../ProjectOverview";
 import type { ProjectInfo, ProjectHealth } from "@fusion/core";
 import { useProjectHealth } from "../../hooks/useProjectHealth";
@@ -105,6 +107,7 @@ function makeProject(overrides: Partial<ProjectInfoWithSource> = {}): ProjectInf
 }
 
 const noop = () => {};
+const projectOverviewCss = fs.readFileSync(path.resolve(__dirname, "../ProjectOverview.css"), "utf8");
 
 describe("ProjectOverview", () => {
   beforeEach(() => {
@@ -131,7 +134,16 @@ describe("ProjectOverview", () => {
       />
     );
 
-    expect(screen.getByText("Projects")).toBeDefined();
+    expect(screen.getByRole("heading", { name: /Dashboard/ })).toBeDefined();
+  });
+
+  it("keeps Dashboard header full-width while only the overview body is constrained", () => {
+    expect(projectOverviewCss).toContain(".project-overview > :where(.view-header)");
+    expect(projectOverviewCss).toContain("width: 100%;");
+    expect(projectOverviewCss).toContain("flex: 0 0 auto;");
+    expect(projectOverviewCss).toContain("background: var(--surface);");
+    expect(projectOverviewCss).toContain("border-bottom-color: var(--border);");
+    expect(projectOverviewCss).toContain("max-width: 1400px;");
   });
 
   it("displays project cards when projects provided", () => {

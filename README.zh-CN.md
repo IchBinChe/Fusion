@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="./demo/assets/fusion-logo.png" alt="Fusion" width="120" />
-
-# Fusion
+# <img src="./demo/assets/fusion-logo-orange.svg" alt="" width="34" align="center" /> Fusion
 
 ### 从粗糙想法到生产代码——全程自动化。
 
-**多节点智能体编排器** — 任务、智能体、任务群、Git、文件与工作树，支持任意模型，本地与云端皆可。
+### 🏭 由多智能体编排器运行的软件工厂。
+
+描述你想要的东西——一支 AI 智能体团队便会为你**规划、构建、审核并交付**。Fusion 就是你的软件工厂：一条贯穿任务、智能体、任务群、Git、文件与工作树的代码流水线，支持任意模型，本地与云端皆可。
 
 [**runfusion.ai →**](https://runfusion.ai) · [文档](./docs/README.md) · [GitHub](https://github.com/Runfusion/Fusion) · [npm](https://www.npmjs.com/package/@runfusion/fusion) · [Discord](https://discord.gg/ksrfuy7WYR)
 
@@ -42,6 +42,70 @@
 一块看板。随处操控。笔记本、Mac mini、Linux 服务器、云虚拟机、手机——全部互联。
 
 > 就像 Trello，只不过你的任务由 AI 来定义、执行和交付。基于 [dustinbyrne/kb](https://github.com/dustinbyrne/kb) 的出色工作构建。
+
+---
+
+## 快速上手
+
+**无需安装，直接通过 npm 运行：**
+
+```bash
+npx runfusion.ai
+```
+
+这将启动仪表板。子命令可透传：`npx runfusion.ai task create "fix X"`、`npx runfusion.ai --help` 等（或完整写法：`npx @runfusion/fusion dashboard`）。
+
+**一键安装脚本**（macOS 和 Linux——自动选用 Homebrew，失败则回退到 npm）：
+
+```bash
+curl -fsSL https://runfusion.ai/install.sh | sh
+fusion dashboard
+```
+
+**Homebrew**（macOS 和 Linux）：
+
+```bash
+brew tap runfusion/fusion
+brew install fusion
+fusion dashboard            # 或：fn dashboard
+```
+
+或使用一行命令（自动添加 tap）：`brew install runfusion/fusion/fusion`。
+
+**npm 全局安装**：
+
+```bash
+npm install -g @runfusion/fusion
+fn dashboard                # 或：fusion dashboard
+```
+
+**从克隆仓库启动**（用于开发）：
+
+```bash
+pnpm dev dashboard
+```
+
+然后点击终端输出的 `Open:` URL。该 URL 内嵌了一个持有者令牌
+（`http://localhost:4040/?token=fn_...`），浏览器首次访问时会将其捕获并存入
+`localStorage`，此后自动复用。在服务端，Fusion 会在首次经过身份验证的运行时将
+仪表板/守护进程令牌持久化至 `~/.fusion/settings.json`，并在后续启动时复用，
+除非你通过 `--token`、`FUSION_DASHBOARD_TOKEN`、`FUSION_DAEMON_TOKEN` 覆盖，
+或使用 `--no-auth` 禁用鉴权。完整的优先级规则及重置/吊销选项，请参见
+[CLI 参考 → fn dashboard → 身份验证](./docs/cli-reference.md#fn-dashboard)。
+
+### 首次运行向导
+
+首次启动时，Fusion 会打开**引导向导**，分三步引导：
+
+1. **AI 配置** — 使用简化的快速启动提供商列表（推荐提供商加上已连接的提供商），如需添加更多提供商或查看详细设置，展开**高级提供商设置**即可。入门只需一个提供商。已弃用的 Google Gemini CLI / Antigravity 提供商条目已被有意隐藏；Google/Gemini API 密钥、Google Generative AI、Vertex 和 Cloud Code 路径仍受支持。
+2. **GitHub（可选）** — 连接 GitHub 以导入 Issue 和管理 PR
+3. **第一个任务** — 创建你的第一个任务，或从 GitHub 导入（若当前无活跃项目，引导向导会先提示你注册/选择项目目录）
+
+向导**可关闭且不阻塞**——点击**暂时跳过**即可立即使用仪表板。稍后可从**设置 → 身份验证 → 重新打开引导向导**再次触发。
+
+### 移动端
+
+Capacitor + PWA 工作流，请参见 [MOBILE.md](./MOBILE.md)。
 
 ---
 
@@ -83,6 +147,122 @@
 | 🔬 **调研** | 有边界的调研运行，集成网络搜索、GitHub、本地文档和 LLM 综合分析（规划与综合流程中还支持运行时内置 WebSearch/WebFetch）。将调研发现直接转化为任务。（[文档](./docs/research.md)） |
 | 🧪 **自我改进** | 智能体反思自身输出，并在熟悉你的代码库后持续更新其提示词。 |
 | 🔓 **开源，MIT 协议。** | 无供应商锁定。可在自有硬件上运行。每周持续更新。 |
+
+---
+
+## 实地一览
+
+<!--
+FNXC:Docs 2026-06-21-19:55:
+README must lead with a smaller wordmark and a visual showcase of the latest surfaces (Command Center, selectable workflows, agent chat, multi-agent chat rooms, agent mail) so the value lands fast.
+Each feature pairs a short looping GIF with value copy; Command Center additionally carries real fleet stats, the token/productivity/team graph trio, and the 70+-theme grid (incl. shadcn light/mono/orange/black) to make the data pop.
+Media lives in demo/assets/ (committed, GitHub-inline GIFs); stat numbers are sourced from a live seeded fleet — refresh them if the captures are re-shot.
+Each feature keeps its original Tokyo Night capture and adds a Shadcn Light + Shadcn Dark Gray pair; the theme showcase is split into a light-themes grid and a dark-themes grid. Workflow GIFs feature the Stepwise coding graph with node-level zoom/pan.
+-->
+
+Fusion 中最新的功能界面一览——任务控制中心、可视化工作流、智能体聊天、多智能体聊天室与智能体间邮件。
+
+### 🛰️ 指挥中心 — 你的智能体舰队的任务控制中心
+
+<div align="center">
+  <img src="./demo/assets/command-center.gif" alt="Fusion Command Center: live concurrency gauges, token charts, and fleet telemetry across tabs" width="900" />
+</div>
+
+一块屏幕掌握智能体的所有动态。实时调节调度器容量，按模型实时观察 token 消耗，并用硬数据证明价值。
+
+<table>
+<tr>
+<td width="33%"><img src="./demo/assets/command-center-tokens.png" alt="Tokens by model, token trend, and tokens-over-time charts" /><br/><sub><b>Token</b> — 按模型划分的消耗，缓存 vs. 输入 vs. 输出，随时间变化。</sub></td>
+<td width="33%"><img src="./demo/assets/command-center-productivity.png" alt="Productivity: commits, human-hours saved, task duration percentiles, and files by language" /><br/><sub><b>生产力</b> — 产出成果、时长分位数、语言占比。</sub></td>
+<td width="33%"><img src="./demo/assets/command-center-team.png" alt="Agent org chart with token share and tokens-by-agent breakdown" /><br/><sub><b>团队</b> — 智能体组织架构图与每个智能体的 token 占比。</sub></td>
+</tr>
+</table>
+
+> Tokens · Tools · Activity · Productivity · Team · Ecosystem · GitHub · Signals · System · Reliability · Mission Control — 每个标签页都是观察同一支实时舰队的不同视角。
+
+**同一支舰队，随你定制** — 指挥中心（以及整个仪表板）可在 **70+ 种配色主题**间实时换肤。这里展示的是 Shadcn Light 和 Shadcn Dark Gray：
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/command-center-light.gif" alt="Command Center in Shadcn Light theme" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/command-center-gray.gif" alt="Command Center in Shadcn Dark Gray theme" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
+
+<details>
+<summary><b>十余种浅色主题与十余种深色主题</b>（点击展开）</summary>
+
+<br/>
+
+<div align="center">
+  <img src="./demo/assets/command-center-themes-light.png" alt="Command Center across 12 light color themes" width="900" />
+  <br/><br/>
+  <img src="./demo/assets/command-center-themes-dark.png" alt="Command Center across 12 dark color themes" width="900" />
+</div>
+
+</details>
+
+### 🔁 可视化编写的可选工作流
+
+<div align="center">
+  <img src="./demo/assets/workflows.gif" alt="Fusion Workflow Editor: switching between built-in workflow graphs" width="820" />
+</div>
+
+任务从想法到合并的旅程就是一条**工作流**——它由你选择、由你塑造。挑选一个内置工作流（Coding、Quick fix、Review-heavy、Stepwise、PR lifecycle、Compound engineering 等），查看其图形，然后在可视化[工作流编辑器](./docs/workflow-editor.md)中复制并定制列、门控、模型通道和审核策略。无需 fork 引擎。
+
+这是 **Stepwise coding**（逐步编码）图形——在进入下一步前对每一步进行规划、执行和审核——在 Shadcn Light 和 Dark Gray 中逐节点探索：
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/workflows-light.gif" alt="Stepwise coding workflow graph in Shadcn Light, panning across nodes" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/workflows-gray.gif" alt="Stepwise coding workflow graph in Shadcn Dark Gray, panning across nodes" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
+
+### 🗨️ 智能体聊天 — 在任务进行中与智能体对话
+
+<div align="center">
+  <img src="./demo/assets/agent-chat.gif" alt="Fusion agent chat: a threaded conversation with an agent diagnosing a failed task" width="900" />
+</div>
+
+与任意智能体进行直接聊天和任务聊天，可用任意模型。询问任务为何失败、引导其方法、拖入附件、回答聊天内问题卡，并从上次中断处恢复流——全程支持完整的 markdown 和代码渲染。
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/agent-chat-light.png" alt="Agent chat thread in Shadcn Light" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/agent-chat-gray.png" alt="Agent chat thread in Shadcn Dark Gray" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
+
+### 👥 多智能体聊天室
+
+<div align="center">
+  <img src="./demo/assets/chat-rooms.gif" alt="Fusion chat room: CEO, Product Manager, and CTO agents coordinating in #leads" width="900" />
+</div>
+
+把多个智能体放进同一个房间，让它们协作。提及某个成员，它便会直接回复；旁听成员可在上限内加入对话。这里 **CEO**、**产品经理**和 **CTO** 智能体在 `#leads` 中就任务归属达成一致——全程无需人工介入。（[聊天文档](./docs/dashboard-guide.md#chat-view)）
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/chat-rooms-light.gif" alt="Multi-agent chat room in Shadcn Light" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/chat-rooms-gray.gif" alt="Multi-agent chat room in Shadcn Dark Gray" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
+
+### 📬 智能体邮件 — 智能体之间的收件箱
+
+<div align="center">
+  <img src="./demo/assets/agent-mail.gif" alt="Fusion mailbox: inter-agent messages with triage summaries and approvals" width="900" />
+</div>
+
+内置邮箱，用于委派、澄清与交接。智能体提交分诊摘要、请求审批，并在整支舰队间协调工作——配有收件箱、发件箱、智能体和审批视图，让你可以审计每一次往来。
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/agent-mail-light.gif" alt="Agent mailbox in Shadcn Light" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/agent-mail-gray.gif" alt="Agent mailbox in Shadcn Dark Gray" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
 
 ---
 
@@ -221,70 +401,6 @@ npx companies.sh add paperclipai/companies/gstack
 <br />
 
 > **Hermes**、**Paperclip** 和 **OpenClaw** 均为**实验性**运行时插件——API 和通信格式可能在次要版本间发生变更。
-
----
-
-## 快速上手
-
-**无需安装，直接通过 npm 运行：**
-
-```bash
-npx runfusion.ai
-```
-
-这将启动仪表板。子命令可透传：`npx runfusion.ai task create "fix X"`、`npx runfusion.ai --help` 等（或完整写法：`npx @runfusion/fusion dashboard`）。
-
-**一键安装脚本**（macOS 和 Linux——自动选用 Homebrew，失败则回退到 npm）：
-
-```bash
-curl -fsSL https://runfusion.ai/install.sh | sh
-fusion dashboard
-```
-
-**Homebrew**（macOS 和 Linux）：
-
-```bash
-brew tap runfusion/fusion
-brew install fusion
-fusion dashboard            # 或：fn dashboard
-```
-
-或使用一行命令（自动添加 tap）：`brew install runfusion/fusion/fusion`。
-
-**npm 全局安装**：
-
-```bash
-npm install -g @runfusion/fusion
-fn dashboard                # 或：fusion dashboard
-```
-
-**从克隆仓库启动**（用于开发）：
-
-```bash
-pnpm dev dashboard
-```
-
-然后点击终端输出的 `Open:` URL。该 URL 内嵌了一个持有者令牌
-（`http://localhost:4040/?token=fn_...`），浏览器首次访问时会将其捕获并存入
-`localStorage`，此后自动复用。在服务端，Fusion 会在首次经过身份验证的运行时将
-仪表板/守护进程令牌持久化至 `~/.fusion/settings.json`，并在后续启动时复用，
-除非你通过 `--token`、`FUSION_DASHBOARD_TOKEN`、`FUSION_DAEMON_TOKEN` 覆盖，
-或使用 `--no-auth` 禁用鉴权。完整的优先级规则及重置/吊销选项，请参见
-[CLI 参考 → fn dashboard → 身份验证](./docs/cli-reference.md#fn-dashboard)。
-
-### 首次运行向导
-
-首次启动时，Fusion 会打开**引导向导**，分三步引导：
-
-1. **AI 配置** — 使用简化的快速启动提供商列表（推荐提供商加上已连接的提供商），如需添加更多提供商或查看详细设置，展开**高级提供商设置**即可。入门只需一个提供商。已弃用的 Google Gemini CLI / Antigravity 提供商条目已被有意隐藏；Google/Gemini API 密钥、Google Generative AI、Vertex 和 Cloud Code 路径仍受支持。
-2. **GitHub（可选）** — 连接 GitHub 以导入 Issue 和管理 PR
-3. **第一个任务** — 创建你的第一个任务，或从 GitHub 导入（若当前无活跃项目，引导向导会先提示你注册/选择项目目录）
-
-向导**可关闭且不阻塞**——点击**暂时跳过**即可立即使用仪表板。稍后可从**设置 → 身份验证 → 重新打开引导向导**再次触发。
-
-### 移动端
-
-Capacitor + PWA 工作流，请参见 [MOBILE.md](./MOBILE.md)。
 
 ---
 

@@ -3,6 +3,10 @@ export { reloadExemptTools, addToExemptTools, getExemptToolNames } from "./agent
 export { createFusionAuthStorage } from "./auth-storage.js";
 export {
   createTaskCreateTool,
+  createArtifactListTool,
+  createArtifactRegisterTool,
+  createArtifactViewTool,
+  createChatArtifactTools,
   createChatTaskDocumentTools,
   createTaskDocumentReadTool,
   createTaskDocumentWriteTool,
@@ -19,6 +23,11 @@ export {
   createTraitListTool,
   createWorkflowAuthoringTools,
   taskCreateParams,
+  artifactListParams,
+  artifactRegisterParams,
+  artifactViewParams,
+  chatArtifactListParams,
+  chatArtifactRegisterParams,
   chatTaskDocumentReadParams,
   chatTaskDocumentWriteParams,
   taskDocumentReadParams,

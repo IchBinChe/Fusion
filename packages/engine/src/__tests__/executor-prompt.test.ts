@@ -744,7 +744,7 @@ describe("TaskExecutor pause behavior", () => {
     // Should move to todo, NOT mark as failed. This path (agent threw mid-
     // execution while paused) explicitly nukes worktree+branch — work is
     // discarded — so it must NOT flag preserveResumeState.
-    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", undefined);
     expect(store.updateTask).not.toHaveBeenCalledWith("FN-001", { status: "failed" });
   });
 
@@ -2024,8 +2024,9 @@ describe("TaskExecutor global pause behavior", () => {
     ]);
 
     // Global pause should move both tasks out of in-progress without marking failed.
-    expect(store.moveTask).toHaveBeenCalledWith("FN-002", expect.stringMatching(/^(todo|in-review)$/));
-    expect(store.moveTask).toHaveBeenCalledWith("FN-001", expect.stringMatching(/^(todo|in-review)$/));
+    const moveCalls = store.moveTask.mock.calls;
+    expect(moveCalls.some(([id, column]) => id === "FN-002" && /^(todo|in-review)$/.test(String(column)))).toBe(true);
+    expect(moveCalls.some(([id, column]) => id === "FN-001" && /^(todo|in-review)$/.test(String(column)))).toBe(true);
     expect(store.updateTask).not.toHaveBeenCalledWith("FN-001", { status: "failed" });
     expect(store.updateTask).not.toHaveBeenCalledWith("FN-002", { status: "failed" });
   });
@@ -2053,7 +2054,7 @@ describe("TaskExecutor global pause behavior", () => {
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     });
 
-    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo", undefined);
     expect(store.updateTask).not.toHaveBeenCalledWith("FN-001", { status: "failed" });
   });
 

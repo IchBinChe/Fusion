@@ -197,6 +197,7 @@ function renderCard(
     addToast: vi.fn(),
     availableModels: MOCK_MODELS,
     projectId: TEST_PROJECT_ID,
+    onSubtaskBreakdown: vi.fn(),
     ...overrides,
   };
   const result = render(<InlineCreateCard {...props} />);
@@ -833,17 +834,18 @@ describe("InlineCreateCard Plan and Subtask buttons", () => {
     expect(subtaskButton.disabled).toBe(false);
   });
 
-  it("calls onPlanningMode with description and clears input when Plan clicked", () => {
+  it("calls onPlanningMode with description and preserves input draft when Plan clicked", () => {
     const onPlanningMode = vi.fn();
     renderCard([], { onPlanningMode });
     expandCard();
-    const textarea = screen.getByPlaceholderText("What needs to be done?");
+    const textarea = screen.getByPlaceholderText("What needs to be done?") as HTMLTextAreaElement;
 
-    fireEvent.change(textarea, { target: { value: "Plan this task" } });
+    fireEvent.change(textarea, { target: { value: "  Plan this task  " } });
     fireEvent.click(screen.getByTestId("plan-button"));
 
     expect(onPlanningMode).toHaveBeenCalledWith("Plan this task");
-    expect((textarea as HTMLTextAreaElement).value).toBe("");
+    expect(textarea.value).toBe("  Plan this task  ");
+    expect(localStorage.getItem(INLINE_CREATE_STORAGE_KEY)).toBe("  Plan this task  ");
   });
 
   it("calls onSubtaskBreakdown with description and clears input when Subtask clicked", () => {
@@ -857,6 +859,18 @@ describe("InlineCreateCard Plan and Subtask buttons", () => {
 
     expect(onSubtaskBreakdown).toHaveBeenCalledWith("Break this down");
     expect((textarea as HTMLTextAreaElement).value).toBe("");
+  });
+
+  it("hides the Subtask quick-add action without leaving an inline controls shell when the callback is omitted", () => {
+    renderCard([], { onSubtaskBreakdown: undefined });
+    expandCard();
+
+    const controlsRow = document.querySelector(".inline-create-controls") as HTMLElement;
+    expect(controlsRow).toBeTruthy();
+    expect(screen.queryByTestId("subtask-button")).not.toBeInTheDocument();
+    expect(screen.queryByTitle("Break down into AI-generated subtasks")).not.toBeInTheDocument();
+    expect(controlsRow.contains(screen.getByTestId("plan-button"))).toBe(true);
+    expect(controlsRow.querySelector(".dep-trigger")).toBeTruthy();
   });
 
   it("shows toast when Plan clicked with empty description (via direct handler call)", () => {

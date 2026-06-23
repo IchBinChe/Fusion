@@ -124,8 +124,26 @@ FN-6425 requires the chat expand control to stay inside the chat view as an icon
   color: var(--text-muted);
 }
 
-.task-chat-avatar {
-  flex: 0 0 auto;
+.task-chat-provider-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--provider-icon-color, currentColor) 8%, transparent);
+  color: var(--text-muted);
+}
+
+.task-chat-provider-icon--fallback {
+  color: var(--text-muted);
+}
+
+.task-chat-provider-icon .provider-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .task-chat-role-label {

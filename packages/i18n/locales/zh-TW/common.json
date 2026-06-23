@@ -223,6 +223,7 @@
   "workflowNodes": {
     "summaryAwaitInput": "",
     "summaryCodeDefault": "",
+    "summaryDefaultModel": "",
     "summaryGateAdvisory": "",
     "summaryGateBlocks": "",
     "summaryHoldRelease": "",

@@ -54,6 +54,8 @@ vi.mock("../../api", () => ({
   updateGlobalSettings: vi.fn(),
   fetchWorkflowSettingValues: vi.fn().mockResolvedValue({ stored: {}, effective: {}, orphaned: [] }),
   updateWorkflowSettingValues: vi.fn().mockResolvedValue({ stored: {}, effective: {}, orphaned: [] }),
+  fetchWorkflowPromptOverrides: vi.fn().mockResolvedValue({ stored: {}, effective: {}, defaults: {} }),
+  updateWorkflowPromptOverrides: vi.fn().mockResolvedValue({ stored: {}, effective: {}, defaults: {} }),
 }));
 
 import { fireEvent } from "@testing-library/react";
@@ -76,6 +78,8 @@ import {
   fetchAgents,
   fetchConfig,
   fetchSettings,
+  fetchWorkflowPromptOverrides,
+  updateWorkflowPromptOverrides,
 } from "../../api";
 import type { TraitCatalogEntry } from "../../api";
 import type { WorkflowStepTemplate } from "@fusion/core";
@@ -122,6 +126,8 @@ viBeforeEach(() => {
   vi.mocked(fetchConfig).mockResolvedValue({ maxConcurrent: 2, rootDir: "." });
   vi.mocked(fetchSettings).mockResolvedValue({} as never);
   vi.mocked(fetchAgents).mockResolvedValue([]);
+  vi.mocked(fetchWorkflowPromptOverrides).mockResolvedValue({ stored: {}, effective: {}, defaults: {} });
+  vi.mocked(updateWorkflowPromptOverrides).mockResolvedValue({ stored: {}, effective: {}, defaults: {} });
 });
 
 const TRAIT_CATALOG: TraitCatalogEntry[] = [
@@ -407,6 +413,7 @@ describe("WorkflowNodeEditor", () => {
   });
 
   afterEach(() => {
+    localStorage.removeItem("fusion:wf-left-sidebar-collapsed");
     localStorage.removeItem("fusion:wf-sidebar-settings-collapsed");
     localStorage.removeItem("fusion:wf-templates-collapsed");
     cleanup();
@@ -430,6 +437,55 @@ describe("WorkflowNodeEditor", () => {
     expect(await screen.findByTestId("wf-workflow-name")).toHaveTextContent("QA");
     expect(screen.queryByTestId("wf-mobile-select-note")).not.toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "QA" })[0]).toHaveClass("active");
+  });
+
+  it("lets desktop users collapse and restore the workflow sidebar", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    expect(await screen.findByTestId("wf-workflow-name")).toHaveTextContent("QA");
+    const body = screen.getByTestId("wf-new-workflow").closest(".wf-editor-body");
+    expect(body).not.toBeNull();
+    expect(body!).not.toHaveClass("wf-editor-body--sidebar-collapsed");
+    expect(screen.queryByTestId("wf-sidebar-restore")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("wf-sidebar-collapse"));
+
+    expect(body!).toHaveClass("wf-editor-body--sidebar-collapsed");
+    const restoreButton = screen.getByTestId("wf-sidebar-restore");
+    expect(restoreButton).toHaveAccessibleName("Show workflow sidebar");
+    expect(restoreButton).toHaveTextContent("");
+    expect(screen.getByTestId("wf-workflow-name").previousElementSibling).toBe(restoreButton);
+
+    fireEvent.click(screen.getByTestId("wf-sidebar-restore"));
+
+    expect(body!).not.toHaveClass("wf-editor-body--sidebar-collapsed");
+    expect(screen.queryByTestId("wf-sidebar-restore")).not.toBeInTheDocument();
+  });
+
+  it("lets users collapse and restore the workflow mini map", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([def()]);
+
+    const { container } = render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    expect(await screen.findByTestId("wf-workflow-name")).toHaveTextContent("QA");
+    const toggle = await screen.findByTestId("wf-minimap-toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveTextContent("Hide mini map");
+    expect(container.querySelector(".react-flow__minimap")).toBeTruthy();
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveTextContent("Show mini map");
+    expect(container.querySelector(".react-flow__minimap")).toBeNull();
+
+    fireEvent.click(toggle);
+
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveTextContent("Hide mini map");
+    expect(container.querySelector(".react-flow__minimap")).toBeTruthy();
   });
 
   it("lets desktop users switch to the simple graph layout and back", async () => {
@@ -803,8 +859,92 @@ describe("WorkflowNodeEditor", () => {
     fireEvent.click(await screen.findByTestId("wf-node-start"));
 
     const inspector = await screen.findByTestId("wf-node-inspector");
-    expect(within(inspector).getByText(/Read-only built-in/i)).toBeInTheDocument();
+    expect(within(inspector).getByText(/structure is read-only/i)).toBeInTheDocument();
     expect(within(inspector).getByTestId("wf-start-entry-column")).toBeDisabled();
+  });
+
+  it("edits and resets built-in prompt overrides from the node inspector", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef()]);
+    vi.mocked(fetchWorkflowPromptOverrides).mockResolvedValue({
+      stored: {},
+      effective: { execute: "Default execute prompt" },
+      defaults: { execute: "Default execute prompt" },
+    });
+    vi.mocked(updateWorkflowPromptOverrides)
+      .mockResolvedValueOnce({
+        stored: { execute: "Custom execute prompt" },
+        effective: { execute: "Custom execute prompt" },
+        defaults: { execute: "Default execute prompt" },
+      })
+      .mockResolvedValueOnce({
+        stored: {},
+        effective: { execute: "Default execute prompt" },
+        defaults: { execute: "Default execute prompt" },
+      });
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    await selectBuiltinExecutePromptNode();
+    const inspector = await screen.findByTestId("wf-node-inspector");
+    const prompt = within(inspector).getByLabelText("Prompt") as HTMLTextAreaElement;
+    expect(prompt).not.toHaveAttribute("readonly");
+    expect(within(inspector).getByRole("button", { name: "Reset to default" })).toBeDisabled();
+
+    fireEvent.change(prompt, { target: { value: "Custom execute prompt" } });
+    fireEvent.blur(prompt);
+
+    await waitFor(() =>
+      expect(updateWorkflowPromptOverrides).toHaveBeenCalledWith("builtin:coding", { execute: "Custom execute prompt" }, undefined),
+    );
+    expect(await within(inspector).findByTestId("wf-prompt-overridden")).toHaveTextContent("Overridden");
+    const reset = within(inspector).getByRole("button", { name: "Reset to default" });
+    expect(reset).not.toBeDisabled();
+
+    fireEvent.click(reset);
+    await waitFor(() =>
+      expect(updateWorkflowPromptOverrides).toHaveBeenLastCalledWith("builtin:coding", { execute: null }, undefined),
+    );
+    await waitFor(() => expect(prompt).toHaveValue("Default execute prompt"));
+  });
+
+  it("edits gate prompts and shows reset controls in mobile built-in panels", async () => {
+    mockWorkflowEditorViewport("mobile");
+    const gateWorkflow: WorkflowDefinition = {
+      ...builtinDef(),
+      ir: {
+        version: "v2",
+        name: "Gate built-in",
+        columns: [],
+        nodes: [
+          { id: "start", kind: "start" },
+          { id: "security", kind: "gate", config: { prompt: "Default security prompt" } },
+          { id: "end", kind: "end" },
+        ],
+        edges: [
+          { from: "start", to: "security", condition: "success" },
+          { from: "security", to: "end", condition: "success" },
+        ],
+      },
+      layout: {},
+    };
+    vi.mocked(fetchWorkflows).mockResolvedValue([gateWorkflow]);
+    vi.mocked(fetchWorkflowPromptOverrides).mockResolvedValue({
+      stored: { security: "Custom security prompt" },
+      effective: { security: "Custom security prompt" },
+      defaults: { security: "Default security prompt" },
+    });
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Default coding workflow" }));
+    fireEvent.click(within(await screen.findByTestId("mobile-wf-node-security")).getAllByRole("button")[0]);
+
+    const inspector = await screen.findByTestId("wf-node-inspector");
+    const prompt = within(inspector).getByLabelText("Prompt") as HTMLTextAreaElement;
+    expect(prompt).not.toHaveAttribute("readonly");
+    expect(prompt).toHaveValue("Custom security prompt");
+    expect(within(inspector).getByTestId("wf-prompt-overridden")).toHaveTextContent("Overridden");
+    expect(within(inspector).getByRole("button", { name: "Reset to default" })).not.toBeDisabled();
   });
 
   it("opens the start node inspector from the mobile node-detail stage", async () => {
@@ -1038,6 +1178,50 @@ describe("WorkflowNodeEditor", () => {
     expect(getPromptFullscreenOverlay()).toBeNull();
   });
 
+  it("edits and resets built-in prompt overrides in the fullscreen editor", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef()]);
+    vi.mocked(fetchWorkflowPromptOverrides).mockResolvedValue({
+      stored: { execute: "Existing execute override" },
+      effective: { execute: "Existing execute override" },
+      defaults: { execute: "Default execute prompt" },
+    });
+    vi.mocked(updateWorkflowPromptOverrides)
+      .mockResolvedValueOnce({
+        stored: { execute: "Fullscreen execute override" },
+        effective: { execute: "Fullscreen execute override" },
+        defaults: { execute: "Default execute prompt" },
+      })
+      .mockResolvedValueOnce({
+        stored: {},
+        effective: { execute: "Default execute prompt" },
+        defaults: { execute: "Default execute prompt" },
+      });
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    await selectBuiltinExecutePromptNode();
+    fireEvent.click(await screen.findByRole("button", { name: "Expand prompt editor" }));
+
+    const fullscreenPromptEditor = getPromptFullscreenOverlay();
+    expect(fullscreenPromptEditor).toBeInTheDocument();
+    const textarea = getPromptFullscreenTextarea();
+    expect(textarea).not.toHaveAttribute("readonly");
+    expect(textarea).toHaveValue("Existing execute override");
+    expect(within(fullscreenPromptEditor!).getByTestId("wf-prompt-overridden")).toHaveTextContent("Overridden");
+
+    fireEvent.change(textarea, { target: { value: "Fullscreen execute override" } });
+    fireEvent.blur(textarea);
+    await waitFor(() =>
+      expect(updateWorkflowPromptOverrides).toHaveBeenCalledWith("builtin:coding", { execute: "Fullscreen execute override" }, undefined),
+    );
+
+    fireEvent.click(within(fullscreenPromptEditor!).getByRole("button", { name: "Reset to default" }));
+    await waitFor(() =>
+      expect(updateWorkflowPromptOverrides).toHaveBeenLastCalledWith("builtin:coding", { execute: null }, undefined),
+    );
+    await waitFor(() => expect(textarea).toHaveValue("Default execute prompt"));
+  });
+
   it("opens and collapses the fullscreen prompt editor for builtin workflows on mobile", async () => {
     mockWorkflowEditorViewport("mobile");
     vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef()]);
@@ -1111,6 +1295,62 @@ describe("WorkflowNodeEditor", () => {
   it("renders nothing when closed", () => {
     const { container } = render(<WorkflowNodeEditor isOpen={false} onClose={() => {}} addToast={() => {}} />);
     expect(container).toBeEmptyDOMElement();
+  });
+});
+
+// FNXC:EmbeddedPresentation 2026-06-22-12:00:
+// presentation="embedded" was a zero-coverage branch. These assert the embedded contract via useEmbeddedPresentation:
+// no fixed .modal-overlay backdrop, Escape does NOT dismiss (escapeEnabled is false), and the embedded root class renders.
+describe("WorkflowNodeEditor — embedded presentation", () => {
+  beforeEach(() => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([]);
+    vi.mocked(fetchTraits).mockResolvedValue(TRAIT_CATALOG);
+    vi.mocked(fetchStepParsers).mockResolvedValue(["step-headings", "json-steps"]);
+    vi.mocked(fetchModels).mockResolvedValue({ models: [] });
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("renders the embedded root class and no modal overlay", async () => {
+    const { container } = render(
+      <WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} presentation="embedded" />,
+    );
+
+    expect(await screen.findByText("Workflows")).toBeInTheDocument();
+    expect(container.querySelector(".workflow-editor-embedded")).not.toBeNull();
+    expect(container.querySelector(".wf-editor-modal--embedded")).not.toBeNull();
+    // No fixed full-screen overlay host in embedded mode.
+    expect(container.querySelector(".modal-overlay")).toBeNull();
+    expect(container.querySelector(".wf-editor-overlay")).toBeNull();
+  });
+
+  it("does not dismiss on Escape in embedded mode", async () => {
+    const onClose = vi.fn();
+    const { container } = render(
+      <WorkflowNodeEditor isOpen onClose={onClose} addToast={() => {}} presentation="embedded" />,
+    );
+
+    expect(await screen.findByText("Workflows")).toBeInTheDocument();
+    // Escape is handled on the modal element (onKeyDown), so fire it there — not on document.
+    const embeddedModal = container.querySelector(".wf-editor-modal--embedded")!;
+    fireEvent.keyDown(embeddedModal, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("keeps the modal overlay and Escape-to-close in modal mode", async () => {
+    const onClose = vi.fn();
+    const { container } = render(<WorkflowNodeEditor isOpen onClose={onClose} addToast={() => {}} />);
+
+    expect(await screen.findByText("Workflows")).toBeInTheDocument();
+    expect(container.querySelector(".wf-editor-overlay")).not.toBeNull();
+    expect(container.querySelector(".wf-editor-modal--embedded")).toBeNull();
+    // Modal-mode Escape is handled on the modal element (onKeyDown), not document.
+    const modal = container.querySelector(".wf-editor-modal")!;
+    fireEvent.keyDown(modal, { key: "Escape" });
+    expect(onClose).toHaveBeenCalled();
   });
 });
 
@@ -3022,7 +3262,7 @@ describe("WorkflowNodeEditor — U10 design-with-AI", () => {
 
 // ── U6: per-column agent picker, mode toggle, stale-id + override surfaces ────
 
-function flagsOn(): Settings {
+function settingsWithStaleWorkflowFlags(): Settings {
   return { experimentalFeatures: { workflowColumns: true, workflowGraphExecutor: true } } as Settings;
 }
 
@@ -3049,7 +3289,7 @@ describe("WorkflowNodeEditor — U6 column agents", () => {
   beforeEach(() => {
     vi.mocked(fetchTraits).mockResolvedValue(TRAIT_CATALOG);
     vi.mocked(fetchStepParsers).mockResolvedValue(["step-headings", "json-steps"]);
-    vi.mocked(fetchSettings).mockResolvedValue(flagsOn());
+    vi.mocked(fetchSettings).mockResolvedValue(settingsWithStaleWorkflowFlags());
     vi.mocked(fetchAgents).mockResolvedValue(agentList());
     vi.mocked(fetchModels).mockResolvedValue({ models: [] });
   });
@@ -3058,7 +3298,7 @@ describe("WorkflowNodeEditor — U6 column agents", () => {
     vi.clearAllMocks();
   });
 
-  it("renders the per-column agent picker enabled with registry agents when flags are on", async () => {
+  it("renders the per-column agent picker enabled with registry agents by default", async () => {
     vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
     render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
     const picker = (await screen.findByTestId("wf-column-agent-select-triage")) as HTMLSelectElement;
@@ -3070,14 +3310,14 @@ describe("WorkflowNodeEditor — U6 column agents", () => {
     expect(picker.value).toBe("");
   });
 
-  it("disables the picker with a flag-naming hint when the flags are off", async () => {
+  it("keeps the picker enabled when stale workflow flags are absent", async () => {
     vi.mocked(fetchSettings).mockResolvedValue({} as Settings);
     vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
     render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
     const picker = (await screen.findByTestId("wf-column-agent-select-triage")) as HTMLSelectElement;
-    await waitFor(() => expect(picker.disabled).toBe(true));
-    expect(picker.title).toMatch(/workflowColumns/);
-    expect(picker.title).toMatch(/workflowGraphExecutor/);
+    await waitFor(() => expect(picker.disabled).toBe(false));
+    expect(picker.title).not.toMatch(/workflowColumns/);
+    expect(picker.title).not.toMatch(/workflowGraphExecutor/);
   });
 
   it("selecting an agent reveals the defer/override mode toggle (default defer) and writes the binding", async () => {

@@ -80,7 +80,12 @@ describe("discoverDroidModels", () => {
 
     const models = await discoverDroidModels();
     expect(spawnMock).toHaveBeenCalledTimes(1);
-    expect(spawnMock).toHaveBeenCalledWith("droid", ["exec", "--help"], expect.anything());
+    expect(spawnMock).toHaveBeenCalledWith("droid", ["exec", "--help"], expect.objectContaining({
+      stdio: ["ignore", "pipe", "ignore"],
+    }));
+    const options = spawnMock.mock.calls[0]?.[2] as { stdio: string[] };
+    expect(options.stdio).not.toBe("inherit");
+    expect(options.stdio).not.toContain("inherit");
     expect(models).toContain("claude-opus-4-8");
     expect(models).toContain("custom:Kimi-K2.5-Turbo-0");
   });
@@ -102,6 +107,14 @@ describe("discoverDroidModels", () => {
       const proc = makeProc();
       queueMicrotask(() => proc.emit("error", new Error("ENOENT")));
       return proc;
+    });
+
+    await expect(discoverDroidModels()).resolves.toEqual([]);
+  });
+
+  it("returns [] instead of rejecting when spawn throws synchronously", async () => {
+    spawnMock.mockImplementationOnce(() => {
+      throw new Error("Real AI CLI launch blocked during tests: droid exec --help");
     });
 
     await expect(discoverDroidModels()).resolves.toEqual([]);

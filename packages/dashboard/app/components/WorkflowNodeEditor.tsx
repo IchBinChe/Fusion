@@ -35,7 +35,10 @@ import {
   fetchDiscoveredSkills,
   fetchWorkflowStepTemplates,
   fetchPluginWorkflowStepTemplates,
+  fetchWorkflowPromptOverrides,
+  updateWorkflowPromptOverrides,
   type ModelInfo,
+  type WorkflowPromptOverridesPayload,
 } from "../api";
 import type { Agent } from "../api";
 import type { DiscoveredSkill } from "../api";
@@ -48,7 +51,7 @@ FNXC:i18n-Localize 2026-06-20-00:00:
 FN-6770 localizes this workflow surface through t() and authored en catalog keys so hardcoded user-facing copy does not need a lint.ignore deferral.
 */
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
-import { useAppSettings } from "../hooks/useAppSettings";
+import { useEmbeddedPresentation, type ModalPresentation } from "../hooks/useEmbeddedPresentation";
 import { isMobileViewport, useViewportMode } from "../hooks/useViewportMode";
 import { workflowNodeTypes, type WorkflowFlowNodeData, type WorkflowEditorNodeKind } from "./nodes/WorkflowNodeTypes";
 import { WorkflowEditorCatalogContext } from "./nodes/WorkflowEditorCatalogContext";
@@ -154,6 +157,26 @@ function parseModelDropdownValue(value: string): { provider: string; modelId: st
   return { provider: value.slice(0, slashIndex), modelId: value.slice(slashIndex + 1) };
 }
 
+/*
+FNXC:WorkflowMiniMap 2026-06-22-10:15:
+The workflow minimap must show the actual graph, not the large column swimlane
+band nodes that exist only as canvas background scaffolding. Use explicit
+theme-token colors so React Flow's SVG attributes do not fall back to blank
+default chrome in dark/light themes.
+*/
+function miniMapNodeColor(node: FlowNode<WorkflowFlowNodeData>): string {
+  if (isColumnBandNode(node.id)) return "transparent";
+  if (node.data.kind === "start") return "var(--ws-success)";
+  if (node.data.kind === "end") return "var(--ws-info)";
+  if (node.data.kind === "gate" || node.data.kind === "step-review") return "var(--ws-warning)";
+  if (node.data.kind === "merge" || node.data.kind === "join") return "var(--accent)";
+  return "var(--todo)";
+}
+
+function miniMapNodeStrokeColor(node: FlowNode<WorkflowFlowNodeData>): string {
+  return isColumnBandNode(node.id) ? "transparent" : "var(--border-strong, var(--border))";
+}
+
 /** Normalized serialization of the editor's authoring state for dirty tracking
  *  (U4). Serializes nodes/edges through flowToIr (so mapping-layer defaults are
  *  materialized identically on the loaded and live sides) plus the editor-owned
@@ -194,6 +217,17 @@ interface WorkflowNodeEditorProps {
   initialAction?: "create";
   /** Workflow id to preselect when the editor opens from workflow-aware surfaces. */
   initialWorkflowId?: string;
+  /*
+  FNXC:WorkflowEditorEmbedding 2026-06-22-00:00:
+  The workflow editor can render either as a fixed modal overlay ("modal", the
+  default and historical behavior) or inline as a main-content-area view
+  ("embedded") that fills the right-dock panel like a Command Center view.
+  In embedded mode the editor drops the .modal-overlay shell, the X close
+  button, native resize, and all modal-only dismiss paths (Escape, overlay
+  click) so it reads as a persistent view rather than a dismissible dialog.
+  The modal path stays byte-identical when presentation is "modal"/undefined.
+  */
+  presentation?: ModalPresentation;
 }
 
 let nodeSeq = 0;
@@ -694,7 +728,11 @@ function InnerEditor({
   initialAction,
   initialWorkflowId,
   modalRef,
-}: Omit<WorkflowNodeEditorProps, "isOpen"> & { modalRef: React.RefObject<HTMLDivElement | null> }) {
+  isEmbedded = false,
+}: Omit<WorkflowNodeEditorProps, "isOpen" | "presentation"> & {
+  modalRef: React.RefObject<HTMLDivElement | null>;
+  isEmbedded?: boolean;
+}) {
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const viewportMode = useViewportMode();
@@ -712,6 +750,7 @@ function InnerEditor({
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [miniMapCollapsed, setMiniMapCollapsed] = useState(false);
   const [compactLayoutEnabled, setCompactLayoutEnabled] = useState(false);
   const [mobilePanel, setMobilePanel] = useState<MobileWorkflowPanel>(() =>
     initialPanel === "settings" ? "settings" : "graph",
@@ -745,6 +784,10 @@ function InnerEditor({
   // managed by the panel's Values tab, not this declaration array.
   const [settings, setSettings] = useState<WorkflowSettingDefinition[]>([]);
   const [optionalSteps, setOptionalSteps] = useState<WorkflowOptionalStep[]>([]);
+  // FNXC:WorkflowEditor 2026-06-21-20:06:
+  // Built-in workflow graph structure remains read-only, but prompt/gate node prompts need a separate per-project override state so editing prompts does not mark structural graph edits dirty or use the read-only workflow PATCH authority.
+  const [promptOverrides, setPromptOverrides] = useState<WorkflowPromptOverridesPayload | null>(null);
+  const [promptOverrideSavingNodeId, setPromptOverrideSavingNodeId] = useState<string | null>(null);
   // Ref to the settings panel so a `?panel=settings` deep link can scroll it
   // into view on mount (U6/U9 redirect stubs).
   const settingsPanelRef = useRef<HTMLDivElement | null>(null);
@@ -780,10 +823,25 @@ function InnerEditor({
   // U12: the columns/fields authoring panels live in the left sidebar (below the
   // workflow list) as collapsible disclosure sections. Each section's collapsed
   // state persists in localStorage; default expanded.
+  /*
+  FNXC:WorkflowSidebar 2026-06-22-12:00:
+  The workflow view needs the entire left sidebar collapsible, not only its
+  internal column/field/settings groups, so graph editing can use the full
+  canvas width. Persist the shell state and keep a visible restore control in
+  the canvas area when the sidebar is hidden.
+  */
+  const sidebarCollapsedStorageKey = "fusion:wf-left-sidebar-collapsed";
   const columnsCollapsedStorageKey = "fusion:wf-sidebar-columns-collapsed";
   const fieldsCollapsedStorageKey = "fusion:wf-sidebar-fields-collapsed";
   const settingsCollapsedStorageKey = "fusion:wf-sidebar-settings-collapsed";
   const optionalStepsCollapsedStorageKey = "fusion:wf-sidebar-optional-steps-collapsed";
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(sidebarCollapsedStorageKey) === "1";
+    } catch {
+      return false;
+    }
+  });
   const [columnsCollapsed, setColumnsCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem(columnsCollapsedStorageKey) === "1";
@@ -812,6 +870,13 @@ function InnerEditor({
       return false;
     }
   });
+  useEffect(() => {
+    try {
+      localStorage.setItem(sidebarCollapsedStorageKey, sidebarCollapsed ? "1" : "0");
+    } catch {
+      // localStorage unavailable (private mode / SSR): non-fatal.
+    }
+  }, [sidebarCollapsed]);
   useEffect(() => {
     try {
       localStorage.setItem(columnsCollapsedStorageKey, columnsCollapsed ? "1" : "0");
@@ -897,13 +962,11 @@ function InnerEditor({
     return !nodes.some((n) => USER_NODE_KINDS.has(n.data.kind));
   }, [activeWorkflow, isBuiltin, nodes]);
 
-  // Column-agent authoring requires BOTH flags (R10). When either is off, the
-  // picker is disabled (not hidden) and bound columns are inert at execution
-  // time; config still round-trips (flags gate execution, not storage).
-  const { experimentalFeatures } = useAppSettings(projectId);
-  const columnAgentsEnabled =
-    experimentalFeatures?.workflowColumns === true &&
-    experimentalFeatures?.workflowGraphExecutor === true;
+  // FNXC:WorkflowColumns 2026-06-22-18:00:
+  // Workflow columns and the graph engine graduated from Experimental. Column
+  // agent authoring is available by default; stale persisted flag values do not
+  // disable the picker or make bindings inert.
+  const columnAgentsEnabled = true;
 
   // Trait catalog (for client-side composition validation; the panel fetches its
   // own copy for the picker, but the editor needs the flags to validate).
@@ -1181,6 +1244,8 @@ function InnerEditor({
       setFields([]);
       setSettings([]);
       setOptionalSteps([]);
+      setPromptOverrides(null);
+      setPromptOverrideSavingNodeId(null);
       setName("");
       setDescription("");
       loadedSnapshotRef.current = null;
@@ -1235,6 +1300,41 @@ function InnerEditor({
   useEffect(() => {
     if (nodes.length > 0) canvasNodesMaterializedRef.current = true;
   }, [nodes]);
+
+  useEffect(() => {
+    if (!activeWorkflow || !isBuiltin) {
+      setPromptOverrides(null);
+      setPromptOverrideSavingNodeId(null);
+      return;
+    }
+    let cancelled = false;
+    void fetchWorkflowPromptOverrides(activeWorkflow.id, projectId)
+      .then((payload) => {
+        if (cancelled) return;
+        setPromptOverrides(payload);
+        setNodes((ns) =>
+          ns.map((node) => {
+            if (node.data.kind !== "prompt" && node.data.kind !== "gate") return node;
+            const effective = payload.effective[node.id];
+            if (effective === undefined) return node;
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                config: { ...(node.data.config ?? {}), prompt: effective },
+              },
+            };
+          }),
+        );
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        addToast(getErrorMessage(err) || t("workflowEditor.promptOverridesLoadFailed", "Failed to load prompt overrides"), "error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeWorkflow, isBuiltin, projectId, addToast, t, setNodes]);
 
   // `?panel=settings` deep link (U6/U9 redirect stubs): once the active workflow
   // has loaded, scroll the settings panel into view. Runs once per editor open.
@@ -1595,6 +1695,67 @@ function InnerEditor({
       );
     },
     [selectedNodeId, setNodes],
+  );
+
+  const applyPromptOverridePayloadToNode = useCallback(
+    (nodeId: string, payload: WorkflowPromptOverridesPayload) => {
+      setPromptOverrides(payload);
+      const effective = payload.effective[nodeId] ?? payload.defaults[nodeId] ?? "";
+      setNodes((ns) =>
+        ns.map((node) =>
+          node.id === nodeId
+            ? {
+                ...node,
+                data: {
+                  ...node.data,
+                  config: { ...(node.data.config ?? {}), prompt: effective },
+                },
+              }
+            : node,
+        ),
+      );
+    },
+    [setNodes],
+  );
+
+  const persistBuiltinPromptOverride = useCallback(
+    async (nodeId: string, prompt: string) => {
+      if (!activeWorkflow || !isBuiltin) return;
+      setPromptOverrideSavingNodeId(nodeId);
+      try {
+        const payload = await updateWorkflowPromptOverrides(activeWorkflow.id, { [nodeId]: prompt }, projectId);
+        applyPromptOverridePayloadToNode(nodeId, payload);
+        addToast(t("workflowEditor.promptOverrideSaved", "Prompt override saved"), "success");
+      } catch (err) {
+        addToast(getErrorMessage(err) || t("workflowEditor.promptOverrideSaveFailed", "Failed to save prompt override"), "error");
+        try {
+          const payload = await fetchWorkflowPromptOverrides(activeWorkflow.id, projectId);
+          applyPromptOverridePayloadToNode(nodeId, payload);
+        } catch {
+          // Best-effort rollback; a later workflow reload will reconcile.
+        }
+      } finally {
+        setPromptOverrideSavingNodeId((current) => (current === nodeId ? null : current));
+      }
+    },
+    [activeWorkflow, isBuiltin, projectId, addToast, t, applyPromptOverridePayloadToNode],
+  );
+
+  const resetBuiltinPromptOverride = useCallback(
+    async (nodeId: string) => {
+      if (!activeWorkflow || !isBuiltin) return;
+      setPromptOverrideSavingNodeId(nodeId);
+      try {
+        const payload = await updateWorkflowPromptOverrides(activeWorkflow.id, { [nodeId]: null }, projectId);
+        applyPromptOverridePayloadToNode(nodeId, payload);
+        addToast(t("workflowEditor.promptOverrideReset", "Prompt reset to default"), "success");
+      } catch (err) {
+        addToast(getErrorMessage(err) || t("workflowEditor.promptOverrideResetFailed", "Failed to reset prompt"), "error");
+      } finally {
+        setPromptOverrideSavingNodeId((current) => (current === nodeId ? null : current));
+      }
+    },
+    [activeWorkflow, isBuiltin, projectId, addToast, t, applyPromptOverridePayloadToNode],
   );
 
   // Edge inspector (KTD-4/5): mutate the selected edge's condition + rework
@@ -1985,9 +2146,39 @@ function InnerEditor({
     selectedNode && (selectedNode.data.kind === "prompt" || selectedNode.data.kind === "gate")
       ? String(
           selectedNode.data.config?.prompt
+            ?? promptOverrides?.effective[selectedNode.id]
             ?? (isBuiltin ? builtinSeamPrompt(selectedNode.data.config as Record<string, unknown> | undefined) : ""),
         )
       : "";
+  const selectedPromptDefault = selectedNode ? promptOverrides?.defaults[selectedNode.id] : undefined;
+  const selectedPromptStored = selectedNode ? promptOverrides?.stored[selectedNode.id] : undefined;
+  const selectedPromptHasOverride = selectedPromptStored !== undefined;
+  const selectedPromptIsOverridden =
+    selectedPromptHasOverride && selectedPromptDefault !== undefined && selectedPromptStored !== selectedPromptDefault;
+  const selectedPromptOverrideSaving = !!selectedNode && promptOverrideSavingNodeId === selectedNode.id;
+  const selectedNodePromptEditable =
+    !!selectedNode &&
+    (selectedNode.data.kind === "prompt" || selectedNode.data.kind === "gate") &&
+    (!isBuiltin || selectedPromptDefault !== undefined);
+  const handlePromptTextChange = useCallback(
+    (value: string) => {
+      if (!selectedNodePromptEditable) return;
+      updateSelectedData({ config: { prompt: value } });
+    },
+    [selectedNodePromptEditable, updateSelectedData],
+  );
+  const handlePromptTextBlur = useCallback(() => {
+    if (!isBuiltin || !selectedNode || (selectedNode.data.kind !== "prompt" && selectedNode.data.kind !== "gate")) return;
+    const stored = promptOverrides?.stored[selectedNode.id];
+    const defaultPrompt = promptOverrides?.defaults[selectedNode.id];
+    const nextPrompt = selectedNodePromptValue.trim() ? selectedNodePromptValue : "";
+    if ((stored === undefined && (defaultPrompt === undefined || nextPrompt === defaultPrompt)) || stored === nextPrompt) return;
+    void persistBuiltinPromptOverride(selectedNode.id, selectedNodePromptValue);
+  }, [isBuiltin, selectedNode, selectedNodePromptValue, promptOverrides, persistBuiltinPromptOverride]);
+  const handlePromptResetClick = useCallback(() => {
+    if (!selectedNode) return;
+    void resetBuiltinPromptOverride(selectedNode.id);
+  }, [selectedNode, resetBuiltinPromptOverride]);
   // The edge inspector renders different controls per source-node kind (KTD-2):
   // step-review → verdict controls; prompt/script/gate/code/foreach →
   // success/failure select; everything else → a read-only condition note.
@@ -2270,21 +2461,45 @@ function InnerEditor({
               <textarea
                 rows={undefined}
                 value={selectedNodePromptValue}
-                readOnly={isBuiltin}
-                onChange={(e) => updateSelectedData({ config: { prompt: e.target.value } })}
+                readOnly={!selectedNodePromptEditable}
+                onChange={(e) => handlePromptTextChange(e.target.value)}
+                onBlur={handlePromptTextBlur}
                 autoFocus
               />
             </label>
+            {isBuiltin ? (
+              <div className="wf-prompt-override-actions wf-prompt-override-actions--fullscreen">
+                {selectedPromptIsOverridden ? (
+                  <span className="wf-prompt-override-badge" data-testid="wf-prompt-overridden">
+                    {t("workflowEditor.promptOverridden", "Overridden")}
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={handlePromptResetClick}
+                  disabled={!selectedPromptHasOverride || selectedPromptOverrideSaving}
+                >
+                  {selectedPromptOverrideSaving
+                    ? t("workflowEditor.promptSaving", "Saving…")
+                    : t("workflowEditor.resetPromptDefault", "Reset to default")}
+                </button>
+              </div>
+            ) : null}
           </div>,
           document.body,
         )
       : null;
 
-  return (
-    <>
-      <div className="modal-overlay open wf-editor-overlay" {...overlayProps}>
+  // FNXC:WorkflowEditorEmbedding 2026-06-22-00:00:
+  // Embedded mode renders the editor inline inside the right-dock panel: no
+  // fixed .modal-overlay shell, no overlay-click dismiss, no Escape-to-close,
+  // and a --embedded sized variant of the modal element. The modal path stays
+  // byte-identical (same overlay + overlayProps + Escape handler) when not
+  // embedded.
+  const modalElement = (
       <div
-        className="modal wf-editor-modal"
+        className={`modal wf-editor-modal${isEmbedded ? " wf-editor-modal--embedded" : ""}`}
         ref={modalRef}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => {
@@ -2292,6 +2507,8 @@ function InnerEditor({
           // Ignore Escape originating from inputs/textareas/selects so inline
           // editors (name/description) keep their own Escape-to-cancel behavior.
           if (e.key !== "Escape") return;
+          // Embedded views are persistent; Escape must not dismiss them.
+          if (isEmbedded) return;
           // The create dialog (rendered as a child) owns its own Escape; if it's
           // open, let it handle the event (it stops propagation already).
           if (createOpen) return;
@@ -2303,10 +2520,18 @@ function InnerEditor({
         }}
       >
         <header className="wf-editor-header">
-          <h2>{t("workflows.title", "Workflows")}</h2>
-          <button className="wf-editor-close" onClick={requestClose} aria-label={t("workflows.closeEditor", "Close workflow editor")}>
-            <X size={18} />
-          </button>
+          {/* FNXC:WorkflowEditorEmbedding 2026-06-22-01:00: Title row aligned to the shared ViewHeader/Command Center metric — a Workflow icon (size 20) + 1.125rem title — so the embedded workflows view reads consistently with other main-content destinations. */}
+          <h2>
+            <Workflow size={20} aria-hidden="true" />
+            <span>{t("workflows.title", "Workflows")}</span>
+          </h2>
+          {/* FNXC:WorkflowEditorEmbedding 2026-06-22-00:00: embedded views keep a
+              Command Center-style header title but drop the modal X close button. */}
+          {!isEmbedded ? (
+            <button className="wf-editor-close" onClick={requestClose} aria-label={t("workflows.closeEditor", "Close workflow editor")}>
+              <X size={18} />
+            </button>
+          ) : null}
         </header>
 
         {showMigrationNotice ? (
@@ -2334,17 +2559,32 @@ function InnerEditor({
             simpleLayoutEnabled ? " wf-editor-body--simple-layout" : ""
           }${mobileNodeDetailStage ? " wf-editor-body--mobile-node-detail" : ""}${
             mobileEdgeDetailStage ? " wf-editor-body--mobile-edge-detail" : ""
-          }`}
+          }${sidebarCollapsed ? " wf-editor-body--sidebar-collapsed" : ""}`}
         >
           <aside className="wf-editor-sidebar">
-            <button
-              className="wf-editor-new"
-              ref={newWorkflowBtnRef}
-              data-testid="wf-new-workflow"
-              onClick={() => setCreateOpen(true)}
-            >
-              <Plus size={14} /> {t("workflows.newWorkflow", "New workflow")}
-            </button>
+            <div className="wf-editor-sidebar-head">
+              <button
+                className="wf-editor-new"
+                ref={newWorkflowBtnRef}
+                data-testid="wf-new-workflow"
+                onClick={() => setCreateOpen(true)}
+              >
+                <Plus size={14} /> {t("workflows.newWorkflow", "New workflow")}
+              </button>
+              {!isMobileMode && (
+                <button
+                  type="button"
+                  className="wf-sidebar-shell-toggle"
+                  data-testid="wf-sidebar-collapse"
+                  aria-expanded={!sidebarCollapsed}
+                  aria-label={t("workflows.collapseSidebar", "Collapse workflow sidebar")}
+                  title={t("workflows.collapseSidebar", "Collapse workflow sidebar")}
+                  onClick={() => setSidebarCollapsed(true)}
+                >
+                  <ChevronLeft size={14} aria-hidden />
+                </button>
+              )}
+            </div>
             {/* U5/R10: keyboard-accessible import affordance triggering a hidden
                 file input; validation failures render in the persistent inline
                 region below (role="alert"), not a toast. */}
@@ -2526,6 +2766,19 @@ function InnerEditor({
                     plain text (no click affordance); user-owned workflows are
                     click-to-edit (Enter commits, Escape cancels, blur commits). */}
                 <div className="wf-name-strip">
+                  {sidebarCollapsed && !isMobileMode && (
+                    <button
+                      type="button"
+                      className="wf-sidebar-shell-restore"
+                      data-testid="wf-sidebar-restore"
+                      aria-expanded="false"
+                      aria-label={t("workflows.showSidebar", "Show workflow sidebar")}
+                      title={t("workflows.showSidebar", "Show workflow sidebar")}
+                      onClick={() => setSidebarCollapsed(false)}
+                    >
+                      <ChevronRight size={14} aria-hidden />
+                    </button>
+                  )}
                   {isBuiltin ? (
                     <span className="wf-workflow-name wf-workflow-name--readonly" data-testid="wf-workflow-name">
                       {activeWorkflow.name}
@@ -2670,7 +2923,7 @@ function InnerEditor({
                         <div className="wf-mobile-add">
                           {isBuiltin ? (
                             <p className="wf-inspector-note wf-inspector-note--info">
-                              {t("workflows.readOnlyBuiltin", "Read-only built-in workflow")}
+                              {t("workflows.readOnlyBuiltin", "Built-in workflow: structure is read-only, prompts are editable.")}
                             </p>
                           ) : (
                             <>
@@ -2837,7 +3090,7 @@ function InnerEditor({
                           {isBuiltin ? (
                             <>
                               <p className="wf-inspector-note wf-inspector-note--info">
-                                {t("workflows.readOnlyBuiltin", "Read-only built-in workflow")}
+                                {t("workflows.readOnlyBuiltin", "Built-in workflow: structure is read-only, prompts are editable.")}
                               </p>
                               <button className="wf-editor-action" data-testid="wf-mobile-export" onClick={handleExport}>
                                 <Download size={15} /> {t("workflows.export", "Export")}
@@ -2917,7 +3170,7 @@ function InnerEditor({
                   // (not an overlay); the canvas below stays inspectable.
                   <div className="wf-editor-readonly-banner" role="status" data-testid="wf-readonly-banner">
                     <span className="wf-editor-readonly-note">
-                      {t("workflows.readOnlyBuiltin", "Read-only built-in workflow")}
+                      {t("workflows.readOnlyBuiltin", "Built-in workflow: structure is read-only, prompts are editable.")}
                     </span>
                     <button
                       className="wf-editor-action"
@@ -3276,7 +3529,32 @@ function InnerEditor({
                   >
                     <Background />
                     <Controls />
-                    <MiniMap pannable zoomable />
+                    <button
+                      type="button"
+                      className={`wf-minimap-toggle nodrag nopan${miniMapCollapsed ? " wf-minimap-toggle--collapsed" : ""}`}
+                      aria-expanded={!miniMapCollapsed}
+                      aria-controls="wf-workflow-minimap"
+                      data-testid="wf-minimap-toggle"
+                      onClick={() => setMiniMapCollapsed((collapsed) => !collapsed)}
+                    >
+                      {miniMapCollapsed ? <Maximize2 size={13} aria-hidden /> : <Minimize2 size={13} aria-hidden />}
+                      <span>
+                        {miniMapCollapsed
+                          ? t("workflowNodes.showMiniMap", "Show mini map")
+                          : t("workflowNodes.hideMiniMap", "Hide mini map")}
+                      </span>
+                    </button>
+                    {!miniMapCollapsed && (
+                      <MiniMap
+                        id="wf-workflow-minimap"
+                        pannable
+                        zoomable
+                        nodeColor={miniMapNodeColor}
+                        nodeStrokeColor={miniMapNodeStrokeColor}
+                        maskColor="color-mix(in srgb, var(--surface) 70%, transparent)"
+                        bgColor="var(--surface)"
+                      />
+                    )}
                   </ReactFlow>
                   </WorkflowEditorCatalogContext.Provider>
                 </div>
@@ -3331,7 +3609,7 @@ function InnerEditor({
               </div>
               {isBuiltin && (
                 <p className="wf-inspector-note wf-inspector-note--info">
-                  {t("workflowNodes.readOnlyDuplicateToEdit", "Read-only built-in — duplicate the workflow to edit nodes.")}
+                  {t("workflowNodes.readOnlyDuplicateToEdit", "Built-in structure is read-only — prompts on prompt and gate nodes can be edited here.")}
                 </p>
               )}
               <fieldset className="wf-inspector-fields" disabled={isBuiltin}>
@@ -3384,10 +3662,30 @@ function InnerEditor({
                     <textarea
                       rows={5}
                       value={selectedNodePromptValue}
-                      readOnly={isBuiltin}
-                      onChange={(e) => updateSelectedData({ config: { prompt: e.target.value } })}
+                      readOnly={!selectedNodePromptEditable}
+                      onChange={(e) => handlePromptTextChange(e.target.value)}
+                      onBlur={handlePromptTextBlur}
                     />
                   </label>
+                  <div className="wf-prompt-override-actions">
+                    {isBuiltin && selectedPromptIsOverridden ? (
+                      <span className="wf-prompt-override-badge" data-testid="wf-prompt-overridden">
+                        {t("workflowEditor.promptOverridden", "Overridden")}
+                      </span>
+                    ) : null}
+                    {isBuiltin ? (
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={handlePromptResetClick}
+                        disabled={!selectedPromptHasOverride || selectedPromptOverrideSaving}
+                      >
+                        {selectedPromptOverrideSaving
+                          ? t("workflowEditor.promptSaving", "Saving…")
+                          : t("workflowEditor.resetPromptDefault", "Reset to default")}
+                      </button>
+                    ) : null}
+                  </div>
                   {/* Expand button is outside <fieldset disabled={isBuiltin}> so it remains
                       clickable for builtin workflows. Root cause: HTML spec disables all
                       descendant buttons inside a disabled fieldset, including type="button". */}
@@ -4423,7 +4721,20 @@ function InnerEditor({
           />
         )}
       </div>
-      </div>
+  );
+  return (
+    <>
+      {isEmbedded ? (
+        // FNXC:WorkflowEditorEmbedding 2026-06-22-00:00: inline main-content
+        // wrapper (no fixed overlay, no overlayProps overlay-click dismiss).
+        <div className="workflow-editor-embedded right-dock-embedded-view">
+          {modalElement}
+        </div>
+      ) : (
+        <div className="modal-overlay open wf-editor-overlay" {...overlayProps}>
+          {modalElement}
+        </div>
+      )}
       {promptFullscreenOverlay}
     </>
   );
@@ -4437,9 +4748,14 @@ export function WorkflowNodeEditor({
   initialPanel,
   initialAction,
   initialWorkflowId,
+  presentation = "modal",
 }: WorkflowNodeEditorProps) {
   const modalRef = useRef<HTMLDivElement>(null);
-  useModalResizePersist(modalRef, isOpen, "fusion:workflow-node-editor-size");
+  const { isEmbedded, resizePersistEnabled } = useEmbeddedPresentation(presentation);
+  // FNXC:WorkflowEditorEmbedding 2026-06-22-00:00:
+  // Size persistence + native resize are modal-only; an embedded view fills its
+  // host panel (width/height:100%) so persisting a saved pixel size is wrong.
+  useModalResizePersist(modalRef, isOpen && resizePersistEnabled, "fusion:workflow-node-editor-size");
   if (!isOpen) return null;
   return (
     <ReactFlowProvider>
@@ -4451,6 +4767,7 @@ export function WorkflowNodeEditor({
         initialAction={initialAction}
         initialWorkflowId={initialWorkflowId}
         modalRef={modalRef}
+        isEmbedded={isEmbedded}
       />
     </ReactFlowProvider>
   );

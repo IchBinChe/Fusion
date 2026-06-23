@@ -349,8 +349,8 @@ The token-over-time chart is live-updated and animated, but the motion is decora
 FNXC:CommandCenterStyling 2026-06-18-14:29:
 Line-chart motion is decorative, token-timed, and disabled for reduced-motion users; sizing and stroke colors stay on design tokens so the Activity area remains readable across desktop and mobile without chart-specific hardcoded colors or lengths.
 
-FNXC:CommandCenterCharts 2026-06-20-22:59:
-FN-6818 keeps the CSS box wide/short for the Activity layout while the SVG now uses uniform scaling for geometry. Do not switch the square viewBox back to non-uniform scaling to fill this box: that made point markers render as ovals on mobile, and non-scaling stroke was insufficient because it did not protect circle coordinates.
+FNXC:CommandCenterCharts 2026-06-21-17:10:
+FN-6883 keeps the Activity line chart CSS box wide/short while the SVG coordinate system now tracks the rendered box. FN-6818's square `xMidYMid meet` viewBox kept markers circular but collapsed the plot into a centered square with blank margins; the measured viewBox fills desktop and mobile boxes while preserving round markers.
 */
 .cc-line-chart {
   display: block;
@@ -414,12 +414,65 @@ FN-6818 keeps the CSS box wide/short for the Activity layout while the SVG now u
 /*
 FNXC:CommandCenterCharts 2026-06-19-05:24:
 ResponsiveContainer measures its direct parent. Keep the shared recharts wrapper non-zero by default so Activity, Team, Overview, and any future Command Center chart surface render populated data instead of a blank zero-height box; scoped area/overview CSS may restate this size but must not remove the measurable block axis.
+
+FNXC:CommandCenterCharts 2026-06-23-20:35:
+On narrow mobile, Recharts' default legend measured to 0px wide and positioned itself above the chart, overlapping Ecosystem stat cards and wrapping model labels into unreadable vertical fragments. The shared chart wrapper must bound the legend inline size and truncate long labels so Tools/Ecosystem charts stay contained inside their section.
 */
 .cc-recharts-chart,
 .cc-recharts-empty {
   inline-size: 100%;
   block-size: calc(var(--space-2xl) * 7 + var(--space-lg));
   min-inline-size: 0;
+}
+
+.cc-recharts-chart .recharts-wrapper {
+  inline-size: 100% !important;
+  max-inline-size: 100%;
+}
+
+.cc-recharts-chart .recharts-legend-wrapper {
+  inset-inline: 0 !important;
+  inset-block-start: auto !important;
+  inset-block-end: 0 !important;
+  inline-size: 100% !important;
+  max-inline-size: 100%;
+  overflow: hidden;
+}
+
+.cc-recharts-chart .recharts-default-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-xs) var(--space-sm);
+  inline-size: 100%;
+  max-inline-size: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+.cc-recharts-chart .recharts-legend-item {
+  display: inline-flex !important;
+  align-items: center;
+  max-inline-size: min(100%, calc(var(--space-2xl) * 5));
+  margin-inline-end: 0 !important;
+  min-inline-size: 0;
+}
+
+.cc-recharts-chart .recharts-legend-item-text {
+  display: inline-block;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+@media (max-width: 768px) {
+  .cc-recharts-chart,
+  .cc-recharts-empty {
+    block-size: calc(var(--space-2xl) * 8 + var(--space-md));
+  }
 }
 
 /* ---- RadialGauge ---- */

@@ -1,5 +1,5 @@
 import type { WorkflowDefinition, WorkflowDefinitionKind, WorkflowIr, WorkflowIrNode, WorkflowSettingDefinition, TaskStore } from "@fusion/core";
-import { ColumnTraitValidationError, OccupiedColumnsError, InvalidRehomeTargetError, WorkflowCompileError, WorkflowIrError, ColumnAgentBindingError, WorkflowSettingRejectionError, SCHEMA_VERSION, assertColumnTraitsValid, compileWorkflowToSteps, layoutForIr, listTraits, listStepParsers, parseWorkflowIr, resolvePlanningSettingsModel, stripApprovalBypassFlags, resolveWorkflowIrById, resolveEffectiveSettingValues, findOrphanedSettingValues, isBuiltinWorkflowId, BUILTIN_WORKFLOW_SETTINGS, AgentStore, validateColumnAgentBindings, resolveWorkflowOptionalSteps } from "@fusion/core";
+import { ColumnTraitValidationError, OccupiedColumnsError, InvalidRehomeTargetError, WorkflowCompileError, WorkflowIrError, ColumnAgentBindingError, WorkflowSettingRejectionError, SCHEMA_VERSION, assertColumnTraitsValid, compileWorkflowToSteps, layoutForIr, listTraits, listStepParsers, parseWorkflowIr, resolvePlanningSettingsModel, stripApprovalBypassFlags, resolveWorkflowIrById, resolveEffectiveSettingValues, findOrphanedSettingValues, isBuiltinWorkflowId, getBuiltinWorkflow, BUILTIN_WORKFLOW_SETTINGS, AgentStore, validateColumnAgentBindings, resolveWorkflowOptionalSteps, enumeratePromptBearingWorkflowNodes } from "@fusion/core";
 import { buildSessionSkillContextSync, createFnAgent as engineCreateFnAgent, validateCodeNodeSources } from "@fusion/engine";
 import { ApiError, badRequest, conflict, notFound, rateLimited } from "../api-error.js";
 import { emitWorkflowSseEvent } from "../sse.js";
@@ -193,6 +193,25 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
     if (isBuiltinWorkflowId(workflowId)) return;
     const def = await store.getWorkflowDefinition(workflowId);
     if (!def) throw notFound(`Workflow '${workflowId}' not found`);
+  }
+
+  async function resolvePromptOverrideDefaults(store: TaskStore, workflowId: string): Promise<Record<string, string>> {
+    const builtin = isBuiltinWorkflowId(workflowId) ? getBuiltinWorkflow(workflowId) : undefined;
+    const ir = builtin?.ir ?? (await store.getWorkflowDefinition(workflowId))?.ir;
+    if (!ir) return {};
+    const defaults: Record<string, string> = {};
+    for (const entry of enumeratePromptBearingWorkflowNodes(ir)) {
+      defaults[entry.nodeId] = entry.prompt;
+    }
+    return defaults;
+  }
+
+  function resolveEffectivePromptOverrides(defaults: Record<string, string>, stored: Record<string, string>): Record<string, string> {
+    const effective: Record<string, string> = {};
+    for (const [nodeId, prompt] of Object.entries(defaults)) {
+      effective[nodeId] = stored[nodeId] ?? prompt;
+    }
+    return effective;
   }
 
   /**
@@ -487,6 +506,71 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
         }
         throw writeErr;
       }
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err);
+    }
+  });
+
+  // GET /api/workflows/:id/prompt-overrides — read per-project prompt overrides
+  // for prompt/gate nodes. Defaults are the shipped/custom IR prompt text, while
+  // effective applies the stored nodeId → prompt override map.
+  // FNXC:CustomWorkflows 2026-06-21-19:24:
+  // The dashboard needs a separate prompt-override route so built-in workflow prompt edits do not pass through the graph-edit PATCH route that remains read-only for built-ins.
+  router.get("/workflows/:id/prompt-overrides", async (req, res) => {
+    try {
+      const { store } = await getProjectContext(req);
+      const workflowId = req.params.id;
+      await assertWorkflowExists(store, workflowId);
+      const projectId = store.getWorkflowSettingsProjectId();
+      const defaults = await resolvePromptOverrideDefaults(store, workflowId);
+      const stored = store.getWorkflowPromptOverrides(workflowId, projectId);
+      res.json({
+        stored,
+        effective: resolveEffectivePromptOverrides(defaults, stored),
+        defaults,
+      });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err);
+    }
+  });
+
+  // PATCH /api/workflows/:id/prompt-overrides — merge prompt overrides for a
+  // workflow. Body: { overrides: Record<nodeId, string | null> }. Null, empty,
+  // and whitespace values reset a node back to its default prompt.
+  router.patch("/workflows/:id/prompt-overrides", async (req, res) => {
+    try {
+      const { store, projectId: sseProjectId } = await getProjectContext(req);
+      const workflowId = req.params.id;
+      const overrides = (req.body ?? {}).overrides;
+      if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) {
+        throw badRequest("overrides is required and must be an object map of node id → prompt (null to reset)");
+      }
+      await assertWorkflowExists(store, workflowId);
+      const defaults = await resolvePromptOverrideDefaults(store, workflowId);
+      const promptNodeIds = new Set(Object.keys(defaults));
+      for (const [nodeId, value] of Object.entries(overrides as Record<string, unknown>)) {
+        if (!promptNodeIds.has(nodeId)) {
+          throw badRequest(`Node '${nodeId}' is not a prompt-bearing node in workflow '${workflowId}'`, { nodeId });
+        }
+        if (value !== null && typeof value !== "string") {
+          throw badRequest(`Override for node '${nodeId}' must be a string or null`, { nodeId });
+        }
+      }
+      const projectId = store.getWorkflowSettingsProjectId();
+      const stored = store.updateWorkflowPromptOverrides(
+        workflowId,
+        projectId,
+        overrides as Record<string, string | null>,
+      );
+      const payload = {
+        stored,
+        effective: resolveEffectivePromptOverrides(defaults, stored),
+        defaults,
+      };
+      emitWorkflowSseEvent("workflow:updated", (await store.getWorkflowDefinition(workflowId)) ?? { id: workflowId }, sseProjectId);
+      res.json(payload);
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err;
       rethrowAsApiError(err);

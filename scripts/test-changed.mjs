@@ -1311,6 +1311,78 @@ export function packageHasVitestConfig(pkgDir, projectRoot = rootDir) {
   return VITEST_CONFIG_BASENAMES.some((name) => existsSync(path.join(projectRoot, pkgDir, name)));
 }
 
+export const ENGINE_SCOPED_AFFECTED_PACKAGE = "@fusion/engine";
+export const ENGINE_SCOPED_AFFECTED_HEAP_MB = "6144";
+export const ENGINE_SCOPED_AFFECTED_WORKERS = "1";
+export const DASHBOARD_SCOPED_AFFECTED_PACKAGE = "@fusion/dashboard";
+export const DASHBOARD_SCOPED_AFFECTED_HEAP_MB = "6144";
+export const DASHBOARD_SCOPED_AFFECTED_WORKERS = "1";
+
+export const SCOPED_AFFECTED_MEMORY_ENVELOPES = Object.freeze({
+  [ENGINE_SCOPED_AFFECTED_PACKAGE]: Object.freeze({
+    packageName: ENGINE_SCOPED_AFFECTED_PACKAGE,
+    heapMb: ENGINE_SCOPED_AFFECTED_HEAP_MB,
+    workers: ENGINE_SCOPED_AFFECTED_WORKERS,
+  }),
+  [DASHBOARD_SCOPED_AFFECTED_PACKAGE]: Object.freeze({
+    packageName: DASHBOARD_SCOPED_AFFECTED_PACKAGE,
+    heapMb: DASHBOARD_SCOPED_AFFECTED_HEAP_MB,
+    workers: DASHBOARD_SCOPED_AFFECTED_WORKERS,
+  }),
+});
+
+export function prependNodeOption(currentOptions, option) {
+  return [option, currentOptions || ""].join(" ").trim();
+}
+
+export function createScopedAffectedMemoryEnvelopeEnv(packageName, env = process.env) {
+  const envelope = SCOPED_AFFECTED_MEMORY_ENVELOPES[packageName];
+  if (!envelope) return env;
+  /*
+  FNXC:TestInfrastructure 2026-06-21-11:24:
+  The engine affected lane can select hundreds of real-git-heavy files when `vitest --changed` sees a widely imported boundary. Run that scoped lane in its own memory envelope: cap Node old-space like the dashboard heap runner and lower Vitest worker fan-out to one process so the lane returns a real pass/fail verdict instead of an OS OOM SIGKILL. Keep watchdog timing outside this env so hangs still fail through `runWithWatchdog`.
+
+  FNXC:TestInfrastructure 2026-06-21-16:28:
+  FN-6874 showed the dashboard changed-mode affected lane can OOM/SIGKILL even with `FUSION_TEST_CONCURRENCY=1 FUSION_TEST_WORKSPACE_CONCURRENCY=1`, so worker fan-out alone is not the failure mode. Give each heavy scoped package its own bounded heap envelope while preserving caller env and keeping the finite changed-class watchdog outside this env so hangs still fail instead of being masked.
+  */
+  return {
+    ...env,
+    NODE_OPTIONS: prependNodeOption(env.NODE_OPTIONS, `--max-old-space-size=${envelope.heapMb}`),
+    FUSION_TEST_TOTAL_WORKERS: envelope.workers,
+    FUSION_TEST_CONCURRENCY: envelope.workers,
+    VITEST_MAX_WORKERS: envelope.workers,
+  };
+}
+
+export function createEngineScopedAffectedEnv(env = process.env) {
+  return createScopedAffectedMemoryEnvelopeEnv(ENGINE_SCOPED_AFFECTED_PACKAGE, env);
+}
+
+export function createDashboardScopedAffectedEnv(env = process.env) {
+  return createScopedAffectedMemoryEnvelopeEnv(DASHBOARD_SCOPED_AFFECTED_PACKAGE, env);
+}
+
+export function partitionScopedAffectedPackages(packages) {
+  const memoryEnvelopePackages = Object.keys(SCOPED_AFFECTED_MEMORY_ENVELOPES);
+  const memoryEnvelopePackageSet = new Set(memoryEnvelopePackages);
+  const requestedPackageSet = new Set(packages);
+  const regularPackages = packages.filter((pkg) => !memoryEnvelopePackageSet.has(pkg));
+  const groups = [];
+  if (regularPackages.length > 0) {
+    groups.push({ packages: regularPackages, engineMemoryEnvelope: false, memoryEnvelopePackage: null, memoryEnvelope: null });
+  }
+  for (const packageName of memoryEnvelopePackages) {
+    if (!requestedPackageSet.has(packageName)) continue;
+    groups.push({
+      packages: [packageName],
+      engineMemoryEnvelope: packageName === ENGINE_SCOPED_AFFECTED_PACKAGE,
+      memoryEnvelopePackage: packageName,
+      memoryEnvelope: SCOPED_AFFECTED_MEMORY_ENVELOPES[packageName],
+    });
+  }
+  return groups;
+}
+
 export function normalizeForwardedArgs(argv) {
   const normalized = [];
 
@@ -1524,8 +1596,8 @@ export async function main(argv = process.argv.slice(2)) {
     : [];
   const fallbackPkgs = activePackages.filter((pkg) => !scopable.includes(pkg));
 
-  for (const { packages, mode } of [
-    { packages: scopable, mode: "scoped" },
+  for (const { packages, mode, memoryEnvelopePackage = null } of [
+    ...partitionScopedAffectedPackages(scopable).map((group) => ({ ...group, mode: "scoped" })),
     { packages: fallbackPkgs, mode: "full" },
   ]) {
     if (packages.length === 0) continue;
@@ -1546,13 +1618,16 @@ export async function main(argv = process.argv.slice(2)) {
             ...forwardedArgs,
           ]
         : [...filterArgs, `--workspace-concurrency=${workspaceConcurrency}`, "test", ...forwardedArgs];
+    const memoryEnvelopeLabel = memoryEnvelopePackage ? ` (${memoryEnvelopePackage} memory envelope)` : "";
     console.log(
       mode === "scoped"
-        ? `[test-changed] scoped (vitest --changed) run for: ${packages.join(", ")}`
+        ? `[test-changed] scoped (vitest --changed) run for: ${packages.join(", ")}${memoryEnvelopeLabel}`
         : `[test-changed] full package-suite run for: ${packages.join(", ")} (no vitest config / no base)`,
     );
     await runMaybeIsolated("pnpm", commandArgs, {
-      env: isolatedHomeEnv,
+      env: memoryEnvelopePackage
+        ? createScopedAffectedMemoryEnvelopeEnv(memoryEnvelopePackage, isolatedHomeEnv)
+        : isolatedHomeEnv,
       onBeforeAfterCheck: cleanupIsolatedHome,
       // Scoped runs are proportional to the diff, so the tight "changed" ceiling
       // applies; a hang fails fast instead of blocking the 60-min full backstop.

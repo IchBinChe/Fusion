@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import type { TaskDocument } from "@fusion/core";
+import type { ArtifactWithTask, TaskDocument } from "@fusion/core";
 import { TaskDocumentsTab } from "../TaskDocumentsTab";
-import { fetchTaskDocuments, fetchTaskDocumentRevisions } from "../../api";
+import { artifactMediaUrl, fetchTaskDocuments, fetchTaskDocumentRevisions } from "../../api";
+import { useArtifacts } from "../../hooks/useArtifacts";
 
 vi.mock("../../api", () => ({
   fetchTaskDocuments: vi.fn(),
@@ -10,10 +11,63 @@ vi.mock("../../api", () => ({
   fetchTaskDocumentRevisions: vi.fn(),
   putTaskDocument: vi.fn(),
   deleteTaskDocument: vi.fn(),
+  artifactMediaUrl: vi.fn((id: string) => `/api/artifacts/${id}/media`),
+}));
+
+vi.mock("../../hooks/useArtifacts", () => ({
+  useArtifacts: vi.fn(),
 }));
 
 const mockFetchTaskDocuments = vi.mocked(fetchTaskDocuments);
 const mockFetchTaskDocumentRevisions = vi.mocked(fetchTaskDocumentRevisions);
+const mockArtifactMediaUrl = vi.mocked(artifactMediaUrl);
+const mockUseArtifacts = vi.mocked(useArtifacts);
+
+const mockArtifacts: ArtifactWithTask[] = [
+  {
+    id: "artifact-image",
+    type: "image",
+    title: "Image artifact",
+    description: "Screenshot from the agent",
+    authorId: "agent-image",
+    taskId: "KB-001",
+    createdAt: "2026-04-19T10:00:00.000Z",
+    sizeBytes: 2048,
+  },
+  {
+    id: "artifact-video",
+    type: "video",
+    title: "Video artifact",
+    authorId: "agent-video",
+    taskId: "KB-001",
+    createdAt: "2026-04-19T10:01:00.000Z",
+  },
+  {
+    id: "artifact-audio",
+    type: "audio",
+    title: "Audio artifact",
+    authorId: "agent-audio",
+    taskId: "KB-001",
+    createdAt: "2026-04-19T10:02:00.000Z",
+  },
+  {
+    id: "artifact-document",
+    type: "document",
+    title: "Document artifact",
+    content: "Inline document preview",
+    authorId: "agent-doc",
+    taskId: "KB-001",
+    createdAt: "2026-04-19T10:03:00.000Z",
+  },
+  {
+    id: "artifact-other",
+    type: "other",
+    title: "Other artifact",
+    authorId: "agent-other",
+    taskId: "KB-001",
+    createdAt: "2026-04-19T10:04:00.000Z",
+  },
+];
 
 const mockDocuments: TaskDocument[] = [
   {
@@ -45,25 +99,121 @@ describe("TaskDocumentsTab", () => {
     vi.clearAllMocks();
     mockFetchTaskDocuments.mockResolvedValue(mockDocuments);
     mockFetchTaskDocumentRevisions.mockResolvedValue([]);
+    mockArtifactMediaUrl.mockImplementation((id: string) => `/api/artifacts/${id}/media`);
+    mockUseArtifacts.mockReturnValue({
+      artifacts: [],
+      loading: false,
+      error: null,
+      refresh: vi.fn().mockResolvedValue(undefined),
+    });
   });
 
-  it("renders document list", async () => {
+  it("renders the renamed Artifacts heading with document list", async () => {
+    render(<TaskDocumentsTab taskId="KB-001" addToast={addToast} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Artifacts" })).toBeInTheDocument();
+      expect(screen.getByText("plan")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("notes")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Task documents" })).toBeInTheDocument();
+  });
+
+  it("shows loading until documents and artifacts resolve", () => {
+    mockUseArtifacts.mockReturnValue({
+      artifacts: [],
+      loading: true,
+      error: null,
+      refresh: vi.fn().mockResolvedValue(undefined),
+    });
+
+    render(<TaskDocumentsTab taskId="KB-001" addToast={addToast} />);
+
+    expect(screen.getByText("Loading documents and artifacts…")).toBeInTheDocument();
+  });
+
+  it("shows combined empty state when no documents or artifacts", async () => {
+    mockFetchTaskDocuments.mockResolvedValue([]);
+
+    render(<TaskDocumentsTab taskId="KB-001" addToast={addToast} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("No documents or artifacts yet.")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("No task documents yet.")).not.toBeInTheDocument();
+  });
+
+  it("renders documents-only state", async () => {
     render(<TaskDocumentsTab taskId="KB-001" addToast={addToast} />);
 
     await waitFor(() => {
       expect(screen.getByText("plan")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("notes")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Media artifacts" })).not.toBeInTheDocument();
+    expect(screen.getByText("2 documents")).toBeInTheDocument();
   });
 
-  it("shows empty state when no documents", async () => {
+  it("renders artifacts-only state", async () => {
     mockFetchTaskDocuments.mockResolvedValue([]);
+    mockUseArtifacts.mockReturnValue({
+      artifacts: mockArtifacts,
+      loading: false,
+      error: null,
+      refresh: vi.fn().mockResolvedValue(undefined),
+    });
+
+    render(<TaskDocumentsTab taskId="KB-001" addToast={addToast} projectId="project-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Media artifacts" })).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("5 artifacts")).toBeInTheDocument();
+    expect(screen.getByText("No task documents yet.")).toBeInTheDocument();
+    expect(screen.queryByText("No documents or artifacts yet.")).not.toBeInTheDocument();
+  });
+
+  it("renders both documents and all five media artifact paths", async () => {
+    mockUseArtifacts.mockReturnValue({
+      artifacts: mockArtifacts,
+      loading: false,
+      error: null,
+      refresh: vi.fn().mockResolvedValue(undefined),
+    });
+
+    render(<TaskDocumentsTab taskId="KB-001" addToast={addToast} projectId="project-1" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("plan")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Media artifacts" })).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("img", { name: "Image artifact" })).toHaveAttribute("src", "/api/artifacts/artifact-image/media");
+    expect(screen.getByLabelText("Video artifact: Video artifact").tagName).toBe("VIDEO");
+    expect(screen.getByLabelText("Audio artifact: Audio artifact").tagName).toBe("AUDIO");
+    expect(screen.getByTestId("artifact-document-preview")).toHaveTextContent("Inline document preview");
+    expect(screen.getByTestId("artifact-other-link")).toHaveAttribute("href", "/api/artifacts/artifact-other/media");
+    expect(screen.getByText("agent-image")).toBeInTheDocument();
+    expect(screen.getByText("2.0 KB")).toBeInTheDocument();
+    expect(document.querySelector(".documents-artifact-gallery--mobile")).not.toBeNull();
+    expect(mockUseArtifacts).toHaveBeenCalledWith({ projectId: "project-1", taskId: "KB-001" });
+    expect(mockArtifactMediaUrl).toHaveBeenCalledWith("artifact-image", "project-1");
+  });
+
+  it("surfaces artifact fetch errors", async () => {
+    mockUseArtifacts.mockReturnValue({
+      artifacts: [],
+      loading: false,
+      error: "Artifact fetch failed",
+      refresh: vi.fn().mockResolvedValue(undefined),
+    });
 
     render(<TaskDocumentsTab taskId="KB-001" addToast={addToast} />);
 
     await waitFor(() => {
-      expect(screen.getByText("No documents yet.")).toBeInTheDocument();
+      expect(addToast).toHaveBeenCalledWith("Artifact fetch failed", "error");
     });
   });
 

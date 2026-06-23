@@ -4405,34 +4405,32 @@ describe("SelfHealingManager", () => {
         rootDir: "/tmp/test-project",
       });
 
-      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
-        {
-          id: "FN-350",
-          column: "in-review",
-          status: "failed",
-          error: "Invalid transition: 'todo' → 'done'. Valid targets: in-progress, triage",
-          mergeRetries: 3,
-          mergeDetails: {
-            mergeConfirmed: true,
-            mergedAt: "2026-01-01T00:00:00.000Z",
-          },
-          log: [],
+      const task = {
+        id: "FN-350",
+        column: "in-review",
+        status: "failed",
+        error: "Invalid transition: 'todo' → 'done'. Valid targets: in-progress, triage",
+        mergeRetries: 3,
+        mergeDetails: {
+          mergeConfirmed: true,
+          mergedAt: "2026-01-01T00:00:00.000Z",
         },
-      ]);
+        log: [],
+      };
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([task]);
+      (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(task);
 
       const result = await managerWithRecovery.recoverMergedReviewTasks();
 
       expect(result).toBe(1);
-      expect(store.updateTask).toHaveBeenCalledWith("FN-350", {
-        paused: false,
-        status: null,
-        error: null,
-        mergeRetries: 0,
-      });
-      expect(store.moveTask).toHaveBeenCalledWith("FN-350", "done");
+      expect(store.updateTask).toHaveBeenCalledWith(
+        "FN-350",
+        expect.objectContaining({ paused: false, status: null, error: null, mergeRetries: 0 }),
+      );
+      expect(store.moveTask).toHaveBeenCalledWith("FN-350", "done", expect.objectContaining({ moveSource: "engine" }));
       expect(store.logEntry).toHaveBeenCalledWith(
         "FN-350",
-        expect.stringContaining("Auto-finalized from in-review/paused: content proven"),
+        expect.stringContaining("Auto-finalized from in-review: content proven"),
       );
 
       managerWithRecovery.stop();
@@ -4468,29 +4466,27 @@ describe("SelfHealingManager", () => {
         rootDir: "/tmp/test-project",
       });
 
-      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
-        {
-          id: "FN-352",
-          column: "in-review",
-          paused: true,
-          mergeDetails: {
-            mergeConfirmed: true,
-            mergedAt: "2026-01-01T00:00:00.000Z",
-          },
-          log: [],
+      const task = {
+        id: "FN-352",
+        column: "in-review",
+        paused: true,
+        mergeDetails: {
+          mergeConfirmed: true,
+          mergedAt: "2026-01-01T00:00:00.000Z",
         },
-      ]);
+        log: [],
+      };
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([task]);
+      (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(task);
 
       const result = await managerWithRecovery.recoverMergedReviewTasks();
 
       expect(result).toBe(1);
-      expect(store.updateTask).toHaveBeenCalledWith("FN-352", {
-        paused: false,
-        status: null,
-        error: null,
-        mergeRetries: 0,
-      });
-      expect(store.moveTask).toHaveBeenCalledWith("FN-352", "done");
+      expect(store.updateTask).toHaveBeenCalledWith(
+        "FN-352",
+        expect.objectContaining({ paused: false, status: null, error: null, mergeRetries: 0 }),
+      );
+      expect(store.moveTask).toHaveBeenCalledWith("FN-352", "done", expect.objectContaining({ moveSource: "engine" }));
 
       managerWithRecovery.stop();
     });
@@ -4500,21 +4496,21 @@ describe("SelfHealingManager", () => {
         rootDir: "/tmp/test-project",
       });
 
-      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
-        {
-          id: "FN-353",
-          column: "in-review",
-          paused: false,
-          status: null,
-          error: null,
-          mergeDetails: {
-            mergeConfirmed: true,
-            mergedAt: "2026-01-01T00:00:00.000Z",
-          },
-          steps: [{ status: "in-progress" }],
-          log: [],
+      const task = {
+        id: "FN-353",
+        column: "in-review",
+        paused: false,
+        status: null,
+        error: null,
+        mergeDetails: {
+          mergeConfirmed: true,
+          mergedAt: "2026-01-01T00:00:00.000Z",
         },
-      ]);
+        steps: [{ status: "in-progress" }],
+        log: [],
+      };
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([task]);
+      (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(task);
 
       const result = await managerWithRecovery.recoverMergedReviewTasks();
 
@@ -4537,33 +4533,85 @@ describe("SelfHealingManager", () => {
         rootDir: "/tmp/test-project",
       });
 
-      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
-        {
-          id: "FN-354",
-          column: "in-review",
-          paused: false,
-          status: "merging",
-          error: "stale transient merge state",
-          mergeDetails: {
-            mergeConfirmed: true,
-            mergedAt: "2026-01-01T00:00:00.000Z",
-          },
-          steps: [{ status: "done" }],
-          workflowStepResults: [],
-          log: [],
+      const task = {
+        id: "FN-354",
+        column: "in-review",
+        paused: false,
+        status: "merging",
+        error: "stale transient merge state",
+        mergeDetails: {
+          mergeConfirmed: true,
+          mergedAt: "2026-01-01T00:00:00.000Z",
         },
-      ]);
+        steps: [{ status: "done" }],
+        workflowStepResults: [],
+        log: [],
+      };
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([task]);
+      (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(task);
 
       const result = await managerWithRecovery.recoverMergedReviewTasks();
 
       expect(result).toBe(1);
-      expect(store.updateTask).toHaveBeenCalledWith("FN-354", {
-        paused: false,
-        status: null,
-        error: null,
-        mergeRetries: 0,
+      expect(store.updateTask).toHaveBeenCalledWith(
+        "FN-354",
+        expect.objectContaining({ paused: false, status: null, error: null, mergeRetries: 0 }),
+      );
+      expect(store.moveTask).toHaveBeenCalledWith("FN-354", "done", expect.objectContaining({ moveSource: "engine" }));
+
+      managerWithRecovery.stop();
+    });
+
+    it("finalizes landed merge-confirmed tasks stranded in todo with stale queued overlap", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
       });
-      expect(store.moveTask).toHaveBeenCalledWith("FN-354", "done");
+      const task = {
+        id: "FN-6897",
+        column: "todo",
+        status: "queued",
+        error: "Invalid transition: 'todo' → 'done'. Valid targets: in-progress, triage",
+        blockedBy: null,
+        overlapBlockedBy: "FN-ACTIVE",
+        paused: false,
+        mergeRetries: 3,
+        mergeDetails: {
+          mergeConfirmed: true,
+          commitSha: "landed123",
+          mergedAt: "2026-01-01T00:00:00.000Z",
+        },
+        steps: [{ status: "done" }],
+        workflowStepResults: [],
+        log: [{ action: "AI merge: landed landed12, task → done" }],
+      };
+      (store.listTasks as ReturnType<typeof vi.fn>).mockImplementation(async (filter?: { column?: string }) => {
+        if (filter?.column === "todo") return [task];
+        return [];
+      });
+      (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(task);
+      mockedExecSync.mockImplementation((command: string | Buffer) => {
+        const cmd = String(command);
+        if (cmd.includes("cat-file -e landed123^{commit}")) return "" as any;
+        if (cmd.includes("merge-base --is-ancestor landed123")) return "" as any;
+        return "" as any;
+      });
+
+      const result = await managerWithRecovery.recoverMergedReviewTasks();
+
+      expect(result).toBe(1);
+      expect(store.updateTask).toHaveBeenCalledWith(
+        "FN-6897",
+        expect.objectContaining({ status: null, error: null, blockedBy: null, overlapBlockedBy: null, mergeRetries: 0 }),
+      );
+      expect(store.moveTask).toHaveBeenCalledWith(
+        "FN-6897",
+        "done",
+        expect.objectContaining({ moveSource: "engine", recoveryRehome: true }),
+      );
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "task:auto-merge-finalize-column-mismatch-reconciled",
+        metadata: expect.objectContaining({ previousColumn: "todo", overlapBlockedBy: "FN-ACTIVE", commitSha: "landed123" }),
+      }));
 
       managerWithRecovery.stop();
     });

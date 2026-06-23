@@ -6,7 +6,7 @@
  */
 
 import { access, readFile, writeFile, mkdir, readdir, stat } from "node:fs/promises";
-import { join, relative, dirname } from "node:path";
+import { join, relative, dirname, resolve, sep } from "node:path";
 import { superviseSpawn } from "@fusion/core";
 import type { ChildProcess } from "node:child_process";
 
@@ -178,6 +178,23 @@ export interface SkillsAdapter {
    * Read the contents of a skill's SKILL.md file and list supplementary files.
    */
   readSkillContent(rootDir: string, skillId: string): Promise<SkillContent>;
+
+  /*
+  FNXC:Skills 2026-06-23-04:15:
+  Read a single supplementary file's text for the detail-pane file viewer. The SkillsView detail pane lists referenced files; clicking one must show its content. The `files` array carried only name/path/type, so a per-file content endpoint is required. `relativePath` is the skill-dir-relative path returned by readSkillContent; it is resolved + path-traversal-guarded against the skill directory so a request can never escape the skill root.
+  */
+  readSkillFileContent(rootDir: string, skillId: string, relativePath: string): Promise<SkillFileContent>;
+}
+
+/*
+FNXC:Skills 2026-06-23-04:15:
+Payload for the per-file viewer. `isText` is false for binary/oversized files so the UI renders a "cannot preview" notice instead of garbled bytes; `content` is empty in that case.
+*/
+export interface SkillFileContent {
+  name: string;
+  relativePath: string;
+  content: string;
+  isText: boolean;
 }
 
 /**
@@ -765,6 +782,74 @@ export function createSkillsAdapter(options: {
         name: skill.name,
         skillMd,
         files,
+      };
+    },
+
+    /*
+    FNXC:Skills 2026-06-23-04:15:
+    Per-file content read for the detail-pane viewer. Resolves the skill directory the same way readSkillContent does, then joins the requested relativePath. Guards against path traversal (resolved target must stay inside the skill dir) and refuses to read SKILL.md through this path (the SKILL.md view has its own endpoint). Binary/oversized files return isText:false with empty content so the UI shows a non-previewable notice rather than garbled output.
+    */
+    async readSkillFileContent(rootDir: string, skillId: string, relativePath: string): Promise<SkillFileContent> {
+      const parsed = parseSkillId(skillId);
+      if (!parsed) {
+        throw new Error(`Invalid skill ID format: ${skillId}`);
+      }
+
+      const discovered = await this.discoverSkills(rootDir);
+      const skill = discovered.find((entry) => entry.id === skillId);
+      if (!skill) {
+        throw new Error(`Skill not found: ${skillId}`);
+      }
+      if (skill.metadata.source.startsWith("plugin:")) {
+        throw new Error(`Skill file not found: ${relativePath}`);
+      }
+
+      let skillDir = skill.path;
+      try {
+        const skillPathStat = await stat(skill.path);
+        skillDir = skillPathStat.isFile() ? dirname(skill.path) : skill.path;
+      } catch {
+        skillDir = dirname(skill.path);
+      }
+
+      const normalizedRelative = relativePath.replaceAll("\\", "/");
+      const resolvedSkillDir = resolve(skillDir);
+      const targetPath = resolve(resolvedSkillDir, normalizedRelative);
+      // Path-traversal guard: the resolved target must stay inside the skill dir.
+      if (targetPath !== resolvedSkillDir && !targetPath.startsWith(resolvedSkillDir + sep)) {
+        throw new Error(`Invalid skill file path: ${relativePath}`);
+      }
+
+      let fileStat;
+      try {
+        fileStat = await stat(targetPath);
+      } catch {
+        throw new Error(`Skill file not found: ${relativePath}`);
+      }
+      if (fileStat.isDirectory()) {
+        throw new Error(`Skill file not found: ${relativePath}`);
+      }
+
+      const name = normalizedRelative.split("/").filter(Boolean).pop() ?? normalizedRelative;
+      // 2 MB ceiling keeps the viewer responsive and avoids streaming huge blobs.
+      const MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
+      if (fileStat.size > MAX_PREVIEW_BYTES) {
+        return { name, relativePath: normalizedRelative, content: "", isText: false };
+      }
+
+      const buffer = await readFile(targetPath);
+      // Heuristic: a NUL byte in the first chunk means binary -> non-previewable.
+      const sample = buffer.subarray(0, Math.min(buffer.length, 8000));
+      const isBinary = sample.includes(0);
+      if (isBinary) {
+        return { name, relativePath: normalizedRelative, content: "", isText: false };
+      }
+
+      return {
+        name,
+        relativePath: normalizedRelative,
+        content: buffer.toString("utf-8"),
+        isText: true,
       };
     },
   };

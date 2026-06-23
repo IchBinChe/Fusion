@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { ScheduledTasksModal } from "../ScheduledTasksModal";
 import type { Routine } from "@fusion/core";
 
@@ -165,6 +167,21 @@ describe("ScheduledTasksModal", () => {
     expect(toolbarLeft?.contains(scopeSelector as Node)).toBe(true);
     expect(header?.contains(scopeSelector as Node)).toBe(false);
     expect(toolbarRight?.contains(newAutomationButton)).toBe(true);
+  });
+
+  it("styles scope controls like the Artifacts button bar", () => {
+    const source = readFileSync(resolve(__dirname, "../ScriptsModal.css"), "utf8");
+    const selectorRule = source.match(/\.scheduling-scope-selector\s*\{[^}]*\}/)?.[0] ?? "";
+    const scopeRule = source.match(/\.scope-btn\s*\{[^}]*\}/)?.[0] ?? "";
+    const activeRule = source.match(/\.scope-btn\.active\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(selectorRule).toContain("background: transparent;");
+    expect(selectorRule).toContain("border: none;");
+    expect(scopeRule).toContain("border: 1px solid var(--border);");
+    expect(scopeRule).toContain("background: var(--surface);");
+    expect(activeRule).toContain("color: var(--todo);");
+    expect(activeRule).toContain("border-color: var(--todo);");
+    expect(activeRule).toContain("background: color-mix(in srgb, var(--todo) 12%, transparent);");
   });
 
   it("uses routine APIs with global scope by default", async () => {
@@ -353,5 +370,36 @@ describe("ScheduledTasksModal", () => {
 
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onClose).toHaveBeenCalled();
+  });
+
+  // FNXC:EmbeddedPresentation 2026-06-22-12:00:
+  // presentation="embedded" was a zero-coverage branch. Assert the embedded contract via useEmbeddedPresentation:
+  // embedded root class present, no fixed .modal-overlay backdrop / dialog role / close button, and Escape does NOT dismiss.
+  describe("embedded presentation", () => {
+    it("renders the embedded root class with no modal overlay, dialog role, or close button", async () => {
+      const { container } = render(
+        <ScheduledTasksModal onClose={onClose} addToast={addToast} presentation="embedded" />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("No automations yet")).toBeDefined();
+      });
+      expect(screen.getByText("Automations")).toBeDefined();
+      expect(container.querySelector(".automations-embedded")).not.toBeNull();
+      // No fixed overlay backdrop, no dialog role, no modal close button in embedded mode.
+      expect(container.querySelector(".modal-overlay")).toBeNull();
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+    });
+
+    it("does not dismiss on Escape in embedded mode", async () => {
+      render(<ScheduledTasksModal onClose={onClose} addToast={addToast} presentation="embedded" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("No automations yet")).toBeDefined();
+      });
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onClose).not.toHaveBeenCalled();
+    });
   });
 });

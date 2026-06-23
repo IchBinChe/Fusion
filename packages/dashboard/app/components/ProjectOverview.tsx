@@ -8,6 +8,7 @@ import { ProjectCard } from "./ProjectCard";
 import { getNodeMappingsForProject, resolveNodeDisplayName } from "../utils/nodeProjectAssignment";
 import { ProjectGridSkeleton } from "./ProjectGridSkeleton";
 import { useProjectHealth } from "../hooks/useProjectHealth";
+import { ViewHeader } from "./ViewHeader";
 
 export interface ProjectOverviewProps {
   projects: ProjectInfoWithSource[];
@@ -235,31 +236,63 @@ export function ProjectOverview({
   // 2. Projects exist but we haven't fetched health data yet (healthLoading with no data)
   // Don't show skeleton during background health polling when health data already exists
   const needsInitialSkeleton = loading || (healthLoading && projects.length > 0 && Object.keys(healthMap).length === 0);
+  /*
+  FNXC:DashboardHeader 2026-06-22-16:42:
+  The Project Dashboard overview (projects, stats, filters, and charts/overview content) owns the shared top header. The Board view must stay headerless because its columns already consume the full board surface.
+
+  FNXC:DashboardNaming 2026-06-22-20:08:
+  The analytics Command Center surface is now labeled Dashboard, so this older projects overview is labeled Project Dashboard to avoid two visible Dashboard destinations.
+  */
+  const dashboardHeader = (
+    <ViewHeader
+      icon={LayoutGrid}
+      title={t("dashboard.title", "Project Dashboard")}
+      actions={(
+        <button
+          className="btn btn-primary btn-sm project-overview__add-btn"
+          onClick={onAddProject}
+        >
+          <Plus size={14} />
+          {t("projects.addProject", "Add Project")}
+        </button>
+      )}
+    />
+  );
 
   // Show skeleton while loading
   if (needsInitialSkeleton) {
-    return <ProjectGridSkeleton />;
+    return (
+      <div className="project-overview">
+        {dashboardHeader}
+        <div className="project-overview__body">
+          <ProjectGridSkeleton />
+        </div>
+      </div>
+    );
   }
 
   // Empty state when no projects
   if (projects.length === 0) {
     return (
-      <div className="project-overview project-overview--empty">
-        <div className="project-empty-state">
-          <div className="project-empty-state__icon">
-            <Inbox size={48} />
+      <div className="project-overview">
+        {dashboardHeader}
+        <div className="project-overview__body project-overview__body--empty">
+          <div className="project-empty-state">
+            <div className="project-empty-state__icon">
+              <Inbox size={48} />
+            </div>
+            <h2 className="project-empty-state__title">{t("projects.noProjectsFound", "No Projects Found")}</h2>
+            <p className="project-empty-state__description">
+              {t("projects.emptyStateDescription", "Get started by adding your first project. Projects allow you to organize and track tasks across multiple repositories.")}
+            </p>
+            <button
+              className="btn btn-primary project-empty-state__cta"
+              onClick={onAddProject}
+            >
+              <Plus size={16} />
+              {t("projects.addFirstProject", "Add Your First Project")}
+            </button>
           </div>
-          <h2 className="project-empty-state__title">{t("projects.noProjectsFound", "No Projects Found")}</h2>
-          <p className="project-empty-state__description">
-            {t("projects.emptyStateDescription", "Get started by adding your first project. Projects allow you to organize and track tasks across multiple repositories.")}
-          </p>
-          <button
-            className="btn btn-primary project-empty-state__cta"
-            onClick={onAddProject}
-          >
-            <Plus size={16} />
-            {t("projects.addFirstProject", "Add Your First Project")}
-          </button>
         </div>
       </div>
     );
@@ -267,12 +300,10 @@ export function ProjectOverview({
 
   return (
     <div className="project-overview">
+      {dashboardHeader}
+      <div className="project-overview__body">
       {/* Header with stats */}
       <div className="project-overview__header">
-        <h2 className="project-overview__title">
-          <LayoutGrid size={20} />
-          {t("projects.title", "Projects")}
-        </h2>
         <div className="project-overview__stats">
           <div className="project-stat">
             <div className="project-stat__icon">
@@ -324,13 +355,6 @@ export function ProjectOverview({
             </div>
           )}
         </div>
-        <button
-          className="btn btn-primary project-overview__add-btn"
-          onClick={onAddProject}
-        >
-          <Plus size={16} />
-          {t("projects.addProject", "Add Project")}
-        </button>
       </div>
 
       {/* Filter tabs */}
@@ -450,6 +474,7 @@ export function ProjectOverview({
           </button>
         </div>
       )}
+      </div>
     </div>
   );
 }

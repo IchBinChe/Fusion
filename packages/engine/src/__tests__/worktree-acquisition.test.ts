@@ -1,6 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { execSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { acquireTaskWorktree } from "../worktree-acquisition.js";
+import { acquireTaskWorktree, RepoRootWorktreeError } from "../worktree-acquisition.js";
 import { classifyTaskWorktree, PoolDoubleLeaseError } from "../worktree-pool.js";
 import * as desktopArtifacts from "../worktree-desktop-artifacts.js";
 import * as branchConflicts from "../branch-conflicts.js";
@@ -36,6 +40,33 @@ vi.mock("../worktree-desktop-artifacts.js", () => ({
   removeDesktopBuildArtifacts: vi.fn().mockResolvedValue({ removed: [], skipped: [], failures: [] }),
 }));
 
+const cleanupPaths: string[] = [];
+function track(path: string): string {
+  cleanupPaths.push(path);
+  return path;
+}
+
+function git(cwd: string, command: string): string {
+  return execSync(command, { cwd, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+}
+
+function makeRepo(): string {
+  const rootDir = track(mkdtempSync(join(tmpdir(), "fn-6861-acquisition-root-")));
+  git(rootDir, "git init -b main");
+  git(rootDir, 'git config user.email "test@example.com"');
+  git(rootDir, 'git config user.name "Test User"');
+  writeFileSync(join(rootDir, "README.md"), "root\n", "utf-8");
+  git(rootDir, "git add README.md");
+  git(rootDir, 'git commit -m "init"');
+  return rootDir;
+}
+
+afterEach(() => {
+  for (const path of cleanupPaths.splice(0)) {
+    rmSync(path, { recursive: true, force: true });
+  }
+});
+
 describe("acquireTaskWorktree", () => {
   const task = {
     id: "FN-1",
@@ -56,15 +87,16 @@ describe("acquireTaskWorktree", () => {
   });
 
   it("reuses existing usable worktree", async () => {
+    const worktreePath = process.cwd();
     const result = await acquireTaskWorktree({
-      task: { ...task, worktree: process.cwd(), branch: "fusion/fn-1" },
-      rootDir: process.cwd(),
+      task: { ...task, worktree: worktreePath, branch: "fusion/fn-1" },
+      rootDir: dirname(worktreePath),
       store,
       settings: {},
       createWorktree: vi.fn(),
     });
     expect(result.source).toBe("existing");
-    expect(result.worktreePath).toBe(process.cwd());
+    expect(result.worktreePath).toBe(worktreePath);
   });
 
   // Regression: FN-5475 — when a resumed worktree's branch was created from
@@ -80,9 +112,10 @@ describe("acquireTaskWorktree", () => {
       nonAttributedCount: 0,
     });
 
+    const worktreePath = process.cwd();
     const result = await acquireTaskWorktree({
-      task: { ...task, worktree: process.cwd(), branch: "fusion/fn-1" },
-      rootDir: process.cwd(),
+      task: { ...task, worktree: worktreePath, branch: "fusion/fn-1" },
+      rootDir: dirname(worktreePath),
       store,
       settings: {},
       audit,
@@ -98,9 +131,10 @@ describe("acquireTaskWorktree", () => {
   });
 
   it("does not re-anchor a resumed branch when not misbound", async () => {
+    const worktreePath = process.cwd();
     const result = await acquireTaskWorktree({
-      task: { ...task, worktree: process.cwd(), branch: "fusion/fn-1" },
-      rootDir: process.cwd(),
+      task: { ...task, worktree: worktreePath, branch: "fusion/fn-1" },
+      rootDir: dirname(worktreePath),
       store,
       settings: {},
       createWorktree: vi.fn(),
@@ -259,6 +293,110 @@ describe("acquireTaskWorktree", () => {
     expect(auditGit).toHaveBeenCalledWith(expect.objectContaining({
       type: "worktree:incomplete-detected",
       metadata: expect.objectContaining({ classification: "unregistered", source: "resume" }),
+    }));
+    expect(store.updateTask).toHaveBeenCalledWith("FN-1", { worktree: null, branch: null, sessionFile: null });
+  });
+
+  it("FN-6861 creates a fresh configured worktree when a resumed assignment points at the repo root", async () => {
+    const rootDir = makeRepo();
+    const actualPool = await vi.importActual<typeof import("../worktree-pool.js")>("../worktree-pool.js");
+    vi.mocked(classifyTaskWorktree).mockImplementationOnce(actualPool.classifyTaskWorktree);
+    const freshPath = join(rootDir, ".worktrees", "fn-6861-fresh");
+    const createWorktree = vi.fn().mockResolvedValue({ path: freshPath, branch: "fusion/fn-1" });
+    const auditGit = vi.fn().mockResolvedValue(undefined);
+
+    const result = await acquireTaskWorktree({
+      task: { ...task, worktree: rootDir, branch: "fusion/fn-1", sessionFile: "/tmp/session.json" },
+      rootDir,
+      store,
+      settings: {} as any,
+      createWorktree,
+      audit: { git: auditGit } as any,
+    });
+
+    expect(result).toMatchObject({
+      worktreePath: freshPath,
+      branch: "fusion/fn-1",
+      source: "fresh",
+      isResume: false,
+    });
+    expect(result.worktreePath).not.toBe(rootDir);
+    expect(result.worktreePath).toContain(`${join(rootDir, ".worktrees")}/`);
+    expect(auditGit).toHaveBeenCalledWith(expect.objectContaining({
+      type: "worktree:incomplete-detected",
+      target: rootDir,
+      metadata: expect.objectContaining({ classification: "repo-root", source: "resume" }),
+    }));
+    expect(store.updateTask).toHaveBeenCalledWith("FN-1", { worktree: null, branch: null, sessionFile: null });
+    expect(store.updateTask).toHaveBeenCalledWith("FN-1", { worktree: freshPath, branch: "fusion/fn-1" });
+  });
+
+  it("FN-6922 rejects a canonical-equal resumed repo root before returning", async () => {
+    const rootDir = makeRepo();
+    const actualPool = await vi.importActual<typeof import("../worktree-pool.js")>("../worktree-pool.js");
+    vi.mocked(classifyTaskWorktree).mockImplementationOnce(actualPool.classifyTaskWorktree);
+    const freshPath = join(rootDir, ".worktrees", "fn-6922-trailing-slash");
+    const createWorktree = vi.fn().mockResolvedValue({ path: freshPath, branch: "fusion/fn-1" });
+
+    const result = await acquireTaskWorktree({
+      task: { ...task, worktree: `${rootDir}/`, branch: "fusion/fn-1", sessionFile: "/tmp/session.json" },
+      rootDir,
+      store,
+      settings: {} as any,
+      createWorktree,
+    });
+
+    expect(result.worktreePath).toBe(freshPath);
+    expect(result.worktreePath).not.toBe(rootDir);
+    expect(result.isResume).toBe(false);
+    expect(store.updateTask).toHaveBeenCalledWith("FN-1", { worktree: null, branch: null, sessionFile: null });
+    expect(store.updateTask).toHaveBeenCalledWith("FN-1", { worktree: freshPath, branch: "fusion/fn-1" });
+  });
+
+  it("FN-6922 self-heals when the return guard catches a mocked repo-root resume", async () => {
+    const rootDir = makeRepo();
+    vi.mocked(classifyTaskWorktree).mockResolvedValueOnce({ ok: true });
+    const freshPath = join(rootDir, ".worktrees", "fn-6922-guard-fresh");
+    const createWorktree = vi.fn().mockResolvedValue({ path: freshPath, branch: "fusion/fn-1" });
+    const auditGit = vi.fn().mockResolvedValue(undefined);
+
+    const result = await acquireTaskWorktree({
+      task: { ...task, worktree: rootDir, branch: "fusion/fn-1", sessionFile: "/tmp/session.json" },
+      rootDir,
+      store,
+      settings: {} as any,
+      createWorktree,
+      audit: { git: auditGit } as any,
+    });
+
+    expect(result).toMatchObject({ worktreePath: freshPath, source: "fresh", isResume: false });
+    expect(createWorktree).toHaveBeenCalledWith("fusion/fn-1", expect.stringContaining(`${join(rootDir, ".worktrees")}/`), "FN-1", undefined, false);
+    expect(auditGit).toHaveBeenCalledWith(expect.objectContaining({
+      type: "worktree:incomplete-detected",
+      target: rootDir,
+      metadata: expect.objectContaining({ classification: "repo-root", source: "acquire-return-guard", returnSource: "existing" }),
+    }));
+    expect(store.updateTask).toHaveBeenCalledWith("FN-1", { worktree: null, branch: null, sessionFile: null });
+    expect(store.updateTask).toHaveBeenCalledWith("FN-1", { worktree: freshPath, branch: "fusion/fn-1" });
+  });
+
+  it("FN-6922 throws a typed error when fresh creation returns the repo root", async () => {
+    const rootDir = makeRepo();
+    const auditGit = vi.fn().mockResolvedValue(undefined);
+
+    await expect(acquireTaskWorktree({
+      task: { ...task, worktree: null, branch: null },
+      rootDir,
+      store,
+      settings: {} as any,
+      createWorktree: vi.fn().mockResolvedValue({ path: rootDir, branch: "fusion/fn-1" }),
+      audit: { git: auditGit } as any,
+    })).rejects.toBeInstanceOf(RepoRootWorktreeError);
+
+    expect(auditGit).toHaveBeenCalledWith(expect.objectContaining({
+      type: "worktree:incomplete-detected",
+      target: rootDir,
+      metadata: expect.objectContaining({ classification: "repo-root", source: "acquire-return-guard", returnSource: "fresh" }),
     }));
     expect(store.updateTask).toHaveBeenCalledWith("FN-1", { worktree: null, branch: null, sessionFile: null });
   });

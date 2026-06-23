@@ -262,8 +262,15 @@
 }
 
 .agent-role-option-icon {
-  font-size: calc(var(--space-lg) + var(--space-xs));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   line-height: 1;
+  color: currentColor;
+}
+
+.agent-role-option-icon svg {
+  flex-shrink: 0;
 }
 
 .agent-role-option-label {

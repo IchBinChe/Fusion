@@ -65,6 +65,7 @@ export function createEngineMock(overrides: AnyModule = {}): AnyModule {
     Keep chat task document tools iterable by default so rescuing chat-routes from quarantine does not poison planning route imports with a fallback vi.fn() result.
     */
     createChatTaskDocumentTools: vi.fn(() => []),
+    createChatArtifactTools: vi.fn(() => []),
     ...overrides,
   });
 }

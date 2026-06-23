@@ -51,7 +51,8 @@
 
 .wf-optional-steps-dropdown-option:hover,
 .wf-optional-steps-dropdown-option.is-active {
-  background: var(--surface-hover, rgba(127, 127, 127, 0.12));
+  /* FNXC:DashboardTheming 2026-06-21-00:00: Status/theme-token tests ban raw rgba fallbacks for --surface-hover; use the shared color-mix fallback so every color theme, including newly added shadcn variants, keeps tokenized hover surfaces. */
+  background: var(--surface-hover, color-mix(in srgb, var(--surface) 90%, var(--text) 10%));
 }
 
 .wf-optional-steps-dropdown-option:focus-visible {

@@ -8,11 +8,14 @@
  *   1. Global keys are routed via {@link isGlobalSettingsKey} to the global
  *      patch; project keys via {@link isProjectSettingsKey} to the project
  *      patch. (A key can be neither — server-only/UI-only fields are dropped.)
- *   2. null-as-delete: an explicit clear (current value `undefined`, but the
+ *   2. Global and project writes are changed-only. This prevents any Settings
+ *      save from re-sending default global values that can overwrite unrelated
+ *      user preferences such as notifications or onboarding state.
+ *   3. null-as-delete: an explicit clear (current value `undefined`, but the
  *      initial value was defined) is written as `null` so it survives
  *      `JSON.stringify` and tells the server to delete the key. Plain
  *      `undefined` is dropped.
- *   3. changed-only project writes: an inherited/effective project value that
+ *   4. changed-only project writes: an inherited/effective project value that
  *      the user never touched is NOT serialized as an explicit override —
  *      doing so would silently break inheritance for every project setting on
  *      every save. Only keys whose value differs from the initial project-scoped
@@ -42,6 +45,119 @@ export const MODEL_LANE_KEYS = [
 
 const MODEL_LANE_KEY_SET = new Set<string>(MODEL_LANE_KEYS);
 
+const GLOBAL_SECTION_KEYS: Record<string, ReadonlySet<string>> = {
+  appearance: new Set([
+    "themeMode",
+    "colorTheme",
+    "dashboardFontScalePct",
+    "shadcnCustomColors",
+  ]),
+  notifications: new Set([
+    "ntfyEnabled",
+    "ntfyTopic",
+    "ntfyBaseUrl",
+    "ntfyAccessToken",
+    "ntfyEvents",
+    "ntfyDashboardHost",
+    "failureNotificationDelayMs",
+    "failureNotificationMode",
+    "webhookEnabled",
+    "webhookUrl",
+    "webhookFormat",
+    "webhookEvents",
+    "notificationProviders",
+  ]),
+  experimental: new Set(["experimentalFeatures"]),
+  "global-general": new Set([
+    "githubTrackingDefaultRepo",
+    "language",
+    "persistAgentToolOutput",
+    "persistAgentThinkingLogPermanent",
+    "persistAgentThinkingLogEphemeral",
+    "fnBinaryCheckEnabled",
+    "updateCheckEnabled",
+    "updateCheckFrequency",
+    "autoReloadOnVersionChange",
+  ]),
+  "global-models": new Set([
+    "defaultProvider",
+    "defaultModelId",
+    "fallbackProvider",
+    "fallbackModelId",
+    "defaultThinkingLevel",
+    "modelRouterEnabled",
+    "modelRouterCheapProvider",
+    "modelRouterCheapModelId",
+    "opencodeGoModelSync",
+    "openrouterAppAttribution",
+    "openrouterModelFilters",
+    "openrouterModelSync",
+    "openrouterProviderPreferences",
+    "executionGlobalProvider",
+    "executionGlobalModelId",
+    "planningGlobalProvider",
+    "planningGlobalModelId",
+    "validatorGlobalProvider",
+    "validatorGlobalModelId",
+    "titleSummarizerGlobalProvider",
+    "titleSummarizerGlobalModelId",
+  ]),
+  "project-models": new Set([
+    "defaultProvider",
+    "defaultModelId",
+    "fallbackProvider",
+    "fallbackModelId",
+    "defaultThinkingLevel",
+    "modelRouterEnabled",
+    "modelRouterCheapProvider",
+    "modelRouterCheapModelId",
+    "opencodeGoModelSync",
+    "openrouterAppAttribution",
+    "openrouterModelFilters",
+    "openrouterModelSync",
+    "openrouterProviderPreferences",
+    "executionGlobalProvider",
+    "executionGlobalModelId",
+    "planningGlobalProvider",
+    "planningGlobalModelId",
+    "validatorGlobalProvider",
+    "validatorGlobalModelId",
+    "titleSummarizerGlobalProvider",
+    "titleSummarizerGlobalModelId",
+  ]),
+  "node-sync": new Set([
+    "settingsSyncEnabled",
+    "settingsSyncAuth",
+    "settingsSyncInterval",
+    "settingsSyncConflictResolution",
+  ]),
+  "research-global": new Set([
+    "researchGlobalDefaults",
+    "researchGlobalEnabled",
+    "researchGlobalMaxConcurrentRuns",
+    "researchGlobalDefaultTimeout",
+    "researchGlobalMaxSourcesPerRun",
+    "researchGlobalMaxSynthesisRounds",
+    "researchGlobalWebSearchProvider",
+    "researchGlobalSearxngUrl",
+    "researchGlobalBraveApiKey",
+    "researchGlobalGoogleSearchApiKey",
+    "researchGlobalGoogleSearchCx",
+    "researchGlobalTavilyApiKey",
+    "researchGlobalGitHubEnabled",
+    "researchGlobalLocalDocsEnabled",
+    "researchGlobalMaxSearchResults",
+    "researchGlobalFetchTimeoutMs",
+    "researchGlobalUserAgent",
+  ]),
+  remote: new Set(["remoteAccess"]),
+};
+
+function isGlobalKeyAllowedForSection(key: string, activeSection: string): boolean {
+  const sectionKeys = GLOBAL_SECTION_KEYS[activeSection];
+  return !sectionKeys || sectionKeys.has(key);
+}
+
 export interface SaveSplitInput {
   /** The fully-normalized form payload (after trimming/normalization). */
   payload: Record<string, unknown>;
@@ -56,6 +172,31 @@ export interface SaveSplitInput {
 export interface SaveSplitResult {
   globalPatch: Partial<GlobalSettings>;
   projectPatch: Partial<Settings>;
+}
+
+function hasOwn(obj: object | null | undefined, key: string): boolean {
+  return !!obj && Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function settingsValueEquals(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right)) return false;
+    if (left.length !== right.length) return false;
+    return left.every((item, index) => settingsValueEquals(item, right[index]));
+  }
+  if (isPlainObject(left) || isPlainObject(right)) {
+    if (!isPlainObject(left) || !isPlainObject(right)) return false;
+    const leftKeys = Object.keys(left);
+    const rightKeys = Object.keys(right);
+    if (leftKeys.length !== rightKeys.length) return false;
+    return leftKeys.every((key) => hasOwn(right, key) && settingsValueEquals(left[key], right[key]));
+  }
+  return false;
 }
 
 /**
@@ -85,11 +226,37 @@ export function splitSettingsSave({
       continue;
     }
     if (isGlobalSettingsKey(key)) {
-      // null-as-delete: explicit clear is sent as null, plain undefined dropped.
-      const initialValue = initialValues?.[key as keyof GlobalSettings];
-      if (value === undefined && initialValue !== undefined) {
+      /*
+      FNXC:SettingsPersistence 2026-06-23-00:55:
+      Global settings saves must be changed-only, just like project settings. The Settings form carries full default-shaped global values, so emitting unchanged globals can overwrite unrelated user preferences (notifications, onboarding state, theme) when a user saves another section or when experimental-feature normalization allocates a fresh but equivalent object.
+
+      FNXC:SettingsPersistence 2026-06-23-01:18:
+      Global Settings saves are also gated by the active settings section. The form can contain stale/default values from sections the user did not edit, so changed-only comparison alone cannot distinguish an intentional Appearance edit from a default-filled Notifications or onboarding field.
+      */
+      if (!isGlobalKeyAllowedForSection(key, activeSection)) {
+        continue;
+      }
+
+      if (value === undefined && key === "ntfyAccessToken" && activeSection === "notifications") {
         (globalPatch as Record<string, unknown>)[key] = null;
-      } else {
+        continue;
+      }
+
+      const hasScopedInitial = hasOwn(initialScopedValues?.global, key);
+      const hasMergedInitial = hasOwn(initialValues, key);
+      const initialValue = hasScopedInitial
+        ? initialScopedValues?.global?.[key as keyof GlobalSettings]
+        : initialValues?.[key as keyof GlobalSettings];
+      const hasInitialValue = hasScopedInitial || hasMergedInitial;
+
+      if (settingsValueEquals(value, initialValue)) {
+        continue;
+      }
+
+      // null-as-delete: explicit clear is sent as null, plain undefined dropped.
+      if (value === undefined && hasInitialValue && initialValue !== undefined) {
+        (globalPatch as Record<string, unknown>)[key] = null;
+      } else if (value !== undefined) {
         (globalPatch as Record<string, unknown>)[key] = value;
       }
     }
@@ -105,7 +272,7 @@ export function splitSettingsSave({
     const initialProjectValue = initialScopedValues?.project?.[key as keyof Settings];
 
     if (MODEL_LANE_KEY_SET.has(key)) {
-      if (value !== initialProjectValue) {
+      if (!settingsValueEquals(value, initialProjectValue)) {
         if (
           (value === undefined || value === null) &&
           initialProjectValue !== undefined &&
@@ -118,7 +285,7 @@ export function splitSettingsSave({
       }
     } else {
       // Changed-only gate + null-as-delete for non-model project settings.
-      if (value !== initialProjectValue) {
+      if (!settingsValueEquals(value, initialProjectValue)) {
         if (value === undefined && initialProjectValue !== undefined && initialProjectValue !== null) {
           (projectPatch as Record<string, unknown>)[key] = null;
         } else if (value !== undefined) {

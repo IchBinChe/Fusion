@@ -10,11 +10,36 @@
   resize: both;
 }
 
+.floating-window--file-browser.floating-window--headerless .floating-window__body {
+  overflow: hidden;
+}
+
+.floating-window--file-browser .file-browser-modal {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  resize: none;
+  border: none;
+  border-radius: inherit;
+  box-shadow: none;
+}
+
 .file-browser-modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-lg);
+  min-height: 48px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.file-browser-modal-header:active {
+  cursor: grabbing;
 }
 
 .file-browser-header-title {
@@ -166,6 +191,52 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
+}
+
+.file-browser-new-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.file-browser-new-menu-trigger {
+  white-space: nowrap;
+}
+
+.file-browser-new-menu-panel {
+  position: absolute;
+  top: calc(100% + var(--space-xs));
+  right: 0;
+  z-index: 20;
+  min-width: calc(var(--space-xl) * 5.5);
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.file-browser-new-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  min-height: calc(var(--space-lg) + var(--space-md));
+  padding: var(--space-sm) var(--space-md);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.file-browser-new-menu-item:hover,
+.file-browser-new-menu-item:focus-visible {
+  outline: none;
+  background: var(--card-hover);
 }
 
 .file-browser-list {
@@ -345,6 +416,136 @@
   opacity: 0.7;
 }
 
+/*
+FNXC:FileBrowser 2026-06-22-17:25:
+Narrow Files windows use the same single-pane list/editor behavior as mobile even when the browser viewport is desktop-sized. Keep this separate from the mobile media query so a resized floating file editor becomes usable without forcing the entire FloatingWindow fullscreen.
+*/
+.file-browser-modal--narrow .file-browser-body {
+  flex-direction: column;
+}
+
+.file-browser-modal--narrow .file-browser-modal-header {
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--space-sm);
+}
+
+.file-browser-modal--narrow .file-browser-header-title {
+  overflow: hidden;
+  min-width: 0;
+  flex: 1;
+}
+
+.file-browser-modal--narrow .file-browser-header-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 50vw;
+}
+
+.file-browser-modal--narrow .file-browser-header-actions {
+  flex-shrink: 0;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.file-browser-modal--narrow .file-browser .file-browser-header {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.file-browser-modal--narrow .file-browser .file-browser-path {
+  flex: 1 1 auto;
+  max-width: none;
+}
+
+.file-browser-modal--narrow .file-browser .file-browser-header-actions {
+  width: 100%;
+  margin-left: 0;
+  justify-content: flex-start;
+}
+
+.file-browser-modal--narrow .file-editor-toolbar {
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.file-browser-modal--narrow .file-editor-toolbar-actions {
+  margin-inline-start: auto;
+  justify-content: flex-end;
+}
+
+.file-browser-modal--narrow .file-editor-toolbar-actions[hidden] {
+  display: none;
+}
+
+.file-browser-modal--narrow .file-editor-toolbar-button {
+  min-height: calc(var(--space-lg) + var(--space-sm));
+  min-width: calc(var(--space-lg) + var(--space-sm));
+}
+
+.file-browser-modal--narrow .file-browser-sidebar {
+  width: 100%;
+  height: 40%;
+  border-right: none;
+  border-bottom: calc(var(--space-xs) * 0.25) solid var(--border);
+}
+
+.file-browser-modal--narrow .file-browser-sidebar.mobile {
+  display: none;
+}
+
+.file-browser-modal--narrow .file-browser-sidebar.mobile.active {
+  display: flex;
+  flex: 1;
+  height: 100%;
+  max-height: none;
+  border-bottom: none;
+}
+
+.file-browser-modal--narrow .file-browser-content.mobile {
+  display: none;
+}
+
+.file-browser-modal--narrow .file-browser-content.mobile.active {
+  display: flex;
+  flex: 1;
+  height: 100%;
+}
+
+.file-browser-modal--narrow .file-browser-back-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-md);
+  background: transparent;
+  border: calc(var(--space-xs) * 0.25) solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-size: calc(var(--space-md) + var(--space-xs) * 0.25);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  margin-right: var(--space-sm);
+}
+
+.file-browser-modal--narrow .file-browser-back-button:hover {
+  background: var(--card-hover);
+}
+
+.file-browser-modal--narrow .file-browser-back-button:focus {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.file-browser-modal--narrow .file-browser-image-preview {
+  padding: var(--space-md);
+}
+
+.file-browser-modal--narrow .file-browser-image {
+  max-width: 100%;
+  max-height: calc(100dvh - var(--space-2xl) * 6.25);
+}
+
 /* Mobile responsive */
 @media (max-width: 768px) {
   .file-editor-line-numbers {
@@ -353,13 +554,19 @@
     padding-right: var(--space-xs);
   }
 
-  /* On mobile the file browser is presented as a full-screen sheet — drop
-     the overlay's default top padding so the modal actually fills the
-     viewport instead of being pushed below it. */
-  .modal-overlay:has(.file-browser-modal) {
-    padding-top: 0;
-    align-items: stretch;
-    justify-content: stretch;
+  .floating-window--file-browser {
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100dvh !important;
+    max-width: none;
+    max-height: none;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .floating-window--file-browser .floating-window__resize-handle {
+    display: none;
   }
 
   .modal.file-browser-modal {
@@ -380,9 +587,28 @@
   }
 
   .file-browser-modal-header {
+    position: relative;
     flex-wrap: wrap;
     align-items: flex-start;
     gap: var(--space-sm);
+    min-height: 56px;
+    padding-block: calc(var(--space-md) + var(--space-xs)) var(--space-md);
+  }
+
+  /*
+  FNXC:FileBrowser 2026-06-23-23:25:
+  On phones the full-screen Files modal still uses the header as its drag handle, but the title row can wrap and the action controls consume much of the top bar. Preserve a large touch-safe grab area with touch-action:none and add a subtle handle marker so dragging is discoverable without adding a second toolbar.
+  */
+  .file-browser-modal-header::before {
+    content: "";
+    position: absolute;
+    top: var(--space-xs);
+    left: 50%;
+    width: calc(var(--space-xl) + var(--space-sm));
+    height: calc(var(--space-xs) * 0.75);
+    transform: translateX(-50%);
+    border-radius: var(--radius-pill);
+    background: color-mix(in srgb, var(--text-muted) 44%, transparent);
   }
 
   .file-browser-header-title {
@@ -840,4 +1066,3 @@
   font-size: calc(var(--space-sm) + var(--space-xs) * 0.5);
   font-family: var(--font-mono);
 }
-

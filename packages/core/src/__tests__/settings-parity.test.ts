@@ -73,6 +73,10 @@ describe("settings key parity", () => {
     expect(isProjectSettingsKey("persistAgentThinkingLogEphemeral")).toBe(false);
     expect(isGlobalOnlySettingsKey("persistAgentThinkingLogEphemeral")).toBe(true);
     expect(isGlobalSettingsKey("researchSettings")).toBe(false);
+    expect(isGlobalSettingsKey("modelPricingOverrides")).toBe(true);
+    expect(isGlobalSettingsKey("modelPricingFetchedAt")).toBe(true);
+    expect(isGlobalSettingsKey("modelPricingSource")).toBe(true);
+    expect(isProjectSettingsKey("modelPricingOverrides")).toBe(false);
     expect(isGlobalSettingsKey("agentMemoryInclusionMode")).toBe(true);
     expect(isProjectSettingsKey("agentMemoryInclusionMode")).toBe(false);
   });

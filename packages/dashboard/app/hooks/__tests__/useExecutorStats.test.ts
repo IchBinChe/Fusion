@@ -264,7 +264,7 @@ describe("useExecutorStats", () => {
   });
 
   describe("executor state derivation", () => {
-    it("returns 'idle' when globalPause is true", async () => {
+    it("returns 'stopped' when globalPause is true", async () => {
       mockFetchExecutorStats.mockResolvedValue({
         globalPause: true,
         enginePaused: false,
@@ -277,7 +277,25 @@ describe("useExecutorStats", () => {
         await vi.advanceTimersByTimeAsync(100);
       });
 
-      expect(result.current.stats.executorState).toBe("idle");
+      expect(result.current.stats.executorState).toBe("stopped");
+    });
+
+    it("returns 'stopped' when globalPause is true even with running tasks", async () => {
+      const tasks: Task[] = [createMockTask("FN-001", "in-progress")];
+      mockFetchExecutorStats.mockResolvedValue({
+        globalPause: true,
+        enginePaused: false,
+        maxConcurrent: 4,
+      });
+
+      const { result } = renderHook(() => useExecutorStats(tasks));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      expect(result.current.stats.runningTaskCount).toBe(1);
+      expect(result.current.stats.executorState).toBe("stopped");
     });
 
     it("returns 'idle' when enginePaused is true and runningTaskCount is 0", async () => {

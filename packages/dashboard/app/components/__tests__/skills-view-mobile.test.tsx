@@ -17,6 +17,9 @@ vi.mock("../../api", () => ({
   fetchSkillsCatalog: (...args: unknown[]) => mockFetchSkillsCatalog(...args),
   toggleExecutionSkill: (...args: unknown[]) => mockToggleExecutionSkill(...args),
   fetchSkillContent: (...args: unknown[]) => mockFetchSkillContent(...args),
+  // FNXC:Skills 2026-06-23-04:15: SkillsView now imports fetchSkillFileContent for the file viewer; stub it so the mock module is complete.
+  fetchSkillFileContent: vi.fn().mockResolvedValue({ name: "", relativePath: "", content: "", isText: true }),
+  installSkill: vi.fn().mockResolvedValue({ success: true }),
 }));
 
 function extractRuleBlock(css: string, selector: string): string {
@@ -53,15 +56,17 @@ describe("skills-view mobile css", () => {
   const cssContent = loadAllAppCss();
   const mobileMediaBlock = extractMobileMediaBlocks(cssContent);
 
-  it("defines .skills-view-header in mobile block with reduced padding", () => {
-    expect(mobileMediaBlock).toContain(".skills-view-header");
-    const block = extractRuleBlock(mobileMediaBlock, ".skills-view-header");
-    // Base has padding: var(--space-lg) 20px; mobile should override
-    expect(block).toMatch(/padding:\s*var\(--space-sm\)\s+var\(--space-md\)/);
+  // FNXC:Skills 2026-06-22-09:30: SkillsView adopted the shared ViewHeader (.view-header /
+  // .view-header__title) in the redesign, replacing the bespoke .skills-view-header /
+  // .skills-view-title. Assert the shared header is defined and carries its standard padding/title.
+  it("uses the shared .view-header for the skills title row", () => {
+    expect(cssContent).toContain(".view-header {");
+    const viewHeaderBlocks = [...cssContent.matchAll(/\.view-header\s*\{([^}]*)\}/g)].map((match) => match[1]);
+    expect(viewHeaderBlocks.some((block) => /padding:\s*var\(--space-lg\)\s+var\(--space-xl\)/.test(block))).toBe(true);
   });
 
-  it("defines .skills-view-title h2 with smaller font on mobile", () => {
-    expect(cssContent).toContain(".skills-view-title h2");
+  it("defines the shared .view-header__title", () => {
+    expect(cssContent).toContain(".view-header__title {");
   });
 
   it("defines .skills-view-content with reduced padding on mobile", () => {
@@ -169,8 +174,9 @@ describe("skills-view mobile css", () => {
 
   it("skills-view base styles are defined in styles.css", () => {
     expect(cssContent).toContain(".skills-view {");
-    expect(cssContent).toContain(".skills-view-header {");
-    expect(cssContent).toContain(".skills-view-title {");
+    // Header/title row is now the shared .view-header (not bespoke .skills-view-header/-title).
+    expect(cssContent).toContain(".view-header {");
+    expect(cssContent).toContain(".view-header__title {");
     expect(cssContent).toContain(".skills-view-content {");
     expect(cssContent).toContain(".skills-view-section {");
     expect(cssContent).toContain(".skills-view-list {");
@@ -184,6 +190,7 @@ describe("skills-view mobile css", () => {
   it(".skills-view-content has overflow-y auto in base CSS", () => {
     expect(cssContent).toMatch(/\.skills-view-content\s*\{[^}]*overflow-y:\s*auto[^}]*\}/s);
     expect(cssContent).toMatch(/\.skills-view-content\s*\{[^}]*flex:\s*1[^}]*\}/s);
+    expect(cssContent).toMatch(/\.skills-view-content\s*\{[^}]*padding:\s*var\(--space-lg\) var\(--space-lg\) var\(--space-lg\)[^}]*\}/s);
   });
 
   it("defines .skills-view-detail with reduced padding on mobile", () => {
@@ -259,9 +266,10 @@ describe("SkillsView component structure", () => {
     const sections = contentWrapper!.querySelectorAll(".skills-view-section");
     expect(sections.length).toBe(2);
 
-    // Header should be outside the wrapper (directly on skills-view)
+    // Header (now the shared ViewHeader: .view-header) should be outside the content
+    // wrapper, directly on skills-view.
     const skillsView = screen.getByTestId("skills-view");
-    const header = skillsView.querySelector(".skills-view-header");
+    const header = skillsView.querySelector(".view-header");
     expect(header).not.toBeNull();
     expect(header!.parentElement).toBe(skillsView);
   });

@@ -337,6 +337,9 @@
 FNXC:DashboardTheming 2026-06-19-15:39:
 Air must be the calmest, flattest theme: near-monochrome tokens, a restrained blue-gray accent, a clean system sans stack, and faint color-mix borders.
 The "remove unnecessary UI" requirement is intentionally CSS-only and scoped to [data-color-theme="air"] so shared DOM affordances remain present while borders, shadows, and decorative chrome flatten visually.
+
+FNXC:DashboardTheming 2026-06-22-14:24:
+Air should hide horizontal divider lines across headers, modal title bars, footers, and tab rails while preserving vertical pane dividers and component outlines. Keep this as theme CSS so the DOM and hit targets remain shared across themes.
 */
 [data-color-theme="air"] {
   --bg: #0f1115;
@@ -432,6 +435,73 @@ The "remove unnecessary UI" requirement is intentionally CSS-only and scoped to 
 [data-color-theme="air"] .tag {
   border-color: var(--border);
   box-shadow: 0 0 0 transparent;
+}
+
+[data-color-theme="air"] .view-header,
+[data-color-theme="air"] .header,
+[data-color-theme="air"] .modal-header,
+[data-color-theme="air"] .modal-actions,
+[data-color-theme="air"] .modal-footer,
+[data-color-theme="air"] .floating-window-header,
+[data-color-theme="air"] .settings-section-heading,
+[data-color-theme="air"] .settings-section-divider,
+[data-color-theme="air"] .runtime-card__tabs,
+[data-color-theme="air"] .runtime-card__footer,
+[data-color-theme="air"] .mailbox-thread-detail-header,
+[data-color-theme="air"] .chat-sidebar-footer,
+[data-color-theme="air"] .task-detail-tabs,
+[data-color-theme="air"] .task-detail-section,
+[data-color-theme="air"] .workflow-output-modal-header,
+[data-color-theme="air"] .file-browser-modal-header,
+[data-color-theme="air"] .activity-log-header {
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+}
+
+/*
+FNXC:DashboardTheming 2026-06-22-14:24:
+Shadcn-family themes should read as seamless app shells: header and modal-title separators disappear, but vertical pane borders and local control outlines stay intact.
+*/
+[data-color-theme^="shadcn"] .view-header,
+[data-color-theme^="shadcn"] .header,
+[data-color-theme^="shadcn"] .modal-header,
+[data-color-theme^="shadcn"] .modal-actions,
+[data-color-theme^="shadcn"] .modal-footer,
+[data-color-theme^="shadcn"] .floating-window-header,
+[data-color-theme^="shadcn"] .settings-section-heading,
+[data-color-theme^="shadcn"] .settings-section-divider,
+[data-color-theme^="shadcn"] .workflow-output-modal-header,
+[data-color-theme^="shadcn"] .file-browser-modal-header,
+[data-color-theme^="shadcn"] .activity-log-header {
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+}
+
+/*
+FNXC:DashboardTheming 2026-06-23-00:07:
+All shadcn-family themes should use one UI font family across app chrome, forms, popovers, and buttons. Native controls do not reliably inherit the document font in every browser, so pin shadcn UI controls to --font-primary while preserving --font-mono for code-oriented text.
+*/
+[data-color-theme^="shadcn"],
+[data-color-theme^="shadcn"] body,
+[data-color-theme^="shadcn"] button,
+[data-color-theme^="shadcn"] input,
+[data-color-theme^="shadcn"] select,
+[data-color-theme^="shadcn"] textarea,
+[data-color-theme^="shadcn"] optgroup,
+[data-color-theme^="shadcn"] .btn,
+[data-color-theme^="shadcn"] .input,
+[data-color-theme^="shadcn"] .select,
+[data-color-theme^="shadcn"] .modal,
+[data-color-theme^="shadcn"] .card {
+  font-family: var(--font-primary);
+}
+
+[data-color-theme^="shadcn"] code,
+[data-color-theme^="shadcn"] pre,
+[data-color-theme^="shadcn"] kbd,
+[data-color-theme^="shadcn"] samp,
+[data-color-theme^="shadcn"] .font-mono {
+  font-family: var(--font-mono);
 }
 
 /* GRAPHITE - Dark graphite blacks */
@@ -1358,26 +1428,158 @@ FN-6758 makes the default shadcn highlight/accent orange for focus rings, active
   --accent-text: #ffffff;
 }
 
-[data-color-theme="shadcn"] .card.agent-active {
+/*
+FNXC:Theming 2026-06-20-18:30:
+FN-6816 keeps shadcn-custom visually identical to the base shadcn theme until sanitized user token overrides are applied inline by the dashboard theme hook.
+*/
+[data-color-theme="shadcn-custom"] {
+  --bg: #09090b;
+  --surface: #0c0c0e;
+  --card: #18181b;
+  --card-hover: #1f1f23;
+  --surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
+  --border: #27272a;
+
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-dim: #52525b;
+
+  --todo: #60a5fa;
+  --in-progress: #38bdf8;
+  --in-progress-rgb: 56, 189, 248;
+  --in-review: #34d399;
+  --triage: #f59e0b;
+  --done: #71717a;
+
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-muted: #71717a;
+
+  --font-primary: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 10px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 28px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius: var(--radius-md);
+
+  --btn-padding: 6px 12px;
+  --btn-border-width: 1px;
+  --card-padding: 10px 12px;
+  --modal-padding: var(--space-md) var(--space-lg);
+  --header-padding: var(--space-sm) var(--space-lg);
+  --column-gap: var(--space-md);
+  --board-padding: var(--space-md) var(--space-lg);
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000000 18%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, #000000 22%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, #000000 24%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 45%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --transition-instant: 0.05s ease;
+  --transition-fast: 0.1s ease;
+  --transition-normal: 0.15s ease;
+  --transition-slow: 0.2s ease;
+
+  --cta-bg: #fafafa;
+  --cta-border: #fafafa;
+  --cta-text: #18181b;
+  --cta-bg-hover: #e4e4e7;
+  --cta-border-hover: #e4e4e7;
+  --cta-glow: none;
+  --logo-accent: var(--text);
+  --color-info: #38bdf8;
+  --accent: #f97316;
+  --accent-text: #ffffff;
+}
+
+[data-color-theme="shadcn-custom"][data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f4f4f5;
+  --surface-hover: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
+  --border: #e4e4e7;
+
+  --text: #09090b;
+  --text-muted: #71717a;
+  --text-dim: #a1a1aa;
+
+  --todo: #2563eb;
+  --in-progress: #0284c7;
+  --in-progress-rgb: 2, 132, 199;
+  --in-review: #16a34a;
+  --triage: #d97706;
+  --done: #a1a1aa;
+
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-error: #dc2626;
+  --color-muted: #71717a;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, var(--text) 10%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 18%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 28%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #18181b;
+  --cta-border: #18181b;
+  --cta-text: #fafafa;
+  --cta-bg-hover: #27272a;
+  --cta-border-hover: #27272a;
+  --cta-glow: none;
+  --logo-accent: var(--text);
+  --color-info: #0284c7;
+  --accent: #ea580c;
+  --accent-text: #ffffff;
+}
+
+[data-color-theme="shadcn"] .card.agent-active,
+[data-color-theme="shadcn-custom"] .card.agent-active {
   border-color: var(--accent);
   box-shadow: none;
   animation: none;
 }
 
-[data-color-theme="shadcn"][data-theme="light"] .card.agent-active {
+[data-color-theme="shadcn"][data-theme="light"] .card.agent-active,
+[data-color-theme="shadcn-custom"][data-theme="light"] .card.agent-active {
   border-color: var(--accent);
   box-shadow: none;
   animation: none;
 }
 
-[data-color-theme="shadcn"] .btn {
+[data-color-theme="shadcn"] .btn,
+[data-color-theme="shadcn-custom"] .btn {
   text-transform: none;
   letter-spacing: normal;
   font-weight: 500;
 }
 
 [data-color-theme="shadcn"] .btn-primary,
-[data-color-theme="shadcn"] .btn-task-create {
+[data-color-theme="shadcn"] .btn-task-create,
+[data-color-theme="shadcn-custom"] .btn-primary,
+[data-color-theme="shadcn-custom"] .btn-task-create {
   background: var(--cta-bg);
   border-color: var(--cta-border);
   color: var(--cta-text);
@@ -1385,7 +1587,9 @@ FN-6758 makes the default shadcn highlight/accent orange for focus rings, active
 }
 
 [data-color-theme="shadcn"] .btn-primary:hover,
-[data-color-theme="shadcn"] .btn-task-create:hover {
+[data-color-theme="shadcn"] .btn-task-create:hover,
+[data-color-theme="shadcn-custom"] .btn-primary:hover,
+[data-color-theme="shadcn-custom"] .btn-task-create:hover {
   background: var(--cta-bg-hover);
   border-color: var(--cta-border-hover);
   color: var(--cta-text);
@@ -1393,7 +1597,9 @@ FN-6758 makes the default shadcn highlight/accent orange for focus rings, active
 }
 
 [data-color-theme="shadcn"] .card,
-[data-color-theme="shadcn"] .column {
+[data-color-theme="shadcn"] .column,
+[data-color-theme="shadcn-custom"] .card,
+[data-color-theme="shadcn-custom"] .column {
   border-width: var(--btn-border-width);
 }
 
@@ -2227,7 +2433,11 @@ FN-6756 adds shadcn color-family themes as exact zinc-neutral shadcn variants wi
   --accent-text: #18181b;
 }
 
-[data-color-theme="shadcn-mono"] {
+/*
+FNXC:DashboardTheming 2026-06-20-00:00:
+FN-6813 makes the shadcn mono theme a color family: shadcn-mono-red preserves the renamed legacy red accent while the other mono variants reuse the same zinc-neutral tokens and swap only accent/CTA values. Legacy stored shadcn-mono selections remap in bootstrap/theme hooks so users keep the red mono theme instead of falling back to default.
+*/
+[data-color-theme="shadcn-mono-red"] {
   --bg: #09090b;
   --surface: #0c0c0e;
   --card: #18181b;
@@ -2298,7 +2508,8 @@ FN-6756 adds shadcn color-family themes as exact zinc-neutral shadcn variants wi
   --accent-text: #ffffff;
 }
 
-[data-color-theme="shadcn-mono"][data-theme="light"] {
+
+[data-color-theme="shadcn-mono-red"][data-theme="light"] {
   --bg: #ffffff;
   --surface: #ffffff;
   --card: #ffffff;
@@ -2344,6 +2555,727 @@ FN-6756 adds shadcn color-family themes as exact zinc-neutral shadcn variants wi
   --accent: #dc2626;
   --accent-text: #ffffff;
 }
+
+
+[data-color-theme="shadcn-mono-blue"] {
+  --bg: #09090b;
+  --surface: #0c0c0e;
+  --card: #18181b;
+  --card-hover: #1f1f23;
+  --surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
+  --border: #27272a;
+
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-dim: #52525b;
+
+  --todo: #a1a1aa;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #71717a;
+  --triage: #a1a1aa;
+  --done: #52525b;
+
+  --color-success: #71717a;
+  --color-warning: #a1a1aa;
+  --color-error: #ef4444;
+  --color-muted: #71717a;
+
+  --font-primary: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 10px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 28px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius: var(--radius-md);
+
+  --btn-padding: 6px 12px;
+  --btn-border-width: 1px;
+  --card-padding: 10px 12px;
+  --modal-padding: var(--space-md) var(--space-lg);
+  --header-padding: var(--space-sm) var(--space-lg);
+  --column-gap: var(--space-md);
+  --board-padding: var(--space-md) var(--space-lg);
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000000 18%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, #000000 22%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, #000000 24%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 45%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #3b82f6;
+  --cta-border: #3b82f6;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #2563eb;
+  --cta-border-hover: #2563eb;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #a1a1aa;
+  --accent: #3b82f6;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-blue"][data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f4f4f5;
+  --surface-hover: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
+  --border: #e4e4e7;
+
+  --text: #09090b;
+  --text-muted: #71717a;
+  --text-dim: #a1a1aa;
+
+  --todo: #71717a;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #52525b;
+  --triage: #71717a;
+  --done: #a1a1aa;
+
+  --color-success: #71717a;
+  --color-warning: #71717a;
+  --color-error: #dc2626;
+  --color-muted: #71717a;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, var(--text) 10%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 18%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 28%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #2563eb;
+  --cta-border: #2563eb;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #1d4ed8;
+  --cta-border-hover: #1d4ed8;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #71717a;
+  --accent: #2563eb;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-green"] {
+  --bg: #09090b;
+  --surface: #0c0c0e;
+  --card: #18181b;
+  --card-hover: #1f1f23;
+  --surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
+  --border: #27272a;
+
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-dim: #52525b;
+
+  --todo: #a1a1aa;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #71717a;
+  --triage: #a1a1aa;
+  --done: #52525b;
+
+  --color-success: #71717a;
+  --color-warning: #a1a1aa;
+  --color-error: #ef4444;
+  --color-muted: #71717a;
+
+  --font-primary: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 10px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 28px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius: var(--radius-md);
+
+  --btn-padding: 6px 12px;
+  --btn-border-width: 1px;
+  --card-padding: 10px 12px;
+  --modal-padding: var(--space-md) var(--space-lg);
+  --header-padding: var(--space-sm) var(--space-lg);
+  --column-gap: var(--space-md);
+  --board-padding: var(--space-md) var(--space-lg);
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000000 18%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, #000000 22%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, #000000 24%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 45%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #22c55e;
+  --cta-border: #22c55e;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #16a34a;
+  --cta-border-hover: #16a34a;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #a1a1aa;
+  --accent: #22c55e;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-green"][data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f4f4f5;
+  --surface-hover: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
+  --border: #e4e4e7;
+
+  --text: #09090b;
+  --text-muted: #71717a;
+  --text-dim: #a1a1aa;
+
+  --todo: #71717a;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #52525b;
+  --triage: #71717a;
+  --done: #a1a1aa;
+
+  --color-success: #71717a;
+  --color-warning: #71717a;
+  --color-error: #dc2626;
+  --color-muted: #71717a;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, var(--text) 10%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 18%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 28%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #16a34a;
+  --cta-border: #16a34a;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #15803d;
+  --cta-border-hover: #15803d;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #71717a;
+  --accent: #16a34a;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-purple"] {
+  --bg: #09090b;
+  --surface: #0c0c0e;
+  --card: #18181b;
+  --card-hover: #1f1f23;
+  --surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
+  --border: #27272a;
+
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-dim: #52525b;
+
+  --todo: #a1a1aa;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #71717a;
+  --triage: #a1a1aa;
+  --done: #52525b;
+
+  --color-success: #71717a;
+  --color-warning: #a1a1aa;
+  --color-error: #ef4444;
+  --color-muted: #71717a;
+
+  --font-primary: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 10px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 28px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius: var(--radius-md);
+
+  --btn-padding: 6px 12px;
+  --btn-border-width: 1px;
+  --card-padding: 10px 12px;
+  --modal-padding: var(--space-md) var(--space-lg);
+  --header-padding: var(--space-sm) var(--space-lg);
+  --column-gap: var(--space-md);
+  --board-padding: var(--space-md) var(--space-lg);
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000000 18%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, #000000 22%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, #000000 24%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 45%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #8b5cf6;
+  --cta-border: #8b5cf6;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #7c3aed;
+  --cta-border-hover: #7c3aed;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #a1a1aa;
+  --accent: #8b5cf6;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-purple"][data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f4f4f5;
+  --surface-hover: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
+  --border: #e4e4e7;
+
+  --text: #09090b;
+  --text-muted: #71717a;
+  --text-dim: #a1a1aa;
+
+  --todo: #71717a;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #52525b;
+  --triage: #71717a;
+  --done: #a1a1aa;
+
+  --color-success: #71717a;
+  --color-warning: #71717a;
+  --color-error: #dc2626;
+  --color-muted: #71717a;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, var(--text) 10%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 18%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 28%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #7c3aed;
+  --cta-border: #7c3aed;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #6d28d9;
+  --cta-border-hover: #6d28d9;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #71717a;
+  --accent: #7c3aed;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-pink"] {
+  --bg: #09090b;
+  --surface: #0c0c0e;
+  --card: #18181b;
+  --card-hover: #1f1f23;
+  --surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
+  --border: #27272a;
+
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-dim: #52525b;
+
+  --todo: #a1a1aa;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #71717a;
+  --triage: #a1a1aa;
+  --done: #52525b;
+
+  --color-success: #71717a;
+  --color-warning: #a1a1aa;
+  --color-error: #ef4444;
+  --color-muted: #71717a;
+
+  --font-primary: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 10px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 28px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius: var(--radius-md);
+
+  --btn-padding: 6px 12px;
+  --btn-border-width: 1px;
+  --card-padding: 10px 12px;
+  --modal-padding: var(--space-md) var(--space-lg);
+  --header-padding: var(--space-sm) var(--space-lg);
+  --column-gap: var(--space-md);
+  --board-padding: var(--space-md) var(--space-lg);
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000000 18%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, #000000 22%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, #000000 24%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 45%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #ec4899;
+  --cta-border: #ec4899;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #db2777;
+  --cta-border-hover: #db2777;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #a1a1aa;
+  --accent: #ec4899;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-pink"][data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f4f4f5;
+  --surface-hover: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
+  --border: #e4e4e7;
+
+  --text: #09090b;
+  --text-muted: #71717a;
+  --text-dim: #a1a1aa;
+
+  --todo: #71717a;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #52525b;
+  --triage: #71717a;
+  --done: #a1a1aa;
+
+  --color-success: #71717a;
+  --color-warning: #71717a;
+  --color-error: #dc2626;
+  --color-muted: #71717a;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, var(--text) 10%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 18%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 28%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #db2777;
+  --cta-border: #db2777;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #be185d;
+  --cta-border-hover: #be185d;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #71717a;
+  --accent: #db2777;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-orange"] {
+  --bg: #09090b;
+  --surface: #0c0c0e;
+  --card: #18181b;
+  --card-hover: #1f1f23;
+  --surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
+  --border: #27272a;
+
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-dim: #52525b;
+
+  --todo: #a1a1aa;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #71717a;
+  --triage: #a1a1aa;
+  --done: #52525b;
+
+  --color-success: #71717a;
+  --color-warning: #a1a1aa;
+  --color-error: #ef4444;
+  --color-muted: #71717a;
+
+  --font-primary: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 10px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 28px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius: var(--radius-md);
+
+  --btn-padding: 6px 12px;
+  --btn-border-width: 1px;
+  --card-padding: 10px 12px;
+  --modal-padding: var(--space-md) var(--space-lg);
+  --header-padding: var(--space-sm) var(--space-lg);
+  --column-gap: var(--space-md);
+  --board-padding: var(--space-md) var(--space-lg);
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000000 18%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, #000000 22%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, #000000 24%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 45%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #f97316;
+  --cta-border: #f97316;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #ea580c;
+  --cta-border-hover: #ea580c;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #a1a1aa;
+  --accent: #f97316;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-orange"][data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f4f4f5;
+  --surface-hover: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
+  --border: #e4e4e7;
+
+  --text: #09090b;
+  --text-muted: #71717a;
+  --text-dim: #a1a1aa;
+
+  --todo: #71717a;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #52525b;
+  --triage: #71717a;
+  --done: #a1a1aa;
+
+  --color-success: #71717a;
+  --color-warning: #71717a;
+  --color-error: #dc2626;
+  --color-muted: #71717a;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, var(--text) 10%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 18%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 28%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #ea580c;
+  --cta-border: #ea580c;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #c2410c;
+  --cta-border-hover: #c2410c;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #71717a;
+  --accent: #ea580c;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-yellow"] {
+  --bg: #09090b;
+  --surface: #0c0c0e;
+  --card: #18181b;
+  --card-hover: #1f1f23;
+  --surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
+  --border: #27272a;
+
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-dim: #52525b;
+
+  --todo: #a1a1aa;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #71717a;
+  --triage: #a1a1aa;
+  --done: #52525b;
+
+  --color-success: #71717a;
+  --color-warning: #a1a1aa;
+  --color-error: #ef4444;
+  --color-muted: #71717a;
+
+  --font-primary: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 10px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 28px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius: var(--radius-md);
+
+  --btn-padding: 6px 12px;
+  --btn-border-width: 1px;
+  --card-padding: 10px 12px;
+  --modal-padding: var(--space-md) var(--space-lg);
+  --header-padding: var(--space-sm) var(--space-lg);
+  --column-gap: var(--space-md);
+  --board-padding: var(--space-md) var(--space-lg);
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000000 18%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, #000000 22%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, #000000 24%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 45%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #eab308;
+  --cta-border: #eab308;
+  --cta-text: #18181b;
+  --cta-bg-hover: #ca8a04;
+  --cta-border-hover: #ca8a04;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #a1a1aa;
+  --accent: #eab308;
+  --accent-text: #18181b;
+}
+
+
+[data-color-theme="shadcn-mono-yellow"][data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f4f4f5;
+  --surface-hover: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
+  --border: #e4e4e7;
+
+  --text: #09090b;
+  --text-muted: #71717a;
+  --text-dim: #a1a1aa;
+
+  --todo: #71717a;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #52525b;
+  --triage: #71717a;
+  --done: #a1a1aa;
+
+  --color-success: #71717a;
+  --color-warning: #71717a;
+  --color-error: #dc2626;
+  --color-muted: #71717a;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, var(--text) 10%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 18%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 28%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #ca8a04;
+  --cta-border: #ca8a04;
+  --cta-text: #18181b;
+  --cta-bg-hover: #a16207;
+  --cta-border-hover: #a16207;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #71717a;
+  --accent: #ca8a04;
+  --accent-text: #18181b;
+}
+
 
 [data-color-theme="shadcn-black"] {
   --bg: #09090b;
@@ -2585,6 +3517,128 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
   --accent-text: #ffffff;
 }
 
+/*
+FNXC:Theming 2026-06-21-00:00:
+FN-6815 adds Shadcn Gray Blue as the slate-neutral shadcn variant: the whole surface ramp moves from zinc to blue-gray slate while CTA/accent tokens use muted slate-blue and the shadcn flat-shadow/no-glow treatment stays intact.
+*/
+[data-color-theme="shadcn-gray-blue"] {
+  --bg: #020617;
+  --surface: #0b1220;
+  --card: #0f172a;
+  --card-hover: #1e293b;
+  --surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
+  --border: #1e293b;
+
+  --text: #f8fafc;
+  --text-muted: #94a3b8;
+  --text-dim: #475569;
+
+  --todo: #60a5fa;
+  --in-progress: #38bdf8;
+  --in-progress-rgb: 56, 189, 248;
+  --in-review: #34d399;
+  --triage: #f59e0b;
+  --done: #64748b;
+
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-muted: #64748b;
+
+  --font-primary: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 10px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 28px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius: var(--radius-md);
+
+  --btn-padding: 6px 12px;
+  --btn-border-width: 1px;
+  --card-padding: 10px 12px;
+  --modal-padding: var(--space-md) var(--space-lg);
+  --header-padding: var(--space-sm) var(--space-lg);
+  --column-gap: var(--space-md);
+  --board-padding: var(--space-md) var(--space-lg);
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000000 18%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, #000000 22%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, #000000 24%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 45%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #64748b;
+  --cta-border: #64748b;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #475569;
+  --cta-border-hover: #475569;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #64748b;
+  --accent: #64748b;
+  --accent-text: #ffffff;
+}
+
+[data-color-theme="shadcn-gray-blue"][data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f1f5f9;
+  --surface-hover: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
+  --border: #e2e8f0;
+
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --text-dim: #94a3b8;
+
+  --todo: #2563eb;
+  --in-progress: #0284c7;
+  --in-progress-rgb: 2, 132, 199;
+  --in-review: #16a34a;
+  --triage: #d97706;
+  --done: #94a3b8;
+
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-error: #dc2626;
+  --color-muted: #64748b;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, var(--text) 10%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 18%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 28%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #475569;
+  --cta-border: #475569;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #334155;
+  --cta-border-hover: #334155;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #475569;
+  --accent: #475569;
+  --accent-text: #ffffff;
+}
+
 [data-color-theme="shadcn-blue"] .card.agent-active,
 [data-color-theme="shadcn-green"] .card.agent-active,
 [data-color-theme="shadcn-red"] .card.agent-active,
@@ -2592,9 +3646,16 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
 [data-color-theme="shadcn-pink"] .card.agent-active,
 [data-color-theme="shadcn-orange"] .card.agent-active,
 [data-color-theme="shadcn-yellow"] .card.agent-active,
-[data-color-theme="shadcn-mono"] .card.agent-active,
+[data-color-theme="shadcn-mono-red"] .card.agent-active,
+[data-color-theme="shadcn-mono-blue"] .card.agent-active,
+[data-color-theme="shadcn-mono-green"] .card.agent-active,
+[data-color-theme="shadcn-mono-purple"] .card.agent-active,
+[data-color-theme="shadcn-mono-pink"] .card.agent-active,
+[data-color-theme="shadcn-mono-orange"] .card.agent-active,
+[data-color-theme="shadcn-mono-yellow"] .card.agent-active,
 [data-color-theme="shadcn-black"] .card.agent-active,
-[data-color-theme="shadcn-gray"] .card.agent-active {
+[data-color-theme="shadcn-gray"] .card.agent-active,
+[data-color-theme="shadcn-gray-blue"] .card.agent-active {
   border-color: var(--accent);
   box-shadow: none;
   animation: none;
@@ -2607,9 +3668,16 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
 [data-color-theme="shadcn-pink"][data-theme="light"] .card.agent-active,
 [data-color-theme="shadcn-orange"][data-theme="light"] .card.agent-active,
 [data-color-theme="shadcn-yellow"][data-theme="light"] .card.agent-active,
-[data-color-theme="shadcn-mono"][data-theme="light"] .card.agent-active,
+[data-color-theme="shadcn-mono-red"][data-theme="light"] .card.agent-active,
+[data-color-theme="shadcn-mono-blue"][data-theme="light"] .card.agent-active,
+[data-color-theme="shadcn-mono-green"][data-theme="light"] .card.agent-active,
+[data-color-theme="shadcn-mono-purple"][data-theme="light"] .card.agent-active,
+[data-color-theme="shadcn-mono-pink"][data-theme="light"] .card.agent-active,
+[data-color-theme="shadcn-mono-orange"][data-theme="light"] .card.agent-active,
+[data-color-theme="shadcn-mono-yellow"][data-theme="light"] .card.agent-active,
 [data-color-theme="shadcn-black"][data-theme="light"] .card.agent-active,
-[data-color-theme="shadcn-gray"][data-theme="light"] .card.agent-active {
+[data-color-theme="shadcn-gray"][data-theme="light"] .card.agent-active,
+[data-color-theme="shadcn-gray-blue"][data-theme="light"] .card.agent-active {
   border-color: var(--accent);
   box-shadow: none;
   animation: none;
@@ -2622,9 +3690,16 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
 [data-color-theme="shadcn-pink"] .btn,
 [data-color-theme="shadcn-orange"] .btn,
 [data-color-theme="shadcn-yellow"] .btn,
-[data-color-theme="shadcn-mono"] .btn,
+[data-color-theme="shadcn-mono-red"] .btn,
+[data-color-theme="shadcn-mono-blue"] .btn,
+[data-color-theme="shadcn-mono-green"] .btn,
+[data-color-theme="shadcn-mono-purple"] .btn,
+[data-color-theme="shadcn-mono-pink"] .btn,
+[data-color-theme="shadcn-mono-orange"] .btn,
+[data-color-theme="shadcn-mono-yellow"] .btn,
 [data-color-theme="shadcn-black"] .btn,
-[data-color-theme="shadcn-gray"] .btn {
+[data-color-theme="shadcn-gray"] .btn,
+[data-color-theme="shadcn-gray-blue"] .btn {
   text-transform: none;
   letter-spacing: normal;
   font-weight: 500;
@@ -2644,12 +3719,26 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
 [data-color-theme="shadcn-orange"] .btn-task-create,
 [data-color-theme="shadcn-yellow"] .btn-primary,
 [data-color-theme="shadcn-yellow"] .btn-task-create,
-[data-color-theme="shadcn-mono"] .btn-primary,
-[data-color-theme="shadcn-mono"] .btn-task-create,
+[data-color-theme="shadcn-mono-red"] .btn-primary,
+[data-color-theme="shadcn-mono-red"] .btn-task-create,
+[data-color-theme="shadcn-mono-blue"] .btn-primary,
+[data-color-theme="shadcn-mono-blue"] .btn-task-create,
+[data-color-theme="shadcn-mono-green"] .btn-primary,
+[data-color-theme="shadcn-mono-green"] .btn-task-create,
+[data-color-theme="shadcn-mono-purple"] .btn-primary,
+[data-color-theme="shadcn-mono-purple"] .btn-task-create,
+[data-color-theme="shadcn-mono-pink"] .btn-primary,
+[data-color-theme="shadcn-mono-pink"] .btn-task-create,
+[data-color-theme="shadcn-mono-orange"] .btn-primary,
+[data-color-theme="shadcn-mono-orange"] .btn-task-create,
+[data-color-theme="shadcn-mono-yellow"] .btn-primary,
+[data-color-theme="shadcn-mono-yellow"] .btn-task-create,
 [data-color-theme="shadcn-black"] .btn-primary,
 [data-color-theme="shadcn-black"] .btn-task-create,
 [data-color-theme="shadcn-gray"] .btn-primary,
-[data-color-theme="shadcn-gray"] .btn-task-create {
+[data-color-theme="shadcn-gray"] .btn-task-create,
+[data-color-theme="shadcn-gray-blue"] .btn-primary,
+[data-color-theme="shadcn-gray-blue"] .btn-task-create {
   background: var(--cta-bg);
   border-color: var(--cta-border);
   color: var(--cta-text);
@@ -2670,12 +3759,26 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
 [data-color-theme="shadcn-orange"] .btn-task-create:hover,
 [data-color-theme="shadcn-yellow"] .btn-primary:hover,
 [data-color-theme="shadcn-yellow"] .btn-task-create:hover,
-[data-color-theme="shadcn-mono"] .btn-primary:hover,
-[data-color-theme="shadcn-mono"] .btn-task-create:hover,
+[data-color-theme="shadcn-mono-red"] .btn-primary:hover,
+[data-color-theme="shadcn-mono-red"] .btn-task-create:hover,
+[data-color-theme="shadcn-mono-blue"] .btn-primary:hover,
+[data-color-theme="shadcn-mono-blue"] .btn-task-create:hover,
+[data-color-theme="shadcn-mono-green"] .btn-primary:hover,
+[data-color-theme="shadcn-mono-green"] .btn-task-create:hover,
+[data-color-theme="shadcn-mono-purple"] .btn-primary:hover,
+[data-color-theme="shadcn-mono-purple"] .btn-task-create:hover,
+[data-color-theme="shadcn-mono-pink"] .btn-primary:hover,
+[data-color-theme="shadcn-mono-pink"] .btn-task-create:hover,
+[data-color-theme="shadcn-mono-orange"] .btn-primary:hover,
+[data-color-theme="shadcn-mono-orange"] .btn-task-create:hover,
+[data-color-theme="shadcn-mono-yellow"] .btn-primary:hover,
+[data-color-theme="shadcn-mono-yellow"] .btn-task-create:hover,
 [data-color-theme="shadcn-black"] .btn-primary:hover,
 [data-color-theme="shadcn-black"] .btn-task-create:hover,
 [data-color-theme="shadcn-gray"] .btn-primary:hover,
-[data-color-theme="shadcn-gray"] .btn-task-create:hover {
+[data-color-theme="shadcn-gray"] .btn-task-create:hover,
+[data-color-theme="shadcn-gray-blue"] .btn-primary:hover,
+[data-color-theme="shadcn-gray-blue"] .btn-task-create:hover {
   background: var(--cta-bg-hover);
   border-color: var(--cta-border-hover);
   color: var(--cta-text);
@@ -2696,12 +3799,26 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
 [data-color-theme="shadcn-orange"] .column,
 [data-color-theme="shadcn-yellow"] .card,
 [data-color-theme="shadcn-yellow"] .column,
-[data-color-theme="shadcn-mono"] .card,
-[data-color-theme="shadcn-mono"] .column,
+[data-color-theme="shadcn-mono-red"] .card,
+[data-color-theme="shadcn-mono-red"] .column,
+[data-color-theme="shadcn-mono-blue"] .card,
+[data-color-theme="shadcn-mono-blue"] .column,
+[data-color-theme="shadcn-mono-green"] .card,
+[data-color-theme="shadcn-mono-green"] .column,
+[data-color-theme="shadcn-mono-purple"] .card,
+[data-color-theme="shadcn-mono-purple"] .column,
+[data-color-theme="shadcn-mono-pink"] .card,
+[data-color-theme="shadcn-mono-pink"] .column,
+[data-color-theme="shadcn-mono-orange"] .card,
+[data-color-theme="shadcn-mono-orange"] .column,
+[data-color-theme="shadcn-mono-yellow"] .card,
+[data-color-theme="shadcn-mono-yellow"] .column,
 [data-color-theme="shadcn-black"] .card,
 [data-color-theme="shadcn-black"] .column,
 [data-color-theme="shadcn-gray"] .card,
-[data-color-theme="shadcn-gray"] .column {
+[data-color-theme="shadcn-gray"] .column,
+[data-color-theme="shadcn-gray-blue"] .card,
+[data-color-theme="shadcn-gray-blue"] .column {
   border-width: var(--btn-border-width);
 }
 
@@ -4529,8 +5646,13 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
 }
 
 [data-color-theme="glass"] .modal-overlay {
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  /*
+  FNXC:ModalChrome 2026-06-23-21:36:
+  Even glass-style themes should keep modal overlays non-dimming/non-blurring; modal panels provide depth with shadows and their own translucent surfaces.
+  */
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /* HORIZON - Warm sunset-inspired palette */
@@ -5734,4 +6856,3 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
   --accent: #9a8050;
   --accent-text: #fff;
 }
-

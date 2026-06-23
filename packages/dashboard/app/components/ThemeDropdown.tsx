@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Check, ChevronDown } from "lucide-react";
 import type { ColorTheme, ThemeMode } from "@fusion/core";
 import { COLOR_THEMES, THEME_MODES } from "./themeOptions";
+import { ShadcnColorPicker } from "./ShadcnColorPicker";
 import "./ThemeSelector.css";
 import "./ThemeDropdown.css";
 
@@ -10,7 +11,10 @@ interface ThemeDropdownProps {
   colorTheme: ColorTheme;
   onColorThemeChange: (theme: ColorTheme) => void;
   themeMode?: ThemeMode;
+  shadcnCustomColors?: Record<string, string>;
+  resolvedThemeMode?: "dark" | "light";
   onThemeModeChange?: (mode: ThemeMode) => void;
+  onShadcnCustomColorsChange?: (colors: Record<string, string>) => void;
 }
 
 function ThemeSwatch({ className }: { className: string }) {
@@ -28,7 +32,15 @@ function ThemeSwatch({ className }: { className: string }) {
 FNXC:Theme 2026-06-19-12:10:
 FN-6727 requires Command Center operators to change the global app theme from a compact dropdown that previews each color theme with the same rich swatch chips used by Settings; this component accepts App-threaded setters instead of creating another theme owner.
 */
-export function ThemeDropdown({ colorTheme, onColorThemeChange, themeMode, onThemeModeChange }: ThemeDropdownProps) {
+export function ThemeDropdown({
+  colorTheme,
+  onColorThemeChange,
+  themeMode,
+  shadcnCustomColors = {},
+  resolvedThemeMode = themeMode === "light" ? "light" : "dark",
+  onThemeModeChange,
+  onShadcnCustomColorsChange = () => {},
+}: ThemeDropdownProps) {
   const { t } = useTranslation("app");
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(() => Math.max(0, COLOR_THEMES.findIndex((theme) => theme.value === colorTheme)));
@@ -138,6 +150,15 @@ export function ThemeDropdown({ colorTheme, onColorThemeChange, themeMode, onThe
             </button>
           ))}
         </div>
+      ) : null}
+
+      {/* FNXC:Theme 2026-06-20-19:00: Command Center exposes the same shadcn-custom color picker as Settings and hides it for every other theme so non-custom themes never show orphaned override controls. */}
+      {colorTheme === "shadcn-custom" ? (
+        <ShadcnColorPicker
+          value={shadcnCustomColors}
+          onChange={onShadcnCustomColorsChange}
+          resolvedThemeMode={resolvedThemeMode}
+        />
       ) : null}
 
       {open ? (

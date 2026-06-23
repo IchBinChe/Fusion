@@ -46,7 +46,7 @@ export function isIOS(): boolean {
  * area aligned with the layout viewport.
  *
  * Reference counting matters because multiple overlays can be open at once
- * (e.g. a confirm dialog over a TodoModal) — only the outermost lock should
+ * (e.g. a confirm dialog over another modal) — only the outermost lock should
  * actually mutate styles, so an inner unmount doesn't release the lock for
  * an outer overlay that is still open.
  */

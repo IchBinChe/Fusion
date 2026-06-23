@@ -19,7 +19,11 @@ let highWaterMark = 0;
 let nextConnectionId = 1;
 
 const SSE_CLIENT_ID_MAX_LENGTH = 128;
-const SSE_CLIENT_STALE_MS = 5_000;
+/*
+ * FNXC:DashboardSSE 2026-06-23-15:08:
+ * Client-side keepalive probes are intentionally infrequent to avoid a dashboard-only HTTP connection storm. Keep the server stale timer comfortably above that cadence so healthy streams are not reaped between probes while abandoned streams still self-clean.
+ */
+const SSE_CLIENT_STALE_MS = 75_000;
 // If a client's outbound buffer exceeds this, treat the connection as stuck
 // and close it. Without this, res.write() silently queues into res.outputData
 // for a paused/backgrounded client, and every store event for every entity

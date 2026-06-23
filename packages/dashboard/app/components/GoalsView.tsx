@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Goal } from "@fusion/core";
-import { Link, Plus, Sparkles, X } from "lucide-react";
+import { Link, Plus, Sparkles, Target, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { draftGoalDescription, getRefineErrorMessage } from "../api";
+import { ViewHeader } from "./ViewHeader";
 import "./GoalsView.css";
 
 export interface GoalsViewProps {
@@ -430,18 +431,28 @@ export function GoalsView({ initialGoals, anchorGoalId, onNavigateToMission }: G
 
   return (
     <section className="goals-view" data-testid="goals-view">
-      <header className="goals-header">
-        <div>
-          <h2 className="goals-title">{t("goals.title", "Goals")}</h2>
-          <p className="goals-count" data-testid="goals-active-count">
-            {t("goals.activeCount", "{{count}} active goals", { count: activeCount })}
-          </p>
-        </div>
-        <button type="button" className="btn btn-primary goals-add-button" onClick={openAddForm} data-testid="goals-add-button">
-          <Plus aria-hidden="true" />
-          {t("goals.addGoal", "Add Goal")}
-        </button>
-      </header>
+      {/*
+      FNXC:Navigation 2026-06-22-01:10:
+      Goals adopts the shared ViewHeader (CC-modeled) for a consistent main-content title row; the Add Goal action and the active-goal count both ride in the header actions cluster so existing behavior and the goals-active-count test hook are preserved.
+      */}
+      <ViewHeader
+        icon={Target}
+        title={t("goals.title", "Goals")}
+        actions={(
+          <>
+            <p className="goals-count" data-testid="goals-active-count">
+              {t("goals.activeCount", "{{count}} active goals", { count: activeCount })}
+            </p>
+            {/* FNXC:Goals 2026-06-22-16:30: Plus icon is sized 18 (was unsized → lucide 24px default) so the Add Goal button matches the height of the Compound Engineering stage-launcher button, which uses an 18px icon on the same .btn base. */}
+            <button type="button" className="btn btn-primary goals-add-button" onClick={openAddForm} data-testid="goals-add-button">
+              <Plus size={18} aria-hidden="true" />
+              {t("goals.addGoal", "Add Goal")}
+            </button>
+          </>
+        )}
+      />
+      {/* FNXC:Navigation 2026-06-22-01:12: Inner content keeps its own horizontal padding via .goals-view__content so it aligns with the ViewHeader inset after the root drops its uniform padding. */}
+      <div className="goals-view__content">
 
       {isAddFormOpen ? (
         <div className="card goals-form" data-testid="goals-form">
@@ -692,6 +703,7 @@ export function GoalsView({ initialGoals, anchorGoalId, onNavigateToMission }: G
           ))}
         </div>
       ) : null}
+      </div>
     </section>
   );
 }

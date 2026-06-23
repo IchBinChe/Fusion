@@ -16,6 +16,50 @@ import {
 
 const execAsync = promisify(exec);
 
+/*
+FNXC:GitHubImport 2026-06-23-03:30:
+Resolve a comment author's bot flag + avatar URL for the Import Tasks preview.
+isBot: true when the author type is a GitHub Bot (gh GraphQL Actor `__typename === "Bot"` / `is_bot`, REST `user.type === "Bot"`) OR the login ends in `[bot]` (case-insensitive).
+avatarUrl: prefer the API-provided avatar; otherwise fall back to `https://github.com/{login}.png?size=40` — but NOT for bots, whose `[bot]`-suffixed login does not resolve to a real avatar (the frontend renders a generic bot icon instead of a broken image).
+
+FNXC:GitHubImport 2026-06-22-12:00:
+The TYPE field is the real bot signal and must be read directly. `gh pr/issue view --json comments` does NOT expose `__typename`/`type`/`is_bot` and surfaces an app bot's bare display login (e.g. `coderabbitai`, `greptileai`) WITHOUT the `[bot]` suffix, so the suffix heuristic alone misclassified GitHub App reviewers (CodeRabbit, Greptile) as HUMAN. The comment fetch now reads Actor `__typename` via `gh api graphql` (and REST `user.type`/`[bot]` login on the token path) — never hardcode specific app names; the type field catches ANY app bot.
+*/
+function resolveCommentAuthor(input: {
+  login: string;
+  typename?: string | null;
+  isBot?: boolean | null;
+  type?: string | null;
+  avatarUrl?: string | null;
+}): { authorIsBot: boolean; authorAvatarUrl?: string } {
+  const login = input.login || "unknown";
+  const authorIsBot = Boolean(
+    input.isBot === true ||
+      input.typename === "Bot" ||
+      input.type === "Bot" ||
+      /\[bot\]$/i.test(login),
+  );
+  const providedAvatar = input.avatarUrl?.trim();
+  let authorAvatarUrl: string | undefined;
+  if (providedAvatar) {
+    authorAvatarUrl = providedAvatar;
+  } else if (!authorIsBot && login !== "unknown") {
+    authorAvatarUrl = `https://github.com/${encodeURIComponent(login)}.png?size=40`;
+  }
+  return { authorIsBot, authorAvatarUrl };
+}
+
+/*
+FNXC:GitHubImport 2026-06-22-12:00:
+Shape of a single comment node from the `gh api graphql` conversation query. The Actor
+`__typename` is the authoritative bot signal (`gh pr/issue view --json comments` omits it).
+*/
+interface GhGraphqlCommentNode {
+  author?: { __typename?: string | null; login?: string | null; avatarUrl?: string | null } | null;
+  body?: string | null;
+  createdAt?: string | null;
+}
+
 function quoteGitArg(value: string): string {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
@@ -3055,6 +3099,7 @@ export class GitHubClient {
     labels: Array<{ name: string }>;
     state?: "open" | "closed";
     updatedAt?: string;
+    author?: string | null;
   }>> {
     if (this.hasGhAuth()) {
       try {
@@ -3085,6 +3130,7 @@ export class GitHubClient {
     labels: Array<{ name: string }>;
     state?: "open" | "closed";
     updatedAt?: string;
+    author?: string | null;
   }>> {
     const limit = options?.limit ?? 30;
     const state = options?.state ?? "open";
@@ -3098,12 +3144,14 @@ export class GitHubClient {
       labels: Array<{ name: string }>;
       state: "OPEN" | "CLOSED";
       updatedAt: string;
+      author?: { login?: string } | null;
     }>>([
       "issue", "list",
       "--repo", `${owner}/${repo}`,
       "--state", state,
       "--limit", String(Math.min(limit, 100)),
-      "--json", "number,title,body,url,labels,state,updatedAt",
+      // FNXC:GitHubImport 2026-06-22-18:30: Request `author` so the import preview pane can show full issue metadata (author/state alongside the already-present full body) without a per-item detail fetch.
+      "--json", "number,title,body,url,labels,state,updatedAt,author",
     ]);
 
     let result = issues.map((issue) => ({
@@ -3114,6 +3162,7 @@ export class GitHubClient {
       labels: issue.labels,
       state: this.mapGhIssueState(issue.state),
       updatedAt: issue.updatedAt,
+      author: issue.author?.login ?? null,
     }));
 
     // Filter by labels if specified (client-side filtering)
@@ -3140,6 +3189,7 @@ export class GitHubClient {
     labels: Array<{ name: string }>;
     state?: "open" | "closed";
     updatedAt?: string;
+    author?: string | null;
   }>> {
     const limit = options?.limit ?? 30;
     const state = options?.state ?? "open";
@@ -3171,6 +3221,7 @@ export class GitHubClient {
       labels: Array<{ name: string }>;
       state: string;
       updated_at: string;
+      user?: { login?: string } | null;
       pull_request?: unknown;
     }>;
 
@@ -3185,6 +3236,7 @@ export class GitHubClient {
         labels: issue.labels,
         state: this.mapIssueState(issue.state),
         updatedAt: issue.updated_at,
+        author: issue.user?.login ?? null,
       }))
       .slice(0, limit);
   }
@@ -3443,6 +3495,8 @@ export class GitHubClient {
     html_url: string;
     headBranch: string;
     baseBranch: string;
+    state?: "open" | "closed" | "merged";
+    author?: string | null;
   }>> {
     if (this.hasGhAuth()) {
       try {
@@ -3472,6 +3526,8 @@ export class GitHubClient {
     html_url: string;
     headBranch: string;
     baseBranch: string;
+    state?: "open" | "closed" | "merged";
+    author?: string | null;
   }>> {
     const limit = options?.limit ?? 30;
 
@@ -3482,12 +3538,15 @@ export class GitHubClient {
       url: string;
       headRefName: string;
       baseRefName: string;
+      state?: "OPEN" | "CLOSED" | "MERGED";
+      author?: { login?: string } | null;
     }>>([
       "pr", "list",
       "--repo", `${owner}/${repo}`,
       "--state", "open",
       "--limit", String(Math.min(limit, 100)),
-      "--json", "number,title,body,url,headRefName,baseRefName",
+      // FNXC:GitHubImport 2026-06-22-18:30: Request `state,author` so the import preview pane shows full PR metadata (author/state with the already-present full body) without a per-item detail fetch.
+      "--json", "number,title,body,url,headRefName,baseRefName,state,author",
     ]);
 
     return pulls.map((pr) => ({
@@ -3497,6 +3556,8 @@ export class GitHubClient {
       html_url: pr.url,
       headBranch: pr.headRefName,
       baseBranch: pr.baseRefName,
+      state: pr.state ? (pr.state.toLowerCase() as "open" | "closed" | "merged") : undefined,
+      author: pr.author?.login ?? null,
     }));
   }
 
@@ -3511,6 +3572,8 @@ export class GitHubClient {
     html_url: string;
     headBranch: string;
     baseBranch: string;
+    state?: "open" | "closed" | "merged";
+    author?: string | null;
   }>> {
     const limit = options?.limit ?? 30;
 
@@ -3537,6 +3600,8 @@ export class GitHubClient {
       html_url: string;
       head: { ref: string };
       base: { ref: string };
+      state?: string;
+      user?: { login?: string } | null;
     }>;
 
     return data.slice(0, limit).map((pr) => ({
@@ -3546,7 +3611,339 @@ export class GitHubClient {
       html_url: pr.html_url,
       headBranch: pr.head.ref,
       baseBranch: pr.base.ref,
+      state: pr.state === "open" || pr.state === "closed" ? pr.state : undefined,
+      author: pr.user?.login ?? null,
     }));
+  }
+
+  /*
+  FNXC:GitHubImport 2026-06-23-01:00:
+  The Import Tasks PR preview needs the FULL comment thread plus per-check status for the SELECTED PR only.
+  `gh pr list` (listPullRequests) returns just comment COUNT + no per-check detail, so this per-PR detail fetch is intentionally separate and called on selection — never for the whole list (too expensive).
+  Returns the issue-level comment thread (author/body/createdAt, chronological) and the status-check rollup mapped to { name, status, conclusion?, detailsUrl? }.
+  Falls back to REST when gh CLI auth is unavailable; check failures degrade to an empty checks array rather than failing the whole detail.
+  */
+  /*
+  FNXC:GitHubImport 2026-06-23-03:30:
+  Comment shape extends to { authorAvatarUrl?, authorIsBot } so the Import Tasks preview can render an avatar and a reliable human/bot badge per comment.
+  authorIsBot is true when the author type resolves to a GitHub Bot OR the login ends in `[bot]`. authorAvatarUrl is the API-provided avatar when present, else a `https://github.com/{login}.png?size=40` fallback (suppressed for bot logins, whose `[bot]`-suffixed handle does not resolve — the frontend renders a generic bot icon instead).
+  */
+  async getPullRequestDetail(
+    owner: string,
+    repo: string,
+    number: number
+  ): Promise<{
+    comments: Array<{ author: string; body: string; createdAt: string; authorAvatarUrl?: string; authorIsBot: boolean }>;
+    checks: Array<{ name: string; status: string; conclusion?: string; detailsUrl?: string }>;
+  }> {
+    if (this.hasGhAuth()) {
+      try {
+        return await this.getPullRequestDetailWithGh(owner, repo, number);
+      } catch (err) {
+        if (this.token) {
+          return this.getPullRequestDetailWithApi(owner, repo, number);
+        }
+        throw new Error(getGhErrorMessage(err));
+      }
+    }
+    if (this.token) {
+      return this.getPullRequestDetailWithApi(owner, repo, number);
+    }
+    throw new Error("GitHub CLI (gh) is not available or not authenticated, and no GITHUB_TOKEN provided. Run 'gh auth login' to authenticate.");
+  }
+
+  /*
+  FNXC:GitHubImport 2026-06-22-12:00:
+  Fetch a PR/issue's conversation comments via `gh api graphql` so the author's authoritative
+  Actor `__typename` (User | Bot | Organization | Mannequin) is available per comment. The
+  `gh pr/issue view --json comments` path only surfaces `{ login }` with no type and a bot's bare
+  display login (no `[bot]` suffix), which silently misclassified GitHub App reviewers as human.
+  Returns the same `{ author, body, createdAt, authorAvatarUrl?, authorIsBot }` shape; `authorIsBot`
+  is true when `__typename === "Bot"` (or the `[bot]`-login suffix fallback inside resolveCommentAuthor).
+  */
+  private async fetchCommentsWithGhGraphql(
+    owner: string,
+    repo: string,
+    number: number,
+    kind: "pullRequest" | "issue",
+  ): Promise<Array<{ author: string; body: string; createdAt: string; authorAvatarUrl?: string; authorIsBot: boolean }>> {
+    const query = `query($owner:String!,$repo:String!,$number:Int!){
+  repository(owner:$owner,name:$repo){
+    ${kind}(number:$number){
+      comments(first:100){
+        nodes{ author{ __typename login avatarUrl } body createdAt }
+      }
+    }
+  }
+}`;
+    const result = await runGhJsonAsync<{
+      data?: {
+        repository?: {
+          pullRequest?: { comments?: { nodes?: GhGraphqlCommentNode[] } } | null;
+          issue?: { comments?: { nodes?: GhGraphqlCommentNode[] } } | null;
+        } | null;
+      };
+    }>([
+      "api", "graphql",
+      "-f", `query=${query}`,
+      "-F", `owner=${owner}`,
+      "-F", `repo=${repo}`,
+      "-F", `number=${number}`,
+    ]);
+
+    const container = kind === "pullRequest"
+      ? result.data?.repository?.pullRequest
+      : result.data?.repository?.issue;
+    const nodes = container?.comments?.nodes ?? [];
+
+    return nodes.map((c) => {
+      const author = c.author?.login ?? "unknown";
+      const { authorIsBot, authorAvatarUrl } = resolveCommentAuthor({
+        login: author,
+        // Actor.__typename is the real signal: "Bot" for any GitHub App (CodeRabbit, Greptile, ...).
+        typename: c.author?.__typename,
+        avatarUrl: c.author?.avatarUrl,
+      });
+      return { author, body: c.body ?? "", createdAt: c.createdAt ?? "", authorAvatarUrl, authorIsBot };
+    });
+  }
+
+  private async getPullRequestDetailWithGh(
+    owner: string,
+    repo: string,
+    number: number
+  ): Promise<{
+    comments: Array<{ author: string; body: string; createdAt: string; authorAvatarUrl?: string; authorIsBot: boolean }>;
+    checks: Array<{ name: string; status: string; conclusion?: string; detailsUrl?: string }>;
+  }> {
+    // FNXC:GitHubImport 2026-06-22-12:00:
+    // `gh pr view --json comments` author is just `{ login }` — no `__typename`/`type`/`is_bot`,
+    // and the surfaced login is the app's bare display login (e.g. `coderabbitai`, `greptileai`)
+    // WITHOUT the `[bot]` suffix. That made every GitHub App reviewer (CodeRabbit, Greptile, etc.)
+    // misclassify as HUMAN, since neither the type field nor the `[bot]` suffix heuristic could fire.
+    // Fix: read the authoritative Actor `__typename` (User | Bot | Organization | Mannequin) via
+    // `gh api graphql`, so `authorIsBot = __typename === "Bot"` catches ANY app bot by type, not by name.
+    // statusCheckRollup is still only on `gh pr view`, so it stays a separate (best-effort) call.
+    const comments = await this.fetchCommentsWithGhGraphql(owner, repo, number, "pullRequest");
+
+    let checks: Array<{ name: string; status: string; conclusion?: string; detailsUrl?: string }> = [];
+    const pr = await runGhJsonAsync<{
+      // `gh pr view --json statusCheckRollup` returns a flat array of mixed CheckRun/StatusContext shapes.
+      statusCheckRollup?: Array<{
+        name?: string;
+        context?: string;
+        status?: string;
+        state?: string;
+        conclusion?: string;
+        detailsUrl?: string;
+        targetUrl?: string;
+        link?: string;
+      }> | null;
+    }>([
+      "pr", "view", String(number),
+      "--repo", `${owner}/${repo}`,
+      "--json", "statusCheckRollup",
+    ]);
+
+    checks = (pr.statusCheckRollup ?? []).map((c) => ({
+      name: c.name ?? c.context ?? "check",
+      // CheckRun uses `status`; StatusContext uses `state`. Surface whichever is present.
+      status: (c.status ?? c.state ?? "").toLowerCase(),
+      conclusion: c.conclusion ? c.conclusion.toLowerCase() : undefined,
+      detailsUrl: c.detailsUrl ?? c.targetUrl ?? c.link ?? undefined,
+    }));
+
+    return { comments, checks };
+  }
+
+  private async getPullRequestDetailWithApi(
+    owner: string,
+    repo: string,
+    number: number
+  ): Promise<{
+    comments: Array<{ author: string; body: string; createdAt: string; authorAvatarUrl?: string; authorIsBot: boolean }>;
+    checks: Array<{ name: string; status: string; conclusion?: string; detailsUrl?: string }>;
+  }> {
+    const headers = this.buildHeaders();
+
+    // Issue comments thread (the PR conversation tab), chronological.
+    const commentsUrl = `${this.baseUrl}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${number}/comments?per_page=100`;
+    const commentsRes = await fetch(commentsUrl, { headers });
+    if (!commentsRes.ok) {
+      if (commentsRes.status === 404) {
+        throw new Error(`PR #${number} not found in ${owner}/${repo}`);
+      }
+      throw new Error(`GitHub API error: ${commentsRes.status} ${commentsRes.statusText}`);
+    }
+    const commentData = (await commentsRes.json()) as Array<{
+      user?: { login?: string; avatar_url?: string; type?: string } | null;
+      body?: string;
+      created_at?: string;
+    }>;
+    const comments = commentData.map((c) => {
+      const author = c.user?.login ?? "unknown";
+      const { authorIsBot, authorAvatarUrl } = resolveCommentAuthor({
+        login: author,
+        type: c.user?.type,
+        avatarUrl: c.user?.avatar_url,
+      });
+      return { author, body: c.body ?? "", createdAt: c.created_at ?? "", authorAvatarUrl, authorIsBot };
+    });
+
+    // Per-check status via the combined check-runs endpoint on the PR head sha.
+    // Check failures degrade to an empty checks array rather than failing the whole detail.
+    let checks: Array<{ name: string; status: string; conclusion?: string; detailsUrl?: string }> = [];
+    try {
+      const prUrl = `${this.baseUrl}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${number}`;
+      const prRes = await fetch(prUrl, { headers });
+      if (prRes.ok) {
+        const prJson = (await prRes.json()) as { head?: { sha?: string } };
+        const sha = prJson.head?.sha;
+        if (sha) {
+          const checksUrl = `${this.baseUrl}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${sha}/check-runs?per_page=100`;
+          const checksRes = await fetch(checksUrl, { headers });
+          if (checksRes.ok) {
+            const checksJson = (await checksRes.json()) as {
+              check_runs?: Array<{ name?: string; status?: string; conclusion?: string | null; details_url?: string | null }>;
+            };
+            checks = (checksJson.check_runs ?? []).map((c) => ({
+              name: c.name ?? "check",
+              status: (c.status ?? "").toLowerCase(),
+              conclusion: c.conclusion ? c.conclusion.toLowerCase() : undefined,
+              detailsUrl: c.details_url ?? undefined,
+            }));
+          }
+        }
+      }
+    } catch {
+      checks = [];
+    }
+
+    return { comments, checks };
+  }
+
+  /*
+  FNXC:GitHubImport 2026-06-23-03:15:
+  Issues preview pane mirrors the PR preview: on selection it fetches the issue's full comment thread (issues have no checks rollup, so only comments).
+  `gh issue view --json comments` returns the conversation; REST `issues/{n}/comments` is the token fallback. 404 maps to "not found" upstream of the route.
+  */
+  async getIssueDetail(
+    owner: string,
+    repo: string,
+    number: number
+  ): Promise<{
+    comments: Array<{ author: string; body: string; createdAt: string; authorAvatarUrl?: string; authorIsBot: boolean }>;
+  }> {
+    if (this.hasGhAuth()) {
+      try {
+        return await this.getIssueDetailWithGh(owner, repo, number);
+      } catch (err) {
+        if (this.token) {
+          return this.getIssueDetailWithApi(owner, repo, number);
+        }
+        throw new Error(getGhErrorMessage(err));
+      }
+    }
+    if (this.token) {
+      return this.getIssueDetailWithApi(owner, repo, number);
+    }
+    throw new Error("GitHub CLI (gh) is not available or not authenticated, and no GITHUB_TOKEN provided. Run 'gh auth login' to authenticate.");
+  }
+
+  private async getIssueDetailWithGh(
+    owner: string,
+    repo: string,
+    number: number
+  ): Promise<{
+    comments: Array<{ author: string; body: string; createdAt: string; authorAvatarUrl?: string; authorIsBot: boolean }>;
+  }> {
+    // FNXC:GitHubImport 2026-06-22-12:00:
+    // Use the graphql Actor.__typename path (not `gh issue view --json comments`, which omits the
+    // type) so GitHub App reviewers like CodeRabbit/Greptile are correctly flagged as bots.
+    const comments = await this.fetchCommentsWithGhGraphql(owner, repo, number, "issue");
+
+    return { comments };
+  }
+
+  private async getIssueDetailWithApi(
+    owner: string,
+    repo: string,
+    number: number
+  ): Promise<{
+    comments: Array<{ author: string; body: string; createdAt: string; authorAvatarUrl?: string; authorIsBot: boolean }>;
+  }> {
+    const headers = this.buildHeaders();
+
+    const commentsUrl = `${this.baseUrl}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${number}/comments?per_page=100`;
+    const commentsRes = await fetch(commentsUrl, { headers });
+    if (!commentsRes.ok) {
+      if (commentsRes.status === 404) {
+        throw new Error(`Issue #${number} not found in ${owner}/${repo}`);
+      }
+      throw new Error(`GitHub API error: ${commentsRes.status} ${commentsRes.statusText}`);
+    }
+    const commentData = (await commentsRes.json()) as Array<{
+      user?: { login?: string; avatar_url?: string; type?: string } | null;
+      body?: string;
+      created_at?: string;
+    }>;
+    const comments = commentData.map((c) => {
+      const author = c.user?.login ?? "unknown";
+      const { authorIsBot, authorAvatarUrl } = resolveCommentAuthor({
+        login: author,
+        type: c.user?.type,
+        avatarUrl: c.user?.avatar_url,
+      });
+      return { author, body: c.body ?? "", createdAt: c.created_at ?? "", authorAvatarUrl, authorIsBot };
+    });
+
+    return { comments };
+  }
+
+  /*
+  FNXC:GitHubImport 2026-06-23-03:15:
+  Close-issue action for the Import Tasks issue preview pane. `gh issue close <n>` closes via CLI; REST PATCH state=closed is the token fallback.
+  Returns void; the route maps 404/401 like the detail route. The preview reflects the closed state locally without re-fetching.
+  */
+  async closeIssue(owner: string, repo: string, number: number): Promise<void> {
+    if (this.hasGhAuth()) {
+      try {
+        await runGhAsync([
+          "issue", "close", String(number),
+          "--repo", `${owner}/${repo}`,
+        ]);
+        return;
+      } catch (err) {
+        if (this.token) {
+          await this.closeIssueWithApi(owner, repo, number);
+          return;
+        }
+        throw new Error(getGhErrorMessage(err));
+      }
+    }
+    if (this.token) {
+      await this.closeIssueWithApi(owner, repo, number);
+      return;
+    }
+    throw new Error("GitHub CLI (gh) is not available or not authenticated, and no GITHUB_TOKEN provided. Run 'gh auth login' to authenticate.");
+  }
+
+  private async closeIssueWithApi(owner: string, repo: string, number: number): Promise<void> {
+    const response = await fetch(
+      `${this.baseUrl}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${number}`,
+      {
+        method: "PATCH",
+        headers: { ...this.buildHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ state: "closed" }),
+      }
+    );
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error(`Issue #${number} not found in ${owner}/${repo}`);
+      }
+      const error = await response.json().catch(() => ({ message: response.statusText }));
+      throw new Error(`GitHub API error: ${response.status} ${error.message || response.statusText}`);
+    }
   }
 
   /**

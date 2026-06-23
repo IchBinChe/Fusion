@@ -55,6 +55,7 @@ vi.mock("lucide-react", () => ({
   ArrowLeft: (props: Record<string, unknown>) => <span data-testid="arrow-left-icon" {...props}>ArrowLeft</span>,
   ChevronLeft: (props: Record<string, unknown>) => <span data-testid="chevron-left-icon" {...props}>ChevronLeft</span>,
   ChevronUp: (props: Record<string, unknown>) => <span data-testid="chevron-up-icon" {...props}>ChevronUp</span>,
+  Map: (props: Record<string, unknown>) => <span data-testid="map-icon" {...props}>Map</span>,
 }));
 
 // Viewport mode mock helper
@@ -142,7 +143,7 @@ describe("RoadmapsView", () => {
     render(<RoadmapsView addToast={mockAddToast} />);
 
     await waitFor(() => {
-      expect(screen.getByText("Roadmaps")).toBeInTheDocument();
+      expect(screen.getAllByText("Roadmaps").length).toBeGreaterThanOrEqual(2);
       expect(screen.getByText("Q2 Roadmap")).toBeInTheDocument();
     });
 
@@ -170,7 +171,7 @@ describe("RoadmapsView", () => {
       expect(screen.getByText("Q2 Roadmap")).toBeInTheDocument();
     });
     expect(screen.getByText("Q3 Roadmap")).toBeInTheDocument();
-    expect(screen.getByText("Roadmaps")).toBeInTheDocument();
+    expect(screen.getAllByText("Roadmaps").length).toBeGreaterThanOrEqual(2);
   });
 
   it("shows empty state when no roadmaps exist", async () => {

@@ -45,7 +45,6 @@ function buildAuthoritativeSettings(settings: Settings): Settings {
     ...settings,
     experimentalFeatures: {
       ...(settings.experimentalFeatures ?? {}),
-      workflowGraphExecutor: true,
       [WORKFLOW_INTERPRETER_AUTHORITATIVE_FLAG]: true,
     },
   };

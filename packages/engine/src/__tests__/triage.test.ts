@@ -555,6 +555,29 @@ describe("buildSpecificationPrompt", () => {
       expect(prompt).toContain("Missing comment coverage is a spec quality failure");
     });
 
+    it("pins task-detail chat comments as planning-agent context", () => {
+      const taskWithChatComment: TaskDetail = {
+        ...baseTask,
+        comments: [
+          {
+            id: "chat-1",
+            text: "Please keep the old API export in the generated spec",
+            author: "user",
+            createdAt: "2026-06-21T15:30:00.000Z",
+          },
+        ],
+      };
+
+      const prompt = buildSpecificationPrompt(
+        taskWithChatComment,
+        ".fusion/tasks/KB-001/PROMPT.md",
+      );
+
+      expect(prompt).toContain("## User Comments");
+      expect(prompt).toContain("Please keep the old API export in the generated spec");
+      expect(prompt).toContain("Address every comment");
+    });
+
     it("excludes agent/system comments from user comments section", () => {
       const taskWithMixedComments: TaskDetail = {
         ...baseTask,
@@ -785,7 +808,7 @@ describe("fast-mode triage", () => {
   });
 
   it("documents explicit-request-only workflow routing in standard and fast prompts", () => {
-    const required = ["## Workflow Routing", "Keep the project default workflow", "unless the user explicitly requested a specific workflow", "Do NOT call `fn_workflow_select` or pass `workflow_id`", "If the user explicitly", "fn_workflow_list", "fn_workflow_select", "workflow_id", "**No commits expected:** true", "builtin:coding"];
+    const required = ["## Workflow Routing", "Keep the project default workflow", "unless the user explicitly requested a specific workflow", "or you created that task yourself", "When you create a task via `fn_task_create`", "do not move a task you did not create unless the user asked", "Do NOT call `fn_workflow_select` or pass `workflow_id`", "If the user explicitly", "fn_workflow_list", "fn_workflow_select", "workflow_id", "**No commits expected:** true", "builtin:coding"];
     const forbidden = ["use workflow descriptions as the routing signal", "select an appropriate lightweight workflow", "prefer `builtin:quick-fix` or a custom investigation workflow", "Match the task nature to the workflow description", "descriptions are authoritative for routing decisions"];
     for (const prompt of [RENDERED_TRIAGE_POLICY_PROMPT, FAST_PLANNING_PROMPT]) {
       for (const text of required) expect(prompt).toContain(text);
@@ -983,6 +1006,67 @@ describe("fast-mode triage", () => {
       expect(result.content[0]?.text).toBe("APPROVE");
       expect(store.logEntry).toHaveBeenCalledWith(taskId, "Spec review: APPROVE (auto-approve spec)");
     } finally {
+      await cleanupTriageFixtureRoot(rootDir);
+    }
+  });
+
+  it("threads global fallback model settings into spec reviewer sessions", async () => {
+    const rootDir = await createTriageFixtureRoot("fusion-triage-review-fallback-");
+    try {
+      const taskId = "FN-REVIEW-FALLBACK";
+      await mkdir(join(rootDir, ".fusion", "tasks", taskId), { recursive: true });
+      await writeFile(
+        join(rootDir, ".fusion", "tasks", taskId, "PROMPT.md"),
+        "# Task\n\n## Mission\n\nDo the work.\n\n## Steps\n\n### Step 0: Implement\n\nShip it.",
+      );
+      mockReviewStep.mockResolvedValue({ verdict: "APPROVE", review: "ok", summary: "ok" });
+
+      const store = createMockStore({
+        getTask: vi.fn().mockResolvedValue({ ...mockTaskDetail, id: taskId, comments: [] }),
+        getSettings: vi.fn().mockResolvedValue({
+          maxConcurrent: 2,
+          maxWorktrees: 4,
+          pollIntervalMs: 10000,
+          groupOverlappingFiles: false,
+          autoMerge: true,
+          defaultProvider: "anthropic",
+          defaultModelId: "claude-opus-4-8",
+          defaultProviderOverride: "openai-codex",
+          defaultModelIdOverride: "gpt-5.5",
+          fallbackProvider: "openai-codex",
+          fallbackModelId: "gpt-5.5",
+          memoryEnabled: false,
+          agentPrompts: { roleAssignments: { reviewer: "custom-reviewer" } },
+        } as Settings),
+      });
+      const processor = new TriageProcessor(store, rootDir);
+      const tool = (processor as any).createReviewSpecTool(
+        taskId,
+        `.fusion/tasks/${taskId}/PROMPT.md`,
+        { current: null },
+        { current: null },
+        { current: null },
+        { current: "" },
+        {},
+        false,
+      );
+
+      await tool.execute({});
+
+      const reviewOptions = mockReviewStep.mock.calls[0]?.[7];
+      expect(reviewOptions).toMatchObject({
+        projectDefaultOverrideProvider: "openai-codex",
+        projectDefaultOverrideModelId: "gpt-5.5",
+        fallbackProvider: "openai-codex",
+        fallbackModelId: "gpt-5.5",
+        agentPrompts: { roleAssignments: { reviewer: "custom-reviewer" } },
+      });
+      expect(reviewOptions.settings).toMatchObject({
+        memoryEnabled: false,
+        agentPrompts: { roleAssignments: { reviewer: "custom-reviewer" } },
+      });
+    } finally {
+      mockReviewStep.mockReset();
       await cleanupTriageFixtureRoot(rootDir);
     }
   });

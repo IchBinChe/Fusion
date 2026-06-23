@@ -42,6 +42,21 @@ function expectNoHardcodedWhiteBackground(rule: string): void {
 }
 
 describe("WorkflowNodeEditor themed React Flow CSS contract", () => {
+  it("matches the shared Insights/ViewHeader chrome", () => {
+    const editorCss = readComponentCss("WorkflowNodeEditor.css");
+    const headerRule = findRule([editorCss], /\.wf-editor-header\s*\{[^}]*\}/);
+    const titleRule = findRule([editorCss], /\.wf-editor-header h2\s*\{[^}]*\}/);
+    const iconRule = findRule([editorCss], /\.wf-editor-header h2 svg\s*\{[^}]*\}/);
+
+    expect(headerRule).toMatch(/min-height\s*:\s*var\(--view-header-min-height\)\s*;/);
+    expect(headerRule).toMatch(/padding\s*:\s*var\(--space-lg\) var\(--space-xl\)\s*;/);
+    expect(headerRule).toMatch(/background\s*:\s*var\(--surface\)\s*;/);
+    expect(headerRule).toMatch(/border-bottom\s*:\s*1px solid var\(--border\)\s*;/);
+    expect(titleRule).toMatch(/font-size\s*:\s*1\.125rem\s*;/);
+    expect(titleRule).toMatch(/font-weight\s*:\s*600\s*;/);
+    expect(iconRule).toMatch(/color\s*:\s*var\(--todo\)\s*;/);
+  });
+
   it("FN-6701 themes zoom controls, mini-map, and sidebar checkboxes with tokens", () => {
     const baseCss = loadAllAppCssBaseOnly();
 
@@ -77,16 +92,23 @@ describe("WorkflowNodeEditor themed React Flow CSS contract", () => {
     expectNoHardcodedWhiteBackground(minimapRule);
 
     const minimapNodeRule = findRule([baseCss], /\.wf-editor-canvas \.react-flow__minimap-node\s*\{[^}]*\}/);
-    expect(minimapNodeRule).toMatch(/fill\s*:\s*var\(--bg-secondary\)\s*;/);
-    expect(minimapNodeRule).toMatch(/stroke\s*:\s*var\(--border\)\s*;/);
+    expect(minimapNodeRule).not.toMatch(/\bfill\s*:/);
+    expect(minimapNodeRule).toMatch(/stroke\s*:\s*var\(--border-strong, var\(--border\)\)\s*;/);
 
     const minimapMaskRule = findRule([baseCss], /\.wf-editor-canvas \.react-flow__minimap-mask\s*\{[^}]*\}/);
     expect(minimapMaskRule).toMatch(/fill\s*:\s*color-mix\(in srgb, var\(--surface\) 70%, transparent\)\s*;/);
+
+    const minimapToggleRule = findRule([baseCss], /\.wf-minimap-toggle\s*\{[^}]*\}/);
+    expect(minimapToggleRule).toMatch(/position\s*:\s*absolute\s*;/);
+    expect(minimapToggleRule).toMatch(/background\s*:\s*var\(--surface\)\s*;/);
+    expect(minimapToggleRule).toMatch(/border\s*:\s*var\(--btn-border-width\) solid var\(--border\)\s*;/);
+    expectNoHardcodedWhiteBackground(minimapToggleRule);
 
     for (const selector of [
       /\.wf-setting--checkbox input\[type="checkbox"\]\s*\{[^}]*\}/,
       /\.wf-field--checkbox input\[type="checkbox"\]\s*\{[^}]*\}/,
       /\.wf-column-trait input\[type="checkbox"\]\s*\{[^}]*\}/,
+      /\.wf-column-agent-mode-option input\[type="radio"\]\s*\{[^}]*\}/,
     ]) {
       const checkboxRule = findRule([baseCss], selector);
       expect(checkboxRule).toMatch(/accent-color\s*:\s*var\(--todo\)\s*;/);
@@ -134,6 +156,16 @@ describe("WorkflowNodeEditor sidebar overflow CSS contract", () => {
     expect(listStageSidebarRule).toMatch(/min-width\s*:\s*0\s*;/);
     expect(listStageSidebarRule).toMatch(/overflow-x\s*:\s*hidden\s*;/);
     expect(listStageSidebarRule).toMatch(/overflow-y\s*:\s*auto\s*;/);
+
+    const collapsedSidebarRule = findRule([editorCss], /\.wf-editor-body--sidebar-collapsed \.wf-editor-sidebar\s*\{[^}]*\}/);
+    expect(collapsedSidebarRule).toMatch(/display\s*:\s*none\s*;/);
+
+    const restoreRule = findRule([editorCss], /\.wf-sidebar-shell-restore\s*\{[^}]*\}/);
+    expect(restoreRule).not.toMatch(/position\s*:\s*absolute\s*;/);
+    expect(restoreRule).toMatch(/flex\s*:\s*0 0 auto\s*;/);
+    expect(restoreRule).toMatch(/width\s*:\s*30px\s*;/);
+    expect(restoreRule).toMatch(/padding-inline\s*:\s*0\s*;/);
+    expect(restoreRule).toMatch(/white-space\s*:\s*nowrap\s*;/);
   });
 
   it("FN-6379 keeps sidebar children from forcing horizontal scroll", () => {
@@ -158,6 +190,13 @@ describe("WorkflowNodeEditor sidebar overflow CSS contract", () => {
     expect(paletteButtonRule).toMatch(/min-width\s*:\s*0\s*;/);
     expect(paletteButtonRule).toMatch(/overflow-wrap\s*:\s*anywhere\s*;/);
 
+    const actionNoWrapRule = findRule(
+      [editorCss],
+      /\.wf-editor-toolbar \.wf-editor-action,\s*\.wf-editor-toolbar \.wf-editor-delete,\s*\.wf-editor-toolbar \.wf-editor-save,\s*\.wf-editor-readonly-banner \.wf-editor-action,\s*\.wf-editor-readonly-banner \.wf-editor-save\s*\{[^}]*\}/,
+    );
+    expect(actionNoWrapRule).toMatch(/white-space\s*:\s*nowrap\s*;/);
+    expect(actionNoWrapRule).toMatch(/overflow-wrap\s*:\s*normal\s*;/);
+
     const sidebarCodeRule = findRule([editorCss], /\.wf-editor-sidebar \.wf-code-source\s*\{[^}]*\}/);
     expect(sidebarCodeRule).toMatch(/overflow-x\s*:\s*hidden\s*;/);
     expect(sidebarCodeRule).toMatch(/overflow-wrap\s*:\s*anywhere\s*;/);
@@ -173,7 +212,14 @@ describe("WorkflowNodeEditor mobile CSS contract", () => {
 
     expect(baseCss).toMatch(/\.wf-editor-modal\s*\{[^}]*min-width\s*:\s*640px\s*;/);
 
-    const editorModalRule = findRule(mobileBlocks, /\.wf-editor-modal,\s*\.wf-create-modal\s*\{[^}]*\}/);
+    // FN-6: the mobile viewport-takeover rule is scoped to the dialog presentation
+    // via :not(.wf-editor-modal--embedded) so the embedded main-view variant keeps its
+    // 100%-of-pane sizing. Match the scoped selector; .wf-create-modal has no embedded
+    // variant and stays unscoped.
+    const editorModalRule = findRule(
+      mobileBlocks,
+      /\.wf-editor-modal:not\(\.wf-editor-modal--embedded\),\s*\.wf-create-modal\s*\{[^}]*\}/,
+    );
     expect(editorModalRule).toMatch(/width\s*:\s*100vw\s*;/);
     expect(editorModalRule).toMatch(/height\s*:\s*100dvh\s*;/);
     expect(editorModalRule).toMatch(/border-radius\s*:\s*0\s*;/);
@@ -344,7 +390,13 @@ describe("WorkflowNodeEditor mobile CSS contract", () => {
     const editorCss = readComponentCss("WorkflowNodeEditor.css");
     const mobileBlocks = extractMediaBlocks(editorCss, "(max-width: 768px)");
 
-    const overlayRule = findRule(mobileBlocks, /\.modal-overlay:has\(\.wf-editor-modal\),\s*\.modal-overlay:has\(\.wf-create-modal\)\s*\{[^}]*\}/);
+    // FN-6: overlay stretch is likewise scoped to the dialog editor via
+    // :not(.wf-editor-modal--embedded) so the embedded variant's overlay-less main view
+    // isn't forced full-bleed. .wf-create-modal stays unscoped.
+    const overlayRule = findRule(
+      mobileBlocks,
+      /\.modal-overlay:has\(\.wf-editor-modal:not\(\.wf-editor-modal--embedded\)\),\s*\.modal-overlay:has\(\.wf-create-modal\)\s*\{[^}]*\}/,
+    );
     expect(overlayRule).toMatch(/padding-top\s*:\s*0\s*;/);
     expect(overlayRule).toMatch(/align-items\s*:\s*stretch\s*;/);
 

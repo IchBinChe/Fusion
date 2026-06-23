@@ -14,22 +14,77 @@
   border-radius: var(--radius-md);
 }
 
+/*
+FNXC:WorkflowEditorEmbedding 2026-06-22-00:00:
+Embedded presentation renders the editor inline as a main-content-area view
+filling the right-dock panel instead of as a centered fixed modal. The wrapper
+takes the full panel box and the modal element drops its modal chrome
+(fixed sizing, box-shadow, border-radius, resize grip) so it reads as a flush
+embedded view.
+*/
+.workflow-editor-embedded {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.wf-editor-modal--embedded {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  min-width: 0;
+  min-height: 0;
+  position: static;
+  resize: none;
+  box-shadow: none;
+  border: none;
+  border-radius: 0;
+}
+
 .wf-create-modal {
   --wf-editor-touch-target: calc(var(--space-xl) + var(--space-lg) + var(--space-xs));
 }
 
+/*
+FNXC:WorkflowEditorEmbedding 2026-06-22-01:00:
+Align the embedded workflows header to the shared ViewHeader/Insights metric — var(--surface) background, --view-header-min-height, --space-lg/--space-xl padding, no bottom divider, and a 20px todo-tinted icon + 1.125rem title — so Workflows reads the same size and color as Insights.
+*/
 .wf-editor-header {
+  box-sizing: border-box;
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   justify-content: space-between;
-  padding: var(--space-md);
-  border-bottom: 1px solid var(--border);
+  gap: var(--space-sm);
+  min-height: var(--view-header-min-height);
+  padding: var(--space-lg) var(--space-xl);
+  background: var(--surface);
+  border-bottom: none;
 }
 
 .wf-editor-header h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
   margin: 0;
-  font-size: 1rem;
+  font-size: 1.125rem;
+  font-weight: 600;
   color: var(--text);
+}
+
+.wf-editor-header h2 svg {
+  flex-shrink: 0;
+  color: var(--todo);
+}
+
+.wf-editor-header h2 span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wf-editor-close {
@@ -93,6 +148,78 @@
   border-right: 1px solid var(--border);
   overflow-x: hidden;
   overflow-y: auto;
+}
+
+/*
+FNXC:WorkflowSidebar 2026-06-22-12:00:
+Workflow authors need to reclaim horizontal graph-editing space without leaving
+the workflow view. Hide only the sidebar shell when collapsed and keep the
+restore control attached to the canvas so the state is always reversible.
+
+FNXC:WorkflowSidebar 2026-06-22-12:35:
+When collapsed, the show-sidebar control belongs inline in the workflow name strip before the workflow name. It must be icon-only and in normal document flow so it cannot overlap the header title or workflow name.
+*/
+.wf-editor-body--sidebar-collapsed .wf-editor-sidebar {
+  display: none;
+}
+
+.wf-editor-sidebar-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.wf-editor-sidebar-head .wf-editor-new {
+  flex: 1 1 auto;
+  justify-content: center;
+}
+
+.wf-sidebar-shell-toggle,
+.wf-sidebar-shell-restore {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  min-height: 30px;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  box-shadow: var(--shadow-sm);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.wf-sidebar-shell-toggle {
+  flex: 0 0 auto;
+  width: 30px;
+  padding-inline: 0;
+}
+
+.wf-sidebar-shell-restore {
+  flex: 0 0 auto;
+  width: 30px;
+  padding-inline: 0;
+  white-space: nowrap;
+}
+
+.wf-sidebar-shell-toggle:hover,
+.wf-sidebar-shell-restore:hover {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+  color: var(--accent);
+}
+
+.wf-sidebar-shell-toggle:focus-visible,
+.wf-sidebar-shell-restore:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 /* U12: columns + fields authoring sections moved into the left sidebar, below
@@ -287,6 +414,7 @@
   flex-direction: column;
   flex: 1;
   min-width: 0;
+  position: relative;
 }
 
 .wf-editor-mobile-back {
@@ -394,6 +522,20 @@
   display: flex;
   align-items: center;
   gap: var(--space-xs);
+}
+
+/*
+FNXC:WorkflowToolbar 2026-06-22-12:00:
+Toolbar commands such as Export should move as whole controls when space is
+tight; do not allow their short labels to split onto multiple lines.
+*/
+.wf-editor-toolbar .wf-editor-action,
+.wf-editor-toolbar .wf-editor-delete,
+.wf-editor-toolbar .wf-editor-save,
+.wf-editor-readonly-banner .wf-editor-action,
+.wf-editor-readonly-banner .wf-editor-save {
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 
 .wf-editor-readonly-note {
@@ -606,13 +748,56 @@ React Flow ships white default controls and mini-map chrome, but the workflow ed
   box-shadow: var(--shadow-sm);
 }
 
+/*
+FNXC:WorkflowMiniMap 2026-06-22-10:15:
+MiniMap node fill is supplied by WorkflowNodeEditor.tsx so background-only
+column bands can be transparent and real workflow nodes remain visible. Keep
+CSS scoped to chrome/stroke details only; a CSS fill here overrides React
+Flow's SVG attributes and makes the graph preview read blank.
+*/
 .wf-editor-canvas .react-flow__minimap-node {
-  fill: var(--bg-secondary);
-  stroke: var(--border);
+  stroke: var(--border-strong, var(--border));
 }
 
 .wf-editor-canvas .react-flow__minimap-mask {
   fill: color-mix(in srgb, var(--surface) 70%, transparent);
+}
+
+.wf-minimap-toggle {
+  position: absolute;
+  right: calc(200px + var(--space-sm));
+  bottom: var(--space-sm);
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-height: 28px;
+  padding: var(--space-xs) var(--space-sm);
+  border: var(--btn-border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-sm);
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.wf-minimap-toggle:hover {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+  color: var(--accent);
+}
+
+.wf-minimap-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.wf-minimap-toggle--collapsed {
+  right: var(--space-sm);
 }
 
 .wf-mobile-shell {
@@ -947,6 +1132,35 @@ React Flow ships white default controls and mini-map chrome, but the workflow ed
   padding-right: calc(var(--space-xl) + var(--space-md));
 }
 
+/*
+FNXC:WorkflowEditor 2026-06-21-20:18:
+Built-in workflow prompts need visible override state and a reset action without making graph controls editable; keep the controls outside disabled fieldsets and use shared button/token styles.
+*/
+.wf-prompt-override-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+  padding-right: calc(var(--space-xl) + var(--space-md));
+}
+
+.wf-prompt-override-actions--fullscreen {
+  justify-content: space-between;
+  padding-right: 0;
+}
+
+.wf-prompt-override-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--color-warning);
+  border-radius: var(--radius-pill);
+  color: var(--color-warning);
+  padding: calc(var(--space-xs) / 2) var(--space-sm);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 .wf-inspector-note {
   margin: 0;
   font-size: 0.78rem;
@@ -1225,7 +1439,7 @@ React Flow ships white default controls and mini-map chrome, but the workflow ed
 /* Inline name + description strip (KTD-10). */
 .wf-name-strip {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: var(--space-sm);
   padding: var(--space-xs) var(--space-sm);
   border-bottom: 1px solid var(--border);
@@ -1491,6 +1705,37 @@ React Flow ships white default controls and mini-map chrome, but the workflow ed
 .wf-column-name {
   flex: 1;
   min-width: 0;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.78rem;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+}
+
+/*
+FNXC:WorkflowEditorTheme 2026-06-22-10:15:
+Column-panel name fields, trait checkboxes, and agent-mode radios sit on the
+same sidebar surface as workflow fields. Theme all native form controls with
+Fusion tokens so light/dark themes never show browser-default white controls.
+*/
+.wf-column-name:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--surface-hover);
+}
+
+.wf-column-name:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.wf-column-name:disabled {
+  background: var(--bg-tertiary);
+  color: var(--text-dim);
+  cursor: not-allowed;
 }
 
 .wf-column-item-actions {
@@ -1536,6 +1781,17 @@ Column trait toggles are left-sidebar workflow controls; keep their enabled and 
 */
 .wf-column-trait input[type="checkbox"] {
   accent-color: var(--todo);
+}
+
+.wf-column-trait input[type="checkbox"],
+.wf-column-agent-mode-option input[type="radio"] {
+  margin: 0;
+  accent-color: var(--todo);
+}
+
+.wf-column-trait input[type="checkbox"]:disabled,
+.wf-column-agent-mode-option input[type="radio"]:disabled {
+  cursor: not-allowed;
 }
 
 .wf-column-traits-label,
@@ -1730,14 +1986,28 @@ Column trait toggles are left-sidebar workflow controls; keep their enabled and 
     padding: var(--space-sm);
   }
 
-  .modal-overlay:has(.wf-editor-modal),
+  .wf-prompt-override-actions {
+    align-items: stretch;
+    flex-direction: column;
+    padding-right: 0;
+  }
+
+  /* FNXC:WorkflowEditor 2026-06-22-16:00: scope the viewport-takeover to the
+     dialog presentation only via :not(.wf-editor-modal--embedded). The embedded
+     workflow editor renders inside the main-content pane (between the mobile
+     Header and MobileNavBar); without the guard its base .wf-editor-modal class
+     matched these 100vw/100dvh rules and covered the whole screen. The embedded
+     panel keeps its 100%-of-pane sizing from the embedded block above and fills
+     only the content area. .wf-create-modal has no embedded variant, so it stays
+     full-screen as a dialog. */
+  .modal-overlay:has(.wf-editor-modal:not(.wf-editor-modal--embedded)),
   .modal-overlay:has(.wf-create-modal) {
     padding-top: 0;
     align-items: stretch;
     justify-content: stretch;
   }
 
-  .wf-editor-modal,
+  .wf-editor-modal:not(.wf-editor-modal--embedded),
   .wf-create-modal {
     width: 100vw;
     min-width: 0;

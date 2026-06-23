@@ -1,5 +1,6 @@
-import { cpus, totalmem, freemem, uptime as getUptime } from "node:os";
+import { cpus, totalmem, uptime as getUptime } from "node:os";
 import * as checkDiskSpaceModule from "check-disk-space";
+import { getAvailableMemoryBytes } from "./available-memory.js";
 import type { SystemMetrics } from "./types.js";
 
 const checkDiskSpace = ((checkDiskSpaceModule as { default?: unknown }).default ??
@@ -40,7 +41,11 @@ export async function collectSystemMetrics(dbPath?: string): Promise<SystemMetri
   const cpuUsage = totalTime > 0 ? (busyTime / totalTime) * 100 : 0;
 
   const memoryTotal = toNonNegative(totalmem());
-  const rawMemoryUsed = memoryTotal - toNonNegative(freemem());
+  /*
+  FNXC:SystemMetrics 2026-06-21-13:01:
+  Mesh metrics must compute used memory from OS-available memory instead of raw `freemem()` so macOS inactive/cache pages are not incorrectly reported as used.
+  */
+  const rawMemoryUsed = memoryTotal - toNonNegative(getAvailableMemoryBytes());
   const memoryUsed = clamp(rawMemoryUsed, 0, memoryTotal);
 
   const diskPath = dbPath ?? process.cwd();

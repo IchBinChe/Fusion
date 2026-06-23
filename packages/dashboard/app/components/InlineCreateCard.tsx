@@ -700,26 +700,11 @@ export function InlineCreateCard({
     } else {
       onPlanningMode?.(trimmed);
     }
-    // Clear the input after triggering planning mode
-    setDescription("");
-    setSelectedWorkflowId(null);
-    setDependencies([]);
-    setExecutorProvider(undefined);
-    setExecutorModelId(undefined);
-    setValidatorProvider(undefined);
-    setValidatorModelId(undefined);
-    setPlanningProvider(undefined);
-    setPlanningModelId(undefined);
-    setEnabledOptionalStepIds([]);
-    setSelectedPresetId(undefined);
-    setSelectedAgentId(null);
-    setNodeId(undefined);
-    setShowDeps(false);
-    setShowAgentPicker(false);
-    setIsModelModalOpen(false);
-    setShowPresets(false);
-    setIsExpanded(false);
-  }, [description, onPlanningMode, selectedWorkflowId, addToast]);
+    /*
+    FNXC:QuickAddPlanningPreserve 2026-06-22-00:00:
+    Opening planning mode must keep the inline-create description and scoped draft available when the user exits without creating tasks. Planning completion owns the eventual draft clear.
+    */
+  }, [description, onPlanningMode, selectedWorkflowId, addToast, t]);
 
   const handleSubtaskClick = useCallback(() => {
     const trimmed = description.trim();
@@ -904,18 +889,21 @@ export function InlineCreateCard({
               <Lightbulb size={12} style={{ verticalAlign: "middle", marginRight: 4 }} />
               {t("inline.plan", "Plan")}
             </button>
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={handleSubtaskClick}
-              onMouseDown={(e) => e.preventDefault()}
-              disabled={!description.trim()}
-              data-testid="subtask-button"
-              title={t("inline.breakDownSubtasks", "Break down into AI-generated subtasks")}
-            >
-              <ListTree size={12} style={{ verticalAlign: "middle", marginRight: 4 }} />
-              {t("inline.subtask", "Subtask")}
-            </button>
+            {/* FNXC:QuickAddSubtaskFlag 2026-06-21-00:00: Render no Subtask button or orphaned inline-create click target unless the default-off `subtaskBreakdown` experiment wires this callback. */}
+            {onSubtaskBreakdown && (
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={handleSubtaskClick}
+                onMouseDown={(e) => e.preventDefault()}
+                disabled={!description.trim()}
+                data-testid="subtask-button"
+                title={t("inline.breakDownSubtasks", "Break down into AI-generated subtasks")}
+              >
+                <ListTree size={12} style={{ verticalAlign: "middle", marginRight: 4 }} />
+                {t("inline.subtask", "Subtask")}
+              </button>
+            )}
             <div className="dep-trigger-wrap">
               <button
                 type="button"

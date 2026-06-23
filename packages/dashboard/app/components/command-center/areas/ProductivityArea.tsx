@@ -1,6 +1,12 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { RefreshCw } from "lucide-react";
 import type { ProductivityAnalytics } from "@fusion/core";
+import {
+  backfillCommitAssociationDiffStats,
+  type CommitAssociationDiffBackfillReport,
+} from "../../../api/legacy";
+import { useConfirm } from "../../../hooks/useConfirm";
 import type { DateRange } from "../DateRangePicker";
 import { Bar } from "../charts/Bar";
 import { PieChart } from "../charts/recharts";
@@ -37,10 +43,68 @@ ProductivityAnalytics exposes a categorical language distribution but no per-day
  */
 export function ProductivityArea({ range }: { range: DateRange }) {
   const { t } = useTranslation("app");
+  const { confirm } = useConfirm();
   const { data, isLoading, error } = useAnalyticsArea<ProductivityAnalytics>(
     "/command-center/productivity",
     range,
   );
+  const [isBackfilling, setIsBackfilling] = useState(false);
+  const [backfillReport, setBackfillReport] = useState<CommitAssociationDiffBackfillReport | null>(null);
+  const [backfillError, setBackfillError] = useState<string | null>(null);
+
+  const handleBackfillPreview = useCallback(async () => {
+    if (isBackfilling) return;
+
+    setIsBackfilling(true);
+    setBackfillError(null);
+    setBackfillReport(null);
+
+    try {
+      const report = await backfillCommitAssociationDiffStats({ dryRun: true });
+      setBackfillReport(report);
+    } catch (err) {
+      setBackfillError(
+        err instanceof Error
+          ? err.message
+          : t("commandCenter.productivity.backfillFailed", "Failed to backfill historical LOC stats"),
+      );
+    } finally {
+      setIsBackfilling(false);
+    }
+  }, [isBackfilling, t]);
+
+  const handleApplyBackfill = useCallback(async () => {
+    if (isBackfilling) return;
+
+    const confirmed = await confirm({
+      title: t("commandCenter.productivity.backfillConfirmTitle", "Apply LOC backfill?"),
+      message: t(
+        "commandCenter.productivity.backfillConfirmMessage",
+        "This will persist diff stats to task_commit_associations for historical commit associations. Review the dry-run counts before applying.",
+      ),
+      confirmLabel: t("commandCenter.productivity.backfillApply", "Apply backfill"),
+      cancelLabel: t("common.cancel", "Cancel"),
+      danger: true,
+    });
+
+    if (!confirmed) return;
+
+    setIsBackfilling(true);
+    setBackfillError(null);
+
+    try {
+      const report = await backfillCommitAssociationDiffStats({ dryRun: false });
+      setBackfillReport(report);
+    } catch (err) {
+      setBackfillError(
+        err instanceof Error
+          ? err.message
+          : t("commandCenter.productivity.backfillFailed", "Failed to backfill historical LOC stats"),
+      );
+    } finally {
+      setIsBackfilling(false);
+    }
+  }, [confirm, isBackfilling, t]);
 
   const languageBars = useMemo(
     () =>
@@ -61,8 +125,6 @@ export function ProductivityArea({ range }: { range: DateRange }) {
     [data?.byLanguage],
   );
 
-  const loc = data?.loc ?? { value: null, unavailable: true };
-  const hoursSaved = data?.hoursSaved ?? { value: null, unavailable: true };
   const taskDuration = data?.taskDuration ?? {
     completedTasks: 0,
     averageMs: null,
@@ -71,6 +133,12 @@ export function ProductivityArea({ range }: { range: DateRange }) {
     totalMs: null,
     unavailable: true,
   };
+  /*
+  FNXC:CommandCenterProductivity 2026-06-22-00:32:
+  Backfill-era dashboard tests and cached clients can render ProductivityArea with legacy productivity payloads that predate LOC and hours-saved summaries. Treat missing nested summaries as unavailable sentinels so the whole Command Center remains mounted instead of crashing during responsive-layout verification.
+  */
+  const loc = data?.loc ?? { value: null, unavailable: true };
+  const hoursSaved = data?.hoursSaved ?? { value: null, unavailable: true };
   const isEmpty =
     !data ||
     (data.modifiedFiles === 0 &&
@@ -85,6 +153,11 @@ export function ProductivityArea({ range }: { range: DateRange }) {
     "commandCenter.productivity.durationUnavailable",
     "Task duration is unavailable until completed tasks have active execution time recorded",
   );
+  const backfillStatusClass = backfillError
+    ? "cc-productivity-backfill-status--error"
+    : isBackfilling
+      ? "cc-productivity-backfill-status--warning"
+      : "";
   const renderDurationValue = (value: number | null, testId: string) =>
     durationUnavailable || value === null ? (
       <span className="cc-unavailable" title={durationTitle} data-testid={testId}>
@@ -157,6 +230,77 @@ export function ProductivityArea({ range }: { range: DateRange }) {
               )}
             </div>
             <span className="cc-stat-sub">{t("commandCenter.productivity.volumeHint", "volume, not outcome")}</span>
+            {/*
+              FNXC:CommandCenterLocBackfill 2026-06-23-00:00:
+              Historical LOC repair must be an explicit operator action, not render-time analytics loading. The first action always previews with the API dry-run default, non-dry-run writes are gated by a danger confirmation that names task_commit_associations, and the returned scanned/distinct/updated/skipped counts are surfaced with tokenized desktop/mobile styling while preserving the LOC unavailable sentinel.
+            */}
+            <div className="cc-productivity-backfill-actions">
+              <button
+                type="button"
+                className="btn"
+                data-testid="cc-productivity-backfill-button"
+                onClick={() => void handleBackfillPreview()}
+                disabled={isBackfilling}
+              >
+                <RefreshCw className={isBackfilling ? "spin" : undefined} />
+                <span>
+                  {isBackfilling
+                    ? t("commandCenter.productivity.backfillBusy", "Checking historical LOC…")
+                    : t("commandCenter.productivity.backfillButton", "Preview LOC backfill")}
+                </span>
+              </button>
+              {backfillReport?.dryRun ? (
+                <button
+                  type="button"
+                  className="btn"
+                  data-testid="cc-productivity-backfill-apply-button"
+                  onClick={() => void handleApplyBackfill()}
+                  disabled={isBackfilling}
+                >
+                  {t("commandCenter.productivity.backfillApply", "Apply backfill")}
+                </button>
+              ) : null}
+            </div>
+            {isBackfilling || backfillReport || backfillError ? (
+              <div
+                className={`cc-productivity-backfill-status ${backfillStatusClass}`.trim()}
+                data-testid="cc-productivity-backfill-result"
+                role="status"
+              >
+                {isBackfilling ? (
+                  <span>{t("commandCenter.productivity.backfillPending", "LOC backfill check is running.")}</span>
+                ) : null}
+                {backfillError ? <span>{backfillError}</span> : null}
+                {backfillReport ? (
+                  <>
+                    <span>{t("commandCenter.productivity.backfillResult", "Backfill report")}</span>
+                    <span>
+                      {backfillReport.dryRun
+                        ? t("commandCenter.productivity.backfillPreviewLabel", "Dry-run preview")
+                        : t("commandCenter.productivity.backfillAppliedLabel", "Applied")}
+                    </span>
+                    <span>
+                      {t("commandCenter.productivity.backfillScannedRows", "Scanned rows")}: {backfillReport.scannedRows}
+                    </span>
+                    <span>
+                      {t("commandCenter.productivity.backfillDistinctCommits", "Distinct commits")}: {backfillReport.distinctCommits}
+                    </span>
+                    <span>
+                      {t("commandCenter.productivity.backfillUpdatedRows", "Updated rows")}: {backfillReport.updatedRows}
+                    </span>
+                    <span>
+                      {t(
+                        "commandCenter.productivity.backfillSkippedUnavailableCommits",
+                        "Skipped unavailable commits",
+                      )}: {backfillReport.skippedUnavailableCommits}
+                    </span>
+                    <span>
+                      {t("commandCenter.productivity.backfillSkippedInvalidShas", "Skipped invalid SHAs")}: {backfillReport.skippedInvalidShas}
+                    </span>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
       </div>

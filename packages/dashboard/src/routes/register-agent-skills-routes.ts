@@ -79,6 +79,63 @@ export function registerAgentSkillsRoutes(ctx: ApiRoutesContext): void {
     }
   });
 
+  /*
+  FNXC:Skills 2026-06-23-04:15:
+  GET /api/skills/:id/file — return a single supplementary file's text for the SkillsView detail-pane file viewer. The /content endpoint lists files (name/path/type) but not their bodies; clicking a file in the detail pane needs its content. The skill-dir-relative path arrives URL-encoded in the `path` query param; the adapter resolves + traversal-guards it against the skill directory.
+  Params: id (URL-encoded skill ID)
+  Query: path (skill-dir-relative file path), projectId (optional)
+  Response: { file: SkillFileContent }
+  Error: 404 { code: "skill_not_found" | "skill_file_not_found" }, 400 { code: "invalid_skill_id" | "invalid_path" }
+  */
+  router.get("/skills/:id/file", async (req, res) => {
+    try {
+      const scopedStore = await getScopedStore(req);
+      const skillsAdapter = options?.skillsAdapter;
+
+      if (!skillsAdapter) {
+        res.status(404).json({ error: "Skills adapter not configured", code: "adapter_not_configured" });
+        return;
+      }
+
+      const encodedSkillId = req.params.id as string;
+      let skillId = encodedSkillId;
+      try {
+        skillId = decodeURIComponent(encodedSkillId);
+      } catch {
+        res.status(400).json({ error: "Invalid skill ID", code: "invalid_skill_id" });
+        return;
+      }
+
+      const rawPath = typeof req.query.path === "string" ? req.query.path : "";
+      if (!rawPath.trim()) {
+        res.status(400).json({ error: "path is required", code: "invalid_path" });
+        return;
+      }
+
+      const rootDir = scopedStore.getRootDir();
+      const file = await skillsAdapter.readSkillFileContent(rootDir, skillId, rawPath);
+
+      res.json({ file });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      if (err instanceof Error && err.message.includes("Skill file not found")) {
+        res.status(404).json({ error: "Skill file not found", code: "skill_file_not_found" });
+        return;
+      }
+      if (err instanceof Error && err.message.includes("Skill not found")) {
+        res.status(404).json({ error: "Skill not found", code: "skill_not_found" });
+        return;
+      }
+      if (err instanceof Error && (err.message.includes("Invalid skill ID") || err.message.includes("Invalid skill file path"))) {
+        res.status(400).json({ error: err.message, code: "invalid_path" });
+        return;
+      }
+      rethrowAsApiError(err, "Failed to read skill file");
+    }
+  });
+
   /**
    * PATCH /api/skills/execution
    * Toggle a skill's enabled/disabled state.

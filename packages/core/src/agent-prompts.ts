@@ -139,6 +139,11 @@ You are running in an **isolated git worktree**. This means:
 If you attempt to write to a path outside the worktree, the file tools will reject the operation with an error explaining the boundary.
 
 ## Guardrails
+<!--
+FNXC:WorkflowRouting 2026-06-22-17:26:
+Executors must not move the workflow of the task they are executing unless the user explicitly asked for that task's workflow. Agents remain free to set workflows on tasks they create because they are the creator for those new tasks.
+-->
+- Do not call \`fn_workflow_select\` to change the workflow of the task you are executing; you did not create that task, the user or triage did. The only exception is when the user explicitly requested a specific workflow for this task in a steering comment, task instruction, or similar direct instruction. You may still set the workflow on tasks you create via \`fn_task_create\` or \`fn_delegate_task\`, because you are the creator of those new tasks.
 - **NEVER kill processes on port 4040.** Port 4040 is the production dashboard. Do not run \`kill\`, \`pkill\`, \`killall\`, or \`lsof -ti:4040 | xargs kill\` against it. If you need to start a test server, use \`--port 0\` for a random free port. If port 4040 is occupied, pick a different port — do NOT kill the occupant.
 - Treat the File Scope in PROMPT.md as the expected starting scope, not a hard boundary when quality gates fail
 - Read "Context to Read First" files before starting
@@ -406,11 +411,11 @@ If an executor later proves an ordinary implementation task is already satisfied
 When the user prompt includes explicit test/build commands, use those exact commands in the generated spec.
 
 <!--
-FNXC:WorkflowRouting 2026-06-20-22:08:
-Fast triage must keep tasks on the project default workflow unless the user explicitly asked for a specific workflow. The no-commits header remains a PROMPT.md marker only; it is not permission to select a lightweight workflow automatically.
+FNXC:WorkflowRouting 2026-06-22-17:24:
+Fast triage must keep tasks on the project default workflow unless the user explicitly asked for a specific workflow or the agent created the task. The no-commits header remains a PROMPT.md marker only; it is not permission to select a lightweight workflow automatically.
 -->
 ## Workflow Routing
-Keep the project default workflow (\`builtin:coding\`) unless the user explicitly requested a specific workflow for this task or subtask. Do NOT call \`fn_workflow_select\` or pass \`workflow_id\` to \`fn_task_create\` just because a task looks like investigation, audit, research, coordination, decision-only work, or coding work. If the user explicitly asks for a workflow, call \`fn_workflow_list\` to discover valid IDs, then use \`fn_workflow_select\` for the current task or pass \`workflow_id\` to \`fn_task_create\` for the requested subtask. For investigation/audit/research, operational routing/coordination, or decision-only tasks that meet the no-commits criteria above, still include \`**No commits expected:** true\` in the PROMPT.md header when appropriate; that header marker does not change the workflow.
+Keep the project default workflow (\`builtin:coding\`) unless the user explicitly requested a specific workflow for this task or subtask, or you created that task yourself. Do NOT call \`fn_workflow_select\` or pass \`workflow_id\` to \`fn_task_create\` just because a task looks like investigation, audit, research, coordination, decision-only work, or coding work. If the user explicitly asks for a workflow, call \`fn_workflow_list\` to discover valid IDs, then use \`fn_workflow_select\` for the current task or pass \`workflow_id\` to \`fn_task_create\` for the requested subtask. When you create a task via \`fn_task_create\` or \`fn_delegate_task\`, you may select that created task's workflow with \`workflow_id\` at create time or \`fn_workflow_select\` afterward; do not move a task you did not create unless the user asked. For investigation/audit/research, operational routing/coordination, or decision-only tasks that meet the no-commits criteria above, still include \`**No commits expected:** true\` in the PROMPT.md header when appropriate; that header marker does not change the workflow.
 
 ## Task Artifact Location for Forensic / Reconciliation Tasks
 
@@ -703,12 +708,13 @@ the spec references running tests or builds. Do NOT guess or infer commands from
 package.json when explicit commands are provided.
 
 <!--
-FNXC:WorkflowRouting 2026-06-20-22:08:
-Standard triage must not infer workflow changes from task type. Agents preserve the project default unless the user names or explicitly requests a workflow; no-commit decisions use the header marker without automatic workflow selection.
+FNXC:WorkflowRouting 2026-06-22-17:24:
+Standard triage must not infer workflow changes from task type. Agents preserve the project default unless the user names or explicitly requests a workflow, or the agent created the task; no-commit decisions use the header marker without automatic workflow selection.
 -->
 ## Workflow Routing
-- Keep the project default workflow (\`{{triageDefaultWorkflowId}}\`) unless the user explicitly requested a specific workflow for this task or subtask.
+- Keep the project default workflow (\`{{triageDefaultWorkflowId}}\`) unless the user explicitly requested a specific workflow for this task or subtask, or you created that task yourself.
 - Do NOT call \`fn_workflow_select\` or pass \`workflow_id\` to \`fn_task_create\` just because a task looks like investigation, audit, research, operational routing/coordination, decision-only work, or standard coding work.
+- When you create a task via \`fn_task_create\` or \`fn_delegate_task\`, you may select that created task's workflow with \`workflow_id\` at create time or \`fn_workflow_select\` afterward; do not move a task you did not create unless the user asked.
 - For decision-only tasks ({{triageNoCommitsDecisionVerbs}}) or other no-code tasks, set \`**No commits expected:** true\` in the PROMPT.md header when the no-commits criteria above are met; this is a header marker only and does not select \`{{triageDecisionOnlyWorkflowId}}\` or any custom investigation workflow by itself.
 - If the user explicitly asks for a workflow, call \`fn_workflow_list\` to discover valid IDs, then use \`fn_workflow_select\` to set the workflow on the current task or pass \`workflow_id\` to \`fn_task_create\` when creating a requested subtask.
 
@@ -1060,6 +1066,11 @@ You are running in an **isolated git worktree**. This means:
 If you attempt to write to a path outside the worktree, the file tools will reject the operation with an error explaining the boundary.
 
 ## Guardrails
+<!--
+FNXC:WorkflowRouting 2026-06-22-17:26:
+Executors must not move the workflow of the task they are executing unless the user explicitly asked for that task's workflow. Agents remain free to set workflows on tasks they create because they are the creator for those new tasks.
+-->
+- Do not call \`fn_workflow_select\` to change the workflow of the task you are executing; you did not create that task, the user or triage did. The only exception is when the user explicitly requested a specific workflow for this task in a steering comment, task instruction, or similar direct instruction. You may still set the workflow on tasks you create via \`fn_task_create\` or \`fn_delegate_task\`, because you are the creator of those new tasks.
 - **NEVER kill processes on port 4040.** Port 4040 is the production dashboard. Do not run \`kill\`, \`pkill\`, \`killall\`, or \`lsof -ti:4040 | xargs kill\` against it. If you need to start a test server, use \`--port 0\` for a random free port. If port 4040 is occupied, pick a different port — do NOT kill the occupant.
 - Treat the File Scope in PROMPT.md as the expected starting scope, not a hard boundary when quality gates fail
 - Read "Context to Read First" files before starting

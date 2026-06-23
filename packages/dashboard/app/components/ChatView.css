@@ -1,13 +1,22 @@
 /* ── Chat View ─────────────────────────────────────────────────────────────── */
 
 .chat-view {
+  container: chat-view / inline-size;
   display: flex;
-  flex: 1;
+  flex-direction: column;
+  flex: 1 1 auto;
   width: 100%;
   height: 100%;
-  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chat-view__body {
+  display: flex;
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
 }
 
@@ -59,7 +68,31 @@
   display: flex;
   gap: var(--space-xs);
   padding: var(--space-sm) var(--space-md);
-  border-bottom: 1px solid var(--border);
+}
+
+/*
+FNXC:ChatHeader 2026-06-22-16:18:
+Direct/Rooms now lives in the Chat ViewHeader immediately before New Chat. The control must scale with available header width: bounded flex-basis, minmax grid columns, and truncating labels let it fit desktop, narrow pop-out, and mobile headers without forcing the title/actions to overlap.
+
+FNXC:ChatHeader 2026-06-22-18:44:
+Keep the Direct/Rooms segmented control height-aligned with ViewHeader's action row and collapse labels to icons when Chat is very narrow. Buttons use height:100% inside the padded track so they cannot grow taller than the background.
+
+FNXC:ChatHeader 2026-06-22-20:28:
+When the movable chat popup is resized narrow, collapse Direct/Rooms labels to icon-only from the ChatView container width so the Chat title remains visible even on a wide desktop viewport.
+*/
+.chat-view-header-scope-toggle {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  flex: 1 1 clamp(128px, 24vw, 220px);
+  width: clamp(128px, 24vw, 220px);
+  min-width: min(128px, 100%);
+  max-width: 220px;
+  height: var(--view-header-content-row, 28px);
+  box-sizing: border-box;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
 }
 
 .chat-sidebar-scope-btn {
@@ -71,6 +104,33 @@
   color: var(--text-muted);
   font-size: var(--space-md);
   transition: background var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.chat-view-header-scope-toggle .chat-sidebar-scope-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  padding: 0 clamp(var(--space-xs), 1.2vw, var(--space-sm));
+  border: 1px solid transparent;
+  border-radius: calc(var(--radius-md) - 2px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.chat-view-header-scope-toggle .chat-sidebar-scope-btn svg {
+  flex: 0 0 auto;
+}
+
+.chat-view-header-scope-toggle .chat-sidebar-scope-btn span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .chat-sidebar-scope-btn:hover {
@@ -88,6 +148,10 @@
   color: var(--text);
 }
 
+.chat-view-header-scope-toggle .chat-sidebar-scope-btn--active {
+  border-color: var(--todo);
+}
+
 .chat-sidebar-rooms {
   flex: 1;
   min-height: 0;
@@ -97,7 +161,6 @@
 
 .chat-sidebar-rooms-header {
   padding: var(--space-sm) var(--space-md);
-  border-bottom: 1px solid var(--border);
 }
 
 .chat-sidebar-rooms-empty {
@@ -397,17 +460,31 @@
   gap: 8px;
 }
 
+/*
+FNXC:Chat 2026-06-22-15:30:
+The active-chat pane header must give the title the full available line to the LEFT of the actions. The identity row grows (flex:1, min-width:0) and the title truncates with an ellipsis instead of being squeezed to one-word-per-line by the model badge, eye/preview toggle, and New Chat button. Those action controls stay flex-shrink:0 so they keep their size and the title absorbs all slack.
+*/
 .chat-thread-header-identity {
   display: inline-flex;
   align-items: center;
   gap: var(--space-sm);
+  flex: 1 1 auto;
   min-width: 0;
 }
 
 .chat-thread-header-title {
+  flex: 1 1 auto;
   font-weight: 600;
   font-size: 15px;
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Model badge keeps its intrinsic size next to the truncating title. */
+.chat-thread-header-identity .chat-model-tag {
+  flex-shrink: 0;
 }
 
 .chat-mobile-session-menu {
@@ -631,8 +708,138 @@ Mobile chat session switching needs a dedicated rename tap target beside each se
   overflow-wrap: anywhere;
 }
 
-.chat-thread-header-new-chat {
-  flex-shrink: 0;
+.chat-view-header-new-chat {
+  flex: 0 1 auto;
+  min-width: fit-content;
+}
+
+.chat-view-header-icon {
+  flex: 0 0 auto;
+}
+
+.chat-view .view-header__actions {
+  min-width: 0;
+}
+
+@media (max-width: 768px), (max-height: 480px) {
+  .chat-view-header-scope-toggle {
+    flex-basis: clamp(112px, 42vw, 180px);
+    width: clamp(112px, 42vw, 180px);
+    max-width: 180px;
+  }
+}
+
+@container chat-view (max-width: 560px) {
+  .chat-view-header-scope-toggle {
+    flex: 0 0 72px;
+    width: 72px;
+    min-width: 72px;
+    max-width: 72px;
+  }
+
+  .chat-view-header-scope-toggle .chat-sidebar-scope-btn {
+    padding: 0;
+  }
+
+  .chat-view-header-scope-toggle .chat-sidebar-scope-btn span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 460px) {
+  .chat-view-header-scope-toggle {
+    flex: 0 0 72px;
+    width: 72px;
+    min-width: 72px;
+    max-width: 72px;
+  }
+
+  .chat-view-header-scope-toggle .chat-sidebar-scope-btn {
+    padding: 0;
+  }
+
+  .chat-view-header-scope-toggle .chat-sidebar-scope-btn span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+/*
+FNXC:ChatModal 2026-06-22-13:22:
+The old Quick Chat panel is replaced by the full ChatView inside a movable FloatingWindow. In floating mode ChatView's shared header is the only visible modal header and doubles as the drag handle, with minimize/close controls in the same action row.
+*/
+.chat-view--floating .view-header {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.chat-view--floating .view-header:active {
+  cursor: grabbing;
+}
+
+/*
+FNXC:ChatModal 2026-06-22-14:38:
+Floating Chat can become narrow while the browser viewport remains desktop-sized. Mirror the mobile one-pane layout with a class driven by the modal ResizeObserver so a narrow pop-out hides the sidebar and shows the mobile thread/list surfaces.
+*/
+.chat-view--narrow .chat-view__body {
+  flex-direction: column;
+}
+
+.chat-view--narrow .chat-sidebar {
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
+  height: 100%;
+  max-height: none;
+  border-right: none;
+  border-bottom: 1px solid var(--border);
+  flex-direction: column;
+}
+
+.chat-view--narrow .chat-sidebar-header {
+  display: none;
+}
+
+.chat-view--narrow .chat-sidebar-search {
+  min-height: calc(var(--space-2xl) + var(--space-xs));
+}
+
+.chat-view--narrow .chat-sidebar-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.chat-view--narrow .chat-sidebar:not(.chat-sidebar--hidden) + .chat-thread {
+  display: none;
+}
+
+/*
+FNXC:ChatModal 2026-06-22-18:00:
+In the narrow/mobile chat layout there is no room for an expand/maximize affordance in the header. Hide only the expand controls (main Chat pop-out and floating-modal maximize); keep minimize/close visible so the user can still dismiss or dock the chat.
+*/
+.chat-view--narrow [data-testid="chat-pop-out"],
+.chat-view--narrow [data-testid="chat-modal-maximize"] {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .chat-view [data-testid="chat-pop-out"],
+  .chat-view [data-testid="chat-modal-maximize"] {
+    display: none;
+  }
 }
 
 .chat-rename-label {
@@ -662,6 +869,7 @@ Mobile chat session switching needs a dedicated rename tap target beside each se
  * used to live inside every assistant bubble. */
 .chat-thread-header-render-toggle {
   margin-left: auto;
+  flex-shrink: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1394,11 +1602,6 @@ Mobile chat session switching needs a dedicated rename tap target beside each se
   font-size: 13px;
 }
 
-.quick-chat-panel-waiting {
-  color: var(--text-muted) !important;
-  font-style: italic;
-}
-
 /* Input area */
 .chat-input-area {
   position: relative;
@@ -1760,7 +1963,7 @@ Mobile chat session switching needs a dedicated rename tap target beside each se
    thread takes the full viewport. The thread already renders a back
    button (ChevronLeft) on mobile to flip back to the session list. */
 @media (max-width: 768px) {
-  .chat-view {
+  .chat-view__body {
     flex-direction: column;
   }
 
@@ -1872,10 +2075,6 @@ Mobile chat session switching needs a dedicated rename tap target beside each se
 
   .chat-thread-header-render-toggle {
     flex-shrink: 0;
-  }
-
-  .chat-thread-header-new-chat {
-    display: none;
   }
 
   .chat-sidebar-scope-btn {

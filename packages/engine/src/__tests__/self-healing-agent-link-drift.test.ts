@@ -12,6 +12,7 @@ describe("FN-4296: self-healing agent link drift", () => {
   function buildManager(agents: Agent[], tasks: Record<string, Task | null>, hasActiveAgentExecution?: (agentId: string) => boolean) {
     const store = {
       getTask: vi.fn(async (taskId: string) => tasks[taskId] ?? null),
+      recordRunAuditEvent: vi.fn(async () => {}),
     } as any;
 
     const agentStore = {
@@ -22,6 +23,10 @@ describe("FN-4296: self-healing agent link drift", () => {
         return agents;
       }),
       getActiveHeartbeatRun: vi.fn(async () => null),
+      updateAgentState: vi.fn(async (agentId: string, state: Agent["state"]) => {
+        const agent = agents.find((candidate) => candidate.id === agentId);
+        if (agent) agent.state = state;
+      }),
       syncExecutionTaskLink: vi.fn(async (agentId: string, taskId?: string) => {
         const agent = agents.find((candidate) => candidate.id === agentId);
         if (agent) agent.taskId = taskId;
@@ -29,7 +34,7 @@ describe("FN-4296: self-healing agent link drift", () => {
     } as unknown as AgentStore;
 
     const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore, hasActiveAgentExecution });
-    return { manager, agentStore };
+    return { manager, agentStore, store };
   }
 
   it("FN-4296: durable agent linked to done task is cleared by sweep", async () => {
@@ -53,6 +58,96 @@ describe("FN-4296: self-healing agent link drift", () => {
     const { manager } = buildManager(agents, { "FN-1": { id: "FN-1", column: "todo" } as Task }, () => false);
     await manager.recoverDriftedAgentTaskLinks();
     expect(agents[0].taskId).toBeUndefined();
+    manager.stop();
+  });
+
+  it("FN-6954: running durable agent on dependency-only queued todo is made active and unlinked", async () => {
+    const agents = [makeAgent("agent-backend", "FN-7000", "running")];
+    const queuedTask = {
+      id: "FN-7000",
+      column: "todo",
+      status: "queued",
+      blockedBy: "FN-6999",
+      overlapBlockedBy: null,
+    } as Task;
+    const { manager } = buildManager(agents, { "FN-7000": queuedTask }, () => false);
+
+    await manager.recoverDriftedAgentTaskLinks();
+
+    expect(agents[0]).toMatchObject({ state: "active", taskId: undefined });
+    expect(queuedTask).toMatchObject({ status: "queued", blockedBy: "FN-6999", overlapBlockedBy: null });
+    manager.stop();
+  });
+
+  it("FN-6954: running durable agent on overlap-queued triage task is made active and unlinked", async () => {
+    const agents = [makeAgent("agent-backend", "FN-7001", "running")];
+    const queuedTask = {
+      id: "FN-7001",
+      column: "triage",
+      status: "queued",
+      overlapBlockedBy: "FN-6827",
+    } as Task;
+    const { manager } = buildManager(agents, { "FN-7001": queuedTask }, () => false);
+
+    await manager.recoverDriftedAgentTaskLinks();
+
+    expect(agents[0]).toMatchObject({ state: "active", taskId: undefined });
+    expect(queuedTask).toMatchObject({ status: "queued", overlapBlockedBy: "FN-6827" });
+    manager.stop();
+  });
+
+  it("FN-6954: duplicate durable agents linked to one parked task preserve only live proof", async () => {
+    const agents = [
+      makeAgent("agent-stale", "FN-7002", "running"),
+      makeAgent("agent-live", "FN-7002", "running"),
+    ];
+    const queuedTask = { id: "FN-7002", column: "todo", status: "queued", overlapBlockedBy: "FN-6827" } as Task;
+    const { manager } = buildManager(agents, { "FN-7002": queuedTask }, (agentId) => agentId === "agent-live");
+
+    await manager.recoverDriftedAgentTaskLinks();
+
+    expect(agents[0]).toMatchObject({ state: "active", taskId: undefined });
+    expect(agents[1]).toMatchObject({ state: "running", taskId: "FN-7002" });
+    expect(queuedTask).toMatchObject({ status: "queued", overlapBlockedBy: "FN-6827" });
+    manager.stop();
+  });
+
+  it("FN-6954: running durable agent on lease-queued todo is made active and audited without clearing the lease", async () => {
+    const agents = [makeAgent("agent-backend", "FN-6709", "running")];
+    const queuedTask = {
+      id: "FN-6709",
+      column: "todo",
+      status: "queued",
+      overlapBlockedBy: "FN-6827",
+      blockedBy: null,
+    } as Task;
+    const blockerTask = { id: "FN-6827", column: "in-progress", assignedAgentId: "agent-other" } as Task;
+    const { manager, agentStore, store } = buildManager(
+      agents,
+      { "FN-6709": queuedTask, "FN-6827": blockerTask },
+      () => false,
+    );
+
+    await manager.recoverDriftedAgentTaskLinks();
+
+    expect(agents[0]).toMatchObject({ state: "active", taskId: undefined });
+    expect(queuedTask).toMatchObject({ status: "queued", overlapBlockedBy: "FN-6827" });
+    expect((agentStore as any).updateAgentState).toHaveBeenCalledWith("agent-backend", "active");
+    expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "task:reconcile-stale-agent-assignment",
+      target: "agent-backend",
+      metadata: expect.objectContaining({
+        agentId: "agent-backend",
+        taskId: "FN-6709",
+        taskColumn: "todo",
+        agentState: "running",
+        status: "queued",
+        overlapBlockedBy: "FN-6827",
+        hadFreshRun: false,
+        hadActiveExecution: false,
+        reason: expect.stringContaining("without fresh run or active execution"),
+      }),
+    }));
     manager.stop();
   });
 

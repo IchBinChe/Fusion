@@ -70,6 +70,8 @@ describe("built-in lead-generation workflow IR", () => {
       expect(config?.seam, node.id).toBeUndefined();
       expect(config?.prompt, node.id).toEqual(expect.stringMatching(/lead|prospect|outreach|customer|company/i));
     }
+    expect(ir.nodes.find((node) => node.id === "enrich-lead")?.config?.prompt).toContain("fn_task_document_write");
+    expect(ir.nodes.find((node) => node.id === "draft-outreach")?.config?.prompt).toContain("fn_task_document_write");
 
     expect(compileWorkflowToSteps(ir).map((step) => step.name)).toEqual([
       "Source prospects",

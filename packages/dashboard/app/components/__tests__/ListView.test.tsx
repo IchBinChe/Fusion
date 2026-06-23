@@ -222,7 +222,7 @@ const renderListView = (
 
   const result = render(<ListView {...defaultProps} {...props} />);
   if (options.openViewOptions ?? true) {
-    const viewOptionsToggle = screen.queryByRole("button", { name: /view options/i });
+    const viewOptionsToggle = screen.queryByRole("button", { name: /^view$/i });
     if (viewOptionsToggle) {
       act(() => {
         fireEvent.click(viewOptionsToggle);
@@ -362,7 +362,7 @@ describe("ListView", () => {
   it("renders without crashing", () => {
     renderListView();
     // The search/filter is now in the header, not in the list view toolbar
-    expect(screen.getByText("View options")).toBeDefined();
+    expect(screen.getByText("View")).toBeDefined();
   });
 
   it("falls back malformed task columns to Planning group instead of crashing", () => {
@@ -383,7 +383,7 @@ describe("ListView", () => {
   it("keeps view options collapsed by default on desktop", () => {
     renderListView({}, { openViewOptions: false });
 
-    const toggle = screen.getByRole("button", { name: /view options/i });
+    const toggle = screen.getByRole("button", { name: /^view$/i });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(document.getElementById("list-view-options-panel")).toBeNull();
   });
@@ -597,7 +597,7 @@ describe("ListView", () => {
 
     renderListView({}, { openViewOptions: false });
 
-    const toggle = screen.getByRole("button", { name: /view options/i });
+    const toggle = screen.getByRole("button", { name: /^view$/i });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
     expect(document.getElementById("list-view-options-panel-mobile")).toBeNull();
 
@@ -656,6 +656,45 @@ describe("ListView", () => {
 
     await waitFor(() => expect(screen.queryAllByText("Ready").length).toBeGreaterThan(0));
     expect(screen.queryAllByText("Backlog")).toHaveLength(0);
+  });
+
+  it("re-fetches board-workflows when the workflow switcher opens", async () => {
+    vi.mocked(fetchBoardWorkflows).mockResolvedValue({
+      flagEnabled: true,
+      defaultWorkflowId: "builtin:coding",
+      workflows: [
+        {
+          id: "builtin:coding",
+          name: "Coding",
+          columns: [
+            { id: "todo", name: "Todo", flags: { hold: true } },
+            { id: "done", name: "Done", flags: { complete: true } },
+          ],
+        },
+        {
+          id: "wf-custom",
+          name: "Custom Flow",
+          columns: [
+            { id: "backlog", name: "Backlog", flags: { intake: true } },
+            { id: "done", name: "Done", flags: { complete: true } },
+          ],
+        },
+      ],
+      taskWorkflowIds: { "FN-001": "builtin:coding" },
+    });
+
+    renderListView({
+      tasks: [createMockTask({ id: "FN-001", column: "todo", title: "Workflow task" })],
+    });
+
+    const trigger = await screen.findByTestId("workflow-switcher");
+    await waitFor(() => expect(fetchBoardWorkflows).toHaveBeenCalledTimes(1));
+    vi.mocked(fetchBoardWorkflows).mockClear();
+
+    fireEvent.click(trigger);
+
+    expect(fetchBoardWorkflows).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("listbox", { name: "Workflow" })).toBeInTheDocument();
   });
 
   it("re-homes a preserved-column task to the new workflow after workflow invalidation", async () => {
@@ -1083,25 +1122,72 @@ describe("ListView", () => {
   it("supports keyboard resizing on the desktop split-pane handle", async () => {
     const viewportSpy = mockDesktopViewport();
     const clientWidthSpy = vi.spyOn(window.HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000);
-    localStorage.setItem(scopedStorageKey("kb-dashboard-list-sidebar-width"), "150");
+    // Persisted below the 64px min clamps up to 64.
+    localStorage.setItem(scopedStorageKey("kb-dashboard-list-sidebar-width"), "40");
     const tasks = [createMockTask({ id: "FN-001", title: "Task" })];
 
     renderListView({ tasks });
-    await waitFor(() => expect(screen.getByTestId("list-split-sidebar")).toHaveStyle({ width: "200px" }));
+    await waitFor(() => expect(screen.getByTestId("list-split-sidebar")).toHaveStyle({ width: "64px" }));
 
     const handle = screen.getByTestId("list-split-resize-handle");
     const startWidth = Number(handle.getAttribute("aria-valuenow"));
 
     expect(handle).toHaveAttribute("tabindex", "0");
-    expect(handle).toHaveAttribute("aria-valuemin", "200");
-    expect(Number(handle.getAttribute("aria-valuemax"))).toBeGreaterThanOrEqual(200);
+    expect(handle).toHaveAttribute("aria-valuemin", "64");
+    expect(Number(handle.getAttribute("aria-valuemax"))).toBeGreaterThanOrEqual(64);
 
     fireEvent.keyDown(handle, { key: "ArrowRight" });
     expect(Number(handle.getAttribute("aria-valuenow"))).toBeGreaterThan(startWidth);
     fireEvent.keyDown(handle, { key: "Home" });
-    expect(handle).toHaveAttribute("aria-valuenow", "200");
-    expect(screen.getByTestId("list-split-sidebar")).toHaveStyle({ width: "200px" });
+    expect(handle).toHaveAttribute("aria-valuenow", "64");
+    expect(screen.getByTestId("list-split-sidebar")).toHaveStyle({ width: "64px" });
     clientWidthSpy.mockRestore();
+    viewportSpy.mockRestore();
+  });
+
+  it("resizes the desktop split sidebar by dragging the handle (pointer)", async () => {
+    // FNXC:ListView 2026-06-22-18:00: Regression guard — dragging the resize handle must change the
+    // sidebar width live and not collapse to the min when the container measures non-zero.
+    const viewportSpy = mockDesktopViewport();
+    const rectSpy = vi
+      .spyOn(window.HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue({ left: 0, width: 1000, top: 0, right: 1000, bottom: 300, height: 300, x: 0, y: 0, toJSON() {} } as DOMRect);
+    const cwSpy = vi.spyOn(window.HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000);
+    localStorage.setItem(scopedStorageKey("kb-dashboard-list-sidebar-width"), "300");
+    const tasks = [createMockTask({ id: "FN-001", title: "Task" })];
+
+    renderListView({ tasks });
+    await waitFor(() => expect(screen.getByTestId("list-split-sidebar")).toHaveStyle({ width: "300px" }));
+
+    const handle = screen.getByTestId("list-split-resize-handle");
+    // Narrow the pane.
+    fireEvent.pointerDown(handle, { clientX: 300, pointerId: 1 });
+    fireEvent.pointerMove(window, { clientX: 250, pointerId: 1 });
+    await waitFor(() => expect(screen.getByTestId("list-split-sidebar")).toHaveStyle({ width: "250px" }));
+    // Widen the pane.
+    fireEvent.pointerMove(window, { clientX: 420, pointerId: 1 });
+    await waitFor(() => expect(screen.getByTestId("list-split-sidebar")).toHaveStyle({ width: "420px" }));
+    fireEvent.pointerUp(window, { pointerId: 1 });
+
+    rectSpy.mockRestore();
+    cwSpy.mockRestore();
+    viewportSpy.mockRestore();
+  });
+
+  it("does not collapse the split sidebar to the min when the container width is unmeasurable", async () => {
+    // FNXC:ListView 2026-06-22-18:00: A zero/unreliable container measurement must not force the
+    // persisted width down to the min clamp — that was the resize regression (pane snapped to 64px).
+    const viewportSpy = mockDesktopViewport();
+    const cwSpy = vi.spyOn(window.HTMLElement.prototype, "clientWidth", "get").mockReturnValue(0);
+    localStorage.setItem(scopedStorageKey("kb-dashboard-list-sidebar-width"), "300");
+    const tasks = [createMockTask({ id: "FN-001", title: "Task" })];
+
+    renderListView({ tasks });
+    // Width must be preserved (not collapsed to 64) while the container reports 0.
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(screen.getByTestId("list-split-sidebar")).toHaveStyle({ width: "300px" });
+
+    cwSpy.mockRestore();
     viewportSpy.mockRestore();
   });
 
@@ -1472,7 +1558,8 @@ describe("ListView", () => {
 
     renderListView({ tasks });
 
-    expect(screen.getByText("3 of 3 tasks")).toBeDefined();
+    // FNXC:ListView 2026-06-23-00:00: the "X of Y tasks" count was removed from the desktop sidebar; verify the filter result via the rendered task rows instead.
+    expect(screen.getAllByRole("row").filter((r) => r.getAttribute("data-id"))).toHaveLength(3);
   });
 
   it("displays filtered task count in stats", () => {
@@ -1484,7 +1571,8 @@ describe("ListView", () => {
 
     renderListView({ tasks, searchQuery: "Alpha" });
 
-    expect(screen.getByText("1 of 3 tasks")).toBeDefined();
+    // FNXC:ListView 2026-06-23-00:00: count removed from sidebar; assert the filtered rows.
+    expect(screen.getAllByRole("row").filter((r) => r.getAttribute("data-id"))).toHaveLength(1);
   });
 
   it("calls onNewTask when + New Task button is clicked", () => {
@@ -1498,21 +1586,36 @@ describe("ListView", () => {
     expect(mockOnNewTask).toHaveBeenCalled();
   });
 
-  it("renders + New Task as the trailing desktop sidebar control", () => {
+  it("keeps Bulk Edit, View, and + New Task together in the desktop sidebar controls", () => {
     renderListView({}, { openViewOptions: false });
 
-    const actions = document.querySelector(".list-sidebar-controls__actions");
-    const actionButtons = Array.from(actions?.querySelectorAll("button") ?? []);
-    expect(actionButtons.at(-1)?.textContent).toContain("+ New Task");
+    const actions = document.querySelector(".list-sidebar-controls .list-action-cluster");
+    const actionButtons = Array.from(actions?.querySelectorAll("button") ?? []).map((button) => button.textContent);
+    expect(actionButtons).toEqual(["Bulk Edit", "View", "+ New Task"]);
   });
 
-  it("renders + New Task as the trailing mobile toolbar control", () => {
+  it("keeps the primary list action cluster on one physical row when the pane narrows", () => {
+    const css = readFileSync("app/components/ListView.css", "utf8");
+    const actionClusterRule = css.match(/\.list-action-cluster,\s*\n\.list-sidebar-controls__actions\s*\{[^}]*\}/)?.[0] ?? "";
+    const toolbarRule = css.match(/\.list-sidebar-controls__toolbar\s*\{[^}]*\}/)?.[0] ?? "";
+    const mobileToolbarRule = css.match(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.list-toolbar\s*\{[^}]*padding:\s*var\(--space-sm\) var\(--space-md\);[^}]*\}/)?.[0] ?? "";
+
+    expect(actionClusterRule).toContain("flex-wrap: nowrap");
+    expect(actionClusterRule).toContain("justify-content: center");
+    expect(actionClusterRule).toContain("inline-size: max-content");
+    expect(actionClusterRule).toContain("min-width: max-content");
+    expect(actionClusterRule).toContain("overflow-x: auto");
+    expect(toolbarRule).toContain("justify-content: center");
+    expect(mobileToolbarRule).toContain("justify-content: center");
+  });
+
+  it("keeps Bulk Edit, View, and + New Task together in the mobile toolbar controls", () => {
     const viewportSpy = mockMobileViewport();
     renderListView({}, { openViewOptions: false });
 
-    const toolbar = document.querySelector(".list-toolbar");
-    const toolbarButtons = Array.from(toolbar?.querySelectorAll("button") ?? []);
-    expect(toolbarButtons.at(-1)?.textContent).toContain("+ New Task");
+    const actions = document.querySelector(".list-toolbar .list-action-cluster");
+    const actionButtons = Array.from(actions?.querySelectorAll("button") ?? []).map((button) => button.textContent);
+    expect(actionButtons).toEqual(["Bulk Edit", "View", "+ New Task"]);
 
     viewportSpy.mockRestore();
   });
@@ -2010,7 +2113,7 @@ describe("ListView Column Filtering", () => {
     fireEvent.click(triageZone);
 
     // Stats should show filtered count with column name
-    expect(screen.getByText("2 of 3 tasks in Planning")).toBeDefined();
+    expect(screen.getAllByRole("row").filter((r) => r.getAttribute("data-id"))).toHaveLength(2);
   });
 
   it("applies text filter within column filter", () => {
@@ -2032,7 +2135,7 @@ describe("ListView Column Filtering", () => {
     expect(screen.queryByText("FN-003")).toBeNull();
 
     // Stats should reflect combined filtering
-    expect(screen.getByText("1 of 3 tasks in Planning")).toBeDefined();
+    expect(screen.getAllByRole("row").filter((r) => r.getAttribute("data-id"))).toHaveLength(1);
   });
 
   it("applies active class to selected column drop zone", () => {
@@ -2065,14 +2168,14 @@ describe("ListView Column Visibility", () => {
   it("renders view options toggle button", () => {
     renderListView();
 
-    const columnsButton = screen.getByRole("button", { name: /view options/i });
+    const columnsButton = screen.getByRole("button", { name: /^view$/i });
     expect(columnsButton).toBeDefined();
   });
 
   it("opens column dropdown when toggle clicked", () => {
     renderListView({}, { openViewOptions: false });
 
-    const columnsButton = screen.getByRole("button", { name: /view options/i });
+    const columnsButton = screen.getByRole("button", { name: /^view$/i });
     fireEvent.click(columnsButton);
 
     expect(columnsButton).toHaveAttribute("aria-expanded", "true");
@@ -2439,16 +2542,15 @@ describe("ListView Hide Done Tasks", () => {
 
     renderListView({ tasks });
 
-    // Initial stats should show all tasks
-    expect(screen.getByText("3 of 3 tasks")).toBeDefined();
+    // Initial: all 3 tasks visible
+    expect(screen.getAllByRole("row").filter((r) => r.getAttribute("data-id"))).toHaveLength(3);
 
     // Click hide done button
     const hideDoneButton = screen.getByRole("button", { name: /hide done/i });
     fireEvent.click(hideDoneButton);
 
-    // Stats should show filtered count with hidden indicator
-    expect(screen.getByText("1 of 3 tasks")).toBeDefined();
-    expect(screen.getByText(/2 hidden/)).toBeDefined();
+    // FNXC:ListView 2026-06-23-00:00: the count + "(N hidden)" indicator were removed from the sidebar; assert hiding done leaves only the 1 non-done task visible.
+    expect(screen.getAllByRole("row").filter((r) => r.getAttribute("data-id"))).toHaveLength(1);
   });
 
   it("hides done and archived column section headers when hide done is active", () => {

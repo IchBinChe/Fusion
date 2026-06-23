@@ -168,11 +168,9 @@ function expectTranscriptTextOrder(...texts: string[]) {
 }
 
 function expectIdleSessionHint() {
-  const idleHint = screen.getByTestId("task-chat-idle-hint");
-  expect(idleHint).toBeVisible();
-  expect(idleHint).toHaveTextContent(/no agent is working on this task right now/i);
-  expect(idleHint).toHaveTextContent(/saved as guidance/i);
-  expect(idleHint).toHaveTextContent(/next time this task runs/i);
+  // FNXC:TaskDetailChat 2026-06-22-21:20: The idle "No agent is working…" banner was removed per user request — idle chats stay sendable with no hint shown.
+  expect(screen.queryByTestId("task-chat-idle-hint")).not.toBeInTheDocument();
+  expect(screen.queryByText(/no agent is working on this task right now/i)).not.toBeInTheDocument();
   expect(screen.getByPlaceholderText("Steer the currently executing agent")).toBeInTheDocument();
 }
 
@@ -425,6 +423,67 @@ describe("TaskChatTab", () => {
     expect(screen.getByText("Merger")).toBeTruthy();
     expect(screen.getByText("Agent")).toBeTruthy();
     expect(screen.getByText("legacy output")).toBeTruthy();
+    expect(screen.getAllByLabelText(/model provider unknown/)).toHaveLength(5);
+  });
+
+  it("renders provider icons for task chat roles from task model overrides", () => {
+    mockLogs([
+      makeEntry({ agent: "triage", text: "planning output" }),
+      makeEntry({ agent: "executor", text: "executor output" }),
+      makeEntry({ agent: "reviewer", text: "reviewer output" }),
+      makeEntry({ agent: "merger", text: "merger output" }),
+    ]);
+
+    render(
+      <TaskChatTab
+        task={makeTask({
+          planningModelProvider: "google",
+          planningModelId: "gemini-pro",
+          modelProvider: "openai",
+          modelId: "gpt-4o",
+          validatorModelProvider: "anthropic",
+          validatorModelId: "claude-sonnet-4-5",
+        })}
+        active
+        addToast={vi.fn()}
+      />,
+    );
+
+    expect(document.querySelector(".task-chat-provider-icon [data-provider='google']")).toBeTruthy();
+    expect(document.querySelector(".task-chat-provider-icon [data-provider='openai']")).toBeTruthy();
+    expect(document.querySelectorAll(".task-chat-provider-icon [data-provider='anthropic']")).toHaveLength(2);
+  });
+
+  it("renders provider icons for task chat roles from runtime model markers", () => {
+    mockLogs([
+      makeEntry({ agent: "triage", text: "Triage using model: google/gemini-pro" }),
+      makeEntry({ agent: "executor", text: "Executor using model: openai/gpt-4o" }),
+      makeEntry({ agent: "reviewer", text: "Reviewer using model: anthropic/claude-sonnet-4-5" }),
+    ]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    expect(document.querySelector(".task-chat-provider-icon [data-provider='google']")).toBeTruthy();
+    expect(document.querySelector(".task-chat-provider-icon [data-provider='openai']")).toBeTruthy();
+    expect(document.querySelector(".task-chat-provider-icon [data-provider='anthropic']")).toBeTruthy();
+  });
+
+  it("renders provider icons for task chat roles from effective default models", () => {
+    mockLogs([
+      makeEntry({ agent: "executor", text: "executor output without model marker" }),
+    ]);
+
+    render(
+      <TaskChatTab
+        task={makeTask()}
+        active
+        addToast={vi.fn()}
+        effectiveModels={{ executor: { provider: "openai-codex", modelId: "gpt-5.5" } }}
+      />,
+    );
+
+    expect(document.querySelector(".task-chat-provider-icon [data-provider='openai-codex']")).toBeTruthy();
+    expect(screen.queryByLabelText("Executor: model provider unknown")).not.toBeInTheDocument();
   });
 
   it("groups consecutive entries by agent role", () => {
@@ -549,6 +608,43 @@ describe("TaskChatTab", () => {
   });
 
   it.each([
+    ["inline planning", false, "planning"],
+    ["expanded planning", true, "planning"],
+    ["inline cleared status", false, null],
+    ["expanded cleared status", true, null],
+  ] as const)("renders active planning guidance in the %s task chat surface", (_label, expanded, status) => {
+    render(
+      <TaskChatTab
+        task={makeTask({ column: "triage", status, assignedAgentId: undefined, checkedOutBy: undefined })}
+        active
+        expanded={expanded}
+        onToggleExpanded={expanded ? vi.fn() : undefined}
+        addToast={vi.fn()}
+        sessionLive={false}
+      />,
+    );
+
+    expectActiveSessionCopy();
+  });
+
+  it.each([
+    ["empty", [], false, makeTask({ column: "triage", status: "planning", assignedAgentId: undefined, checkedOutBy: undefined })],
+    ["populated", [makeEntry({ agent: "triage", text: "Planner is drafting the spec" })], false, makeTask({
+      column: "triage",
+      status: "planning",
+      assignedAgentId: undefined,
+      checkedOutBy: undefined,
+      steeringComments: [makeSteeringComment({ id: "planning-populated-user", text: "Earlier planning guidance" })],
+    })],
+    ["loading", [], true, makeTask({ column: "triage", status: null, assignedAgentId: undefined, checkedOutBy: undefined })],
+  ] as const)("keeps planning-session guidance active with an %s transcript", (_label, entries, loading, task) => {
+    mockLogs([...entries], loading);
+    render(<TaskChatTab task={task} active addToast={vi.fn()} sessionLive={false} />);
+
+    expectActiveSessionCopy();
+  });
+
+  it.each([
     ["empty", [], makeTask({ column: "todo", assignedAgentId: undefined, checkedOutBy: undefined, status: undefined })],
     ["populated", [makeEntry({ agent: "executor", text: "Earlier agent output" })], makeTask({
       column: "todo",
@@ -635,7 +731,7 @@ describe("TaskChatTab", () => {
 
     expect(toolGroup).toHaveAttribute("open");
     const invocation = screen.getByTestId("task-chat-tool-invocation");
-    const kicker = screen.getByText("Tool call → result");
+    const kicker = screen.getByText("Tool call → Result");
     expect(invocation).toHaveClass("task-chat-tool-entry", "task-chat-tool-invocation");
     expect(kicker).toHaveClass("task-chat-entry-kicker");
     expect(kicker).toBeVisible();
@@ -692,7 +788,7 @@ describe("TaskChatTab", () => {
 
     await user.click(within(summary as HTMLElement).getByText("1 tool call"));
 
-    expect(screen.getByText("Tool call → error")).toBeVisible();
+    expect(screen.getByText("Tool call → Error")).toBeVisible();
     expect(screen.getByText("Error")).toBeVisible();
     expect(screen.getByText("stderr")).toBeVisible();
   });
@@ -1953,10 +2049,11 @@ describe("TaskChatTab", () => {
   });
 
   it.each([
-    ["in-progress task", makeTask({ column: "in-progress", assignedAgentId: "agent-1", status: "queued" }), true],
+    ["in-progress task", makeTask({ column: "in-progress", assignedAgentId: "agent-1", status: undefined }), true],
+    ["queued in-progress task", makeTask({ column: "in-progress", assignedAgentId: "agent-1", status: "queued" }), false],
     ["in-review task", makeTask({ column: "in-review", assignedAgentId: "agent-1", status: "reviewing" }), true],
     ["todo task", makeTask({ column: "todo", assignedAgentId: "agent-1", status: undefined }), false],
-    ["triage task", makeTask({ column: "triage", assignedAgentId: "agent-1", status: undefined }), false],
+    ["triage task", makeTask({ column: "triage", assignedAgentId: "agent-1", status: undefined }), true],
     ["done task", makeTask({ column: "done", assignedAgentId: "agent-1", status: undefined }), false],
     ["archived task", makeTask({ column: "archived", assignedAgentId: "agent-1", status: undefined }), false],
   ])("keeps the composer sendable for %s column", (_label, task, showsActiveCopy) => {
@@ -1974,6 +2071,9 @@ describe("TaskChatTab", () => {
 
   it.each([
     ["in-progress task without an assigned or checked-out agent", makeTask({ column: "in-progress", status: "queued", assignedAgentId: undefined, checkedOutBy: undefined })],
+    ["triage task waiting in the queue", makeTask({ column: "triage", status: "queued", assignedAgentId: undefined, checkedOutBy: undefined })],
+    ["paused triage task", makeTask({ column: "triage", status: "planning", paused: true, assignedAgentId: undefined, checkedOutBy: undefined })],
+    ["user-paused triage task", makeTask({ column: "triage", status: "planning", userPaused: true, assignedAgentId: undefined, checkedOutBy: undefined })],
     ["paused in-progress task", makeTask({ column: "in-progress", status: "queued", paused: true })],
     ["user-paused in-progress task", makeTask({ column: "in-progress", status: "queued", userPaused: true })],
     // Paused early-return must win over the ephemeral executionImpliesActiveAgent path:
@@ -2033,10 +2133,10 @@ describe("TaskChatTab", () => {
     expectComposerSendableAfterDraft();
   });
 
-  it.each(["paused", "awaiting-user-input", "awaiting-cli-approval", "awaiting-user-review", "failed", "needs-replan"])(
-    "keeps in-progress steering sendable with idle guidance for %s status",
+  it.each(["paused", "awaiting-user-input", "awaiting-cli-approval", "awaiting-user-review", "awaiting-approval", "awaiting-integration", "failed", "needs-replan"])(
+    "keeps active-column steering sendable with idle guidance for %s status",
     (status) => {
-      render(<TaskChatTab task={makeTask({ column: "in-progress", assignedAgentId: "agent-1", status })} active addToast={vi.fn()} />);
+      render(<TaskChatTab task={makeTask({ column: "triage", assignedAgentId: "agent-1", status })} active addToast={vi.fn()} />);
 
       expectIdleSessionHint();
       expectComposerSendableAfterDraft();

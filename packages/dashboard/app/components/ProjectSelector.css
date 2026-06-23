@@ -566,26 +566,22 @@
 
 /* === Project Content Wrapper (footer-safe layout) === */
 
-/**
- * Wrapper for project-view content (board, list, agents) that reserves space
- * for the fixed ExecutorStatusBar footer. This wrapper is the single source of
- * truth for the footer-safe content area — child views simply use height: 100%
- * to fill the available space without needing to know about the footer.
- *
- * When the footer is present, --with-footer reserves space via padding-bottom
- * equal to the footer height. Because the wrapper uses box-sizing: border-box,
- * children with height: 100% resolve to the content area (wrapper height minus
- * padding), which is exactly the safe zone above the fixed footer.
- *
- * On mobile the token is overridden to 32px to match the shorter footer.
- */
 .dashboard-project-shell {
+  /*
+  FNXC:DashboardFooterLayout 2026-06-21-10:30:
+  Keep the desktop footer-height token on the project shell for sibling consumers such as the left sidebar, which cannot inherit custom properties from project-content itself.
+  */
   --executor-footer-height: 36px;
   display: flex;
   flex: 1;
   min-height: 0;
   min-width: 0;
   width: 100%;
+  /*
+  FNXC:Navigation 2026-06-22-00:10:
+  Anchor for the right dock, which is absolutely positioned so it overlays the page content instead of shrinking it.
+  */
+  position: relative;
 }
 
 .dashboard-project-shell--with-sidebar {
@@ -602,7 +598,25 @@
   overflow: hidden;
 }
 
+/**
+ * Wrapper for project-view content (board, list, agents) that reserves space
+ * for the fixed ExecutorStatusBar footer. This wrapper is the single source of
+ * truth for the footer-safe content area — child views simply use height: 100%
+ * to fill the available space without needing to know about the footer.
+ *
+ * When the footer is present, --with-footer reserves space via padding-bottom
+ * equal to the footer height. Because the wrapper uses box-sizing: border-box,
+ * children with height: 100% resolve to the content area (wrapper height minus
+ * padding), which is exactly the safe zone above the fixed footer.
+ *
+ * On mobile the token is overridden to match the shorter touch-safe footer.
+ */
 .project-content--with-footer {
+  /*
+  FNXC:DashboardFooterLayout 2026-06-21-10:30:
+  The desktop footer wrapper must co-locate --executor-footer-height: 36px with its padding-bottom consumer so the footer-safe contract and CSS regression tests stay in sync.
+  */
+  --executor-footer-height: 36px;
   padding-bottom: var(--executor-footer-height);
 }
 
@@ -612,6 +626,14 @@
     flex: 1;
     min-height: 0;
     min-width: 0;
+  }
+
+  .project-content--with-footer {
+    /*
+    FNXC:DashboardFooterLayout 2026-06-21-10:30:
+    ProjectSelector.css loads after ExecutorStatusBar.css in concatenated CSS fixtures, so repeat the mobile footer-height override here to preserve the touch-safe footer reservation when the desktop wrapper token is co-located with its consumer.
+    */
+    --executor-footer-height: calc(var(--space-lg) * 2 + var(--space-xs));
   }
 
   /* Hide project selector on mobile (belt-and-suspenders with conditional rendering) */

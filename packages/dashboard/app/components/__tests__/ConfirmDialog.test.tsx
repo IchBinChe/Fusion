@@ -65,7 +65,7 @@ describe("ConfirmDialog", () => {
 
   it("calls onCancel when overlay clicked", () => {
     const onCancel = vi.fn();
-    const { container } = render(
+    render(
       <ConfirmDialog
         isOpen={true}
         options={{ title: "Discard", message: "Discard changes?" }}
@@ -74,7 +74,8 @@ describe("ConfirmDialog", () => {
       />,
     );
 
-    const overlay = container.querySelector(".modal-overlay");
+    // FNXC: ConfirmDialog portals to document.body, so query from document (not the render container).
+    const overlay = document.querySelector(".modal-overlay");
     expect(overlay).toBeTruthy();
     fireEvent.click(overlay as Element);
     expect(onCancel).toHaveBeenCalledTimes(1);
@@ -110,7 +111,7 @@ describe("ConfirmDialog", () => {
   });
 
   it("uses compact mobile override classes on overlay and dialog surface", () => {
-    const { container } = render(
+    render(
       <ConfirmDialog
         isOpen={true}
         options={{ title: "Discard", message: "Discard changes?" }}
@@ -119,8 +120,9 @@ describe("ConfirmDialog", () => {
       />,
     );
 
-    expect(container.querySelector(".confirm-dialog-overlay")).toBeTruthy();
-    expect(container.querySelector(".confirm-dialog.modal")).toBeTruthy();
+    // FNXC: portaled to document.body — query from document.
+    expect(document.querySelector(".confirm-dialog-overlay")).toBeTruthy();
+    expect(document.querySelector(".confirm-dialog.modal")).toBeTruthy();
   });
 
   it("does not render checkbox when checkboxLabel is omitted", () => {

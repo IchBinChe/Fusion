@@ -6,6 +6,9 @@ import { BUILTIN_WORKFLOW_SETTINGS } from "./builtin-workflow-settings.js";
  * FNXC:Workflows 2026-06-20-00:25:
  * The lead-generation built-in must be a first-class v2 workflow with its own business pipeline columns, lead-specific task fields, and inline per-stage prompts instead of coding seams.
  * The custom non-default column ids make this workflow graph-executor-oriented at runtime while still compiling its linear prompt/gate spine for legacy step materialization.
+ *
+ * FNXC:Workflows 2026-06-21-12:00:
+ * FN-6906 expands each lead-generation stage prompt with explicit inputs, output structure, and quality bars so non-coding agents produce reviewable business artifacts. Enrichment and outreach deliverables must be persisted with fn_task_document_write as the guaranteed path and can additionally use fn_artifact_register when that previewable-artifact tool is available.
  */
 const RAW_BUILTIN_LEAD_GENERATION_WORKFLOW_IR: WorkflowIr = {
   version: "v2",
@@ -76,7 +79,7 @@ const RAW_BUILTIN_LEAD_GENERATION_WORKFLOW_IR: WorkflowIr = {
         name: "Source prospects",
         executor: "model",
         prompt:
-          "Research and identify promising prospects for this lead-generation task. Capture target companies, likely buyer personas, trigger events, and the evidence behind each prospect so downstream qualification can judge fit.",
+          "Research and identify promising prospects for this lead-generation task. Use the task description, target market clues, existing lead fields (company, contactName, contactEmail, leadSource, leadScore, leadStatus), and any supplied ICP or territory constraints. Structure the output with: 1) sourcing assumptions and leadSource recommendation, 2) prioritized prospect/company list, 3) likely buyer persona or contact gaps, 4) trigger events or pain evidence, 5) source links or evidence notes, and 6) risks or missing data for qualification. Good sourcing is specific, traceable, and relevant to the ideal customer; avoid generic company lists, unsupported prospect claims, and invented contact details.",
       },
     },
     {
@@ -87,7 +90,7 @@ const RAW_BUILTIN_LEAD_GENERATION_WORKFLOW_IR: WorkflowIr = {
         name: "Qualify lead",
         executor: "model",
         prompt:
-          "Evaluate each sourced prospect against the ideal customer profile. Score company fit, pain urgency, budget or buying signals, and disqualifying risks; update lead score and recommend qualified or lost status with concise rationale.",
+          "Evaluate each sourced prospect or lead against the ideal customer profile. Use the sourcing output, task description, and current lead fields (company, contactName, contactEmail, leadSource, leadScore, leadStatus) to score fit. Structure the output with: 1) company-fit rationale, 2) pain urgency and trigger strength, 3) budget, authority, and buying-signal evidence, 4) disqualifying risks, 5) recommended leadScore with scoring rationale, and 6) recommended leadStatus such as qualified or lost. Good qualification is evidence-based and conservative: continue plausible customer opportunities, but clearly mark weak-fit prospects, missing data, and assumptions rather than overstating certainty.",
       },
     },
     {
@@ -98,7 +101,7 @@ const RAW_BUILTIN_LEAD_GENERATION_WORKFLOW_IR: WorkflowIr = {
         name: "Qualification go / no-go",
         gateMode: "advisory",
         prompt:
-          "Advisory check: decide whether this lead should continue to enrichment. Continue for plausible fit, but record any concerns, missing data, or reasons the lead may be low priority.",
+          "Advisory check: decide whether this lead or prospect should continue to enrichment. Use the qualification output, task description, and lead fields (company, contactName, contactEmail, leadSource, leadScore, leadStatus). Structure the advisory result with: 1) go/no-go recommendation, 2) evidence supporting continued enrichment, 3) concerns or missing customer data, 4) suggested leadStatus/leadScore adjustments, and 5) next-best action if the prospect is low priority. Good gate feedback is concise, fair, and useful for a human sales operator; continue plausible-fit companies while documenting risks instead of silently dropping uncertain leads.",
       },
     },
     {
@@ -109,7 +112,7 @@ const RAW_BUILTIN_LEAD_GENERATION_WORKFLOW_IR: WorkflowIr = {
         name: "Enrich lead",
         executor: "model",
         prompt:
-          "Enrich the qualified lead with company context and contact data. Add verified company details, relevant news or initiatives, likely stakeholders, contact name, contact email or profile URL, and personalization hooks for outreach.",
+          "Enrich the qualified lead with company context and contact data. Use the task description, sourcing and qualification outputs, and declared lead fields (company, contactName, contactEmail, leadSource, leadScore, leadStatus) as the source of truth for what must be filled or corrected. Structure the enrichment with: 1) verified company summary, 2) relevant news, initiatives, hiring, funding, or technology signals, 3) likely stakeholders and selected contactName/contactEmail or profile URL with confidence notes, 4) personalization hooks for outreach, 5) updated lead field recommendations, and 6) source/evidence links. Good enrichment is verifiable, useful for outreach, and honest about confidence; do not invent emails or private data. Persist the enrichment deliverable as a task document using fn_task_document_write with key \"lead-enrichment\" so the human can review it. If an artifact-registry tool (fn_artifact_register) is available, also register the deliverable as a previewable artifact.",
       },
     },
     {
@@ -120,7 +123,7 @@ const RAW_BUILTIN_LEAD_GENERATION_WORKFLOW_IR: WorkflowIr = {
         name: "Draft and send outreach",
         executor: "model",
         prompt:
-          "Draft concise personalized outreach for the enriched lead. Reference the strongest trigger or pain evidence, state the proposed value clearly, choose a low-friction call to action, and record the sent or ready-to-send message plus follow-up timing.",
+          "Draft concise personalized outreach for the enriched lead or prospect. Use the task description, the lead-enrichment task document when present, enrichment output, and declared lead fields (company, contactName, contactEmail, leadSource, leadScore, leadStatus). Structure the deliverable with: 1) outreach strategy and persona assumption, 2) ready-to-send initial message with subject line when appropriate, 3) personalization rationale tied to the strongest trigger or customer pain evidence, 4) low-friction call to action, 5) follow-up timing and alternate follow-up copy, and 6) any compliance or do-not-send caveats. Good outreach is brief, specific, respectful, value-led, and truthful; avoid spammy urgency, unsupported claims, and over-personalization from weak evidence. Persist the outreach draft as a task document using fn_task_document_write with key \"outreach-draft\" so the human can review it. If an artifact-registry tool (fn_artifact_register) is available, also register the deliverable as a previewable artifact.",
       },
     },
     { id: "end", kind: "end", column: "converted" },

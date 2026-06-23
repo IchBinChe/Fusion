@@ -20,6 +20,19 @@ import {
 const onPosix = process.platform !== "win32";
 const itPosix = onPosix ? it : it.skip;
 
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * Tests for runVerificationCommand - the core verification execution logic.
  * These tests validate basic command execution, output capture, and error handling.
@@ -393,6 +406,11 @@ describe("runVerificationCommand", { timeout: 30000 }, () => {
       const leakedPid = Number.parseInt(result.stdout.trim(), 10);
       expect(Number.isFinite(leakedPid)).toBe(true);
       expect(result.timedOut).toBe(false);
+
+      for (let i = 0; i < 15 && isProcessAlive(leakedPid); i++) {
+        await sleep(100);
+      }
+      expect(isProcessAlive(leakedPid)).toBe(false);
     });
 
     it("escalates non-timeout process-group reaping with fake timers", () => {

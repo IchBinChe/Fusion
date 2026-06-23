@@ -107,8 +107,10 @@ describe("CompoundEngineeringView theme tokens", () => {
     const radiusToken = /^(?:var\(--radius(?:-[^)]+)?\)|50%)$/;
 
     const tokenizedDeclarations = [
-      [".ce-view", "gap", spacingToken],
-      [".ce-view", "padding", spacingToken],
+      // Spacing moved onto the scrolling .ce-view-body when the shared ViewHeader
+      // took over the root header row (FNXC:CompoundEngineeringUI 2026-06-22-12:00).
+      [".ce-view-body", "gap", spacingToken],
+      [".ce-view-body", "padding", spacingToken],
       [".ce-group", "gap", spacingToken],
       [".ce-group", "padding", spacingToken],
       [".ce-group", "border-radius", radiusToken],

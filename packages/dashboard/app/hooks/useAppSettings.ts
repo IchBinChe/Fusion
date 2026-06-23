@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchConfig, fetchSettings, updateSettings, updateGlobalSettings } from "../api";
 import { setAutoReloadEnabled } from "../versionCheck";
 
+export type QuickChatButtonMode = "floating" | "footer" | "off";
+
 /**
  * Settings state and actions consumed by the dashboard App shell.
  */
@@ -17,6 +19,7 @@ export interface UseAppSettingsResult {
   staleHighFanoutBlockerAgeThresholdMs: number;
   capacityRiskBannerEnabled: boolean;
   capacityRiskTodoThreshold: number;
+  quickChatButtonMode: QuickChatButtonMode;
   showQuickChatFAB: boolean;
   maxTotalRetriesBeforeFail: number;
   prAuthAvailable: boolean;
@@ -32,6 +35,7 @@ export interface UseAppSettingsResult {
   toggleGlobalPause: () => Promise<void>;
   toggleEnginePause: () => Promise<void>;
   toggleShowQuickChatFAB: () => Promise<void>;
+  setQuickChatButtonModeImmediate: (mode: QuickChatButtonMode) => void;
   toggleAutoReloadOnVersionChange: () => Promise<void>;
   /** Re-fetches settings from the backend to pick up changes made externally (e.g., by SettingsModal). */
   refresh: () => Promise<void>;
@@ -52,16 +56,17 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
   const [staleHighFanoutBlockerAgeThresholdMs, setStaleHighFanoutBlockerAgeThresholdMs] = useState(2 * 60 * 60 * 1000);
   const [capacityRiskBannerEnabled, setCapacityRiskBannerEnabled] = useState(false);
   const [capacityRiskTodoThreshold, setCapacityRiskTodoThreshold] = useState(20);
+  const [quickChatButtonMode, setQuickChatButtonMode] = useState<QuickChatButtonMode>("off");
   const [showQuickChatFAB, setShowQuickChatFAB] = useState(false);
   const [maxTotalRetriesBeforeFail, setMaxTotalRetriesBeforeFail] = useState(25);
   const [prAuthAvailable, setPrAuthAvailable] = useState(false);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [experimentalFeatures, setExperimentalFeatures] = useState<Record<string, boolean>>({});
-  const [insightsEnabled, setInsightsEnabled] = useState(false);
-  const [memoryEnabled, setMemoryEnabled] = useState(false);
+  const [insightsEnabled, setInsightsEnabled] = useState(true);
+  const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [devServerEnabled, setDevServerEnabled] = useState(false);
-  const [todosEnabled, setTodosEnabled] = useState(false);
-  const [goalsEnabled, setGoalsEnabled] = useState(false);
+  const [todosEnabled, setTodosEnabled] = useState(true);
+  const [goalsEnabled, setGoalsEnabled] = useState(true);
   const [autoReloadOnVersionChange, setAutoReloadOnVersionChangeState] = useState(true);
   const autoMergeRef = useRef(autoMerge);
 
@@ -94,17 +99,28 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
       setStaleHighFanoutBlockerAgeThresholdMs(
         settings.staleHighFanoutBlockerAgeThresholdMs ?? 2 * 60 * 60 * 1000,
       );
-      setShowQuickChatFAB(settings.showQuickChatFAB === true);
+      const nextQuickChatButtonMode: QuickChatButtonMode =
+        settings.quickChatButtonMode === "floating" || settings.quickChatButtonMode === "footer" || settings.quickChatButtonMode === "off"
+          ? settings.quickChatButtonMode
+          : settings.showQuickChatFAB === true
+            ? "floating"
+            : "off";
+      setQuickChatButtonMode(nextQuickChatButtonMode);
+      setShowQuickChatFAB(nextQuickChatButtonMode === "floating");
       setMaxTotalRetriesBeforeFail(settings.maxTotalRetriesBeforeFail ?? 25);
       setCapacityRiskBannerEnabled(settings.capacityRiskBannerEnabled === true);
       setCapacityRiskTodoThreshold(settings.capacityRiskTodoThreshold ?? 20);
       setExperimentalFeatures(settings.experimentalFeatures ?? {});
       const features = settings.experimentalFeatures ?? {};
-      setInsightsEnabled(features.insights === true);
-      setMemoryEnabled(features.memoryView === true);
+      /*
+      FNXC:DefaultNavigation 2026-06-23-01:24:
+      Insights, Memory, Todo, and Goals graduated from experimental navigation. Keep them enabled regardless of missing or stale false experimental flags so upgrades keep the sidebar/header surfaces visible.
+      */
+      setInsightsEnabled(true);
+      setMemoryEnabled(true);
       setDevServerEnabled(features.devServerView === true || features.devServer === true);
-      setTodosEnabled(features.todoView === true);
-      setGoalsEnabled(features.goalsView === true);
+      setTodosEnabled(true);
+      setGoalsEnabled(true);
       // Sync the module-level auto-reload guard with the persisted setting
       const autoReload = settings.autoReloadOnVersionChange !== false;
       setAutoReloadOnVersionChangeState(autoReload);
@@ -117,11 +133,11 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
   useEffect(() => {
     setSettingsLoaded(false);
     setExperimentalFeatures({});
-    setInsightsEnabled(false);
-    setMemoryEnabled(false);
+    setInsightsEnabled(true);
+    setMemoryEnabled(true);
     setDevServerEnabled(false);
-    setTodosEnabled(false);
-    setGoalsEnabled(false);
+    setTodosEnabled(true);
+    setGoalsEnabled(true);
     void refresh();
   }, [refresh]);
 
@@ -174,13 +190,24 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
   const toggleShowQuickChatFAB = useCallback(async () => {
     const next = !showQuickChatFAB;
     setShowQuickChatFAB(next);
+    setQuickChatButtonMode(next ? "floating" : "off");
 
     try {
-      await updateSettings({ showQuickChatFAB: next }, projectId);
+      await updateSettings({ quickChatButtonMode: next ? "floating" : "off", showQuickChatFAB: next }, projectId);
     } catch {
       setShowQuickChatFAB(!next);
+      setQuickChatButtonMode(!next ? "floating" : "off");
     }
   }, [showQuickChatFAB, projectId]);
+
+  const setQuickChatButtonModeImmediate = useCallback((mode: QuickChatButtonMode) => {
+    /*
+    FNXC:QuickChat 2026-06-22-18:55:
+    The Quick Chat launcher setting must move the visible launcher immediately between floating FAB, footer button, and off while Settings is still open. Persistence still flows through SettingsModal save; this mirrors the pending selection in the app shell.
+    */
+    setQuickChatButtonMode(mode);
+    setShowQuickChatFAB(mode === "floating");
+  }, []);
 
   const toggleAutoReloadOnVersionChange = useCallback(async () => {
     const next = !autoReloadOnVersionChange;
@@ -207,6 +234,7 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
     staleHighFanoutBlockerAgeThresholdMs,
     capacityRiskBannerEnabled,
     capacityRiskTodoThreshold,
+    quickChatButtonMode,
     showQuickChatFAB,
     maxTotalRetriesBeforeFail,
     prAuthAvailable,
@@ -222,6 +250,7 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
     toggleGlobalPause,
     toggleEnginePause,
     toggleShowQuickChatFAB,
+    setQuickChatButtonModeImmediate,
     toggleAutoReloadOnVersionChange,
     refresh,
   };

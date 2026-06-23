@@ -65,6 +65,24 @@ function createDeferred<T>() {
 }
 
 describe("TaskDetailModal summarize title action", () => {
+  it("orders board detail header actions as edit, expand, then Back to board", () => {
+    const onBackToBoard = vi.fn();
+    const onPopOut = vi.fn();
+    renderSummarizeTitleModal(
+      { column: "todo" as any },
+      { embedded: true, onBackToBoard, onPopOut },
+    );
+
+    const actions = document.querySelector(".modal-header-actions");
+    expect(actions).not.toBeNull();
+    const editButton = screen.getByRole("button", { name: "Edit task" });
+    const popOutButton = screen.getByTestId("task-detail-pop-out");
+    const backButton = screen.getByRole("button", { name: /back to board/i });
+
+    // FNXC:TaskDetail 2026-06-22-18:32: Board task-detail action order is edit, expand/pop-out, then Back to board pinned far right.
+    expect(Array.from(actions!.children)).toEqual([editButton, popOutButton, backButton]);
+  });
+
   it("renders when the task is editable and has a description", () => {
     renderSummarizeTitleModal({ column: "todo" as any });
 

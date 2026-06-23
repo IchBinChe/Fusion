@@ -325,7 +325,6 @@ function AppShellMobileHarness({ tasks }: { tasks: Task[] }) {
           onOpenScripts={vi.fn()}
           onToggleTerminal={vi.fn()}
           onOpenFiles={vi.fn()}
-          onOpenTodos={vi.fn()}
           onOpenGitHubImport={vi.fn()}
           onOpenPlanning={vi.fn()}
           onResumePlanning={vi.fn()}

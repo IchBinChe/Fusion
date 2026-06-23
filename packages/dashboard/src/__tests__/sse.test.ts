@@ -338,7 +338,7 @@ describe("createSSE client cleanup", () => {
 
     expect(getActiveSSEConnections()).toBe(baseline + 1);
 
-    vi.advanceTimersByTime(4_999);
+    vi.advanceTimersByTime(74_999);
     expect(connection.res.end).not.toHaveBeenCalled();
     expect(getActiveSSEConnections()).toBe(baseline + 1);
 
@@ -353,14 +353,14 @@ describe("createSSE client cleanup", () => {
     const baseline = getActiveSSEConnections();
     const connection = openSseConnection("client-five");
 
-    vi.advanceTimersByTime(4_000);
+    vi.advanceTimersByTime(30_000);
     expect(markSSEClientAlive("client-five")).toBe(1);
 
-    vi.advanceTimersByTime(4_000);
+    vi.advanceTimersByTime(74_999);
     expect(connection.res.end).not.toHaveBeenCalled();
     expect(getActiveSSEConnections()).toBe(baseline + 1);
 
-    vi.advanceTimersByTime(1_000);
+    vi.advanceTimersByTime(1);
     expect(connection.res.end).toHaveBeenCalledTimes(1);
     expect(getActiveSSEConnections()).toBe(baseline);
   });

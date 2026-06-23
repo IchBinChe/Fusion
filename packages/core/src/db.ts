@@ -162,7 +162,7 @@ export function isFts5CorruptionError(error: unknown): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 127;
+const SCHEMA_VERSION = 128;
 
 const TASKS_FTS_AUTOMERGE = 8;
 const TASKS_FTS_CRISISMERGE = 16;
@@ -681,6 +681,17 @@ CREATE TABLE IF NOT EXISTS workflow_settings (
   PRIMARY KEY (workflowId, projectId)
 );
 CREATE INDEX IF NOT EXISTS idx_workflow_settings_project ON workflow_settings(projectId);
+
+-- FNXC:CustomWorkflows 2026-06-21-19:07:
+-- Built-in workflows keep their graph structure read-only, but users need project-scoped prompt tuning. Store only per-node prompt text overrides here so reset-to-default is a key delete, not an IR mutation.
+CREATE TABLE IF NOT EXISTS workflow_prompt_overrides (
+  workflowId TEXT NOT NULL,
+  projectId TEXT NOT NULL,
+  overrides TEXT NOT NULL DEFAULT '{}',
+  updatedAt TEXT NOT NULL,
+  PRIMARY KEY (workflowId, projectId)
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_prompt_overrides_project ON workflow_prompt_overrides(projectId);
 
 -- Task documents (key-value store per task with revision tracking)
 CREATE TABLE IF NOT EXISTS task_documents (
@@ -5251,6 +5262,29 @@ export class Database {
           CREATE INDEX IF NOT EXISTS idxArtifactsAuthorId ON artifacts(authorId);
           CREATE INDEX IF NOT EXISTS idxArtifactsType ON artifacts(type);
           CREATE INDEX IF NOT EXISTS idxArtifactsCreatedAt ON artifacts(createdAt);
+        `);
+      });
+    }
+
+
+
+    // Migration 128: Built-in workflow prompt overrides.
+    // Mirrors workflow_settings: one project-scoped JSON map per workflow id, but
+    // values are nodeId → prompt overrides. Reset-to-default deletes keys; graph
+    // structure remains owned by the shipped/custom workflow IR.
+    // FNXC:CustomWorkflows 2026-06-21-19:07:
+    // Built-in prompt editing must be a separate per-project authority so users can tune prompts and reset them without lifting the built-in workflow read-only guard.
+    if (version < 128) {
+      this.applyMigration(128, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS workflow_prompt_overrides (
+            workflowId TEXT NOT NULL,
+            projectId TEXT NOT NULL,
+            overrides TEXT NOT NULL DEFAULT '{}',
+            updatedAt TEXT NOT NULL,
+            PRIMARY KEY (workflowId, projectId)
+          );
+          CREATE INDEX IF NOT EXISTS idx_workflow_prompt_overrides_project ON workflow_prompt_overrides(projectId);
         `);
       });
     }

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, type CSSProperties, type MouseEvent } from "react";
-import { Globe, Folder, RefreshCw, Star, HelpCircle } from "lucide-react";
+import { Globe, Folder, RefreshCw, Star, HelpCircle, Settings as SettingsIcon } from "lucide-react";
 import {
   getErrorMessage,
   normalizeMergeIntegrationWorktreeMode,
@@ -56,6 +56,7 @@ import { appendTokenQuery, OAUTH_RELOGIN_SUCCESS_EVENT } from "../auth";
 import { useConfirm } from "../hooks/useConfirm";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
+import { useEmbeddedPresentation, type ModalPresentation } from "../hooks/useEmbeddedPresentation";
 import { useNodes } from "../hooks/useNodes";
 import { useViewportMode } from "../hooks/useViewportMode";
 import { useWorktrunkInstallStatus } from "../hooks/useWorktrunkInstallStatus";
@@ -266,7 +267,6 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
  *  is treated as a legacy alias and must never render as a second row. */
 const KNOWN_EXPERIMENTAL_FEATURES: Record<string, string> = {
   insights: "Insights",
-  roadmap: "Roadmaps",
   memoryView: "Memory Editor",
   remoteAccess: "Remote Access",
   skillsView: "Skills View",
@@ -276,13 +276,53 @@ const KNOWN_EXPERIMENTAL_FEATURES: Record<string, string> = {
   researchView: "Research View",
   evalsView: "Evals View",
   goalsView: "Goals View",
+  /* FNXC:QuickAddSubtaskFlag 2026-06-21-00:00: The AI subtask-breakdown quick-add affordance is exposed only through this default-off experimental flag so missing settings keep every quick-add Subtask button hidden. */
+  subtaskBreakdown: "Subtask Breakdown",
   leftSidebarNav: "Left Sidebar Navigation",
   sandbox: "Sandbox (command isolation)",
   chatRooms: "Chat Rooms",
   agentOnboarding: "Planning-style Agent Onboarding",
-  workflowGraphExecutor: "Workflow Graph Engine (run custom workflows)",
   workflowInterpreterDualObserve: "Workflow Graph Engine — dual-observe parity (diagnostic)",
 };
+
+/*
+FNXC:SettingsExperimental 2026-06-22-17:55:
+Workflow rollout diagnostics remain supported in persisted settings and engine code, but they are no longer normal user-facing Experimental toggles. Hide dual-observe from the settings list so operators do not accidentally flip runtime diagnostic switches from the product UI.
+
+FNXC:SettingsExperimental 2026-06-22-18:00:
+workflowGraphExecutor and workflowColumns graduated from Experimental. They are intentionally absent from the known-label registry, but remain in the hidden registry so stale persisted values never render as resurrected unknown settings while runtime code ignores them.
+
+FNXC:SettingsExperimental 2026-06-22-18:50:
+The Roadmaps dashboard view and experiment were removed from the product surface. Hide stale persisted `roadmap` values so Settings does not expose a dead toggle.
+
+FNXC:SettingsExperimental 2026-06-22-18:00:
+Right Dock Panel is no longer experimental: keep honoring the dock as always-on in App, but hide any stale persisted `rightDock` setting from the Experimental list.
+
+FNXC:SettingsExperimental 2026-06-23-01:31:
+Chat Rooms, Goals, Memory, Insights, Skills, and Todo graduated from Experimental. Hide stale persisted flags so users cannot accidentally disable now-default dashboard surfaces during upgrades.
+*/
+const HIDDEN_EXPERIMENTAL_FEATURE_KEYS = new Set<string>([
+  "chatRooms",
+  "goalsView",
+  "insights",
+  "memoryView",
+  "roadmap",
+  "rightDock",
+  "skillsView",
+  "todoView",
+  "workflowColumns",
+  "workflowGraphExecutor",
+  "workflowInterpreterDualObserve",
+]);
+
+/*
+FNXC:Navigation 2026-06-21-00:00:
+The dashboard owns the left sidebar default-on rollout because the shared experimental-feature helper must keep default-off semantics for unrelated experiments. Keep this set local to Settings so toggle checked-state matches App's `leftSidebarNav !== false` derivation without changing core behavior.
+
+FNXC:Navigation 2026-06-22-18:00:
+Only Left Sidebar Navigation remains a default-on experimental toggle; right dock was promoted to always-on app chrome and is hidden from this settings surface.
+*/
+const DEFAULT_ON_EXPERIMENTAL_FEATURES = new Set<string>(["leftSidebarNav"]);
 
 const EXPERIMENTAL_FEATURE_LEGACY_ALIASES: Record<string, string> = {
   devServer: "devServerView",
@@ -291,15 +331,19 @@ const EXPERIMENTAL_FEATURE_LEGACY_ALIASES: Record<string, string> = {
 function getCanonicalExperimentalFeatureKey(key: string): string {
   return EXPERIMENTAL_FEATURE_LEGACY_ALIASES[key] ?? key;
 }
-
 function isExperimentalFeatureEnabled(features: Record<string, boolean>, key: string): boolean {
-  if (features[key] === true) {
+  if (features[key] === true) return true;
+  if (features[key] === false) return false;
+  if (Object.entries(EXPERIMENTAL_FEATURE_LEGACY_ALIASES).some(([legacyKey, canonicalKey]) => canonicalKey === key && features[legacyKey] === true)) return true;
+  return DEFAULT_ON_EXPERIMENTAL_FEATURES.has(key);
+}
+
+function isDashboardExperimentalFeatureEnabled(features: Record<string, boolean>, key: string): boolean {
+  const canonicalKey = getCanonicalExperimentalFeatureKey(key);
+  if (DEFAULT_ON_EXPERIMENTAL_FEATURES.has(canonicalKey) && features[canonicalKey] === undefined) {
     return true;
   }
-
-  return Object.entries(EXPERIMENTAL_FEATURE_LEGACY_ALIASES).some(
-    ([legacyKey, canonicalKey]) => canonicalKey === key && features[legacyKey] === true,
-  );
+  return isExperimentalFeatureEnabled(features, canonicalKey);
 }
 
 function normalizeExperimentalFeaturesForSave(features?: Record<string, boolean>): Record<string, boolean | null> {
@@ -347,8 +391,16 @@ interface SettingsModalProps {
   onColorThemeChange?: (theme: ColorTheme) => void;
   /** Current dashboard font scale percentage */
   dashboardFontScalePct?: number;
+  /** Current shadcn-custom color overrides */
+  shadcnCustomColors?: Record<string, string>;
+  /** Resolved theme mode for shadcn-custom defaults */
+  resolvedThemeMode?: "dark" | "light";
   /** Called when dashboard font scale changes */
   onDashboardFontScaleChange?: (scalePct: number) => void;
+  /** Called when shadcn-custom color overrides change */
+  onShadcnCustomColorsChange?: (colors: Record<string, string>) => void;
+  /** Mirrors pending Quick Chat launcher changes into the app shell immediately. */
+  onQuickChatButtonModeChange?: (mode: "floating" | "footer" | "off") => void;
   /** Optional callback when user wants to reopen the onboarding guide */
   onReopenOnboarding?: () => void;
   /** Optional callback to open approvals/mailbox view. */
@@ -359,6 +411,11 @@ interface SettingsModalProps {
    * redirect stubs (U9 / KTD-5, R10). Optional so the modal renders standalone.
    */
   onOpenWorkflowSettings?: () => void;
+  /*
+  FNXC:Settings 2026-06-22-00:00:
+  Settings renders both as a dialog overlay (presentation="modal", default) and as an embedded main-content view (presentation="embedded"). Embedded mode drops the fixed overlay backdrop and modal close button, fills the host pane, and disables modal-only behaviors (scroll lock, escape-to-close, resize-persist, overlay click-dismiss). The modal path is kept byte-identical for non-navigation callers (e.g. mobile/right-dock).
+  */
+  presentation?: ModalPresentation;
 }
 
 /** Adapter descriptor served by GET /api/cli-agents (U15). */
@@ -594,21 +651,28 @@ export function SettingsModal({
   projectId,
   initialSection,
   themeMode = "dark",
-  colorTheme = "default",
+  colorTheme = "ocean",
   onThemeModeChange,
   onColorThemeChange,
   dashboardFontScalePct = 100,
+  shadcnCustomColors = {},
+  resolvedThemeMode,
   onDashboardFontScaleChange,
+  onShadcnCustomColorsChange,
+  onQuickChatButtonModeChange,
   onReopenOnboarding,
   onOpenApprovals,
   onOpenWorkflowSettings,
+  presentation = "modal",
 }: SettingsModalProps) {
+  const { isEmbedded, scrollLockEnabled, resizePersistEnabled, escapeEnabled, overlayDismissEnabled } = useEmbeddedPresentation(presentation);
   const { t } = useTranslation("app");
   const { confirm } = useConfirm();
   const worktrunkInstall = useWorktrunkInstallStatus(projectId);
   const worktrunkInstallVerified = worktrunkInstall.status === "installed";
   const viewportMode = useViewportMode();
-  useMobileScrollLock(true);
+  // Modal-only: lock background scroll on mobile. Embedded view owns its own scroll region.
+  useMobileScrollLock(scrollLockEnabled);
   const { keyboardOverlap, viewportHeight, viewportOffsetTop, keyboardOpen } = useMobileKeyboard({
     enabled: viewportMode === "mobile",
   });
@@ -625,7 +689,8 @@ export function SettingsModal({
   const registerWorkflowLaneSaver = useCallback((saver: SectionSaveHandler | null) => {
     workflowLaneSaverRef.current = saver;
   }, []);
-  useModalResizePersist(modalRef, true, "fusion:settings-modal-size");
+  // Modal-only: persist user-resized dialog dimensions. Embedded view fills its host and is not resizable.
+  useModalResizePersist(modalRef, resizePersistEnabled, "fusion:settings-modal-size");
   const sessionBannersHidden = useSessionBannersHidden();
   const [form, setForm] = useState<SettingsFormState>({
     maxConcurrent: 2,
@@ -851,6 +916,7 @@ export function SettingsModal({
   const initialGlobalMaxConcurrentRef = useRef<number | undefined>(4);
   const hasFetchedGlobalConcurrencyRef = useRef(false);
   const globalConcurrencyDirtyRef = useRef(false);
+  const [globalConcurrencyLoaded, setGlobalConcurrencyLoaded] = useState(false);
 
   // Import/Export state
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -940,9 +1006,11 @@ export function SettingsModal({
         }
         initialGlobalMaxConcurrentRef.current = state.globalMaxConcurrent;
         hasFetchedGlobalConcurrencyRef.current = true;
+        setGlobalConcurrencyLoaded(true);
       })
       .catch(() => {
         // Silently fail — global concurrency may not be available
+        setGlobalConcurrencyLoaded(true);
       });
 
     return () => {
@@ -1971,15 +2039,19 @@ export function SettingsModal({
     }
   }, [favoriteModels, favoriteProviders]);
 
+  // Modal-only: Escape dismisses the dialog. Embedded view is navigated away via the left sidebar, not Escape.
   useEffect(() => {
+    if (!escapeEnabled) return;
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [onClose]);
+  }, [onClose, escapeEnabled]);
 
-  const overlayDismissProps = useOverlayDismiss(onClose);
+  // Modal-only: backdrop click dismisses. Embedded view has no overlay backdrop.
+  const modalOverlayDismissProps = useOverlayDismiss(onClose);
+  const overlayDismissProps = overlayDismissEnabled ? modalOverlayDismissProps : {};
 
   /**
    * Lane status types:
@@ -2532,6 +2604,7 @@ export function SettingsModal({
             projectTrackingRepoOptions={projectTrackingRepoOptions}
             projectTrackingRepoLoading={projectTrackingRepoLoading}
             projectTrackingRepoError={projectTrackingRepoError}
+            onQuickChatButtonModeChange={onQuickChatButtonModeChange}
           />
         );
       case "global-general":
@@ -2558,6 +2631,8 @@ export function SettingsModal({
             favoriteModels={favoriteModels}
             onToggleFavorite={handleToggleFavorite}
             onToggleModelFavorite={handleToggleModelFavorite}
+            addToast={addToast}
+            projectId={projectId}
           />
         );
 
@@ -2604,9 +2679,12 @@ export function SettingsModal({
             themeMode={themeMode}
             colorTheme={colorTheme}
             dashboardFontScalePct={dashboardFontScalePct}
+            shadcnCustomColors={shadcnCustomColors}
+            resolvedThemeMode={resolvedThemeMode}
             onThemeModeChange={onThemeModeChange}
             onColorThemeChange={onColorThemeChange}
             onDashboardFontScaleChange={onDashboardFontScaleChange}
+            onShadcnCustomColorsChange={onShadcnCustomColorsChange}
             sessionBannersHidden={sessionBannersHidden}
             setSessionBannersHidden={setSessionBannersHidden}
           />
@@ -2618,6 +2696,7 @@ export function SettingsModal({
             form={form}
             setForm={setForm}
             globalMaxConcurrent={globalMaxConcurrent}
+            concurrencyLoading={activeSection === "scheduling" && !globalConcurrencyLoaded && !globalConcurrencyDirtyRef.current}
             onGlobalMaxConcurrentChange={(value) => {
               globalConcurrencyDirtyRef.current = true;
               setGlobalMaxConcurrent(value);
@@ -2749,7 +2828,8 @@ export function SettingsModal({
             knownFeatures={KNOWN_EXPERIMENTAL_FEATURES}
             legacyAliases={EXPERIMENTAL_FEATURE_LEGACY_ALIASES}
             getCanonicalKey={getCanonicalExperimentalFeatureKey}
-            isFeatureEnabled={isExperimentalFeatureEnabled}
+            isFeatureEnabled={isDashboardExperimentalFeatureEnabled}
+            hiddenFeatureKeys={HIDDEN_EXPERIMENTAL_FEATURE_KEYS}
           />
         );
       case "backups":
@@ -2863,12 +2943,31 @@ export function SettingsModal({
     }
   };
 
+  /*
+  FNXC:Settings 2026-06-22-00:00:
+  Embedded settings is a main-content destination, not a dialog. It drops the fixed `.modal-overlay` backdrop and the inner card chrome (modal-overlay/modal/settings-modal classes), and instead uses `settings-embedded right-dock-embedded-view` (host) + `settings-modal--embedded` (panel) to fill the pane flush like other embedded views (Planning, Command Center). The modal path stays byte-identical.
+  */
   return (
-    <div className="modal-overlay open settings-modal-overlay" {...overlayDismissProps} role="dialog" aria-modal="true">
-      <div className="modal modal-lg settings-modal" ref={modalRef} style={keyboardStyle}>
-        <div className="modal-header">
+    <div
+      className={isEmbedded ? "settings-embedded right-dock-embedded-view" : "modal-overlay open settings-modal-overlay"}
+      {...overlayDismissProps}
+      data-testid={isEmbedded ? "settings-view" : undefined}
+      role={isEmbedded ? "region" : "dialog"}
+      aria-label={isEmbedded ? t("settings.title", "Settings") : undefined}
+      aria-modal={isEmbedded ? undefined : "true"}
+    >
+      <div
+        className={isEmbedded ? "modal modal-lg settings-modal settings-modal--embedded" : "modal modal-lg settings-modal"}
+        ref={modalRef}
+        style={isEmbedded ? undefined : keyboardStyle}
+      >
+        <div className={isEmbedded ? "modal-header modal-header--embedded" : "modal-header"}>
+          {/* FNXC:Settings 2026-06-22-01:00: Embedded title gains a Settings icon (size 20, matching the sidebar nav and shared ViewHeader) so the embedded settings panel reads consistently with other main-content destinations; title is already 1.125rem. */}
           <div className="settings-modal-heading">
-            <h3>{t("settings.title", "Settings")}</h3>
+            <h3>
+              {isEmbedded && <SettingsIcon size={20} aria-hidden="true" />}
+              <span>{t("settings.title", "Settings")}</span>
+            </h3>
           </div>
           <div className="settings-header-actions">
             <a
@@ -2906,9 +3005,11 @@ export function SettingsModal({
               {t("settings.header.discord", "Discord")}
             </a>
           </div>
-          <button className="modal-close" onClick={onClose} aria-label={t("actions.close", "Close")}>
-            &times;
-          </button>
+          {!isEmbedded && (
+            <button className="modal-close" onClick={onClose} aria-label={t("actions.close", "Close")}>
+              &times;
+            </button>
+          )}
         </div>
         {loading ? (
           <div className="settings-empty-state settings-loading"><LoadingSpinner label={t("settings.loading", "Loading…")} /></div>
@@ -3041,9 +3142,12 @@ export function SettingsModal({
             </button>
           </div>
           <div className="modal-actions-right">
-            <button className="btn btn-sm" onClick={onClose}>
-              {t("settings.actions.cancel", "Cancel")}
-            </button>
+            {/* FNXC:Settings 2026-06-22-00:00: Cancel/close is a dialog affordance; the embedded main view is left via the sidebar, so it shows only Save. */}
+            {!isEmbedded && (
+              <button className="btn btn-sm" onClick={onClose}>
+                {t("settings.actions.cancel", "Cancel")}
+              </button>
+            )}
             <button className="btn btn-primary btn-sm" onClick={handleSave} disabled={loading || isSaving}>
               {t("settings.actions.save", "Save")}
             </button>
@@ -3237,4 +3341,12 @@ export function SettingsModal({
       )}
     </div>
   );
+}
+
+/*
+FNXC:Settings 2026-06-22-00:00:
+SettingsView is the embedded main-content presentation of SettingsModal. App.tsx lazy-imports this alias and renders it in renderMainContent() for taskView === "settings" with presentation defaulting to "embedded". It is a thin wrapper so the heavy SettingsModal body stays a single chunk and the modal path is unaffected.
+*/
+export function SettingsView(props: SettingsModalProps) {
+  return <SettingsModal presentation="embedded" {...props} />;
 }

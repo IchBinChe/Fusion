@@ -1160,7 +1160,7 @@ describe("InsightsView", () => {
       render(<InsightsView {...defaultProps} />);
 
       const toggle = screen.getByTestId("toggle-backlog-health");
-      expect(toggle).toHaveTextContent("Backlog Health (1)");
+      expect(toggle).toHaveTextContent("Backlog (1)");
       expect(toggle).toHaveAttribute("aria-pressed", "false");
       expect(screen.getByTestId("insights-category-quality")).toBeInTheDocument();
       expect(screen.getByTestId("insights-category-workflow")).toBeInTheDocument();
@@ -1280,7 +1280,7 @@ describe("InsightsView", () => {
       const item = screen.getByText("Archived Insight").closest("li");
       expect(item?.className).toContain("insight-item--archived");
       expect(screen.getByTestId("unarchive-INS-ARCH")).toBeTruthy();
-      expect(screen.getByTestId("toggle-archived-insights")).toHaveTextContent("Hide Archived");
+      expect(screen.getByTestId("toggle-archived-insights")).toHaveTextContent("Archived");
     });
   });
 
@@ -1367,7 +1367,7 @@ describe("InsightsView", () => {
 
       expect(css).toMatch(/@media[^{]*\(min-width:\s*769px\)\s*and\s*\(max-width:\s*1024px\)[^{]*\{[\s\S]*?\.insights-view\s*\{[^}]*inline-size:\s*100%;[^}]*min-inline-size:\s*0;[^}]*overflow:\s*hidden;[^}]*\}/);
       expect(css).toMatch(/@media[^{]*\(min-width:\s*769px\)\s*and\s*\(max-width:\s*1024px\)[^{]*\{[\s\S]*?\.insights-body\s*\{[^}]*flex-direction:\s*column;[^}]*inline-size:\s*100%;[^}]*min-width:\s*0;[^}]*min-inline-size:\s*0;[^}]*overflow:\s*hidden;[^}]*\}/);
-      expect(css).toMatch(/@media[^{]*\(min-width:\s*769px\)\s*and\s*\(max-width:\s*1024px\)[^{]*\{[\s\S]*?\.insights-sidebar\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*min-inline-size:\s*0;[^}]*border-right:\s*none;[^}]*border-bottom:\s*var\(--btn-border-width\)\s+solid\s+var\(--border\);[^}]*overflow-x:\s*auto;[^}]*overflow-y:\s*hidden;[^}]*\}/);
+      expect(css).toMatch(/@media[^{]*\(min-width:\s*769px\)\s*and\s*\(max-width:\s*1024px\)[^{]*\{[\s\S]*?\.insights-sidebar\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*min-inline-size:\s*0;[^}]*border-right:\s*none;[^}]*border-bottom:\s*var\(--chrome-divider-width,\s*1px\)\s+solid\s+var\(--insights-divider-color\);[^}]*overflow-x:\s*auto;[^}]*overflow-y:\s*hidden;[^}]*\}/);
       expect(css).toMatch(/@media[^{]*\(min-width:\s*769px\)\s*and\s*\(max-width:\s*1024px\)[^{]*\{[\s\S]*?\.insights-detail\s*\{[^}]*flex:\s*1\s+1\s+0;[^}]*min-width:\s*0;[^}]*min-inline-size:\s*0;[^}]*overflow-y:\s*auto;[^}]*\}/);
     });
   });

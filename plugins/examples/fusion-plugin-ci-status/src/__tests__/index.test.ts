@@ -63,15 +63,48 @@ function createMockResponse() {
   return { json, status };
 }
 
+const mockTask = {
+  id: "FN-001",
+  title: "Test Task",
+  description: "A test task",
+  column: "in-progress" as const,
+  dependencies: [],
+  steps: [],
+  currentStep: 0,
+  size: "M" as const,
+  reviewLevel: "full" as const,
+  createdAt: "2024-01-01T00:00:00.000Z",
+  updatedAt: "2024-01-01T00:00:00.000Z",
+};
+
+function getFetchMock(): ReturnType<typeof vi.fn> {
+  return globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+}
+
+async function drainDetachedPoll(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 // ── Test Suite ─────────────────────────────────────────────────────────────────
 
 describe("ci-status plugin", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    // FNXC:PluginTesting 2026-06-21-00:00: ci-status suite must mock global.fetch — postRefreshHandler and the onLoad poll call pollCIStatus(), and an unmocked real fetch to ci.example.com caused a load-sensitive POST /refresh timeout (FN-6714/FN-6898). Keep zero real-network calls; assert the mock catches both the route and timer-driven polls.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ statuses: [] }),
+      }),
+    );
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await plugin.hooks.onUnload?.({} as any);
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
     vi.useRealTimers();
   });
@@ -192,20 +225,6 @@ describe("ci-status plugin", () => {
   });
 
   describe("hooks.onTaskMoved", () => {
-    const mockTask = {
-      id: "FN-001",
-      title: "Test Task",
-      description: "A test task",
-      column: "in-progress" as const,
-      dependencies: [],
-      steps: [],
-      currentStep: 0,
-      size: "M" as const,
-      reviewLevel: "full" as const,
-      createdAt: "2024-01-01T00:00:00.000Z",
-      updatedAt: "2024-01-01T00:00:00.000Z",
-    };
-
     it("should track branch when task moves to in-progress", async () => {
       const ctx = createMockContext();
       await plugin.hooks.onTaskMoved?.(
@@ -292,19 +311,7 @@ describe("ci-status plugin", () => {
 
         // First add the branch via onTaskMoved
         await plugin.hooks.onTaskMoved?.(
-          {
-            id: "FN-001",
-            title: "Test Task",
-            description: "A test task",
-            column: "in-progress" as const,
-            dependencies: [],
-            steps: [],
-            currentStep: 0,
-            size: "M" as const,
-            reviewLevel: "full" as const,
-            createdAt: "2024-01-01T00:00:00.000Z",
-            updatedAt: "2024-01-01T00:00:00.000Z",
-          } as any,
+          mockTask as any,
           "todo",
           "in-progress",
           ctx as any,
@@ -343,20 +350,98 @@ describe("ci-status plugin", () => {
     });
 
     describe("POST /refresh", () => {
-      it("should trigger refresh and return branches", async () => {
+      it("should trigger refresh for tracked branches through the mocked fetch", async () => {
         const ctx = createMockContext();
         const req = createMockRequest({ method: "POST" });
-        const res = createMockResponse();
+        const fetchMock = getFetchMock();
+
+        await plugin.hooks.onTaskMoved?.(
+          mockTask as any,
+          "todo",
+          "in-progress",
+          ctx as any,
+        );
+        fetchMock.mockClear();
 
         const route = plugin.routes!.find(
           (r) => r.method === "POST" && r.path === "/refresh",
         )!;
 
         const result = await route.handler(req as any, ctx as any) as { refreshed?: boolean; branches?: unknown[] };
+        await drainDetachedPoll();
 
         expect(result).toHaveProperty("refreshed", true);
         expect(result).toHaveProperty("branches");
         expect(Array.isArray(result.branches)).toBe(true);
+        expect(vi.isMockFunction(globalThis.fetch)).toBe(true);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock).toHaveBeenCalledWith(
+          "https://ci.example.com/api/status",
+          expect.objectContaining({
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ branches: ["fusion/fn-001"] }),
+          }),
+        );
+      });
+
+      it("should return refreshed without fetch when no branches are tracked", async () => {
+        const ctx = createMockContext();
+        const req = createMockRequest({ method: "POST" });
+        const fetchMock = getFetchMock();
+
+        const route = plugin.routes!.find(
+          (r) => r.method === "POST" && r.path === "/refresh",
+        )!;
+
+        const result = await route.handler(req as any, ctx as any) as { refreshed?: boolean; branches?: unknown[] };
+        await drainDetachedPoll();
+
+        expect(result).toHaveProperty("refreshed", true);
+        expect(result).toHaveProperty("branches", []);
+        expect(vi.isMockFunction(globalThis.fetch)).toBe(true);
+        expect(fetchMock).not.toHaveBeenCalled();
+      });
+    });
+
+    describe("onLoad polling interval", () => {
+      it("should poll tracked branches through the mocked fetch when timers advance", async () => {
+        const ctx = createMockContext();
+        const fetchMock = getFetchMock();
+
+        await plugin.hooks.onTaskMoved?.(
+          mockTask as any,
+          "todo",
+          "in-progress",
+          ctx as any,
+        );
+        await plugin.hooks.onLoad?.(ctx as any);
+        fetchMock.mockClear();
+
+        await vi.advanceTimersByTimeAsync(60000);
+
+        expect(vi.isMockFunction(globalThis.fetch)).toBe(true);
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(fetchMock).toHaveBeenCalledWith(
+          "https://ci.example.com/api/status",
+          expect.objectContaining({
+            method: "POST",
+            body: JSON.stringify({ branches: ["fusion/fn-001"] }),
+          }),
+        );
+      });
+
+      it("should skip fetch on interval ticks when no branches are tracked", async () => {
+        const ctx = createMockContext();
+        const fetchMock = getFetchMock();
+
+        await plugin.hooks.onLoad?.(ctx as any);
+        fetchMock.mockClear();
+
+        await vi.advanceTimersByTimeAsync(60000);
+
+        expect(vi.isMockFunction(globalThis.fetch)).toBe(true);
+        expect(fetchMock).not.toHaveBeenCalled();
       });
     });
   });

@@ -473,6 +473,45 @@ describe("token-analytics", () => {
     expect(groups.get("mystery-model")?.cost).toEqual({ usd: null, unavailable: true, stale: false });
   });
 
+  it("applies pricing overrides while preserving baseline fallback", () => {
+    insertTask(db, {
+      id: "override-priced",
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      totalTokens: 2_000_000,
+      lastUsedAt: "2026-03-01T00:00:00.000Z",
+      modelProvider: "openai",
+      modelId: "gpt-4o",
+    });
+    insertTask(db, {
+      id: "baseline-priced",
+      inputTokens: 1_000_000,
+      outputTokens: 1_000_000,
+      totalTokens: 2_000_000,
+      lastUsedAt: "2026-03-02T00:00:00.000Z",
+      modelProvider: "anthropic",
+      modelId: "claude-opus-4-8",
+    });
+
+    const result = aggregateTokenAnalytics(db, {
+      groupBy: "model",
+      pricingOverrides: {
+        "openai:gpt-4o": {
+          inputPer1M: 1,
+          outputPer1M: 2,
+          cacheReadPer1M: 1,
+          cacheWritePer1M: 1,
+          source: "test override",
+        },
+      },
+    });
+
+    const groups = new Map(result.groups.map((group) => [group.key, group.cost]));
+    expect(groups.get("gpt-4o")?.usd).toBeCloseTo(3, 2);
+    expect(groups.get("claude-opus-4-8")?.usd).toBeCloseTo(30, 2);
+    expect(result.cost.usd).toBeCloseTo(33, 2);
+  });
+
   it("returns an empty series for an empty requested range", () => {
     insertTask(db, { id: "t1", inputTokens: 100, totalTokens: 100, lastUsedAt: "2026-03-01T00:00:00.000Z", modelId: "model-A" });
 

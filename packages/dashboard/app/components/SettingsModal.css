@@ -103,21 +103,105 @@
   resize: both;
 }
 
+/*
+FNXC:Settings 2026-06-22-00:00:
+Embedded settings is a main-content destination (taskView === "settings"), mirroring Planning/Command Center. The host (.settings-embedded.right-dock-embedded-view) fills the content pane and the inner panel (.settings-modal--embedded) sheds all dialog chrome — fixed dialog sizing, shadow, border, radius, resize grip — so the view sits flush on the project-content surface. Theme tokens only; no hardcoded colors.
+
+FNXC:Settings 2026-06-22-14:36:
+The Settings page should match other main-content views with no extra outer inset around the whole box. Keep breathing room inside each settings screen instead so controls never sit directly against the content edge.
+*/
+.settings-embedded.right-dock-embedded-view {
+  display: flex;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.settings-embedded .settings-modal--embedded {
+  flex: 1;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  resize: none;
+  box-shadow: none;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  position: static;
+}
+
+/*
+FNXC:Settings 2026-06-22-00:00:
+The embedded title reads like other embedded-view titles (Planning modal-header--embedded, Command Center cc-title): a plain heading with no tinted modal-header bar, no bottom divider, no close button, aligned to the content edge, at the shared 1.125rem embedded-title size. Header actions (Star/Discord) and footer remain so the full-width panel keeps its controls.
+*/
+/* FNXC:Settings 2026-06-23-04:45: The embedded Settings header now matches the canonical ViewHeader/other sidebar views exactly — same min-height, space-lg/space-xl padding, surface bg, no bottom divider, var(--todo) icon, 1.125rem/600 title, actions pinned right. */
+.settings-modal--embedded .modal-header--embedded {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-height: var(--view-header-min-height);
+  padding: var(--space-lg) var(--space-xl);
+  background: var(--surface);
+  border-bottom: none;
+  flex-shrink: 0;
+}
+
+.settings-modal--embedded .modal-header--embedded .settings-header-actions {
+  margin-left: auto;
+}
+
+.settings-modal--embedded .modal-header--embedded .settings-modal-heading h3 {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: normal;
+}
+
+.settings-modal--embedded .modal-header--embedded .settings-modal-heading svg {
+  color: var(--todo);
+  flex-shrink: 0;
+}
+
+/* Embedded footer actions sit flush on the content surface (no tinted modal bar).
+   FNXC:Settings 2026-06-23-04:45: Trim the footer's bottom padding so the space BELOW the Save/Help/Version/Import-Export row matches the space above it (the base .modal-actions var(--modal-padding) left too large a gap under the row in the embedded full-height view). */
+.settings-modal--embedded .modal-actions {
+  background: transparent;
+  flex-shrink: 0;
+  padding-bottom: var(--space-sm);
+}
+
 /* Mobile: full-screen sheet. The desktop `min-width: 520px` was forcing the
    modal wider than narrow viewports, pushing it off-screen; the desktop
    `height: 80vh` left awkward strips of overlay above and below. Drop the
    overlay's default top padding so the modal actually fills the viewport,
-   and disable resize (touchscreen users can't drag the grip anyway). */
+   and disable resize (touchscreen users can't drag the grip anyway).
+   FNXC:Settings 2026-06-22-16:00: scope the viewport-takeover rules to the
+   NON-embedded (dialog) presentation only via :not(.settings-modal--embedded).
+   The embedded panel lives inside the main-content pane (between the mobile
+   Header and MobileNavBar); without the guard its base .settings-modal class
+   matched these 100vw/100dvh rules and covered the whole screen, hiding the
+   app header/footer. The embedded view's own fill-the-pane sizing is handled
+   below. */
 @media (max-width: 768px) {
   .modal-overlay.settings-modal-overlay,
-  .modal-overlay:has(.settings-modal) {
+  .modal-overlay:has(.settings-modal:not(.settings-modal--embedded)) {
     padding: 0;
     inset: 0;
     align-items: stretch;
     justify-content: stretch;
   }
 
-  .modal.settings-modal {
+  .modal.settings-modal:not(.settings-modal--embedded) {
     width: 100vw;
     min-width: 0;
     max-width: 100vw;
@@ -131,12 +215,25 @@
     flex: 1 1 auto;
   }
 
-  .modal.settings-modal[style*="--keyboard-overlap"] {
+  .modal.settings-modal:not(.settings-modal--embedded)[style*="--keyboard-overlap"] {
     height: var(--vv-height, 100dvh);
     min-height: var(--vv-height, 100dvh);
     max-height: var(--vv-height, 100dvh);
     transform: translateY(var(--vv-offset-top, 0px));
     will-change: transform;
+  }
+
+  /* FNXC:Settings 2026-06-22-16:00: on mobile the embedded settings view fills
+     only its own content pane (not the viewport) and scrolls internally so the
+     app Header + MobileNavBar stay visible. Trim the outer host padding so the
+     panel and its section navigation sit edge-to-edge in the narrow pane. */
+  .settings-embedded.right-dock-embedded-view {
+    padding: var(--space-sm);
+  }
+
+  .settings-embedded .settings-modal--embedded {
+    width: 100%;
+    height: 100%;
   }
 }
 
@@ -564,7 +661,7 @@
   flex: 1;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 4px 0 12px;
+  padding: var(--space-md) var(--space-xl) var(--space-lg);
   scrollbar-color: var(--border) transparent;
   scrollbar-width: thin;
 }
@@ -602,7 +699,7 @@
 .settings-section-heading {
   font-size: 14px;
   font-weight: 600;
-  padding: var(--space-lg) var(--space-xl) var(--space-md);
+  padding: var(--space-lg) 0 var(--space-md);
   margin: 0 0 var(--space-md);
   color: var(--text);
   border-bottom: 1px solid var(--border);
@@ -622,7 +719,6 @@
 
 .settings-section-description {
   margin: 0;
-  padding: 0 var(--space-xl);
   margin-bottom: var(--space-sm);
   color: var(--text-muted);
   font-size: 13px;
@@ -632,7 +728,6 @@
 .settings-plugins-subsection-toggle {
   display: inline-flex;
   gap: var(--space-xs);
-  padding: 0 var(--space-xl);
   margin: var(--space-md) 0;
 }
 

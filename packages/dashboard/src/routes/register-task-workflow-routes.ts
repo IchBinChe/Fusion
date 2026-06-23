@@ -1,4 +1,5 @@
 import { createReadStream } from "node:fs";
+import { resolve, sep } from "node:path";
 import type {
   TaskStore,
   Task,
@@ -12,6 +13,7 @@ import type {
   DuplicateCandidate,
   DuplicateMatch,
   RunAuditEvent,
+  ArtifactType,
 } from "@fusion/core";
 import {
   COLUMNS,
@@ -56,6 +58,25 @@ const REVIEW_BLOCK_RE = /##\s+(Code|Plan)\s+Review:[\s\S]*?(?=\n##\s+(?:Code|Pla
 const REVIEW_VERDICT_RE = /###\s+Verdict:\s*(APPROVE|REVISE|RETHINK|UNAVAILABLE)\b/i;
 const REVIEW_STEP_RE = /^(plan|code) review Step (\d+): (APPROVE|REVISE|RETHINK|UNAVAILABLE)\b/i;
 const DUPLICATE_STOPWORDS = new Set(["a", "an", "the", "and", "or", "of", "to", "for", "in", "is", "on", "with", "fn"]);
+const ARTIFACT_TYPES = new Set<ArtifactType>(["document", "image", "video", "audio", "other"]);
+
+function isArtifactType(value: string): value is ArtifactType {
+  return ARTIFACT_TYPES.has(value as ArtifactType);
+}
+
+function resolveArtifactMediaPath(scopedStore: TaskStore, artifact: { taskId?: string; uri?: string }): string | null {
+  if (!artifact.uri) {
+    return null;
+  }
+
+  const anchorDir = artifact.taskId ? scopedStore.getTaskDir(artifact.taskId) : scopedStore.getFusionDir();
+  const expectedArtifactsDir = resolve(anchorDir, "artifacts");
+  const mediaPath = resolve(anchorDir, artifact.uri);
+  if (mediaPath !== expectedArtifactsDir && !mediaPath.startsWith(`${expectedArtifactsDir}${sep}`)) {
+    throw badRequest("Invalid artifact media path");
+  }
+  return mediaPath;
+}
 
 interface AutoSyncOutcome {
   worktreePath: string | null;
@@ -2201,14 +2222,15 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     }
   });
 
+  /*
+  FNXC:TaskPauseControls 2026-06-21-00:00:
+  Agent-assigned tasks must remain manually recoverable from approval-gating and other pauses. The engine still owns automatic pauses recorded with pausedByAgentId, while pauseTask(id, false) clears pausedByAgentId and userPaused so a human unpause can resume dispatch.
+  */
   // Pause task
   router.post("/tasks/:id/pause", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
-      const task = await scopedStore.getTask(req.params.id);
-      if (task.assignedAgentId) {
-        throw conflict(`Cannot manually pause/unpause task assigned to agent ${task.assignedAgentId}. Use agent pause controls instead.`);
-      }
+      await scopedStore.getTask(req.params.id);
       const updated = await scopedStore.pauseTask(req.params.id, true);
       res.json(updated);
     } catch (err: unknown) {
@@ -2223,10 +2245,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
   router.post("/tasks/:id/unpause", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
-      const task = await scopedStore.getTask(req.params.id);
-      if (task.assignedAgentId) {
-        throw conflict(`Cannot manually pause/unpause task assigned to agent ${task.assignedAgentId}. Use agent pause controls instead.`);
-      }
+      await scopedStore.getTask(req.params.id);
       const updated = await scopedStore.pauseTask(req.params.id, false);
       res.json(updated);
     } catch (err: unknown) {
@@ -2671,6 +2690,110 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       }
       const status = (err instanceof Error ? err.message : String(err)).includes("not found") ? 404 : 500;
       throw new ApiError(status, err instanceof Error ? err.message : String(err));
+    }
+  });
+
+  /**
+   * FNXC:ArtifactRegistry 2026-06-21-04:46:
+   * Documents view needs a cross-agent registry read surface for all artifact media classes. Keep query validation aligned with `/documents` so dashboard tabs share bounded pagination behavior while rejecting unknown artifact types before store access.
+   */
+  router.get("/artifacts", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const {
+        type: typeParam,
+        authorId,
+        taskId,
+        q,
+        limit: limitStr,
+        offset: offsetStr,
+      } = req.query as Record<string, string | undefined>;
+
+      let type: ArtifactType | undefined;
+      if (typeParam !== undefined) {
+        if (!isArtifactType(typeParam)) {
+          throw badRequest("type must be one of: document, image, video, audio, other");
+        }
+        type = typeParam;
+      }
+
+      let limit = 200;
+      if (limitStr !== undefined) {
+        const parsed = parseInt(limitStr, 10);
+        if (isNaN(parsed) || parsed < 1) {
+          throw badRequest("limit must be a positive integer");
+        }
+        limit = Math.min(parsed, 1000);
+      }
+
+      let offset = 0;
+      if (offsetStr !== undefined) {
+        const parsed = parseInt(offsetStr, 10);
+        if (isNaN(parsed) || parsed < 0) {
+          throw badRequest("offset must be a non-negative integer");
+        }
+        offset = parsed;
+      }
+
+      const artifacts = await scopedStore.listArtifacts({
+        type,
+        authorId,
+        taskId,
+        search: q,
+        limit,
+        offset,
+      });
+
+      res.json(artifacts);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      throw new ApiError(500, err instanceof Error ? err.message : String(err));
+    }
+  });
+
+  /**
+   * FNXC:ArtifactRegistry 2026-06-21-04:46:
+   * Media artifacts stream by registry id with the persisted MIME type so images, video, and audio render inline in the Documents gallery. Binary rows are anchored under either a task `artifacts/` directory or the task-less `.fusion/artifacts/` registry; inline text rows return their content directly because they intentionally have no file uri.
+   */
+  router.get("/artifacts/:id/media", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const artifact = await scopedStore.getArtifact(req.params.id);
+      if (!artifact) {
+        throw notFound("Artifact not found");
+      }
+
+      if (!artifact.uri) {
+        if (artifact.content === undefined) {
+          throw notFound("Artifact media not found");
+        }
+        res.setHeader("Content-Type", artifact.mimeType ?? "text/plain; charset=utf-8");
+        res.send(artifact.content);
+        return;
+      }
+
+      const mediaPath = resolveArtifactMediaPath(scopedStore, artifact);
+      if (!mediaPath) {
+        throw notFound("Artifact media not found");
+      }
+
+      const stream = createReadStream(mediaPath);
+      stream.on("error", () => {
+        if (!res.headersSent) {
+          res.status(404).json({ error: "Artifact media not found" });
+        } else {
+          res.end();
+        }
+      });
+      res.setHeader("Content-Type", artifact.mimeType ?? "application/octet-stream");
+      stream.pipe(res);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      throw new ApiError(500, err instanceof Error ? err.message : String(err));
     }
   });
 

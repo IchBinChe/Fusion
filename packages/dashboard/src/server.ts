@@ -963,7 +963,7 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
       // attach to the same EventEmitter instance that the engine writes to,
       // rather than a separate store created by getOrCreateProjectStore.
       let scopedStore: TaskStore;
-      let agentStore;
+      let agentStore: AgentStore | undefined;
       let messageStore: MessageStore | undefined;
       let automationStore: AutomationStore | undefined;
       let scopedChatStore = chatStore;

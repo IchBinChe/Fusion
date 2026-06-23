@@ -849,6 +849,35 @@ describe("buildMergePrompt — truncation behavior", () => {
     expect(prompt).not.toContain("Be sure to include");
   });
 
+  it("includes user comments when present and omits the section when absent", async () => {
+    const { buildMergePrompt } = await import("../merger.js");
+
+    const withComments = buildMergePrompt({
+      taskId: "FN-001",
+      branch: "fusion/fn-001",
+      commitLog: "- feat: something",
+      diffStat: "1 file changed",
+      hasConflicts: false,
+      userComments: [{
+        id: "c1",
+        text: "Please keep the old API export",
+        author: "user",
+        createdAt: "2026-06-21T10:00:00.000Z",
+      }],
+    });
+    const withoutComments = buildMergePrompt({
+      taskId: "FN-001",
+      branch: "fusion/fn-001",
+      commitLog: "- feat: something",
+      diffStat: "1 file changed",
+      hasConflicts: false,
+    });
+
+    expect(withComments).toContain("## User Comments");
+    expect(withComments).toContain("Please keep the old API export");
+    expect(withoutComments).not.toContain("## User Comments");
+  });
+
   it("includes source issue reference guidance when provided", async () => {
     const { buildMergePrompt } = await import("../merger.js");
 

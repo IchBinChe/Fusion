@@ -11,7 +11,7 @@ import {
 
 const mockedReviewStep = vi.mocked(mockedReviewStepFn);
 
-async function captureTools() {
+async function captureTools(comments: any[] = []) {
   const store = createMockStore();
   const stepStates = [
     { name: "Preflight", status: "done" },
@@ -33,6 +33,7 @@ async function captureTools() {
     log: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    comments,
   }));
   store.updateStep.mockImplementation(async (_taskId: string, stepIndex: number, status: string) => {
     stepStates[stepIndex].status = status;
@@ -110,6 +111,31 @@ describe("fn_review_step indexing", () => {
     const result = await tools.fn_task_update("call-2", { step: 1, status: "done" });
 
     expect(result.content[0].text).toContain("Cannot mark Step 1 as done");
+  });
+
+  it("passes fresh user comments into reviewStep", async () => {
+    mockedReviewStep.mockResolvedValue({ verdict: "APPROVE", review: "ok", summary: "ok" } as any);
+    const { tools } = await captureTools([
+      {
+        id: "c-user",
+        text: "Please keep the old API export",
+        author: "user",
+        createdAt: "2026-06-21T10:00:00.000Z",
+      },
+      {
+        id: "c-agent",
+        text: "agent-only note",
+        author: "agent",
+        createdAt: "2026-06-21T11:00:00.000Z",
+      },
+    ]);
+
+    await tools.fn_review_step("call-1", { step: 1, type: "code", step_name: "Implement", baseline: "abc" });
+
+    const options = mockedReviewStep.mock.calls[0]?.[7] as any;
+    expect(options.userComments).toEqual([
+      expect.objectContaining({ id: "c-user", text: "Please keep the old API export", author: "user" }),
+    ]);
   });
 
   it("rejects out-of-range steps without reviewer call", async () => {

@@ -2,7 +2,7 @@ import type { AgentLogEntry, AgentRole, SteeringComment, Task, TaskDetail } from
 import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChevronDown, Loader2, Maximize2, Minimize2, Send } from "lucide-react";
+import { ChevronDown, Cpu, Loader2, Maximize2, Minimize2, Send } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { addSteeringComment, refineTask } from "../api";
@@ -11,7 +11,7 @@ import type { ToastType } from "../hooks/useToast";
 import { getErrorMessage } from "@fusion/core";
 import { linkifyFilePaths } from "../utils/filePathLinkify";
 import { formatRelativeTimeAgo } from "../utils/relativeTimeAgo";
-import { AgentAvatar } from "./AgentAvatar";
+import { ProviderIcon } from "./ProviderIcon";
 import { clampChatInputHeight, resolveChatInputOverflowY } from "../utils/chatInputAutosize";
 import { markdownComponents } from "./AgentLogViewer";
 import "./TaskChatTab.css";
@@ -25,9 +25,15 @@ interface TaskChatTabProps {
   onTaskUpdated?: (task: Task) => void;
   expanded?: boolean;
   onToggleExpanded?: () => void;
+  effectiveModels?: Partial<Record<"triage" | "executor" | "reviewer" | "merger", TaskChatModelInfo | null>>;
 }
 
 type AgentLogRole = AgentRole | undefined;
+
+type TaskChatModelInfo = {
+  provider: string;
+  modelId?: string;
+};
 
 type UserChatMessage = Pick<SteeringComment, "id" | "text" | "createdAt"> & { optimistic?: boolean };
 
@@ -49,6 +55,8 @@ const STEERING_BLOCKED_STATUSES = new Set([
   "awaiting-user-input",
   "awaiting-cli-approval",
   "awaiting-user-review",
+  "awaiting-approval",
+  "awaiting-integration",
   "failed",
   "needs-replan",
 ]);
@@ -80,19 +88,85 @@ function getRoleLabel(role: AgentLogRole, t: TFunction<"app">): string {
   }
 }
 
-function getRoleIcon(role: AgentLogRole): string | undefined {
-  switch (role) {
-    case "triage":
-      return "🧭";
-    case "executor":
-      return "⚙️";
-    case "reviewer":
-      return "🔎";
-    case "merger":
-      return "🔀";
-    default:
-      return undefined;
+function parseModelMarker(entry: AgentLogEntry): TaskChatModelInfo | null {
+  if (entry.type !== "text") return null;
+  const match = entry.text.match(/^(?:Triage|Executor|Reviewer) using model: (.+?)\/(.+)$/);
+  if (!match) return null;
+  return { provider: match[1], modelId: match[2] };
+}
+
+function makeModelInfo(provider: string | undefined, modelId: string | undefined): TaskChatModelInfo | null {
+  if (!provider) return null;
+  return modelId ? { provider, modelId } : { provider };
+}
+
+function getExplicitModelForRole(task: Task | TaskDetail, role: AgentLogRole): TaskChatModelInfo | null {
+  if (role === "triage" && task.planningModelProvider) {
+    return makeModelInfo(task.planningModelProvider, task.planningModelId);
   }
+  if (role === "executor" && task.modelProvider) {
+    return makeModelInfo(task.modelProvider, task.modelId);
+  }
+  if ((role === "reviewer" || role === "merger") && task.validatorModelProvider) {
+    return makeModelInfo(task.validatorModelProvider, task.validatorModelId);
+  }
+  return null;
+}
+
+function getRuntimeModelForRole(entries: readonly AgentLogEntry[], role: AgentLogRole): TaskChatModelInfo | null {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry.agent !== role) continue;
+    const parsed = parseModelMarker(entry);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function getEffectiveModelForRole(
+  effectiveModels: TaskChatTabProps["effectiveModels"] | undefined,
+  role: AgentLogRole,
+): TaskChatModelInfo | null {
+  if (!role) return null;
+  return effectiveModels?.[role] ?? null;
+}
+
+function getModelForRole(
+  task: Task | TaskDetail,
+  role: AgentLogRole,
+  entries: readonly AgentLogEntry[],
+  effectiveModels?: TaskChatTabProps["effectiveModels"],
+): TaskChatModelInfo | null {
+  /*
+  FNXC:TaskDetailChat 2026-06-23-21:18:
+  Task-detail chat agent headers should identify the AI provider actually backing each role, not a generic/role avatar. Prefer explicit task model overrides because they are stable before logs stream, then fall back to the runtime "using model" log marker emitted by active planner/executor/reviewer sessions. Merger output uses the validator/reviewer lane provider because merge-fix/review flows share that model family in the UI.
+
+  FNXC:TaskDetailChat 2026-06-23-00:54:
+  Default executor models such as OpenAI Codex GPT-5.5 can resolve through settings rather than task overrides or log markers. Task chat receives the same effective model resolution used by the task-detail model header so role icons match Chat and Agent Log instead of falling back to CPU for default-backed agents.
+  */
+  return getExplicitModelForRole(task, role) ?? getRuntimeModelForRole(entries, role) ?? getEffectiveModelForRole(effectiveModels, role);
+}
+
+function TaskChatAgentIcon({ label, modelInfo }: { label: string; modelInfo: TaskChatModelInfo | null }) {
+  if (modelInfo?.provider) {
+    const title = modelInfo.modelId ? `${label}: ${modelInfo.provider}/${modelInfo.modelId}` : `${label}: ${modelInfo.provider}`;
+    return (
+      <span className="task-chat-provider-icon" title={title} aria-label={title}>
+        <ProviderIcon provider={modelInfo.provider} size="md" />
+      </span>
+    );
+  }
+
+  /*
+  FNXC:TaskDetailChat 2026-06-23-00:42:
+  Task chat role headers should use provider logos whenever the role's model provider is known, and a neutral CPU fallback when it is not. Avoid role clip-art avatars so executor/reviewer/merger rows read as professional model execution blocks rather than cartoon agent identities.
+  */
+  const title = `${label}: model provider unknown`;
+  return (
+    <span className="task-chat-provider-icon task-chat-provider-icon--fallback" title={title} aria-label={title}>
+      <Cpu size={18} aria-hidden="true" />
+    </span>
+  );
 }
 
 function getEntryKey(entry: AgentLogEntry, index: number): string {
@@ -171,11 +245,16 @@ function isActiveAgentSession(task: Task | TaskDetail, opts: { sessionLive?: boo
   if (task.paused || task.userPaused) return false;
   if (opts.sessionLive) return true;
 
+  if (task.status === SCHEDULER_WAITING_STATUS) return false;
+
   const hasAssignedAgent = Boolean(task.assignedAgentId || task.checkedOutBy);
   const statusBlocksProgressSteering = task.status ? STEERING_BLOCKED_STATUSES.has(task.status) : false;
+  if (statusBlocksProgressSteering) return false;
+
   const statusAllowsProgressSteering = !statusBlocksProgressSteering;
   const statusAllowsReviewSteering = !task.status || REVIEW_STEERABLE_STATUSES.has(task.status);
-  const columnAllowsSteering = (task.column === "in-progress" && statusAllowsProgressSteering)
+  const columnAllowsSteering = (task.column === "triage" && statusAllowsProgressSteering)
+    || (task.column === "in-progress" && statusAllowsProgressSteering)
     || (task.column === "in-review" && statusAllowsReviewSteering);
   // FNXC:TaskDetailChat 2026-06-20-20:10:
   // In the default ephemeral-agents mode the scheduler never writes
@@ -184,14 +263,21 @@ function isActiveAgentSession(task: Task | TaskDetail, opts: { sessionLive?: boo
   // task therefore has no assignment field yet IS being worked, so requiring
   // `hasAssignedAgent` made the chat always show "no agent is working" for
   // default-mode tasks. Treat assignment as sufficient-but-not-necessary:
-  // - in-progress with a non-blocked, non-`queued` status is an executing run
-  //   (`queued` is the documented waiting marker, self-healing.ts — it stays
-  //   assignment-gated);
+  // - in-progress with a non-blocked, non-`queued` status is an executing run;
   // - in-review with an active review/merge status (REVIEW_STEERABLE_STATUSES)
   //   has a reviewer/merger running. A null-status in-review row is awaiting
   //   human review, not actively worked, so it stays assignment-gated and idle.
+  // FNXC:TaskDetailChat 2026-06-21-13:03:
+  // Planning/triage is an execution surface too: triage.ts writes
+  // `status: "planning"` only after a planner slot is acquired, while active
+  // default-mode planner sessions still omit assignment fields. Treat non-waiting,
+  // non-blocked triage rows as active so steering copy does not falsely say no
+  // agent is working during spec generation. Keep `queued` and awaiting/failed
+  // statuses idle before assignment checks because they are waiting states, not
+  // live agent work.
   const executionImpliesActiveAgent =
-    (task.column === "in-progress" && statusAllowsProgressSteering && task.status !== SCHEDULER_WAITING_STATUS)
+    (task.column === "triage" && statusAllowsProgressSteering)
+    || (task.column === "in-progress" && statusAllowsProgressSteering)
     || (task.column === "in-review" && task.status != null && REVIEW_STEERABLE_STATUSES.has(task.status));
   return columnAllowsSteering
     && (hasAssignedAgent || executionImpliesActiveAgent);
@@ -463,7 +549,7 @@ function TaskChatUserMessage({ message }: { message: UserChatMessage }) {
   );
 }
 
-export function TaskChatTab({ task, projectId, active, addToast, sessionLive, onTaskUpdated, expanded = false, onToggleExpanded }: TaskChatTabProps) {
+export function TaskChatTab({ task, projectId, active, addToast, sessionLive, onTaskUpdated, expanded = false, onToggleExpanded, effectiveModels }: TaskChatTabProps) {
   const { t } = useTranslation("app");
   const { entries, loading, loadMore, hasMore, loadingMore } = useAgentLogs(task.id, active, projectId);
   const [draft, setDraft] = useState("");
@@ -495,12 +581,15 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
   /**
    * FNXC:TaskDetailChat 2026-06-19-22:54:
    * The task-detail chat must never silently accept a question when no agent session will consume it. Keep idle chats sendable, but surface that the message is saved as guidance for the next task run instead of implying a live reply.
+   *
+   * FNXC:TaskDetailChat 2026-06-22-21:20:
+   * The idle "No agent is working on this task right now…" hint is suppressed (empty) per user request — idle chats stay sendable but no longer show the banner. Done/active hints remain. The render gates on a truthy sessionHint, so the empty idle case renders nothing.
    */
   const sessionHint = isDoneTask
     ? t("taskChat.doneSessionHint", "Send a message to start a refinement task for this completed task.")
     : activeSession
       ? t("taskChat.activeSessionHint", "Message the active agent session. Guidance is delivered to the running session in real time.")
-      : t("taskChat.idleSessionHint", "No agent is working on this task right now. Your message is saved as guidance and will reach an agent the next time this task runs.");
+      : "";
   const composerPlaceholder = isDoneTask
     ? t("taskChat.donePlaceholder", "Start a refinement task for this completed task")
     : t("taskChat.activePlaceholder", "Steer the currently executing agent");
@@ -793,18 +882,14 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
               return <TaskChatUserMessage key={`user-${item.message.id}-${itemIndex}`} message={item.message} />;
             }
 
-            const avatarAgent = {
-              id: item.role ?? "agent",
-              name: item.label,
-              icon: getRoleIcon(item.role),
-            };
             const segments = segmentGroupEntries(item.entries);
             const latestEntryTimestamp = item.entries[item.entries.length - 1]?.timestamp ?? "";
             const relativeTime = formatRelativeTimeAgo(latestEntryTimestamp);
+            const modelInfo = getModelForRole(task, item.role, item.entries, effectiveModels);
             return (
               <section className="task-chat-group" key={`${item.role ?? "agent"}-${itemIndex}`} aria-label={t("taskChat.agentMessages", "{{label}} messages", { label: item.label })}>
                 <header className="task-chat-group-header">
-                  <AgentAvatar agent={avatarAgent} className="task-chat-avatar" />
+                  <TaskChatAgentIcon label={item.label} modelInfo={modelInfo} />
                   <div>
                     <div className="task-chat-role-label">{item.label}</div>
                     <div className="task-chat-group-meta">

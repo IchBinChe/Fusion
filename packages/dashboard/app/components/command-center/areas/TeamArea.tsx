@@ -2,24 +2,34 @@
 FNXC:CommandCenter 2026-06-18-16:57:
 Team tab shows each agent's tokens/cost/files-changed/tasks-completed with live status and bar charts, reusing existing analytics primitives; GitHub-issue per-agent stats are FN-6653, not here.
 */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent, MouseEvent as ReactMouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Pause, Play } from "lucide-react";
 import type { CostResult, OrgTreeNode, TeamAgentSummary, TeamAnalytics } from "@fusion/core";
-import { fetchExecutorStats, fetchOrgTree } from "../../../api/legacy";
+import { getErrorMessage } from "@fusion/core";
+import { fetchExecutorStats, fetchOrgTree, fetchSettings, updateSettings } from "../../../api/legacy";
 import { useAppSettings } from "../../../hooks/useAppSettings";
+import type { ToastType } from "../../../hooks/useToast";
 import { AgentAvatar } from "../../AgentAvatar";
 import { LoadingSpinner } from "../../LoadingSpinner";
 import type { DateRange } from "../DateRangePicker";
 import { Bar, type BarDatum } from "../charts/Bar";
 import { Sparkline } from "../charts/Sparkline";
 import { PieChart } from "../charts/recharts";
+import { resolveOrgChartLayoutMode, type OrgChartLayoutMode } from "../../agentsOrgChartLayout";
 import { AreaShell } from "./AreaShell";
 import { useAnalyticsArea } from "./useAnalyticsArea";
 import { formatCost, formatCount } from "./areaShared";
 
 const TEAM_LIVE_REFRESH_MS = 15_000;
 const EXECUTOR_STATUS_POLL_MS = 10_000;
+const ORG_CHART_DRAG_THRESHOLD = 4;
+/*
+FNXC:CommandCenter 2026-06-22-00:00:
+Heartbeat-multiplier presets mirror the Agents page (AgentsView) exactly so the Command Center slider scales agent heartbeats identically. Same range/step (0.1–10, step 0.1), same persisted settings.heartbeatMultiplier endpoint via updateSettings — no new state or API.
+*/
+const HEARTBEAT_MULTIPLIER_PRESETS = [0.1, 0.25, 0.5, 1, 2, 3, 5, 10] as const;
 type SortKey = "agent" | "tokens" | "cost" | "filesChanged" | "tasksCompleted" | "tasksInProgress";
 
 type AsyncState<T> =
@@ -32,6 +42,15 @@ type ExecutorStats = {
   enginePaused: boolean;
   maxConcurrent: number;
   lastActivityAt?: string;
+};
+
+type OrgChartDragState = {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  startScrollLeft: number;
+  startScrollTop: number;
+  isPanning: boolean;
 };
 
 function costSortValue(cost: CostResult): number {
@@ -145,15 +164,47 @@ function TeamOrgChartNode({ node }: { node: OrgTreeNode }) {
  * FNXC:CommandCenter 2026-06-19-13:45:
  * Org chart and heartbeat control are Team-tab responsibilities, not Overview controls. Keep them outside AreaShell so project-level team operations remain visible while analytics load, error, or return empty, remove org-node role/title descriptions, and style org cards locally so Command Center never depends on lazy AgentsView.css.
  */
-export function TeamArea({ range, projectId }: { range: DateRange; projectId?: string }) {
+export function TeamArea({
+  range,
+  projectId,
+  addToast,
+}: {
+  range: DateRange;
+  projectId?: string;
+  addToast?: (message: string, type?: ToastType) => void;
+}) {
   const { t } = useTranslation("app");
   const {
     globalPaused,
     enginePaused,
     toggleEnginePause,
   } = useAppSettings(projectId);
+  /*
+  FNXC:CommandCenter 2026-06-22-00:00:
+  Heartbeat-speed multiplier replicated from the Agents page so users can scale all agent heartbeat intervals from the dashboard. Wired to the same settings.heartbeatMultiplier persisted via updateSettings; loaded on mount via fetchSettings, defaulting to ×1.0.
+  */
+  const [heartbeatMultiplier, setHeartbeatMultiplier] = useState<number>(1);
+  const [isSavingMultiplier, setIsSavingMultiplier] = useState(false);
   const [orgTreeState, setOrgTreeState] = useState<AsyncState<OrgTreeNode[]>>({ status: "loading", data: null, error: null });
   const [executorStatsState, setExecutorStatsState] = useState<AsyncState<ExecutorStats>>({ status: "loading", data: null, error: null });
+  /*
+  FNXC:CommandCenter 2026-06-22-09:00:
+  The heartbeat slider fires onChange on every input event. Persist the network write through a 300ms debounce (the local optimistic value updates immediately) so dragging the slider does not spray updateSettings calls. mountedRef guards the post-await setState/addToast so they never fire after unmount.
+  */
+  const heartbeatPersistTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (heartbeatPersistTimeoutRef.current) clearTimeout(heartbeatPersistTimeoutRef.current);
+    };
+  }, []);
+  const orgChartViewportRef = useRef<HTMLDivElement | null>(null);
+  const orgChartDragStateRef = useRef<OrgChartDragState | null>(null);
+  const orgChartDidPanRef = useRef(false);
+  const [isOrgChartDragging, setIsOrgChartDragging] = useState(false);
+  const [orgChartViewportWidth, setOrgChartViewportWidth] = useState(0);
   const { data, isLoading, error } = useAnalyticsArea<TeamAnalytics>("/command-center/team", range, {
     pollMs: TEAM_LIVE_REFRESH_MS,
   });
@@ -181,6 +232,25 @@ export function TeamArea({ range, projectId }: { range: DateRange; projectId?: s
       cancelled = true;
     };
   }, [projectId, t]);
+
+  useEffect(() => {
+    const viewport = orgChartViewportRef.current;
+    if (!viewport) return;
+
+    const updateWidth = () => {
+      setOrgChartViewportWidth(viewport.clientWidth);
+    };
+
+    updateWidth();
+    const resizeObserver = typeof ResizeObserver !== "undefined" ? new ResizeObserver(updateWidth) : null;
+    resizeObserver?.observe(viewport);
+    window.addEventListener("resize", updateWidth);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateWidth);
+    };
+  }, [orgTreeState.status]);
 
   useEffect(() => {
     let cancelled = false;
@@ -212,6 +282,49 @@ export function TeamArea({ range, projectId }: { range: DateRange; projectId?: s
       if (timeoutId) clearTimeout(timeoutId);
     };
   }, [projectId, t]);
+  // Load heartbeat multiplier from project settings on mount (same source as the Agents page).
+  useEffect(() => {
+    let cancelled = false;
+    void fetchSettings(projectId)
+      .then((settings) => {
+        if (!cancelled) setHeartbeatMultiplier(settings.heartbeatMultiplier ?? 1);
+      })
+      .catch(() => {
+        // Use default ×1.0 on error.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  const handleHeartbeatMultiplierChange = useCallback(
+    (multiplier: number) => {
+      const clampedValue = Number.isFinite(multiplier) && multiplier > 0 ? multiplier : 1;
+      // Optimistic local update is immediate; the network persist is debounced.
+      setHeartbeatMultiplier(clampedValue);
+      if (heartbeatPersistTimeoutRef.current) clearTimeout(heartbeatPersistTimeoutRef.current);
+      heartbeatPersistTimeoutRef.current = setTimeout(() => {
+        heartbeatPersistTimeoutRef.current = null;
+        if (mountedRef.current) setIsSavingMultiplier(true);
+        void (async () => {
+          try {
+            await updateSettings({ heartbeatMultiplier: clampedValue }, projectId);
+            if (mountedRef.current) {
+              addToast?.(t("agents.heartbeatSpeedSet", "Heartbeat speed set to ×{{value}}", { value: clampedValue.toFixed(1) }), "success");
+            }
+          } catch (err) {
+            if (mountedRef.current) {
+              addToast?.(t("agents.heartbeatSpeedSaveFailed", "Failed to save heartbeat multiplier: {{error}}", { error: getErrorMessage(err) }), "error");
+            }
+          } finally {
+            if (mountedRef.current) setIsSavingMultiplier(false);
+          }
+        })();
+      }, 300);
+    },
+    [projectId, addToast, t],
+  );
+
   const agents = useMemo(() => data?.agents ?? [], [data?.agents]);
   const unknownAgent = t("commandCenter.team.unknownAgent", "(unknown agent)");
   const unknownRole = t("commandCenter.team.unknownRole", "Unknown role");
@@ -275,6 +388,73 @@ export function TeamArea({ range, projectId }: { range: DateRange; projectId?: s
     return <span className="cc-sort-caret">{sortDir === 1 ? "▲" : "▼"}</span>;
   }
 
+  /*
+  FNXC:CommandCenter 2026-06-21-00:00:
+  FN-6885 requires the Team-tab agent org chart to support mouse/pen click-and-drag panning along whichever native scroll axis overflows. Ignore touch pointers so mobile keeps native momentum scrolling, and only activate after the drag threshold so ordinary org-node clicks remain intact.
+  */
+  const endOrgChartDrag = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const dragState = orgChartDragStateRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    }
+    orgChartDragStateRef.current = null;
+    setIsOrgChartDragging(false);
+  }, []);
+
+  const handleOrgChartPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType === "touch" || event.button !== 0) return;
+    const viewport = event.currentTarget;
+    orgChartDidPanRef.current = false;
+    orgChartDragStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startScrollLeft: viewport.scrollLeft,
+      startScrollTop: viewport.scrollTop,
+      isPanning: false,
+    };
+    viewport.setPointerCapture?.(event.pointerId);
+  }, []);
+
+  const handleOrgChartPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const dragState = orgChartDragStateRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - dragState.startX;
+    const deltaY = event.clientY - dragState.startY;
+    if (!dragState.isPanning && Math.hypot(deltaX, deltaY) < ORG_CHART_DRAG_THRESHOLD) return;
+    if (!dragState.isPanning) {
+      dragState.isPanning = true;
+      orgChartDidPanRef.current = true;
+      setIsOrgChartDragging(true);
+    }
+    event.preventDefault();
+    const viewport = event.currentTarget;
+    viewport.scrollLeft = dragState.startScrollLeft - deltaX;
+    viewport.scrollTop = dragState.startScrollTop - deltaY;
+  }, []);
+
+  const handleOrgChartClickCapture = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!orgChartDidPanRef.current) return;
+    orgChartDidPanRef.current = false;
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+
+  /*
+  FNXC:CommandCenter 2026-06-21-00:00:
+  Team org charts should become top-down horizontal trees only when the visible org container is wide enough; use the shared Agents view layout resolver so both surfaces agree on breakpoints and fallback to the established vertical list for unmeasured multi-root charts.
+  */
+  const orgChartLayoutMode: OrgChartLayoutMode = useMemo(() => {
+    if (orgTreeState.status !== "loaded") return "vertical";
+    if (orgChartViewportWidth <= 0 && orgTreeState.data.length > 1) return "vertical";
+    return resolveOrgChartLayoutMode({
+      tree: orgTreeState.data,
+      availableWidth: orgChartViewportWidth,
+      preference: "auto",
+    });
+  }, [orgChartViewportWidth, orgTreeState]);
+
   const effectiveGlobalPaused = executorStatsState.data?.globalPause ?? globalPaused;
   const effectiveEnginePaused = executorStatsState.data?.enginePaused ?? enginePaused;
   const lastActivityLabel = formatLastActivity(
@@ -291,7 +471,18 @@ export function TeamArea({ range, projectId }: { range: DateRange; projectId?: s
               <h3>{t("commandCenter.controls.orgChart.title", "Agent org chart")}</h3>
             </div>
           </div>
-          <div className="cc-team-org-scroll" aria-live="polite">
+          <div
+            className={`cc-team-org-scroll${isOrgChartDragging ? " is-dragging" : ""}`}
+            data-layout={orgChartLayoutMode}
+            ref={orgChartViewportRef}
+            aria-live="polite"
+            onPointerDown={handleOrgChartPointerDown}
+            onPointerMove={handleOrgChartPointerMove}
+            onPointerUp={endOrgChartDrag}
+            onPointerCancel={endOrgChartDrag}
+            onPointerLeave={endOrgChartDrag}
+            onClickCapture={handleOrgChartClickCapture}
+          >
             {orgTreeState.status === "loading" ? (
               <p className="cc-team-muted"><LoadingSpinner label={t("commandCenter.controls.orgChart.loading", "Loading org chart…")} /></p>
             ) : orgTreeState.status === "error" ? (
@@ -308,7 +499,8 @@ export function TeamArea({ range, projectId }: { range: DateRange; projectId?: s
           </div>
         </section>
 
-        <section className="card cc-team-ops-card" data-testid="cc-team-heartbeat">
+        {/* FNXC:CommandCenter 2026-06-22-15:30: Heartbeat card spans the full Team grid width; its controls space out and wrap (see .cc-team-ops-card--heartbeat). */}
+        <section className="card cc-team-ops-card cc-team-ops-card--heartbeat" data-testid="cc-team-heartbeat">
           <div className="cc-team-ops-card-header">
             <div>
               <h3>{t("commandCenter.controls.heartbeat.title", "Heartbeat control")}</h3>
@@ -346,6 +538,60 @@ export function TeamArea({ range, projectId }: { range: DateRange; projectId?: s
           {effectiveGlobalPaused ? (
             <p className="cc-team-muted">{t("commandCenter.controls.heartbeat.disabledByStop", "Start the AI engine before resuming the heartbeat.")}</p>
           ) : null}
+
+          {/*
+          FNXC:CommandCenter 2026-06-22-15:30:
+          The "View Board" / "View Agents" engine-nav shortcuts moved OUT of this Heartbeat card to the Command Center Overview tab (under the Live activity snapshot). The Heartbeat card keeps only its pause control and the heartbeat-speed slider.
+          */}
+          {/*
+          FNXC:CommandCenter 2026-06-22-00:00:
+          Heartbeat-speed multiplier slider replicated from the Agents page (range 0.1–10, step 0.1, ×0.1–×10 presets) so users can scale all agent heartbeat intervals from the dashboard's AI engine card. Wired to the same settings.heartbeatMultiplier endpoint.
+          */}
+          <div className="cc-team-heartbeat-multiplier heartbeat-multiplier-group">
+            <div className="heartbeat-multiplier-controls">
+              <label htmlFor="ccHeartbeatMultiplier" className="heartbeat-multiplier-label">
+                {t("agents.heartbeatSpeed", "Heartbeat Speed")}
+              </label>
+              <input
+                id="ccHeartbeatMultiplier"
+                className="heartbeat-multiplier-slider touch-target"
+                type="range"
+                min={0.1}
+                max={10}
+                step={0.1}
+                value={heartbeatMultiplier}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  void handleHeartbeatMultiplierChange(Number.isFinite(val) && val > 0 ? val : 1);
+                }}
+                disabled={isSavingMultiplier}
+              />
+              <span className="heartbeat-multiplier-value">×{heartbeatMultiplier.toFixed(1)}</span>
+              <select
+                className="heartbeat-multiplier-preset"
+                value={String(
+                  HEARTBEAT_MULTIPLIER_PRESETS.reduce((closest, candidate) => {
+                    return Math.abs(candidate - heartbeatMultiplier) < Math.abs(closest - heartbeatMultiplier) ? candidate : closest;
+                  }, HEARTBEAT_MULTIPLIER_PRESETS[0]),
+                )}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  void handleHeartbeatMultiplierChange(Number.isFinite(val) && val > 0 ? val : 1);
+                }}
+                disabled={isSavingMultiplier}
+                aria-label={t("agents.heartbeatSpeedPreset", "Heartbeat speed preset")}
+              >
+                {HEARTBEAT_MULTIPLIER_PRESETS.map((multiplier) => (
+                  <option key={multiplier} value={String(multiplier)}>
+                    ×{multiplier}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <small className="text-secondary">
+              {t("agents.heartbeatSpeedHint", "Scales all agent heartbeat intervals. ×0.5 = twice as fast, ×2.0 = twice as slow. Default: ×1.0")}
+            </small>
+          </div>
         </section>
       </div>
 

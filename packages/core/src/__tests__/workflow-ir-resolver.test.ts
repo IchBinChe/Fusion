@@ -23,13 +23,28 @@ function makeStore(opts: {
   selection?: { workflowId: string; stepIds: string[] };
   selectionThrows?: boolean;
   defs?: Record<string, { ir: string | WorkflowIr } | undefined>;
-}) {
+  projectId?: string;
+  projectIdThrows?: boolean;
+  promptOverrides?: Record<string, string>;
+} = {}) {
   const getWorkflowDefinition = vi.fn(async (id: string) => opts.defs?.[id]);
   const getTaskWorkflowSelection = vi.fn((_taskId: string) => {
     if (opts.selectionThrows) throw new Error("boom");
     return opts.selection;
   });
-  return { getWorkflowDefinition, getTaskWorkflowSelection };
+  const getWorkflowSettingsProjectId = vi.fn(() => {
+    if (opts.projectIdThrows) throw new Error("identity boom");
+    return opts.projectId ?? "proj-1";
+  });
+  const getWorkflowPromptOverrides = vi.fn(
+    (_workflowId: string, _projectId: string) => opts.promptOverrides ?? {},
+  );
+  return {
+    getWorkflowDefinition,
+    getTaskWorkflowSelection,
+    getWorkflowSettingsProjectId,
+    getWorkflowPromptOverrides,
+  };
 }
 
 describe("resolveWorkflowIrForTask", () => {
@@ -118,6 +133,49 @@ describe("resolveWorkflowIrById", () => {
     expect(ir).toBe(BUILTIN_CODING_WORKFLOW_IR);
     expect(store.getWorkflowDefinition).not.toHaveBeenCalled();
   });
+
+  it("degrades built-in IR resolution when project identity lookup throws", async () => {
+    const store = makeStore({
+      projectIdThrows: true,
+      promptOverrides: { planning: "unreachable project override" },
+    });
+
+    const ir = await resolveWorkflowIrById(store, "builtin:coding");
+
+    expect(ir).toBe(BUILTIN_CODING_WORKFLOW_IR);
+    expect(store.getWorkflowSettingsProjectId).toHaveBeenCalledTimes(1);
+    expect(store.getWorkflowPromptOverrides).not.toHaveBeenCalled();
+    expect(store.getWorkflowDefinition).not.toHaveBeenCalled();
+  });
+
+  it("uses a workflow-only cache key when project identity lookup throws", async () => {
+    const store = makeStore({ projectIdThrows: true, defs: { "wf-custom": { ir: CUSTOM_IR } } });
+    const cache = new Map<string, WorkflowIr>([["wf-custom", CUSTOM_IR]]);
+
+    const ir = await resolveWorkflowIrById(store, "wf-custom", cache);
+
+    expect(ir).toBe(CUSTOM_IR);
+    expect(store.getWorkflowSettingsProjectId).toHaveBeenCalledTimes(1);
+    expect(store.getWorkflowDefinition).not.toHaveBeenCalled();
+  });
+
+  it("keeps project-scoped prompt overrides and cache keys when project identity resolves", async () => {
+    const store = makeStore({
+      projectId: "proj-override",
+      promptOverrides: { planning: "Project-specific plan" },
+    });
+    const cache = new Map<string, WorkflowIr>();
+
+    const first = await resolveWorkflowIrById(store, "builtin:coding", cache);
+    const second = await resolveWorkflowIrById(store, "builtin:coding", cache);
+
+    expect(first).toBe(second);
+    expect(first).not.toBe(BUILTIN_CODING_WORKFLOW_IR);
+    expect(first.nodes.find((node) => node.id === "planning")?.config?.prompt).toBe("Project-specific plan");
+    expect(cache.get("builtin:coding\u0000proj-override")).toBe(first);
+    expect(store.getWorkflowPromptOverrides).toHaveBeenCalledTimes(1);
+  });
+
   it("parses a raw-string IR from the definition", async () => {
     const raw = JSON.stringify(CUSTOM_IR);
     const store = makeStore({ defs: { "wf-raw": { ir: raw } } });

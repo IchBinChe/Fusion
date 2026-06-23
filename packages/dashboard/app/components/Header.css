@@ -1,10 +1,17 @@
 /* === Header === */
+/*
+FNXC:DashboardHeader 2026-06-22-14:30:
+Superseded by the 19:00 shell requirement below. View-level headers such as Missions, Planning, Dashboard, and Project Dashboard no longer carry post-header divider lines; the global Fusion shell header no longer owns that separator either.
+
+FNXC:DashboardHeader 2026-06-22-19:00:
+The global Fusion shell header should not draw a divider between itself and the sidebar/main content row. View-level headers also avoid post-header divider lines; this top shell bar blends into the surface above the navigation/content split.
+*/
 .header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: var(--header-padding);
-  border-bottom: 1px solid var(--border);
+  border-bottom: none;
   background: var(--surface);
 }
 
@@ -124,8 +131,93 @@ non-notched devices, so this is a no-op there. Pair with viewport-fit=cover (ind
 }
 
 @media (max-width: 768px) {
+  /*
+  FNXC:WorkflowControls 2026-06-23-20:05:
+  Mobile places the workflow dropdown in the top header beside the logo/project switch. Match the 32px board/list toggle height, reduce row gaps, hide the text label/counts, and cap width aggressively so resizing does not crowd adjacent header controls.
+
+  FNXC:WorkflowControls 2026-06-23-20:58:
+  In narrow mobile board/list views the workflow selector should sit centered in the available space between the project dropdown and the board/list toggle, while the trigger height lines up exactly with the 32px view toggle. Let the slot flex across the remaining header row and clamp the trigger to a wider 104px-128px range so short names such as "Coding" render fully when the screen can support it.
+
+  FNXC:WorkflowControls 2026-06-23-21:12:
+  The mobile workflow dropdown must visually match the board/list segmented toggle height exactly. Pin the toolbar wrapper, switcher, and trigger to the same 32px border-box and remove inherited vertical padding/line-height drift so the top and bottom edges align pixel-for-pixel.
+  */
+  .header {
+    gap: var(--space-sm);
+    align-items: center;
+  }
+
+  .header-left {
+    flex: 1 1 auto;
+    min-width: 0;
+    gap: var(--space-xs);
+  }
+
+  .header-brand {
+    min-width: 0;
+    flex-shrink: 0;
+  }
+
   .header-workflow-slot {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .header-actions {
+    flex: 0 0 auto;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+
+  .header-workflow-slot:empty {
     display: none;
+  }
+
+  .header-workflow-slot .board-workflow-toolbar,
+  .header-workflow-slot .list-workflow-control {
+    height: 32px;
+    align-items: center;
+  }
+
+  .header-workflow-slot .workflow-switcher {
+    width: clamp(calc(var(--space-2xl) * 3.25), 36vw, calc(var(--space-2xl) * 4));
+    height: 32px;
+    max-height: 32px;
+    min-width: 0;
+    flex: 0 1 auto;
+    align-items: center;
+  }
+
+  .header-workflow-slot .workflow-switcher-label {
+    display: none;
+  }
+
+  .header-workflow-slot .workflow-switcher-trigger {
+    appearance: none;
+    box-sizing: border-box;
+    width: 100%;
+    height: 32px;
+    max-width: 100%;
+    min-height: 32px;
+    max-height: 32px;
+    padding: 0 var(--space-xs);
+    font-size: 12px;
+    line-height: 1;
+    overflow: hidden;
+  }
+
+  .header-workflow-slot .workflow-switcher-trigger-main {
+    gap: var(--space-xs);
+  }
+
+  .header-workflow-slot .workflow-switcher-counts {
+    display: none;
+  }
+
+  .header-workflow-slot .workflow-switcher-merging-indicator {
+    width: calc(var(--space-sm) - 2px);
+    height: calc(var(--space-sm) - 2px);
   }
 }
 
@@ -326,6 +418,7 @@ non-notched devices, so this is a no-op there. Pair with viewport-fit=cover (ind
   border-color: var(--todo);
 }
 
+
 .btn-badge {
   position: absolute;
   top: -2px;
@@ -358,33 +451,6 @@ non-notched devices, so this is a no-op there. Pair with viewport-fit=cover (ind
   .btn-icon--stopped:hover {
     color: var(--color-error);
   }
-}
-
-/* Split-button for terminal + scripts controls */
-.terminal-split-btn {
-  position: relative;
-  display: flex;
-  align-items: center;
-  border-radius: var(--radius-md);
-}
-
-.terminal-split-btn__main {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
-}
-
-.terminal-split-btn__chevron {
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  min-width: 28px;
-  padding: 0;
-}
-
-.terminal-split-btn__divider {
-  width: 1px;
-  height: 16px;
-  background: var(--border);
-  flex-shrink: 0;
 }
 
 /* Header badge for active sessions */
@@ -809,6 +875,11 @@ non-notched devices, so this is a no-op there. Pair with viewport-fit=cover (ind
 
 .mobile-overflow-item:hover {
   background: var(--card);
+}
+
+.mobile-overflow-item--with-badge .btn-badge {
+  position: static;
+  margin-left: auto;
 }
 
 .mobile-overflow-item svg {

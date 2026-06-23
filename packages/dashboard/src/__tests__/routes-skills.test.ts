@@ -147,6 +147,13 @@ function createMockSkillsAdapter(overrides?: Partial<SkillsAdapter>): SkillsAdap
         ],
       };
     }),
+    // FNXC:Skills 2026-06-23-04:15: per-file content read backing the detail-pane file viewer.
+    readSkillFileContent: vi.fn().mockResolvedValue({
+      name: "notes.txt",
+      relativePath: "notes.txt",
+      content: "note body",
+      isText: true,
+    }),
     ...overrides,
   };
 }

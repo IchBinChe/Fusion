@@ -182,6 +182,36 @@ describe("sse-bus", () => {
     expect(MockEventSource.instances.length).toBe(countBeforeTimers);
   });
 
+  it("does not storm keepalive control requests for active local event streams", () => {
+    vi.useFakeTimers();
+    const originalFetch = window.fetch;
+    const fetchMock = vi.fn(() => Promise.resolve(new Response(null, { status: 204 })));
+    Object.defineProperty(window, "fetch", {
+      configurable: true,
+      writable: true,
+      value: fetchMock,
+    });
+    try {
+      const unsub = subscribeSse("/api/events", {});
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(29_999);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      vi.advanceTimersByTime(1);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+
+      unsub();
+    } finally {
+      Object.defineProperty(window, "fetch", {
+        configurable: true,
+        writable: true,
+        value: originalFetch,
+      });
+      vi.useRealTimers();
+    }
+  });
+
   it("reopens subscribed channel on pageshow even when event.persisted is false", () => {
     subscribeSse("/api/events?projectId=p1", {});
     expect(MockEventSource.instances).toHaveLength(1);

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { Task, TaskDetail } from "@fusion/core";
 import type { SectionId } from "../components/SettingsModal";
 import type { ToastType } from "./useToast";
+import { removeScopedItem } from "../utils/projectStorage";
 
 export type DetailTaskTab =
   | "chat"
@@ -52,7 +53,6 @@ export interface ModalManager {
   terminalInitialCommand: string | undefined;
   terminalInitialCommandGeneration: number;
   filesOpen: boolean;
-  todosOpen: boolean;
   fileBrowserWorkspace: string;
   fileBrowserInitialFile: string | null;
   activityLogOpen: boolean;
@@ -98,6 +98,11 @@ export interface ModalManager {
   closeGroupModal: () => void;
 
   openSettings: (section?: SectionId) => void;
+  /*
+  FNXC:Settings 2026-06-22-00:00:
+  Sets the Settings initial/active section WITHOUT opening the modal overlay. Used by the embedded main-content Settings view so header/sidebar/deep-link entry points can carry a requested section while navigating to taskView === "settings" instead of mounting the dialog.
+  */
+  setSettingsSection: (section?: SectionId) => void;
   closeSettings: () => void;
 
   openSchedules: () => void;
@@ -114,8 +119,6 @@ export interface ModalManager {
 
   openFiles: (workspace?: string, initialFile?: string | null) => void;
   closeFiles: () => void;
-  openTodos: () => void;
-  closeTodos: () => void;
   setFileWorkspace: (workspace: string) => void;
 
   openActivityLog: () => void;
@@ -184,7 +187,6 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const [terminalInitialCommand, setTerminalInitialCommand] = useState<string | undefined>(undefined);
   const [terminalInitialCommandGeneration, setTerminalInitialCommandGeneration] = useState(0);
   const [filesOpen, setFilesOpen] = useState(false);
-  const [todosOpen, setTodosOpen] = useState(false);
   const [fileBrowserWorkspace, setFileBrowserWorkspace] = useState("project");
   const [fileBrowserInitialFile, setFileBrowserInitialFile] = useState<string | null>(null);
   const [activityLogOpen, setActivityLogOpen] = useState(false);
@@ -203,11 +205,13 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
       groupModalGroupId ||
       settingsOpen ||
       newTaskModalOpen ||
-      isPlanningOpen ||
+      /*
+      FNXC:Navigation 2026-06-21-00:00:
+      FN-6886 reuses Planning Mode state only as docked-view payload storage, so it must not make the app behave as though a blocking modal overlay is open.
+      */
       isSubtaskOpen ||
       terminalOpen ||
       filesOpen ||
-      todosOpen ||
       activityLogOpen ||
       gitManagerOpen ||
       workflowEditorOpen ||
@@ -333,6 +337,9 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     setSettingsInitialSection(section);
     setSettingsOpen(true);
   }, []);
+  const setSettingsSection = useCallback((section?: SectionId) => {
+    setSettingsInitialSection(section);
+  }, []);
   const closeSettings = useCallback(() => {
     setSettingsOpen(false);
     setSettingsInitialSection(undefined);
@@ -376,8 +383,6 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     setFilesOpen(false);
     setFileBrowserInitialFile(null);
   }, []);
-  const openTodos = useCallback(() => setTodosOpen(true), []);
-  const closeTodos = useCallback(() => setTodosOpen(false), []);
   const setFileWorkspace = useCallback((workspace: string) => {
     if (typeof workspace === "string" && workspace) {
       setFileBrowserWorkspace(workspace);
@@ -423,18 +428,29 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const openModelOnboarding = useCallback(() => setModelOnboardingOpen(true), []);
   const closeModelOnboarding = useCallback(() => setModelOnboardingOpen(false), []);
 
+  const clearQuickAddPlanningDrafts = useCallback(() => {
+    /*
+    FNXC:QuickAddPlanningPreserve 2026-06-22-00:00:
+    Planning completion, not planning exit, is the only modal-manager transition that clears preserved quick-add drafts. Use the active project id so scoped drafts are removed from the correct workspace.
+    */
+    removeScopedItem("kb-quick-entry-text", options.projectId);
+    removeScopedItem("kb-inline-create-text", options.projectId);
+  }, [options.projectId]);
+
   const onPlanningTaskCreated = useCallback((task: Task, addToast: (message: string, type?: ToastType) => void) => {
     addToast(t("modalManager.createdFromPlanning", "Created {{id}} from planning mode", { id: task.id }), "success");
+    clearQuickAddPlanningDrafts();
     setIsPlanningOpen(false);
     setPlanningInitialPlan(null);
-  }, [t]);
+  }, [clearQuickAddPlanningDrafts, t]);
 
   const onPlanningTasksCreated = useCallback((tasks: Task[], addToast: (message: string, type?: ToastType) => void) => {
     const ids = tasks.map((task) => task.id).join(", ");
     addToast(t("modalManager.createdMultipleFromPlanning", "Created {{ids}} from planning mode", { ids }), "success");
+    clearQuickAddPlanningDrafts();
     setIsPlanningOpen(false);
     setPlanningInitialPlan(null);
-  }, [t]);
+  }, [clearQuickAddPlanningDrafts, t]);
 
   const onSubtaskTasksCreated = useCallback((tasks: Task[], addToast: (message: string, type?: ToastType) => void) => {
     const ids = tasks.map((task) => task.id).join(", ");
@@ -468,7 +484,6 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     terminalInitialCommand,
     terminalInitialCommandGeneration,
     filesOpen,
-    todosOpen,
     fileBrowserWorkspace,
     fileBrowserInitialFile,
     activityLogOpen,
@@ -500,6 +515,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     openGroupModal,
     closeGroupModal,
     openSettings,
+    setSettingsSection,
     closeSettings,
     openSchedules,
     closeSchedules,
@@ -511,8 +527,6 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     closeTerminal,
     openFiles,
     closeFiles,
-    openTodos,
-    closeTodos,
     setFileWorkspace,
     openActivityLog,
     closeActivityLog,

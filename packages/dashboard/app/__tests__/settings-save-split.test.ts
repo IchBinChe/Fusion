@@ -5,6 +5,7 @@
  *   - one global + one project edit in a single session produce the expected
  *     `updateGlobalSettings` / `updateSettings` patches with strict scope routing;
  *   - clearing a project override emits null-as-delete;
+ *   - untouched global values are NOT written (changed-only gate);
  *   - untouched inherited project values are NOT written (changed-only gate);
  *   - explicit clears of global keys emit null, plain undefined is dropped.
  *
@@ -60,6 +61,113 @@ describe("splitSettingsSave", () => {
 
     expect(globalPatch).toEqual({ language: "fr" });
     expect(projectPatch).toEqual({ maxConcurrent: 5 });
+  });
+
+  it("does not write global values that match the initial global-scoped value", () => {
+    const initialScopedValues = {
+      global: {
+        ntfyEnabled: true,
+        ntfyTopic: "alerts",
+        ntfyEvents: ["failed", "merged"],
+        notificationProviders: [{ id: "ntfy-main", type: "ntfy", enabled: true }],
+        experimentalFeatures: { insights: true },
+      },
+      project: {},
+    } as never;
+
+    const payload: Record<string, unknown> = {
+      ntfyEnabled: true,
+      ntfyTopic: "alerts",
+      ntfyEvents: ["failed", "merged"],
+      notificationProviders: [{ id: "ntfy-main", type: "ntfy", enabled: true }],
+      experimentalFeatures: { insights: true },
+    };
+
+    const { globalPatch } = splitSettingsSave({
+      payload,
+      initialValues: {
+        ntfyEnabled: true,
+        ntfyTopic: "alerts",
+        ntfyEvents: ["failed", "merged"],
+        notificationProviders: [{ id: "ntfy-main", type: "ntfy", enabled: true }],
+        experimentalFeatures: { insights: true },
+      } as never,
+      initialScopedValues,
+      activeSection: "notifications",
+    });
+
+    expect(globalPatch).toEqual({});
+  });
+
+  it("writes only the changed global value and does not carry unrelated defaults", () => {
+    const initialValues = {
+      colorTheme: "ocean",
+      ntfyEnabled: true,
+      ntfyTopic: "alerts",
+      modelOnboardingComplete: true,
+      experimentalFeatures: { insights: true },
+    } as never;
+    const initialScopedValues = {
+      global: {
+        colorTheme: "ocean",
+        ntfyEnabled: true,
+        ntfyTopic: "alerts",
+        modelOnboardingComplete: true,
+        experimentalFeatures: { insights: true },
+      },
+      project: {},
+    } as never;
+
+    const payload: Record<string, unknown> = {
+      colorTheme: "shadcn-gray-blue",
+      ntfyEnabled: false,
+      ntfyTopic: undefined,
+      modelOnboardingComplete: undefined,
+      experimentalFeatures: { insights: true },
+    };
+
+    const { globalPatch } = splitSettingsSave({
+      payload,
+      initialValues,
+      initialScopedValues,
+      activeSection: "appearance",
+    });
+
+    expect(globalPatch).toEqual({ colorTheme: "shadcn-gray-blue" });
+  });
+
+  it("does not carry notification defaults when saving experimental features", () => {
+    const initialValues = {
+      experimentalFeatures: { researchView: true },
+      ntfyEnabled: true,
+      ntfyTopic: "alerts",
+      modelOnboardingComplete: true,
+    } as never;
+    const initialScopedValues = {
+      global: {
+        experimentalFeatures: { researchView: true },
+        ntfyEnabled: true,
+        ntfyTopic: "alerts",
+        modelOnboardingComplete: true,
+      },
+      project: {},
+    } as never;
+
+    const payload: Record<string, unknown> = {
+      experimentalFeatures: { researchView: true, evalsView: true },
+      ntfyEnabled: false,
+      ntfyTopic: undefined,
+      modelOnboardingComplete: undefined,
+    };
+
+    const { globalPatch } = splitSettingsSave({
+      payload,
+      initialValues,
+      initialScopedValues,
+      activeSection: "experimental",
+    });
+
+    expect(globalPatch).toEqual({ experimentalFeatures: { researchView: true, evalsView: true } });
   });
 
   it("does not write project values that match the initial project-scoped value (changed-only gate)", () => {
@@ -190,9 +298,7 @@ describe("splitSettingsSave", () => {
       activeSection: "notifications",
     });
 
-    // undefined survives the object but is dropped by JSON.stringify on the wire;
-    // the patch must not coerce it to null when there was nothing to clear.
-    expect(globalPatch.ntfyTopic).toBeUndefined();
+    expect(globalPatch).toEqual({});
   });
 
   it("routes githubTrackingDefaultRepo to global only on the global-general section", () => {

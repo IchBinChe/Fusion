@@ -1,3 +1,4 @@
+import { BUILTIN_WORKFLOWS } from "@fusion/core";
 import { describe, expect, it } from "vitest";
 import { bareSkillName, nodeConfigSummary, type NodeSummaryCatalogs } from "../node-summary";
 import type { WorkflowFlowNodeData, WorkflowEditorNodeKind } from "../WorkflowNodeTypes";
@@ -23,6 +24,18 @@ describe("nodeConfigSummary", () => {
       catalogs,
     );
     expect(summary).toBe("Claude 3 Opus");
+  });
+
+  it("model executor with prompt and no pinned model → Default model", () => {
+    const summary = nodeConfigSummary(node("prompt", { executor: "model", prompt: "Research prospects" }));
+    expect(summary).toBe("Default model");
+  });
+
+  it("model executor with name, prompt, and no pinned model → Default model", () => {
+    const summary = nodeConfigSummary(
+      node("prompt", { executor: "model", name: "Source prospects", prompt: "Research prospects" }),
+    );
+    expect(summary).toBe("Default model");
   });
 
   it("model executor defaults when executor unset", () => {
@@ -140,6 +153,25 @@ describe("nodeConfigSummary", () => {
   it("unconfigured prompt → Not configured", () => {
     const summary = nodeConfigSummary(node("prompt", {}));
     expect(summary).toBe("Not configured");
+  });
+
+  it("no built-in workflow prompt node summarizes as Not configured", () => {
+    // Keep this invariant beside the shared helper because desktop cards and the
+    // mobile graph both consume nodeConfigSummary(), so one direct assertion
+    // covers both render paths without duplicating UI fixtures.
+    const offenders = BUILTIN_WORKFLOWS.flatMap((workflow) =>
+      workflow.ir.nodes
+        .filter((workflowNode) => workflowNode.kind === "prompt")
+        .map((workflowNode) => {
+          const summary = nodeConfigSummary(
+            node(workflowNode.kind as WorkflowEditorNodeKind, workflowNode.config ?? {}),
+          );
+          return { workflowId: workflow.id, nodeId: workflowNode.id, summary };
+        })
+        .filter((entry) => entry.summary === "Not configured"),
+    );
+
+    expect(offenders).toEqual([]);
   });
 
   it("script node → scriptName", () => {

@@ -46,6 +46,7 @@ import {
   createAutomatedFollowup,
   extractFailingTestFiles,
 } from "./verification-followup-dedup.js";
+import { finalizeProvenAutoMergeTask } from "./auto-merge-finalization.js";
 import { isTransientError } from "./transient-error-detector.js";
 import { classifyTransientMergeError } from "./transient-merge-error-classifier.js";
 import { TunnelProcessManager } from "./remote-access/tunnel-process-manager.js";
@@ -118,11 +119,6 @@ function formatErrorDetails(error: unknown): { message: string; detail: string }
   }
   const detail = String(error);
   return { message: detail, detail };
-}
-
-function isInvalidDoneTransitionError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes("Invalid transition:") && message.includes("→ 'done'");
 }
 
 export function shouldRetryAutoMergeConflict(
@@ -2069,43 +2065,62 @@ export class ProjectEngine {
               }
 
               runtimeLog.log(
-                `Auto-merge: ${taskId} already has mergeConfirmed — unpausing and moving to done`,
+                `Auto-merge: ${taskId} already has mergeConfirmed — refreshing row and finalizing to done`,
               );
               await store.logEntry(
                 taskId,
-                "Merge already confirmed; unpausing and completing task (recovered from post-merge state inconsistency)",
+                "Merge already confirmed; refreshing row and completing task (recovered from post-merge state inconsistency)",
               );
-              await store.updateTask(taskId, { paused: false, status: null, error: null });
-              try {
-                const movedTask = await store.moveTask(taskId, "done");
-                const mergedTask = movedTask ?? (await store.getTask(taskId).catch(() => null)) ?? task;
-                store.emit("task:merged", {
-                  task: mergedTask,
-                  branch: mergedTask.branch ?? task.branch ?? "",
+              const auditor = createRunAuditor(store, {
+                runId: generateSyntheticRunId("merger-fast-path-finalize", taskId),
+                agentId: "merger",
+                taskId,
+                phase: "auto-merge-fast-path-finalize",
+              });
+              /*
+              FNXC:AutoMergeFinalization 2026-06-23-03:29:
+              The merge-confirmed fast path must pass its in-memory merge proof into the shared finalizer because test stores can return stale rows without commit evidence. Reusing the proven task/result keeps landed rows from being parked as missing merge confirmation.
+              */
+              const finalization = await finalizeProvenAutoMergeTask({
+                store,
+                taskId,
+                result: {
+                  task,
+                  ok: true,
                   merged: true,
-                  worktreeRemoved: false,
-                  branchDeleted: false,
-                  mergeConfirmed: true,
-                  mergedAt: mergedTask.mergeDetails?.mergedAt,
-                  mergeTargetBranch: mergedTask.mergeDetails?.mergeTargetBranch,
-                  mergeTargetSource: mergedTask.mergeDetails?.mergeTargetSource,
-                } as MergeResult);
-              } catch (error) {
-                if (isInvalidDoneTransitionError(error)) {
-                  const latest = await store.getTask(taskId).catch(() => null);
-                  if (latest && latest.column !== "in-review") {
-                    runtimeLog.warn(
-                      `Auto-merge: ${taskId} merge-confirmed finalize skipped — task moved to ${latest.column} before done transition`,
-                    );
-                    await store.logEntry(
-                      taskId,
-                      `Merge confirmed finalize skipped: task moved to '${latest.column}' before in-review → done transition`,
-                    );
-                    continue;
-                  }
-                }
-                throw error;
+                  commitSha: task.mergeDetails?.commitSha,
+                  noOp: task.mergeDetails?.noOpMerge === true,
+                  reason: task.mergeDetails?.noOpReason,
+                  mergeConfirmed: task.mergeDetails?.mergeConfirmed === true,
+                } as MergeResult,
+                audit: auditor,
+                auditAgentId: "merger",
+                auditPhase: "auto-merge-fast-path-finalize",
+                source: "merge-confirmed-fast-path",
+                log: (message) => runtimeLog.warn(message),
+              });
+              if (finalization.outcome === "blocked") {
+                runtimeLog.warn(
+                  `Auto-merge: ${taskId} merge-confirmed finalize blocked — ${finalization.reason ?? "unknown"}`,
+                );
+                await store.logEntry(
+                  taskId,
+                  `Merge confirmed finalization blocked — ${finalization.reason ?? "unknown"}. Task parked for manual completion.`,
+                );
+                continue;
               }
+              const mergedTask = finalization.task ?? (await store.getTask(taskId).catch(() => null)) ?? task;
+              store.emit("task:merged", {
+                task: mergedTask,
+                branch: mergedTask.branch ?? task.branch ?? "",
+                merged: true,
+                worktreeRemoved: false,
+                branchDeleted: false,
+                mergeConfirmed: true,
+                mergedAt: mergedTask.mergeDetails?.mergedAt,
+                mergeTargetBranch: mergedTask.mergeDetails?.mergeTargetBranch,
+                mergeTargetSource: mergedTask.mergeDetails?.mergeTargetSource,
+              } as MergeResult);
               continue;
             }
 

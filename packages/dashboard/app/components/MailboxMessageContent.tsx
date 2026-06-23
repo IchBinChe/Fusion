@@ -2,7 +2,17 @@ import { memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
+import type { PluggableList } from "unified";
 import { linkifyReactChildren } from "../utils/filePathLinkify";
+import { sharedRehypePlugins, createMermaidCodeComponent } from "./markdownPipeline";
+
+/*
+FNXC:Markdown 2026-06-23-03:30:
+The sanitize schema, rehype plugin chain (rehype-raw -> rehype-sanitize), and the
+mermaid-aware code component now live in ./markdownPipeline so the task
+description + summary in TaskDetailModal share the exact same XSS posture. This
+component consumes those shared exports; see markdownPipeline.tsx for the rationale.
+*/
 
 const mailboxMarkdownComponents: Components = {
   p: ({ children, ...props }) => <p {...props}>{linkifyReactChildren(children)}</p>,
@@ -17,14 +27,19 @@ const mailboxMarkdownComponents: Components = {
       {children}
     </table>
   ),
-  // Open links in a new tab. ReactMarkdown does not allow raw HTML by default,
-  // so the rendered output here is safe.
+  // Code-block override: fenced ```mermaid renders as a diagram; all other code
+  // keeps default rendering. See createMermaidCodeComponent in markdownPipeline.
+  code: createMermaidCodeComponent("mailbox-mermaid-diagram"),
+  // Open links in a new tab. Sanitize strips javascript: URLs and event handlers
+  // before this runs, so href is safe.
   a: ({ children, ...props }) => (
     <a {...props} target="_blank" rel="noopener noreferrer">
       {children}
     </a>
   ),
 };
+
+const remarkPlugins: PluggableList = [remarkGfm];
 
 interface MailboxMessageContentProps {
   /** Raw message body. Rendered as GitHub-flavored markdown. */
@@ -38,9 +53,10 @@ interface MailboxMessageContentProps {
 /**
  * Renders a mailbox message body as GitHub-flavored markdown.
  *
- * Uses ReactMarkdown defaults (no raw HTML) so untrusted message content is
- * safe. Plain-text messages render unchanged (markdown is a strict superset
- * for the formatting we care about — bold, lists, code, links, tables).
+ * Supports embedded raw HTML (details/summary/kbd/sub/tables) via rehype-raw, with
+ * rehype-sanitize stripping XSS (script/style/iframe/event-handlers/javascript:).
+ * Fenced ```mermaid blocks render as diagrams via the lazy-loaded MermaidDiagram.
+ * HTML comments (`<!-- -->`) are dropped and never rendered.
  *
  * Memoized because mailbox detail panes can re-render on selection / SSE
  * updates while the underlying message body is unchanged.
@@ -55,7 +71,11 @@ export const MailboxMessageContent = memo(function MailboxMessageContent({
     : "mailbox-markdown";
   return (
     <div className={wrapperClass} data-testid={testId}>
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={mailboxMarkdownComponents}>
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={sharedRehypePlugins}
+        components={mailboxMarkdownComponents}
+      >
         {content}
       </ReactMarkdown>
     </div>

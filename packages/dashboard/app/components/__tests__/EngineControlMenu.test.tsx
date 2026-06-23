@@ -104,9 +104,9 @@ describe("EngineControlMenu", () => {
   it("persists debounced concurrency and worktree slider changes and refreshes settings", async () => {
     legacyMocks.fetchSettings.mockResolvedValue({
       ...defaultSettings,
-      maxConcurrent: 12,
-      maxTriageConcurrent: 3,
-      maxWorktrees: 25,
+      maxConcurrent: 60,
+      maxTriageConcurrent: 70,
+      maxWorktrees: 80,
     });
     await openMenu();
 
@@ -116,10 +116,12 @@ describe("EngineControlMenu", () => {
 
     vi.useFakeTimers();
 
-    expect(maxConcurrent).toHaveAttribute("max", "12");
-    expect(maxConcurrent).toHaveValue("12");
-    expect(maxWorktrees).toHaveAttribute("max", "25");
-    expect(maxWorktrees).toHaveValue("25");
+    expect(maxConcurrent).toHaveAttribute("max", "60");
+    expect(maxConcurrent).toHaveValue("60");
+    expect(maxTriage).toHaveAttribute("max", "70");
+    expect(maxTriage).toHaveValue("70");
+    expect(maxWorktrees).toHaveAttribute("max", "80");
+    expect(maxWorktrees).toHaveValue("80");
 
     fireEvent.change(maxConcurrent, { target: { value: "9" } });
     fireEvent.change(maxTriage, { target: { value: "4" } });
@@ -134,6 +136,40 @@ describe("EngineControlMenu", () => {
       "proj_123",
     );
     expect(apiMocks.fetchSettings).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses a 50 max for all in-range concurrency sliders", async () => {
+    legacyMocks.fetchSettings.mockResolvedValue({
+      ...defaultSettings,
+      maxConcurrent: 12,
+      maxTriageConcurrent: 3,
+      maxWorktrees: 25,
+    });
+    await openMenu();
+
+    expect(await screen.findByLabelText(/max concurrent tasks/i)).toHaveAttribute("max", "50");
+    expect(screen.getByLabelText(/max triage concurrent/i)).toHaveAttribute("max", "50");
+    expect(screen.getByLabelText(/max worktrees/i)).toHaveAttribute("max", "50");
+  });
+
+  it("persists a slider value of 50 through the debounced settings save", async () => {
+    await openMenu();
+
+    const maxConcurrent = await screen.findByLabelText(/max concurrent tasks/i);
+    vi.useFakeTimers();
+
+    expect(maxConcurrent).toHaveAttribute("max", "50");
+
+    fireEvent.change(maxConcurrent, { target: { value: "50" } });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+
+    expect(legacyMocks.updateSettings).toHaveBeenCalledWith(
+      { maxConcurrent: 50, maxTriageConcurrent: 1, maxWorktrees: 4 },
+      "proj_123",
+    );
   });
 
   it("renders a load error state without crashing", async () => {

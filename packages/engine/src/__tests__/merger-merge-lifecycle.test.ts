@@ -178,6 +178,7 @@ import {
 import { mergerLog } from "../logger.js";
 import { createFnAgent } from "../pi.js";
 import { auditSquashMerge } from "../merger-squash-audit.js";
+import { finalizeProvenAutoMergeTask } from "../auto-merge-finalization.js";
 import { detectMergeOverlap, restoreBranchWinsFiles } from "../merger-overlap-guard.js";
 import { execSync, exec } from "node:child_process";
 import * as core from "@fusion/core";
@@ -234,6 +235,160 @@ function createMockStore(taskOverrides: Partial<Task> = {}, allTasks: Task[] = [
     enqueueMergeQueue: vi.fn(),
   } as unknown as TaskStore;
 }
+
+describe("auto-merge proven finalization helper", () => {
+  it("reconciles a landed merge-confirmed todo row without invalid todo-to-done transition", async () => {
+    const strandedTask = {
+      id: "FN-6897",
+      title: "Stranded landed merge",
+      description: "Test",
+      column: "todo",
+      status: "queued",
+      error: "Invalid transition: 'todo' → 'done'. Valid targets: in-progress, triage",
+      blockedBy: "FN-BLOCKER",
+      overlapBlockedBy: "FN-OVERLAP",
+      dependencies: [],
+      steps: [{ status: "done" }],
+      currentStep: 0,
+      log: [{ action: "AI merge: landed f528cd06, task → done" }],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      mergeDetails: {
+        mergeConfirmed: true,
+        commitSha: "f528cd06",
+        mergedAt: "2026-06-22T19:00:00.000Z",
+        landedFiles: ["packages/engine/src/merger-ai.ts"],
+      },
+    } as Task;
+    const doneTask = { ...strandedTask, column: "done", status: null, error: null, blockedBy: null, overlapBlockedBy: null } as Task;
+    const store = createMockStore(strandedTask) as unknown as TaskStore & {
+      getTask: ReturnType<typeof vi.fn>;
+      updateTask: ReturnType<typeof vi.fn>;
+      moveTask: ReturnType<typeof vi.fn>;
+      logEntry: ReturnType<typeof vi.fn>;
+      recordRunAuditEvent: ReturnType<typeof vi.fn>;
+    };
+    store.getTask.mockResolvedValue(strandedTask);
+    store.moveTask.mockResolvedValue(doneTask);
+
+    const result = await finalizeProvenAutoMergeTask({
+      store,
+      taskId: "FN-6897",
+      result: { task: strandedTask, ok: true, merged: true, commitSha: "f528cd06", mergeConfirmed: true } as MergeResult,
+      source: "direct-ai-merge",
+      auditAgentId: "merger",
+      auditPhase: "direct-ai-merge-finalize",
+    });
+
+    expect(result.outcome).toBe("done");
+    expect(store.updateTask).toHaveBeenCalledWith(
+      "FN-6897",
+      expect.objectContaining({
+        status: null,
+        error: null,
+        blockedBy: null,
+        overlapBlockedBy: null,
+        mergeRetries: 0,
+        mergeDetails: expect.objectContaining({ commitSha: "f528cd06", mergeConfirmed: true, landedFiles: ["packages/engine/src/merger-ai.ts"] }),
+      }),
+    );
+    expect(store.moveTask).toHaveBeenCalledWith(
+      "FN-6897",
+      "done",
+      expect.objectContaining({ moveSource: "engine", recoveryRehome: true, preserveProgress: true }),
+    );
+    expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "task:auto-merge-finalize-column-mismatch-reconciled",
+      metadata: expect.objectContaining({
+        taskId: "FN-6897",
+        previousColumn: "todo",
+        targetColumn: "done",
+        commitSha: "f528cd06",
+        status: "queued",
+        blockedBy: "FN-BLOCKER",
+        overlapBlockedBy: "FN-OVERLAP",
+      }),
+    }));
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-6897",
+      expect.stringContaining("Auto-merge finalization repaired column mismatch"),
+    );
+  });
+
+  it("treats already-done landed rows as idempotent success", async () => {
+    const doneTask = {
+      id: "FN-DONE",
+      title: "Already done",
+      description: "Test",
+      column: "done",
+      dependencies: [],
+      steps: [{ status: "done" }],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      mergeDetails: { mergeConfirmed: true, commitSha: "abc123" },
+    } as Task;
+    const store = createMockStore(doneTask) as unknown as TaskStore & {
+      getTask: ReturnType<typeof vi.fn>;
+      updateTask: ReturnType<typeof vi.fn>;
+      moveTask: ReturnType<typeof vi.fn>;
+      recordRunAuditEvent: ReturnType<typeof vi.fn>;
+    };
+    store.getTask.mockResolvedValue(doneTask);
+    const mergeResult = { task: doneTask, ok: true, merged: true, commitSha: "abc123", mergeConfirmed: true } as MergeResult;
+
+    const result = await finalizeProvenAutoMergeTask({
+      store,
+      taskId: "FN-DONE",
+      result: mergeResult,
+      source: "merge-confirmed-fast-path",
+    });
+
+    expect(result.outcome).toBe("already-done");
+    expect(mergeResult.task).toBe(doneTask);
+    expect(store.updateTask).not.toHaveBeenCalled();
+    expect(store.moveTask).not.toHaveBeenCalled();
+    expect(store.recordRunAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it("diagnoses rows without merge proof instead of finalizing them", async () => {
+    const unprovenTask = {
+      id: "FN-NOPROOF",
+      title: "No proof",
+      description: "Test",
+      column: "todo",
+      dependencies: [],
+      steps: [{ status: "done" }],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      mergeDetails: undefined,
+    } as Task;
+    const store = createMockStore(unprovenTask) as unknown as TaskStore & {
+      getTask: ReturnType<typeof vi.fn>;
+      updateTask: ReturnType<typeof vi.fn>;
+      moveTask: ReturnType<typeof vi.fn>;
+      recordRunAuditEvent: ReturnType<typeof vi.fn>;
+    };
+    store.getTask.mockResolvedValue(unprovenTask);
+
+    const result = await finalizeProvenAutoMergeTask({
+      store,
+      taskId: "FN-NOPROOF",
+      source: "self-healing",
+    });
+
+    expect(result).toEqual(expect.objectContaining({ outcome: "blocked", reason: "missing-merge-confirmation" }));
+    expect(store.updateTask).not.toHaveBeenCalled();
+    expect(store.moveTask).not.toHaveBeenCalled();
+    expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "task:auto-merge-finalize-column-mismatch-no-action",
+      metadata: expect.objectContaining({ previousColumn: "todo", reason: "missing-merge-confirmation" }),
+    }));
+  });
+});
 
 /**
  * Set up execSync to handle the standard merge flow:

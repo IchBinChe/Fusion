@@ -133,12 +133,34 @@
   margin-left: auto;
 }
 
+/*
+FNXC:TaskDetailChat 2026-06-23-23:55:
+Task-detail chat output blocks can be long enough that the executor/reviewer label scrolls out of view.
+Keep each block full-width and float the role/timestamp badge as a sticky overlay on the left so the visible content always has role context without reserving a permanent label column.
+*/
 .agent-log-badge-row {
+  position: sticky;
+  top: var(--space-xs);
+  left: var(--space-xs);
+  z-index: 2;
   display: inline-flex;
   align-items: center;
+  width: max-content;
+  max-width: calc(100% - var(--space-md));
+  margin: 0 0 var(--space-xs) var(--space-xs);
+  padding: 2px var(--space-xs);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--shadow-color, #000) 12%, transparent);
+  pointer-events: none;
+  white-space: nowrap;
 }
 
 .agent-log-tool {
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
   color: var(--accent);
   margin: var(--space-xs) 0;
   padding: var(--space-xs) var(--space-sm);
@@ -147,6 +169,9 @@
 }
 
 .agent-log-tool-result {
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
   color: var(--color-success);
   margin: calc(var(--space-xs) / 2) 0;
   padding: var(--space-xs) var(--space-sm);
@@ -156,6 +181,9 @@
 }
 
 .agent-log-tool-error {
+  position: relative;
+  width: 100%;
+  box-sizing: border-box;
   color: var(--color-error);
   margin: calc(var(--space-xs) / 2) 0;
   padding: var(--space-xs) var(--space-sm);
@@ -228,11 +256,15 @@
 
 .agent-log-text {
   display: block;
+  position: relative;
+  width: 100%;
   color: var(--text);
 }
 
 .agent-log-thinking {
   display: block;
+  position: relative;
+  width: 100%;
   font-style: italic;
   color: var(--text);
 }

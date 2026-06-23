@@ -9,6 +9,7 @@ export interface SchedulingSectionProps {
     form: SettingsFormState;
     setForm: SetSettingsForm;
     globalMaxConcurrent: number | undefined;
+    concurrencyLoading?: boolean;
     onGlobalMaxConcurrentChange: (value: number | undefined) => void;
     onOverlapIgnorePathChange: (index: number, value: string) => void;
     onOpenOverlapPathPicker: (index: number) => void;
@@ -16,14 +17,18 @@ export interface SchedulingSectionProps {
     onAddOverlapIgnorePath: () => void;
     onOpenWorkflowSettings?: () => void;
 }
-export function SchedulingSection({ scopeBanner, form, setForm, globalMaxConcurrent, onGlobalMaxConcurrentChange, onOverlapIgnorePathChange, onOpenOverlapPathPicker, onRemoveOverlapIgnorePath, onAddOverlapIgnorePath, onOpenWorkflowSettings, }: SchedulingSectionProps) {
+export function SchedulingSection({ scopeBanner, form, setForm, globalMaxConcurrent, concurrencyLoading = false, onGlobalMaxConcurrentChange, onOverlapIgnorePathChange, onOpenOverlapPathPicker, onRemoveOverlapIgnorePath, onAddOverlapIgnorePath, onOpenWorkflowSettings, }: SchedulingSectionProps) {
     const { t } = useTranslation("app");
     return (<>
       {scopeBanner}
       <h4 className="settings-section-heading">{t("settings.scheduling.scheduling", "Scheduling")}</h4>
+      {/*
+      FNXC:SettingsConcurrency 2026-06-22-20:18:
+      Concurrency inputs represent live project/global limits. Keep them disabled while their actual values are still loading so users cannot edit a blank fallback and accidentally overwrite the resolved limits.
+      */}
       <div className="form-group">
         <label htmlFor="globalMaxConcurrent">{t("settings.scheduling.globalMaxConcurrent", "Global Max Concurrent")}</label>
-        <input id="globalMaxConcurrent" type="number" min={0} max={10000} value={globalMaxConcurrent ?? ""} onChange={(e) => {
+        <input id="globalMaxConcurrent" type="number" min={0} max={10000} disabled={concurrencyLoading} value={globalMaxConcurrent ?? ""} onChange={(e) => {
             const val = e.target.value;
             onGlobalMaxConcurrentChange(val === "" ? undefined : Number(val));
         }}/>
@@ -31,14 +36,14 @@ export function SchedulingSection({ scopeBanner, form, setForm, globalMaxConcurr
       </div>
       <div className="form-group">
         <label htmlFor="maxConcurrent">{t("settings.scheduling.maxConcurrentTasks", "Max Concurrent Tasks")}</label>
-        <input id="maxConcurrent" type="number" min={1} max={10} value={form.maxConcurrent ?? ""} onChange={(e) => {
+        <input id="maxConcurrent" type="number" min={1} max={10} disabled={concurrencyLoading} value={form.maxConcurrent ?? ""} onChange={(e) => {
             const val = e.target.value;
             setForm((f) => ({ ...f, maxConcurrent: val === "" ? undefined : Number(val) } as SettingsFormState));
         }}/>
       </div>
       <div className="form-group">
         <label htmlFor="maxTriageConcurrent">{t("settings.scheduling.maxTriageConcurrent", "Max Triage Concurrent")}</label>
-        <input id="maxTriageConcurrent" type="number" min={1} max={10} value={form.maxTriageConcurrent ?? ""} onChange={(e) => {
+        <input id="maxTriageConcurrent" type="number" min={1} max={10} disabled={concurrencyLoading} value={form.maxTriageConcurrent ?? ""} onChange={(e) => {
             const val = e.target.value;
             setForm((f) => ({ ...f, maxTriageConcurrent: val === "" ? undefined : Number(val) } as SettingsFormState));
         }}/>

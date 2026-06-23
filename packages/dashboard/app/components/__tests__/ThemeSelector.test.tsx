@@ -78,55 +78,13 @@ describe("ThemeSelector", () => {
       />
     );
 
-    expect(screen.getByLabelText("Default theme")).toBeDefined();
-    expect(screen.getByLabelText("Ocean theme")).toBeDefined();
-    expect(screen.getByLabelText("Forest theme")).toBeDefined();
-    expect(screen.getByLabelText("Sunset theme")).toBeDefined();
-    expect(screen.getByLabelText("Zen theme")).toBeDefined();
-    expect(screen.getByLabelText("Berry theme")).toBeDefined();
-    expect(screen.getByLabelText("Mono theme")).toBeDefined();
-    expect(screen.getByLabelText("High Contrast theme")).toBeDefined();
-    expect(screen.getByLabelText("Solarized theme")).toBeDefined();
-    expect(screen.getByLabelText("Factory theme")).toBeDefined();
-    expect(screen.getByLabelText("Ayu theme")).toBeDefined();
-    expect(screen.getByLabelText("One Dark theme")).toBeDefined();
-    expect(screen.getByLabelText("Nord theme")).toBeDefined();
-    expect(screen.getByLabelText("Dracula theme")).toBeDefined();
-    expect(screen.getByLabelText("Gruvbox theme")).toBeDefined();
-    expect(screen.getByLabelText("Tokyo Night theme")).toBeDefined();
-    expect(screen.getByLabelText("Catppuccin Mocha theme")).toBeDefined();
-    expect(screen.getByLabelText("GitHub Dark theme")).toBeDefined();
-    expect(screen.getByLabelText("Everforest theme")).toBeDefined();
-    expect(screen.getByLabelText("Rosé Pine theme")).toBeDefined();
-    expect(screen.getByLabelText("Kanagawa theme")).toBeDefined();
-    expect(screen.getByLabelText("Slate theme")).toBeDefined();
-    expect(screen.getByLabelText("Ash theme")).toBeDefined();
-    expect(screen.getByLabelText("Graphite theme")).toBeDefined();
-    expect(screen.getByLabelText("Silver theme")).toBeDefined();
-    expect(screen.getByLabelText("Brutalist theme")).toBeDefined();
-    expect(screen.getByLabelText("Neon City theme")).toBeDefined();
-    expect(screen.getByLabelText("Parchment theme")).toBeDefined();
-    expect(screen.getByLabelText("Terminal theme")).toBeDefined();
-    expect(screen.getByLabelText("Glass theme")).toBeDefined();
-    expect(screen.getByLabelText("Horizon theme")).toBeDefined();
-    expect(screen.getByLabelText("Vitesse theme")).toBeDefined();
-    expect(screen.getByLabelText("Outrun theme")).toBeDefined();
-    expect(screen.getByLabelText("Snazzy theme")).toBeDefined();
-    expect(screen.getByLabelText("Porple theme")).toBeDefined();
-    expect(screen.getByLabelText("Espresso theme")).toBeDefined();
-    expect(screen.getByLabelText("Mars theme")).toBeDefined();
-    expect(screen.getByLabelText("Poimandres theme")).toBeDefined();
-    expect(screen.getByLabelText("Ember theme")).toBeDefined();
-    expect(screen.getByLabelText("Rust theme")).toBeDefined();
-    expect(screen.getByLabelText("Copper theme")).toBeDefined();
-    expect(screen.getByLabelText("Foundry theme")).toBeDefined();
-    expect(screen.getByLabelText("Carbon theme")).toBeDefined();
-    expect(screen.getByLabelText("Sandstone theme")).toBeDefined();
-    expect(screen.getByLabelText("Lagoon theme")).toBeDefined();
-    expect(screen.getByLabelText("Frost theme")).toBeDefined();
-    expect(screen.getByLabelText("Lavender theme")).toBeDefined();
-    expect(screen.getByLabelText("Neon Bloom theme")).toBeDefined();
-    expect(screen.getByLabelText("Sepia theme")).toBeDefined();
+    // FNXC:Theme 2026-06-22-09:30: Assert the accessibility invariant — every theme in the
+    // shared COLOR_THEMES list renders an accessibly-labeled option — instead of a frozen
+    // hardcoded label list that drifts whenever themes are renamed/added (e.g. FN-6813 mono variants).
+    for (const theme of THEME_OPTIONS) {
+      expect(screen.getByLabelText(`${theme.label} theme`)).toBeDefined();
+    }
+    expect(THEME_OPTIONS.map((theme) => theme.value)).toEqual([...COLOR_THEMES]);
   });
 
   it("renders every shared swatch class from themeOptions", () => {
@@ -156,7 +114,7 @@ describe("ThemeSelector", () => {
       />
     );
 
-    const oceanBtn = screen.getByLabelText("Ocean theme");
+    const oceanBtn = screen.getByLabelText("Ocean (Default) theme");
     expect(oceanBtn.className).toContain("active");
     expect(oceanBtn.getAttribute("aria-pressed")).toBe("true");
   });
@@ -529,7 +487,7 @@ describe("ThemeSelector", () => {
     );
 
     expect(screen.getByText(/Current theme/)).toBeDefined();
-    expect(screen.getByText(/Dark \/ Ocean/)).toBeDefined();
+    expect(screen.getByText(/Dark \/ Ocean \(Default\)/)).toBeDefined();
   });
 
   it("displays system theme in preview when system mode", () => {
@@ -640,7 +598,60 @@ describe("ThemeSelector", () => {
 
     fireEvent.click(screen.getByLabelText("Reset to default theme"));
     expect(onThemeModeChange).toHaveBeenCalledWith("dark");
-    expect(onColorThemeChange).toHaveBeenCalledWith("default");
+    expect(onColorThemeChange).toHaveBeenCalledWith("ocean");
+  });
+
+  it("shows the shadcn custom picker only for shadcn-custom", () => {
+    const { rerender } = render(
+      <ThemeSelector
+        themeMode="dark"
+        colorTheme="default"
+        onThemeModeChange={vi.fn()}
+        onColorThemeChange={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByTestId("shadcn-color-picker")).toBeNull();
+
+    rerender(
+      <ThemeSelector
+        themeMode="dark"
+        colorTheme="shadcn"
+        onThemeModeChange={vi.fn()}
+        onColorThemeChange={vi.fn()}
+      />
+    );
+    expect(screen.queryByTestId("shadcn-color-picker")).toBeNull();
+
+    rerender(
+      <ThemeSelector
+        themeMode="light"
+        colorTheme="shadcn-custom"
+        shadcnCustomColors={{ "--accent": "#123456" }}
+        resolvedThemeMode="light"
+        onThemeModeChange={vi.fn()}
+        onColorThemeChange={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId("shadcn-color-picker")).toBeDefined();
+    expect(screen.getByLabelText("Shadcn Custom theme").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("reset to defaults clears shadcn custom color overrides", () => {
+    const onShadcnCustomColorsChange = vi.fn();
+    render(
+      <ThemeSelector
+        themeMode="dark"
+        colorTheme="shadcn-custom"
+        shadcnCustomColors={{ "--accent": "#123456" }}
+        onThemeModeChange={vi.fn()}
+        onColorThemeChange={vi.fn()}
+        onShadcnCustomColorsChange={onShadcnCustomColorsChange}
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText("Reset to default theme"));
+    expect(onShadcnCustomColorsChange).toHaveBeenCalledWith({});
   });
 
   it("each color theme has a swatch with four explicit sample colors", () => {

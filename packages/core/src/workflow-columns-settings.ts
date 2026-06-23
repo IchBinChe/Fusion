@@ -1,18 +1,13 @@
-import { isExperimentalFeatureEnabled } from "./experimental-features.js";
 import type { Settings } from "./types.js";
 
 /**
- * The `experimentalFeatures.workflowColumns` flag (KTD-8). OFF: the legacy
- * enum/`VALID_TRANSITIONS` path runs untouched. ON: `moveTaskInternal` resolves
- * each task's workflow column graph + trait guards. The workflow-resolved path
- * is now default-on while the explicit OFF override remains available.
+ * Resolve whether workflow-defined columns are active for a settings snapshot.
  *
- * Mirrors `isSandboxExperimentalEnabled` / `isEvalsViewEnabled` — a thin,
- * named accessor over the shared experimental-features map so the literal flag
- * key lives in exactly one place.
+ * FNXC:WorkflowColumns 2026-06-22-18:00:
+ * Workflow columns graduated from the experimental runtime flag. Public runtime checks must treat stale persisted false values as enabled so engine scheduling and dashboard callers do not reactivate the retired legacy dispatcher.
  */
 export function isWorkflowColumnsEnabled(
-  settings: Pick<Settings, "experimentalFeatures"> | undefined,
+  _settings: Pick<Settings, "experimentalFeatures"> | undefined,
 ): boolean {
-  return isExperimentalFeatureEnabled(settings, "workflowColumns");
+  return true;
 }

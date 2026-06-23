@@ -8,20 +8,16 @@ interface SelectorExpectation {
 
 const convertedSelectors: SelectorExpectation[] = [
   {
-    selector: ".modal-overlay",
-    expectedColorMix: "color-mix(in srgb, var(--text) 60%, transparent)",
-  },
-  {
     selector: ".modal-header",
-    expectedColorMix: "color-mix(in srgb, var(--text) 10%, transparent)",
+    expectedColorMix: "color-mix(in srgb, var(--surface) 80%, transparent)",
   },
   {
     selector: ".modal-actions",
-    expectedColorMix: "color-mix(in srgb, var(--text) 5%, transparent)",
+    expectedColorMix: "color-mix(in srgb, var(--surface) 60%, transparent)",
   },
   {
     selector: ".settings-sidebar",
-    expectedColorMix: "color-mix(in srgb, var(--text) 10%, transparent)",
+    expectedColorMix: "color-mix(in srgb, var(--surface) 60%, transparent)",
   },
   {
     selector: ".step-progress-segment[data-tooltip]:hover::after",
@@ -104,6 +100,18 @@ function extractSelectorBlocks(css: string, selector: string): string[] {
 describe("styles.css rgba tokenization", () => {
   it("does not use raw rgba() outside :root token definition blocks", () => {
     expect(nonTokenRgbaLines(loadStylesCss())).toEqual([]);
+  });
+
+  it("keeps shared modal overlays visually transparent while panels provide shadow depth", () => {
+    const css = loadStylesCss();
+    const overlayBlock = extractSelectorBlocks(css, ".modal-overlay").at(0) ?? "";
+    const modalBlock = extractSelectorBlocks(css, ".modal").at(0) ?? "";
+
+    expect(overlayBlock).toContain("background: transparent;");
+    expect(overlayBlock).toContain("backdrop-filter: none;");
+    expect(overlayBlock).toContain("-webkit-backdrop-filter: none;");
+    expect(overlayBlock).not.toContain("color-mix(in srgb, var(--text)");
+    expect(modalBlock).toContain("box-shadow: var(--shadow-lg);");
   });
 
   it("keeps converted selectors on tokenized color-mix() values", () => {

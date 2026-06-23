@@ -61,6 +61,8 @@ type MockTask = {
   status: string | null;
   error: string | null;
   paused?: boolean;
+  blockedBy?: string | null;
+  overlapBlockedBy?: string | null;
   steps?: Array<{ status: string }>;
   mergeDetails?: { mergeConfirmed?: boolean; commitSha?: string; mergedAt?: string } | null;
   verificationFailureCount?: number;
@@ -717,8 +719,11 @@ describe("ProjectEngine merge error recovery", () => {
     const engine = createEngine(store);
     await runMergeCycle(engine);
 
-    expect(store.updateTask).toHaveBeenCalledWith(TASK_ID, { paused: false, status: null, error: null });
-    expect(store.moveTask).toHaveBeenCalledWith(TASK_ID, "done");
+    expect(store.updateTask).toHaveBeenCalledWith(
+      TASK_ID,
+      expect.objectContaining({ paused: false, status: null, error: null }),
+    );
+    expect(store.moveTask).toHaveBeenCalledWith(TASK_ID, "done", expect.objectContaining({ moveSource: "engine" }));
   });
 
   it("auto-finalizes merge-confirmed tasks with stale transient merging status", async () => {
@@ -735,8 +740,11 @@ describe("ProjectEngine merge error recovery", () => {
     const engine = createEngine(store);
     await runMergeCycle(engine);
 
-    expect(store.updateTask).toHaveBeenCalledWith(TASK_ID, { paused: false, status: null, error: null });
-    expect(store.moveTask).toHaveBeenCalledWith(TASK_ID, "done");
+    expect(store.updateTask).toHaveBeenCalledWith(
+      TASK_ID,
+      expect.objectContaining({ paused: false, status: null, error: null }),
+    );
+    expect(store.moveTask).toHaveBeenCalledWith(TASK_ID, "done", expect.objectContaining({ moveSource: "engine" }));
     expect(store.updateTask).not.toHaveBeenCalledWith(
       TASK_ID,
       expect.objectContaining({
@@ -746,18 +754,20 @@ describe("ProjectEngine merge error recovery", () => {
     );
   });
 
-  it("does not park merge-confirmed tasks as failed when finalize loses in-review ownership", async () => {
+  it("reconciles merge-confirmed tasks when finalize refresh finds todo ownership", async () => {
     const store = makeStore({
       tasks: [
         makeTask({
           mergeDetails: { mergeConfirmed: true },
         }),
-        makeTask({ column: "todo" }),
+        makeTask({
+          column: "todo",
+          status: "queued",
+          overlapBlockedBy: "FN-9999",
+          mergeDetails: { mergeConfirmed: true },
+        }),
       ],
     });
-    store.moveTask.mockRejectedValueOnce(
-      new Error("Invalid transition: 'todo' → 'done'. Valid targets: in-progress, triage"),
-    );
 
     const engine = createEngine(store);
     await runMergeCycle(engine);
@@ -767,10 +777,30 @@ describe("ProjectEngine merge error recovery", () => {
       mergeRetries: 3,
       error: expect.stringContaining("Invalid transition"),
     });
+    expect(store.updateTask).toHaveBeenCalledWith(
+      TASK_ID,
+      expect.objectContaining({ status: null, error: null, blockedBy: null, overlapBlockedBy: null }),
+    );
+    expect(store.moveTask).toHaveBeenCalledWith(
+      TASK_ID,
+      "done",
+      expect.objectContaining({ moveSource: "engine", recoveryRehome: true }),
+    );
     expect(store.logEntry).toHaveBeenCalledWith(
       TASK_ID,
-      expect.stringContaining("finalize skipped"),
+      expect.stringContaining("Auto-merge finalization repaired column mismatch"),
     );
+    expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      domain: "database",
+      mutationType: "task:auto-merge-finalize-column-mismatch-reconciled",
+      target: TASK_ID,
+      metadata: expect.objectContaining({
+        previousColumn: "todo",
+        targetColumn: "done",
+        status: "queued",
+        overlapBlockedBy: "FN-9999",
+      }),
+    }));
   });
 
   it("logs when non-conflict direct merge error recovery update fails", async () => {

@@ -1,7 +1,14 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { tempWorkspace } from "@fusion/test-utils";
+const spawnMock = vi.hoisted(() => vi.fn());
+
+vi.mock("node:child_process", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:child_process")>()),
+  spawn: spawnMock,
+}));
+
 import {
   resolveDroidCliExtension,
   resolveDroidCliExtensionPaths,
@@ -22,11 +29,15 @@ describe("resolveDroidCliExtension", () => {
 });
 
 describe("resolveDroidCliExtensionPaths", () => {
-  it("returns empty when useDroidCli is off (default)", () => {
+  it("returns empty when useDroidCli is off (default) without spawning droid", () => {
+    spawnMock.mockClear();
+
     const result = resolveDroidCliExtensionPaths({});
+
     expect(result.paths).toEqual([]);
     expect(result.warning).toBeUndefined();
     expect(result.resolution).toBeNull();
+    expect(spawnMock).not.toHaveBeenCalled();
   });
 
   it("returns empty when useDroidCli is explicitly false", () => {

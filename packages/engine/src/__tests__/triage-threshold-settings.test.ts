@@ -45,6 +45,9 @@ describe("triage threshold workflow settings", () => {
     expect(rendered).toContain("Decide, Evaluate, Verify, Confirm, Audit, Review whether, Investigate and report");
     expect(rendered).toContain("Keep the project default workflow (`builtin:coding`)");
     expect(rendered).toContain("unless the user explicitly requested a specific workflow");
+    expect(rendered).toContain("or you created that task yourself");
+    expect(rendered).toContain("When you create a task via `fn_task_create`");
+    expect(rendered).toContain("do not move a task you did not create unless the user asked");
     expect(rendered).toContain("Do NOT call `fn_workflow_select` or pass `workflow_id`");
     expect(rendered).toContain("set `**No commits expected:** true` in the PROMPT.md header");
     expect(rendered).not.toContain("prefer `builtin:quick-fix`");

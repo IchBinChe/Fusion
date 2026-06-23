@@ -146,7 +146,7 @@ describe("MovedSettingsStub", () => {
 });
 
 describe("ExperimentalSection", () => {
-  const knownFeatures = { insights: "Insights", roadmap: "Roadmaps" };
+  const knownFeatures = { insights: "Insights" };
   const legacyAliases: Record<string, string> = { devServer: "devServerView" };
   const getCanonicalKey = (k: string) => legacyAliases[k] ?? k;
   const isFeatureEnabled = (features: Record<string, boolean>, key: string) => features[key] === true;
@@ -173,7 +173,7 @@ describe("ExperimentalSection", () => {
   it("renders a row per known flag and round-trips the canonical key", () => {
     render(<ExperimentalHost />);
     expect(screen.getByText("Insights")).toBeInTheDocument();
-    expect(screen.getByText("Roadmaps")).toBeInTheDocument();
+    expect(screen.queryByText("Roadmaps")).not.toBeInTheDocument();
 
     const insightsToggle = document.getElementById("experimental-insights") as HTMLInputElement;
     expect(insightsToggle.checked).toBe(false);

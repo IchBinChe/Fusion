@@ -14,7 +14,7 @@ describe("ThemeDropdown", () => {
 
     const trigger = screen.getByRole("button", { name: /ocean/i });
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
-    expect(within(trigger).getByText("Ocean")).toBeDefined();
+    expect(within(trigger).getByText("Ocean (Default)")).toBeDefined();
     expect(trigger.querySelector(".theme-swatch-ocean")).toBeTruthy();
 
     fireEvent.click(trigger);
@@ -33,16 +33,16 @@ describe("ThemeDropdown", () => {
     const onColorThemeChange = vi.fn();
     render(<ThemeDropdown colorTheme="default" onColorThemeChange={onColorThemeChange} />);
 
-    fireEvent.click(screen.getByRole("button", { name: /default/i }));
+    fireEvent.click(screen.getByRole("button", { name: /fusion legacy/i }));
     fireEvent.click(screen.getAllByRole("option").find((element) => element.textContent?.trim() === "Forest")!);
     expect(onColorThemeChange).toHaveBeenCalledWith("forest");
     expect(screen.queryByRole("listbox")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: /default/i }));
-    fireEvent.keyDown(screen.getByRole("option", { name: /default/i }), { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: /fusion legacy/i }));
+    fireEvent.keyDown(screen.getByRole("option", { name: /fusion legacy/i }), { key: "Escape" });
     expect(screen.queryByRole("listbox")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: /default/i }));
+    fireEvent.click(screen.getByRole("button", { name: /fusion legacy/i }));
     fireEvent.pointerDown(document.body);
     expect(screen.queryByRole("listbox")).toBeNull();
   });
@@ -51,13 +51,32 @@ describe("ThemeDropdown", () => {
     const onColorThemeChange = vi.fn();
     render(<ThemeDropdown colorTheme="default" onColorThemeChange={onColorThemeChange} />);
 
-    const trigger = screen.getByRole("button", { name: /default/i });
+    const trigger = screen.getByRole("button", { name: /fusion legacy/i });
     fireEvent.keyDown(trigger, { key: "ArrowDown" });
-    fireEvent.keyDown(screen.getByRole("option", { name: /default/i }), { key: "ArrowDown" });
+    fireEvent.keyDown(screen.getByRole("option", { name: /fusion legacy/i }), { key: "ArrowDown" });
     fireEvent.keyDown(screen.getByRole("option", { name: /ocean/i }), { key: "Enter" });
 
     expect(onColorThemeChange).toHaveBeenCalledWith("ocean");
     expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("shows the shadcn custom picker only for shadcn-custom", () => {
+    const { rerender } = render(<ThemeDropdown colorTheme="default" onColorThemeChange={vi.fn()} />);
+    expect(screen.queryByTestId("shadcn-color-picker")).toBeNull();
+
+    rerender(<ThemeDropdown colorTheme="shadcn" onColorThemeChange={vi.fn()} />);
+    expect(screen.queryByTestId("shadcn-color-picker")).toBeNull();
+
+    rerender(
+      <ThemeDropdown
+        colorTheme="shadcn-custom"
+        themeMode="light"
+        resolvedThemeMode="light"
+        shadcnCustomColors={{ "--accent": "#123456" }}
+        onColorThemeChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("shadcn-color-picker")).toBeDefined();
   });
 
   it("renders compact theme mode controls when mode props are supplied", () => {
@@ -88,11 +107,11 @@ describe("ThemeDropdown", () => {
       />,
     );
 
-    const trigger = screen.getByRole("button", { name: /default/i });
+    const trigger = screen.getByRole("button", { name: /fusion legacy/i });
     const root = trigger.closest(".theme-dropdown");
     expect(root).toBeTruthy();
     expect(root?.classList.contains("open")).toBe(false);
-    expect(getComputedStyle(root!).zIndex).not.toBe("40");
+    expect(getComputedStyle(root!).zIndex).not.toBe("10002");
 
     fireEvent.click(trigger);
 
@@ -100,10 +119,10 @@ describe("ThemeDropdown", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(root?.classList.contains("open")).toBe(true);
     expect(getComputedStyle(root!).position).toBe("relative");
-    expect(getComputedStyle(root!).zIndex).toBe("40");
+    expect(getComputedStyle(root!).zIndex).toBe("10002");
     expect(popover).toBeTruthy();
     expect(getComputedStyle(popover!).position).toBe("absolute");
-    expect(getComputedStyle(popover!).zIndex).toBe("40");
+    expect(getComputedStyle(popover!).zIndex).toBe("10002");
   });
 
   it("preserves the mobile static in-flow popover branch without dropdown elevation", () => {

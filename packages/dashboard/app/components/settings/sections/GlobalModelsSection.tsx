@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { THINKING_LEVELS } from "@fusion/core";
 import type { Settings, ThinkingLevel } from "@fusion/core";
 import type { ModelInfo } from "../../../api";
+import type { ToastType } from "../../../hooks/useToast";
+import { ModelPricingSection } from "./ModelPricingSection";
 import { CustomModelDropdown } from "../../CustomModelDropdown";
 import type { SectionBaseProps, ModelLane } from "./context";
 import { LoadingSpinner } from "../../LoadingSpinner";
@@ -22,8 +24,10 @@ export interface GlobalModelsSectionProps extends SectionBaseProps {
     favoriteModels: string[];
     onToggleFavorite: (provider: string) => void;
     onToggleModelFavorite: (modelId: string) => void;
+    addToast: (message: string, type?: ToastType) => void;
+    projectId?: string;
 }
-export function GlobalModelsSection({ scopeBanner, form, setForm, availableModels, modelsLoading, globalModelLanes, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, }: GlobalModelsSectionProps) {
+export function GlobalModelsSection({ scopeBanner, form, setForm, availableModels, modelsLoading, globalModelLanes, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, addToast, projectId, }: GlobalModelsSectionProps) {
     const { t } = useTranslation("app");
     const selectedValue = form.defaultProvider && form.defaultModelId
         ? `${form.defaultProvider}/${form.defaultModelId}`
@@ -121,6 +125,8 @@ export function GlobalModelsSection({ scopeBanner, form, setForm, availableModel
               </div>);
             })}
         </>)}
+
+      <ModelPricingSection form={form} setForm={setForm} addToast={addToast} projectId={projectId}/>
 
       {/* --- Startup Model Sync --- */}
       <h4 className="settings-section-heading settings-section-heading--spaced">{t("settings.globalModels.startupModelSync", "Startup Model Sync")}</h4>

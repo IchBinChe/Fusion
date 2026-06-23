@@ -1,6 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { ConfirmOptions } from "../hooks/useConfirm";
+import { nextFloatingZ } from "./floatingWindowStack";
 import "./ConfirmDialog.css";
 
 export interface ConfirmDialogProps {
@@ -28,6 +30,16 @@ export function ConfirmDialog({
 }: ConfirmDialogProps) {
   const { t } = useTranslation("app");
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  /*
+  FNXC:Confirm 2026-06-23-01:30:
+  The confirm dialog (e.g. the "discard changes" prompt when cancelling New Task) MUST sit above the floating modal stack. Floating windows (New Task, pop-outs) live at the shared floating z-band (nextFloatingZ) and are portaled to document.body, so a confirm rendered inline at the page .modal-overlay z (~10000) paints BEHIND them. Portal the confirm to body and claim the TOP of the shared stack each time it opens so it always appears over whatever floating window triggered it.
+  */
+  const [overlayZ, setOverlayZ] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    if (isOpen) {
+      setOverlayZ(nextFloatingZ());
+    }
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -51,8 +63,8 @@ export function ConfirmDialog({
     return null;
   }
 
-  return (
-    <div className="modal-overlay open confirm-dialog-overlay" onClick={onCancel}>
+  return createPortal(
+    <div className="modal-overlay open confirm-dialog-overlay" onClick={onCancel} style={overlayZ ? { zIndex: overlayZ } : undefined}>
       <div
         className="modal confirm-dialog"
         onClick={(event) => event.stopPropagation()}
@@ -95,6 +107,7 @@ export function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

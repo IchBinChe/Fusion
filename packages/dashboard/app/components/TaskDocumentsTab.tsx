@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileText, ChevronDown, ChevronUp, Plus, Trash2, History } from "lucide-react";
+import "./DocumentsView.css";
 import "./TaskDocumentsTab.css";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { Task, TaskDocument, TaskDocumentRevision } from "@fusion/core";
+import type { ArtifactWithTask, Task, TaskDocument, TaskDocumentRevision } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
 import {
@@ -12,8 +13,11 @@ import {
   fetchTaskDocumentRevisions,
   putTaskDocument,
   deleteTaskDocument,
+  artifactMediaUrl,
 } from "../api";
+import { useArtifacts } from "../hooks/useArtifacts";
 import { LoadingSpinner } from "./LoadingSpinner";
+import { ArtifactMedia, getArtifactTypeLabel } from "./ArtifactMedia";
 
 // Document key validation: alphanumeric, hyphens, underscores, 1-64 chars
 const DOCUMENT_KEY_REGEX = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -35,6 +39,51 @@ function formatTimestamp(iso?: string): string {
 function getContentPreview(content: string, maxLength: number = MAX_CONTENT_PREVIEW): string {
   if (content.length <= maxLength) return content;
   return content.substring(0, maxLength) + "…";
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(bytes >= 10 * 1024 ? 0 : 1)} KB`;
+  }
+
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+interface TaskArtifactCardProps {
+  artifact: ArtifactWithTask;
+  projectId?: string;
+}
+
+function TaskArtifactCard({ artifact, projectId }: TaskArtifactCardProps) {
+  const { t } = useTranslation("app");
+  const mediaUrl = artifactMediaUrl(artifact.id, projectId);
+  const typeLabel = getArtifactTypeLabel(t, artifact.type);
+  const preview = artifact.content ? getContentPreview(artifact.content, 320) : artifact.description;
+  const title = artifact.title || t("documents.untitledArtifact", "Untitled artifact");
+
+  return (
+    <article className="document-card documents-artifact-card" aria-label={t("documents.artifactCardLabel", "Artifact {{title}}", { title })}>
+      <div className="documents-artifact-preview">
+        <ArtifactMedia artifact={artifact} mediaUrl={mediaUrl} title={title} preview={preview} t={t} />
+      </div>
+      <div className="documents-artifact-body">
+        <div className="documents-artifact-header">
+          <span className="documents-artifact-type-badge">{typeLabel}</span>
+          <span className="documents-artifact-author">{artifact.authorId}</span>
+        </div>
+        <h5 className="documents-artifact-title">{title}</h5>
+        {artifact.description && <p className="documents-artifact-description">{artifact.description}</p>}
+        <div className="documents-artifact-meta">
+          <span>{formatTimestamp(artifact.createdAt)}</span>
+          {artifact.sizeBytes !== undefined && <span>{formatFileSize(artifact.sizeBytes)}</span>}
+        </div>
+      </div>
+    </article>
+  );
 }
 
 export function TaskDocumentsTab({
@@ -61,6 +110,7 @@ export function TaskDocumentsTab({
   const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [renderMarkdown, setRenderMarkdown] = useState(false);
+  const { artifacts, loading: artifactsLoading, error: artifactsError } = useArtifacts({ projectId, taskId });
 
   const loadDocuments = useCallback(async () => {
     try {
@@ -76,6 +126,12 @@ export function TaskDocumentsTab({
   useEffect(() => {
     void loadDocuments();
   }, [loadDocuments]);
+
+  useEffect(() => {
+    if (artifactsError) {
+      addToast(artifactsError || t("taskDocuments.failedToLoadArtifacts", "Failed to load artifacts"), "error");
+    }
+  }, [addToast, artifactsError, t]);
 
   async function handleExpandDocument(doc: TaskDocument) {
     if (expandedDocKey === doc.key) {
@@ -210,18 +266,52 @@ export function TaskDocumentsTab({
     setEditContent("");
   }
 
-  if (loading) {
+  if (loading || artifactsLoading) {
     return (
       <div className="detail-section">
-        <h4>{t("taskDocuments.heading", "Documents")}</h4>
-        <div className="detail-log-empty"><LoadingSpinner label={t("taskDocuments.loading", "Loading documents…")} /></div>
+        <h4>{t("taskDocuments.heading", "Artifacts")}</h4>
+        <div className="detail-log-empty"><LoadingSpinner label={t("taskDocuments.loading", "Loading documents and artifacts…")} /></div>
       </div>
     );
   }
 
+  const isEmpty = documents.length === 0 && artifacts.length === 0 && !showCreateForm;
+
   return (
     <div className="detail-section">
-      <h4>{t("taskDocuments.heading", "Documents")}</h4>
+      <h4>{t("taskDocuments.heading", "Artifacts")}</h4>
+
+      {isEmpty && (
+        <div className="detail-log-empty">
+          {t("taskDocuments.noDocuments", "No documents or artifacts yet.")}
+        </div>
+      )}
+
+      {/*
+       * FNXC:ArtifactRegistry 2026-06-21-21:44:
+       * The per-task Artifacts tab must surface both traditional task documents and agent-created media artifacts so users can inspect all task-scoped outputs without leaving the task modal.
+       */}
+      {artifacts.length > 0 && (
+        <section className="task-artifacts-section" aria-labelledby="task-artifacts-heading">
+          <div className="task-artifacts-section-header">
+            <h5 id="task-artifacts-heading">{t("taskDocuments.artifactsSubheading", "Media artifacts")}</h5>
+            <span className="task-artifacts-section-count">{t("taskDocuments.artifactCount", "{{count}} artifact{{plural}}", { count: artifacts.length, plural: artifacts.length === 1 ? "" : "s" })}</span>
+          </div>
+          <div className="documents-artifact-gallery documents-artifact-gallery--mobile task-artifacts-gallery">
+            {artifacts.map((artifact) => (
+              <TaskArtifactCard key={artifact.id} artifact={artifact} projectId={projectId} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className="task-documents-section" aria-labelledby="task-documents-heading">
+        <div className="task-artifacts-section-header">
+          <h5 id="task-documents-heading">{t("taskDocuments.documentsSubheading", "Task documents")}</h5>
+          {documents.length > 0 && (
+            <span className="task-artifacts-section-count">{t("taskDocuments.documentCount", "{{count}} document{{plural}}", { count: documents.length, plural: documents.length === 1 ? "" : "s" })}</span>
+          )}
+        </div>
 
       {/* Create Form */}
       {showCreateForm && (
@@ -276,9 +366,11 @@ export function TaskDocumentsTab({
 
       {/* Document List */}
       {documents.length === 0 && !showCreateForm ? (
-        <div className="detail-log-empty">
-          {t("taskDocuments.noDocuments", "No documents yet.")}
-        </div>
+        !isEmpty && (
+          <div className="detail-log-empty">
+            {t("taskDocuments.noTaskDocuments", "No task documents yet.")}
+          </div>
+        )
       ) : (
         <div className="task-documents-list">
           {documents.map((doc) => (
@@ -456,6 +548,7 @@ export function TaskDocumentsTab({
           <Plus size={14} /> {t("taskDocuments.newDocumentButton", "New Document")}
         </button>
       )}
+      </section>
     </div>
   );
 }

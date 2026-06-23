@@ -867,6 +867,9 @@ export async function createSession(
       /*
       FNXC:PlanningTools 2026-06-18-07:11:
       FN-6640 gives planning agents parity with chat for `fn_task_document_write` and `fn_task_document_read` after FN-6635. The planning lane has no ambient task (`PLANNING_NO_AMBIENT_TASK_ID`), so these document tools must require an explicit `task_id`, mirroring no-ambient workflow authoring tools.
+
+      FNXC:ArtifactRegistry 2026-06-21-00:00:
+      Planning sessions do not own the dashboard MessageStore, so artifact tools stay excluded here until the planning lane can thread the same inbox dependency as chat. This preserves the FN-6778 requirement that registration notifications use an existing MessageStore rather than constructing a new one.
       */
       ...createChatTaskDocumentTools(store),
     ],
@@ -1461,6 +1464,7 @@ async function createPlanningAgent(
     customTools: [
       ...createPlanningBoardTools(store),
       ...createWorkflowAuthoringTools(store, PLANNING_NO_AMBIENT_TASK_ID, { stripApprovalFlags: true }),
+      /* FNXC:ArtifactRegistry 2026-06-21-00:00: Streaming planning excludes artifact tools for the same reason as non-streaming planning: this module has no MessageStore dependency to provide best-effort dashboard inbox notifications. */
       ...createChatTaskDocumentTools(store),
     ],
     ...(modelProvider && modelId

@@ -94,6 +94,20 @@ describeIfGit("worktree liveness gating (FN-4682)", () => {
       expected: { ok: true } as const,
     },
     {
+      name: "repo-root",
+      setup: () => {
+        const rootDir = track(makeRepo((dir) => {
+          git(dir, 'git commit --allow-empty -m "init"');
+        }));
+        return { rootDir, worktreePath: rootDir };
+      },
+      expected: {
+        ok: false,
+        classification: "repo-root",
+        reason: "worktree path is the project root, not a task worktree",
+      } as const,
+    },
+    {
       name: "missing",
       setup: () => {
         const rootDir = track(makeRepo((dir) => {
@@ -160,6 +174,17 @@ describeIfGit("worktree liveness gating (FN-4682)", () => {
   ])("FN-4935: classifyTaskWorktree %s", async ({ setup, expected }) => {
     const { rootDir, worktreePath } = setup();
     await expect(classifyTaskWorktree(rootDir, worktreePath)).resolves.toEqual(expected);
+  });
+
+  it("FN-6861: rejects canonical-equal repo root paths before accepting registered worktrees", async () => {
+    const rootDir = track(makeRepo((dir) => {
+      git(dir, 'git commit --allow-empty -m "init"');
+    }));
+    await expect(classifyTaskWorktree(rootDir, `${rootDir}/`)).resolves.toEqual({
+      ok: false,
+      classification: "repo-root",
+      reason: "worktree path is the project root, not a task worktree",
+    });
   });
 
   it("FN-4682: rejects missing worktree directory", async () => {

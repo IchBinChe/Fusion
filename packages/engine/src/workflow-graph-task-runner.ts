@@ -1,5 +1,5 @@
 import type { Settings, TaskDetail, WorkflowDefinition } from "@fusion/core";
-import { getBuiltinWorkflow, isBuiltinWorkflowId, isExperimentalFeatureEnabled } from "@fusion/core";
+import { getBuiltinWorkflow, isBuiltinWorkflowId } from "@fusion/core";
 
 import { WorkflowGraphExecutor, type WorkflowNodeOutcome, type WorkflowTaskProjection } from "./workflow-graph-executor.js";
 import type {
@@ -139,10 +139,6 @@ export class WorkflowGraphTaskRunner {
     task: TaskDetail,
     settings: Pick<Settings, "experimentalFeatures"> | undefined,
   ): Promise<WorkflowGraphTaskRunResult> {
-    if (!isExperimentalFeatureEnabled(settings, "workflowGraphExecutor")) {
-      return this.fallBack(task.id, "flag-off");
-    }
-
     let selection: { workflowId: string; stepIds: string[] } | undefined;
     try {
       selection = this.deps.store.getTaskWorkflowSelection(task.id);

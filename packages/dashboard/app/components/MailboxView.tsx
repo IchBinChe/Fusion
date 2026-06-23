@@ -39,6 +39,7 @@ import {
 } from "../api";
 import { MailboxMessageContent } from "./MailboxMessageContent";
 import { MessageComposer } from "./MessageComposer";
+import { ViewHeader } from "./ViewHeader";
 import { WorktrunkInstallApprovalDetails } from "./WorktrunkInstallApprovalDetails";
 import { subscribeSse } from "../sse-bus";
 import { useViewportMode } from "../hooks/useViewportMode";
@@ -59,10 +60,14 @@ interface MailboxViewProps {
 
 const ALL_AGENTS_MAILBOX_ID = "__all_agents__";
 
-const MAILBOX_SIDEBAR_MIN_WIDTH = 280;
+/*
+FNXC:Mailbox 2026-06-22-16:00:
+The mailbox message-list pane defaults narrow and can be dragged narrower than before. Lowered min 280->180 and default 320->220 so the conversation list takes less horizontal room by default while the active-message pane gets more; users can still widen via the resize handle (persisted per project).
+*/
+const MAILBOX_SIDEBAR_MIN_WIDTH = 180;
 const MAILBOX_SIDEBAR_MAX_RATIO = 0.65;
 const MAILBOX_SIDEBAR_KEYBOARD_STEP = 16;
-const MAILBOX_SIDEBAR_DEFAULT_WIDTH = 320;
+const MAILBOX_SIDEBAR_DEFAULT_WIDTH = 220;
 
 function getMailboxSidebarMaxWidth(containerWidth: number): number {
   return Math.max(MAILBOX_SIDEBAR_MIN_WIDTH, containerWidth * MAILBOX_SIDEBAR_MAX_RATIO);
@@ -230,6 +235,19 @@ export function MailboxView({
   const [selectedApproval, setSelectedApproval] = useState<ApprovalRequestDetail | null>(null);
   const [approvalComment, setApprovalComment] = useState("");
   const [approvalDecisionLoading, setApprovalDecisionLoading] = useState<false | "approve" | "deny">(false);
+  const consumedDeepLinkedMessageIdRef = useRef<string | null>(null);
+  const highlightedDeepLinkedMessageIdRef = useRef<string | null>(null);
+
+  /*
+   * FNXC:MailboxMobile 2026-06-23-10:55:
+   * URL mailbox deep links initialize one message selection for reload/share flows, but mobile Back, tab switches, compose/delete/approval actions, and direct row clicks are explicit user navigation. Consume the current URL target before those actions so refresh or conversation effects cannot restore an older message over the user's chosen row.
+   */
+  const consumeCurrentDeepLink = useCallback(() => {
+    const deepLinkedMessageId = getDeepLinkedMessageId();
+    if (deepLinkedMessageId) {
+      consumedDeepLinkedMessageIdRef.current = deepLinkedMessageId;
+    }
+  }, []);
 
   const agentNamesById = useMemo(
     () => new Map(agents.map((agent) => [agent.id, agent.name ?? ""])),
@@ -245,6 +263,11 @@ export function MailboxView({
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => readMailboxSidebarWidth(projectId));
   const splitLayoutRef = useRef<HTMLDivElement>(null);
   const mailboxContentRef = useRef<HTMLDivElement>(null);
+  /*
+  FNXC:Mailbox 2026-06-22-18:05:
+  Teardown ref for the pointer-driven divider drag. The pointer move/up/cancel listeners and the captured pointer must be released exactly once on pointerup, pointercancel, or unmount; storing the cleanup here guarantees we never leak a global listener or a stuck pointer capture if the component unmounts mid-drag.
+  */
+  const splitResizeTeardownRef = useRef<(() => void) | null>(null);
   const pendingScrollTopRef = useRef<number | null>(null);
   const { keyboardOverlap, viewportHeight, viewportOffsetTop, keyboardOpen } = useMobileKeyboard({ enabled: isMobile });
   const containerKeyboardStyle = useMemo<CSSProperties | undefined>(() => {
@@ -280,26 +303,55 @@ export function MailboxView({
     }
   }, [isSplitPane, projectId, sidebarWidth]);
 
-  const handleSplitResizeStart = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+  /*
+  FNXC:Mailbox 2026-06-22-18:05:
+  Divider drag uses pointer events + setPointerCapture so the drag keeps tracking even when the cursor leaves the thin handle. Each move maps the pointer's X to a list-pane width relative to the split-layout left edge, clamped to [MIN, container * MAX_RATIO]. setSidebarWidth feeds the pane's inline `width`, which the flex row now honors, so the resize is live; the existing persistence effect writes the final width to scoped storage. The teardown (release capture + remove listeners) runs once on pointerup/pointercancel and is parked in splitResizeTeardownRef for unmount safety.
+  */
+  const handleSplitResizeStart = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (!isSplitPane) return;
     event.preventDefault();
     const container = splitLayoutRef.current;
     if (!container) return;
 
+    splitResizeTeardownRef.current?.();
+
+    const handle = event.currentTarget;
     const rect = container.getBoundingClientRect();
-    const onMouseMove = (moveEvent: MouseEvent) => {
+    const pointerId = event.pointerId;
+
+    const onPointerMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) return;
       const proposedWidth = moveEvent.clientX - rect.left;
       setSidebarWidth(clampMailboxSidebarWidth(proposedWidth, rect.width));
     };
 
-    const onMouseUp = () => {
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
+    const teardown = () => {
+      handle.removeEventListener("pointermove", onPointerMove);
+      handle.removeEventListener("pointerup", teardown);
+      handle.removeEventListener("pointercancel", teardown);
+      try {
+        handle.releasePointerCapture(pointerId);
+      } catch {
+        // Pointer capture may already be released; ignore.
+      }
+      splitResizeTeardownRef.current = null;
     };
 
-    window.addEventListener("mousemove", onMouseMove);
-    window.addEventListener("mouseup", onMouseUp);
+    splitResizeTeardownRef.current = teardown;
+
+    try {
+      handle.setPointerCapture(pointerId);
+    } catch {
+      // setPointerCapture can throw in non-DOM test environments; drag still works via listeners.
+    }
+    handle.addEventListener("pointermove", onPointerMove);
+    handle.addEventListener("pointerup", teardown);
+    handle.addEventListener("pointercancel", teardown);
   }, [isSplitPane]);
+
+  useEffect(() => () => {
+    splitResizeTeardownRef.current?.();
+  }, []);
 
   const handleSplitResizeKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!isSplitPane) return;
@@ -535,7 +587,10 @@ export function MailboxView({
 
   // ── Actions ───────────────────────────────────────────────────────────
 
-  const handleOpenMessage = useCallback(async (message: Message) => {
+  const handleOpenMessage = useCallback(async (message: Message, source: "deep-link" | "user" = "user") => {
+    if (source === "user") {
+      consumeCurrentDeepLink();
+    }
     setSelectedMessage(message);
     // Only auto-mark as read when viewing the dashboard user's own inbox.
     // Browsing another agent's mailbox must not consume their unread messages
@@ -569,12 +624,12 @@ export function MailboxView({
     } catch {
       setConversationMessages([message]);
     }
-  }, [projectId, unreadCount, onUnreadCountChange, activeTab]);
+  }, [projectId, unreadCount, onUnreadCountChange, activeTab, consumeCurrentDeepLink]);
 
   // Deep-link: open and highlight a specific message from URL params.
   useEffect(() => {
     const deepLinkedMessageId = getDeepLinkedMessageId();
-    if (!deepLinkedMessageId) {
+    if (!deepLinkedMessageId || consumedDeepLinkedMessageIdRef.current === deepLinkedMessageId) {
       return;
     }
 
@@ -591,11 +646,12 @@ export function MailboxView({
       return;
     }
 
-    void handleOpenMessage(message);
+    consumedDeepLinkedMessageIdRef.current = deepLinkedMessageId;
+    void handleOpenMessage(message, "deep-link");
   }, [inbox, outbox, agentMailbox, allAgentsMailbox, conversationMessages, handleOpenMessage]);
   useEffect(() => {
     const deepLinkedMessageId = getDeepLinkedMessageId();
-    if (!deepLinkedMessageId) {
+    if (!deepLinkedMessageId || selectedMessage?.id !== deepLinkedMessageId || highlightedDeepLinkedMessageIdRef.current === deepLinkedMessageId) {
       return;
     }
 
@@ -604,6 +660,7 @@ export function MailboxView({
       return;
     }
 
+    highlightedDeepLinkedMessageIdRef.current = deepLinkedMessageId;
     element.scrollIntoView({ behavior: "smooth", block: "center" });
     element.classList.add("mailbox-message-highlight");
     const timer = window.setTimeout(() => {
@@ -616,9 +673,10 @@ export function MailboxView({
   }, [selectedMessage, conversationMessages]);
 
   const handleCloseMessage = useCallback(() => {
+    consumeCurrentDeepLink();
     setSelectedMessage(null);
     setConversationMessages([]);
-  }, []);
+  }, [consumeCurrentDeepLink]);
 
   const handleMarkAllRead = useCallback(async () => {
     try {
@@ -641,6 +699,7 @@ export function MailboxView({
   }, [projectId, addToast, onUnreadCountChange]);
 
   const handleDeleteMessage = useCallback(async (id: string) => {
+    consumeCurrentDeepLink();
     try {
       await deleteMessage(id, projectId);
       setSelectedMessage(null);
@@ -654,16 +713,17 @@ export function MailboxView({
     } catch {
       addToast?.("Failed to delete message", "error");
     }
-  }, [projectId, activeTab, selectedAgentId, loadInbox, loadOutbox, loadAgentMailbox, loadAllAgentsMailbox, addToast]);
+  }, [projectId, activeTab, selectedAgentId, loadInbox, loadOutbox, loadAgentMailbox, loadAllAgentsMailbox, addToast, consumeCurrentDeepLink]);
 
   const handleReply = useCallback((message: Message) => {
+    consumeCurrentDeepLink();
     setComposeRecipient({ id: message.fromId, type: message.fromType });
     setComposeReplyContext({
       messageId: message.id,
       preview: messagePreview(message.content, 120),
     });
     setShowComposer(true);
-  }, []);
+  }, [consumeCurrentDeepLink]);
 
   const handleMessageSent = useCallback(() => {
     setShowComposer(false);
@@ -678,6 +738,7 @@ export function MailboxView({
   }, [activeTab, loadOutbox, selectedAgentId, loadAgentMailbox, loadAllAgentsMailbox, addToast, refreshUnreadCount]);
 
   const handleOpenCompose = useCallback(() => {
+    consumeCurrentDeepLink();
     // Pre-fill recipient from selected agent if available
     if (activeTab === "agents" && selectedAgentId && selectedAgentId !== ALL_AGENTS_MAILBOX_ID) {
       setComposeRecipient({ id: selectedAgentId, type: "agent" });
@@ -686,15 +747,17 @@ export function MailboxView({
     }
     setComposeReplyContext(null);
     setShowComposer(true);
-  }, [activeTab, selectedAgentId]);
+  }, [activeTab, selectedAgentId, consumeCurrentDeepLink]);
 
   const handleComposeCancel = useCallback(() => {
+    consumeCurrentDeepLink();
     setShowComposer(false);
     setComposeRecipient(null);
     setComposeReplyContext(null);
-  }, []);
+  }, [consumeCurrentDeepLink]);
 
   const handleOpenApproval = useCallback(async (request: ApprovalRequestSummary) => {
+    consumeCurrentDeepLink();
     try {
       const detail = await fetchApprovalDetail(request.id, projectId);
       setSelectedApproval(detail);
@@ -702,7 +765,7 @@ export function MailboxView({
     } catch {
       addToast?.("Failed to load approval request", "error");
     }
-  }, [projectId, addToast]);
+  }, [projectId, addToast, consumeCurrentDeepLink]);
 
   const handleApprovalDecision = useCallback(async (decision: "approve" | "deny") => {
     if (!selectedApproval || approvalDecisionLoading) return;
@@ -964,7 +1027,7 @@ export function MailboxView({
                   <select
                     className="message-composer-select mailbox-agent-select"
                     value={selectedAgentId}
-                    onChange={(e) => { setSelectedAgentId(e.target.value); setAgentSubTab("inbox"); }}
+                    onChange={(e) => { consumeCurrentDeepLink(); setSelectedAgentId(e.target.value); setAgentSubTab("inbox"); setSelectedMessage(null); }}
                     data-testid="mailbox-agent-select"
                   >
                     <option value={ALL_AGENTS_MAILBOX_ID}>{t("mailbox.allAgents", "All agents")}</option>
@@ -989,7 +1052,7 @@ export function MailboxView({
                 <div className="mailbox-agent-subtabs" data-testid="mailbox-agent-subtabs">
                   <button
                     className={`btn btn-sm btn-secondary mailbox-agent-subtab ${agentSubTab === "inbox" ? "active" : ""}`}
-                    onClick={() => setAgentSubTab("inbox")}
+                    onClick={() => { consumeCurrentDeepLink(); setAgentSubTab("inbox"); setSelectedMessage(null); }}
                     data-testid="mailbox-agent-subtab-inbox"
                   >
                     <InboxIcon size={12} />
@@ -1000,7 +1063,7 @@ export function MailboxView({
                   </button>
                   <button
                     className={`btn btn-sm btn-secondary mailbox-agent-subtab ${agentSubTab === "outbox" ? "active" : ""}`}
-                    onClick={() => setAgentSubTab("outbox")}
+                    onClick={() => { consumeCurrentDeepLink(); setAgentSubTab("outbox"); setSelectedMessage(null); }}
                     data-testid="mailbox-agent-subtab-outbox"
                   >
                     <Send size={12} />
@@ -1189,61 +1252,64 @@ export function MailboxView({
 
   return (
     <div className="mailbox-view" style={containerKeyboardStyle} data-testid="mailbox-view">
-      {/* Header */}
-      <div className="mailbox-header">
-        <div className="mailbox-title">
-          <Mail size={18} />
-          <span>{t("mailbox.title", "Mailbox")}</span>
-          {unreadCount > 0 && (
-            <span className="mailbox-unread-badge" data-testid="mailbox-unread-badge">
-              {unreadCount}
-            </span>
-          )}
-        </div>
-        <div className="mailbox-header-actions">
-          <button
-            className="btn btn-sm btn-primary"
-            onClick={handleOpenCompose}
-            title={t("mailbox.composeMessageTitle", "Compose message")}
-            data-testid="mailbox-header-compose"
-          >
-            <MessageSquare size={14} />
-            <span>{t("mailbox.compose", "Compose")}</span>
-          </button>
-          {activeTab === "inbox" && unreadCount > 0 && (
+      {/*
+      FNXC:Navigation 2026-06-22-01:10:
+      Mailbox adopts the shared ViewHeader (Command Center-modeled) for a consistent main-content title row. The unread count badge stays beside the title (preserving the mailbox-unread-badge test id), and Compose / Mark-all-read / Refresh controls move into the header actions cluster so they keep working. Tabs remain below the header as their own row.
+      */}
+      <ViewHeader
+        icon={Mail}
+        title={t("mailbox.title", "Mailbox")}
+        actions={
+          <>
+            {unreadCount > 0 && (
+              <span className="mailbox-unread-badge" data-testid="mailbox-unread-badge">
+                {unreadCount}
+              </span>
+            )}
             <button
-              className="btn btn-sm btn-secondary"
-              onClick={handleMarkAllRead}
-              title={t("mailbox.markAllReadTitle", "Mark all as read")}
-              data-testid="mailbox-mark-all-read"
+              className="btn btn-sm btn-primary"
+              onClick={handleOpenCompose}
+              title={t("mailbox.composeMessageTitle", "Compose message")}
+              data-testid="mailbox-header-compose"
             >
-              <CheckCheck size={14} />
-              <span>{t("mailbox.markAllRead", "Mark all read")}</span>
+              <MessageSquare size={14} />
+              <span>{t("mailbox.compose", "Compose")}</span>
             </button>
-          )}
-          <button
-            className="btn-icon"
-            onClick={() => {
-              if (activeTab === "inbox") loadInbox();
-              else if (activeTab === "outbox") loadOutbox();
-              else if (activeTab === "approvals") loadApprovals(approvalSubTab);
-              else if (selectedAgentId === ALL_AGENTS_MAILBOX_ID) loadAllAgentsMailbox();
-              else if (selectedAgentId) loadAgentMailbox(selectedAgentId);
-            }}
-            disabled={isLoading}
-            title={t("mailbox.refreshTitle", "Refresh")}
-            data-testid="mailbox-refresh"
-          >
-            {isLoading ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
-          </button>
-        </div>
-      </div>
+            {activeTab === "inbox" && unreadCount > 0 && (
+              <button
+                className="btn btn-sm btn-secondary"
+                onClick={handleMarkAllRead}
+                title={t("mailbox.markAllReadTitle", "Mark all as read")}
+                data-testid="mailbox-mark-all-read"
+              >
+                <CheckCheck size={14} />
+                <span>{t("mailbox.markAllRead", "Mark all read")}</span>
+              </button>
+            )}
+            <button
+              className="btn-icon"
+              onClick={() => {
+                if (activeTab === "inbox") loadInbox();
+                else if (activeTab === "outbox") loadOutbox();
+                else if (activeTab === "approvals") loadApprovals(approvalSubTab);
+                else if (selectedAgentId === ALL_AGENTS_MAILBOX_ID) loadAllAgentsMailbox();
+                else if (selectedAgentId) loadAgentMailbox(selectedAgentId);
+              }}
+              disabled={isLoading}
+              title={t("mailbox.refreshTitle", "Refresh")}
+              data-testid="mailbox-refresh"
+            >
+              {isLoading ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
+            </button>
+          </>
+        }
+      />
 
       {/* Tabs */}
       <div className="mailbox-tabs" data-testid="mailbox-tabs">
         <button
           className={`btn btn-sm btn-secondary mailbox-tab ${activeTab === "inbox" ? "active" : ""}`}
-          onClick={() => { setActiveTab("inbox"); setSelectedMessage(null); }}
+          onClick={() => { consumeCurrentDeepLink(); setActiveTab("inbox"); setSelectedMessage(null); setSelectedApproval(null); }}
           data-testid="mailbox-tab-inbox"
         >
           <InboxIcon size={14} />
@@ -1252,7 +1318,7 @@ export function MailboxView({
         </button>
         <button
           className={`btn btn-sm btn-secondary mailbox-tab ${activeTab === "outbox" ? "active" : ""}`}
-          onClick={() => { setActiveTab("outbox"); setSelectedMessage(null); }}
+          onClick={() => { consumeCurrentDeepLink(); setActiveTab("outbox"); setSelectedMessage(null); setSelectedApproval(null); }}
           data-testid="mailbox-tab-outbox"
         >
           <Send size={14} />
@@ -1260,7 +1326,7 @@ export function MailboxView({
         </button>
         <button
           className={`btn btn-sm btn-secondary mailbox-tab ${activeTab === "agents" ? "active" : ""}`}
-          onClick={() => { setActiveTab("agents"); setSelectedMessage(null); setSelectedApproval(null); }}
+          onClick={() => { consumeCurrentDeepLink(); setActiveTab("agents"); setSelectedMessage(null); setSelectedApproval(null); }}
           data-testid="mailbox-tab-agents"
         >
           <Bot size={14} />
@@ -1268,7 +1334,7 @@ export function MailboxView({
         </button>
         <button
           className={`btn btn-sm btn-secondary mailbox-tab ${activeTab === "approvals" ? "active" : ""}`}
-          onClick={() => { setActiveTab("approvals"); setSelectedMessage(null); setSelectedApproval(null); }}
+          onClick={() => { consumeCurrentDeepLink(); setActiveTab("approvals"); setSelectedMessage(null); setSelectedApproval(null); }}
           data-testid="mailbox-tab-approvals"
         >
           <CheckCheck size={14} />
@@ -1297,7 +1363,7 @@ export function MailboxView({
               aria-valuemin={MAILBOX_SIDEBAR_MIN_WIDTH}
               aria-valuemax={Math.round(getMailboxSidebarMaxWidth(splitLayoutRef.current?.clientWidth ?? sidebarWidth / MAILBOX_SIDEBAR_MAX_RATIO))}
               aria-valuenow={Math.round(sidebarWidth)}
-              onMouseDown={handleSplitResizeStart}
+              onPointerDown={handleSplitResizeStart}
               onKeyDown={handleSplitResizeKeyDown}
             />
             <div className="mailbox-split-detail-pane" data-testid="mailbox-split-detail-pane">

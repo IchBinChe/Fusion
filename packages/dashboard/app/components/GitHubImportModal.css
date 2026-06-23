@@ -136,6 +136,8 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* FNXC:GitHubImport 2026-06-23-02:00: min-width:0 so neither pane's content can override its flex-basis and force horizontal overflow once GitHub data loads. */
+  min-width: 0;
 }
 
 .github-import-list-pane {
@@ -143,6 +145,25 @@
   flex: 0 0 auto;
   /* Keep separator ownership on the resize handle to avoid a doubled divider. */
   padding-right: var(--space-md);
+}
+
+/*
+FNXC:GitHubImport 2026-06-23-02:00:
+List items must NOT dictate the list pane width. Paired with the pane's min-width:0, every item subtree gets min-width:0 and the title ellipsizes, so a long issue/PR title truncates inside the (resizable) pane instead of forcing it wide.
+*/
+.github-import-list-pane .issue-main,
+.github-import-list-pane .issue-heading-row {
+  min-width: 0;
+}
+.github-import-list-pane .issue-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.github-import-list-pane .issue-labels {
+  flex-wrap: wrap;
+  overflow: hidden;
 }
 
 .github-import-workspace__resize-handle {
@@ -203,6 +224,53 @@
   color: var(--text);
 }
 
+/*
+FNXC:GitHubImport 2026-06-23-02:00:
+Top import action sits at the end of the non-scrolling preview-pane header (space-between pushes it opposite the Preview title / Back button).
+margin-left:auto keeps it pinned right even when the mobile Back button is absent. The button height stays compact so the header does not grow taller than the prior single-line heading.
+*/
+.github-import-action-top {
+  margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+/*
+FNXC:GitHubImport 2026-06-23-03:15:
+Close-issue action sits just left of the top Import action in the preview header. It is the lighter (non-primary) button; flex-shrink:0 keeps it on one line next to Import even on a narrow preview pane.
+*/
+.github-import-issue-close-top {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+/*
+FNXC:GitHubImport 2026-06-23-03:15:
+Transient inline toast confirming issue close. Sits directly under the preview header; success/error use theme tokens only. Auto-dismisses via component timer.
+*/
+.github-import-close-toast {
+  margin-bottom: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.github-import-close-toast--success {
+  border-color: var(--color-success);
+  color: var(--color-success);
+}
+
+.github-import-close-toast--error {
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
 .github-import-pane-content {
   flex: 1;
   min-height: 0;
@@ -245,23 +313,27 @@
   align-items: center;
 }
 
-/* Tab styles for GitHub Import Modal */
+/*
+FNXC:ImportTasks 2026-06-22-12:45:
+The Import Tasks sub-header tab bar should match the Artifacts view's button bar: plain body row, tokenized border/surface buttons, todo-accent active state, and no card-like filled strip under the main header.
+*/
 .github-import-tabs {
   display: flex;
-  gap: var(--space-xs);
-  padding: var(--space-sm) var(--space-md);
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 0;
+  border-bottom: none;
+  background: transparent;
 }
 
 .github-import-tab {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-xs);
-  padding: var(--space-sm) var(--space-md);
-  border: 1px solid transparent;
+  gap: var(--space-sm);
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: transparent;
+  background: var(--surface);
   color: var(--text-muted);
   font-size: 13px;
   font-weight: 500;
@@ -270,14 +342,14 @@
 }
 
 .github-import-tab:hover:not(:disabled) {
-  background: var(--surface-hover);
+  background: var(--card-hover);
   color: var(--text);
 }
 
 .github-import-tab.active {
-  background: var(--card);
-  border-color: var(--border);
-  color: var(--text);
+  color: var(--todo);
+  border-color: var(--todo);
+  background: color-mix(in srgb, var(--todo) 12%, transparent);
 }
 
 .github-import-tab:disabled {
@@ -677,6 +749,352 @@
   word-break: break-word;
 }
 
+/*
+FNXC:GitHubImport 2026-06-22-18:30:
+Full-body preview metadata row (state badge, author, GitHub link) plus the markdown body wrapper.
+The markdown variant must NOT pre-wrap/clamp — MailboxMessageContent emits real block elements (p, ul, pre, table), so reset the plain-text white-space and let the body take full height; the preview pane already owns the vertical scroll.
+*/
+.preview-metadata {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.preview-state-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: capitalize;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.preview-state-badge--open {
+  color: var(--success, var(--accent));
+  border-color: color-mix(in srgb, var(--success, var(--accent)) 40%, transparent);
+}
+
+.preview-state-badge--closed {
+  color: var(--danger, var(--text-muted));
+  border-color: color-mix(in srgb, var(--danger, var(--text-muted)) 40%, transparent);
+}
+
+.preview-state-badge--merged {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.preview-author {
+  color: var(--text-muted);
+}
+
+.preview-url {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.preview-url:hover {
+  text-decoration: underline;
+}
+
+.preview-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.preview-body--markdown {
+  white-space: normal;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.preview-body--markdown :where(p, ul, ol, pre, table, blockquote, h1, h2, h3, h4) {
+  margin: 0 0 var(--space-sm);
+}
+
+.preview-body--markdown :where(p, ul, ol, pre, table, blockquote, h1, h2, h3, h4):last-child {
+  margin-bottom: 0;
+}
+
+/*
+FNXC:GitHubImport 2026-06-23-01:00:
+Checks + Comments sections live below the PR body in the scrollable preview pane. Theme tokens only — check pills color via --success/--danger/--warning/--text-muted, mirroring the preview-state-badge token fallbacks.
+*/
+.github-import-pr-checks,
+.github-import-pr-comments {
+  margin-top: var(--space-md);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--border);
+}
+
+.preview-section-heading {
+  margin: 0 0 var(--space-sm);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.preview-detail-loading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.preview-detail-error {
+  color: var(--danger, var(--text-muted));
+  font-size: 12px;
+}
+
+.preview-detail-empty {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.github-import-pr-checks__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.github-import-pr-check-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.github-import-pr-check-pill {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-width: 64px;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: capitalize;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.github-import-pr-check-pill--success {
+  color: var(--success, var(--accent));
+  border-color: color-mix(in srgb, var(--success, var(--accent)) 40%, transparent);
+}
+
+.github-import-pr-check-pill--failure {
+  color: var(--danger, var(--text-muted));
+  border-color: color-mix(in srgb, var(--danger, var(--text-muted)) 40%, transparent);
+}
+
+.github-import-pr-check-pill--pending {
+  color: var(--warning, var(--accent));
+  border-color: color-mix(in srgb, var(--warning, var(--accent)) 40%, transparent);
+}
+
+.github-import-pr-check-pill--neutral {
+  color: var(--text-muted);
+  border-color: color-mix(in srgb, var(--text-muted) 40%, transparent);
+}
+
+.github-import-pr-check-name {
+  color: var(--text);
+  text-decoration: none;
+  word-break: break-word;
+}
+
+a.github-import-pr-check-name:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.github-import-pr-comments__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.github-import-pr-comment {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--card);
+}
+
+.github-import-pr-comment__author {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.github-import-pr-comment__body {
+  color: var(--text);
+}
+
+/*
+FNXC:GitHubImport 2026-06-23-03:30:
+Per-comment meta row: avatar, author, human/bot badge, and a readable timestamp. The active comment briefly highlights when reached via prev/next nav.
+Across the thread: a top filter (All/Human/Bot) and prev/next chevrons live in the comments header. Theme tokens only.
+*/
+.github-import-pr-comment__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-xs);
+  flex-wrap: wrap;
+}
+
+.github-import-comment__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+
+.github-import-comment__avatar-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.github-import-comment__type-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.github-import-comment__type-badge--human {
+  color: var(--text-muted);
+  border-color: color-mix(in srgb, var(--text-muted) 40%, transparent);
+}
+
+.github-import-comment__type-badge--bot {
+  color: var(--warning, var(--accent));
+  border-color: color-mix(in srgb, var(--warning, var(--accent)) 40%, transparent);
+}
+
+.github-import-comment__time {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-left: auto;
+}
+
+.github-import-pr-comment--active {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  transition: outline-color 0.3s ease;
+}
+
+.github-import-pr-comments__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.github-import-comments-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.github-import-comments-nav__pos {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 36px;
+  text-align: center;
+}
+
+.github-import-comments-nav__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.github-import-comments-nav__btn:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.github-import-comments-nav__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.github-import-comments-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 var(--space-sm);
+  padding: 2px;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+.github-import-comments-filter__chip {
+  padding: 2px 10px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.github-import-comments-filter__chip:hover {
+  color: var(--text);
+}
+
+.github-import-comments-filter__chip.active {
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+}
+
 /* Back button - hidden on desktop by default */
 .github-import-back-button {
   display: none;
@@ -743,7 +1161,12 @@
 
 /* Responsive breakpoints */
 @media (max-width: 860px) {
-  .github-import-modal {
+  /* FNXC:GitHubImport 2026-06-22-16:00: viewport-derived width is for the
+     dialog presentation only. :not(.github-import-modal--embedded) prevents
+     the embedded main-content view from being sized off the viewport — it
+     fills its own (potentially much narrower) content pane via the
+     container-query layout below. */
+  .github-import-modal:not(.github-import-modal--embedded) {
     width: calc(100vw - (var(--space-lg) * 2));
   }
 
@@ -772,14 +1195,21 @@
 
 @media (max-width: 640px) {
   /* Full-screen sheet on mobile — drop overlay padding so the modal
-     actually fills the viewport instead of being pushed below it. */
-  .modal-overlay:has(.github-import-modal) {
+     actually fills the viewport instead of being pushed below it.
+     FNXC:GitHubImport 2026-06-22-16:00: scope the viewport-takeover to the
+     NON-embedded (dialog) presentation via :not(.github-import-modal--embedded).
+     The embedded view lives inside the main-content pane (between the mobile
+     Header and MobileNavBar); without the guard its base .github-import-modal
+     class matched these 100vw/100dvh rules and covered the whole screen. The
+     embedded panel keeps its own 100%-of-pane sizing from the embedded block
+     below. */
+  .modal-overlay:has(.github-import-modal:not(.github-import-modal--embedded)) {
     padding-top: 0;
     align-items: stretch;
     justify-content: stretch;
   }
 
-  .modal.github-import-modal {
+  .modal.github-import-modal:not(.github-import-modal--embedded) {
     width: 100vw;
     min-width: 0;
     max-width: 100vw;
@@ -901,6 +1331,54 @@
     overscroll-behavior: contain;
   }
 
+  /*
+  FNXC:GitHubImport 2026-06-23-02:45:
+  Narrow-mobile (viewport <= 640px) EMBEDDED scroll fix. isMobile is viewport-derived, so at <= 640px the
+  embedded Import Tasks view also enters mobile single-pane mode and inherits the @640 nested-scroll design
+  intended for the dialog (workspace/pane `overflow: hidden`, pane-content `overflow-y: auto`). But the
+  embedded block (later in source) flips the preview pane + its content to natural height + `overflow-y: visible`
+  so the VIEW BODY is meant to be the scroll owner — leaving the @640 `overflow: hidden` on the workspace and
+  the active preview pane as orphaned clips with no inner scroll owner, so a tall preview (body, checks, comments)
+  was cut off with no way to reach it.
+  Fix: in narrow embedded mode make `.github-import-modal__body` the single scroll owner (flex:1; overflow-y:auto)
+  and give every ancestor in the chain (workspace, the active list/preview panes, pane-content) natural height with
+  `overflow: visible` so nothing traps or clips the growing content. The list keeps its own `.issues-list`
+  internal scroll. Wide (>=720px container) two-pane behavior and the dialog (non-embedded) path are untouched —
+  this rule is scoped to `.github-import-modal--embedded`.
+  */
+  .github-import-modal--embedded .github-import-modal__body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+
+  .github-import-modal--embedded .github-import-workspace {
+    flex: 0 0 auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .github-import-modal--embedded .github-import-list-pane.mobile.active,
+  .github-import-modal--embedded .github-import-preview-pane.mobile.active {
+    flex: 0 0 auto;
+    max-height: none;
+    overflow: visible;
+  }
+
+  /* Single scroll owner: let the list grow with the page instead of owning a nested scroll. */
+  .github-import-modal--embedded .github-import-list-pane.mobile.active .issues-list {
+    max-height: none;
+    overflow-y: visible;
+  }
+
+  .github-import-modal--embedded .github-import-preview-pane.mobile.active .github-import-pane-content {
+    flex: 0 0 auto;
+    min-height: auto;
+    overflow-y: visible;
+    overscroll-behavior: auto;
+  }
+
   /* Back button styles */
   .github-import-back-button {
     display: inline-flex;
@@ -937,4 +1415,197 @@
   }
 }
 
+/*
+FNXC:RightDockEmbedding 2026-06-22-00:00:
+Right-dock redesign renders the GitHub import surface inline in the main content area instead of as a fixed popup overlay.
+The embedded root is a plain flow box that fills the host; the inner shell sheds overlay-only chrome (fixed sizing, box-shadow, rounded corners, resize) and fills 100% so the main panel owns the frame. No close button is rendered in embedded mode.
+*/
+.github-import-embedded.right-dock-embedded-view {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  /*
+  FNXC:ImportTasks 2026-06-22-16:05:
+  Import Tasks is a full main-content view, not a modal card. Match Skills/other view bodies by letting the host read as the dashboard background while the shared header owns the surface band.
+  */
+  background: var(--bg);
+}
 
+/*
+FNXC:ViewHeader 2026-06-23-04:15:
+Embedded root drops its uniform --space-lg padding so the header can span edge-to-edge like the canonical ViewHeader; the body re-applies a horizontal inset below. This keeps the resizable list/preview/comments work intact (only the outer padding moves to the body).
+*/
+.github-import-modal.github-import-modal--embedded {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  min-width: 0;
+  max-height: none;
+  min-height: 0;
+  position: static;
+  box-shadow: none;
+  border-radius: 0;
+  resize: none;
+  padding: 0;
+  background: var(--bg);
+  border: none;
+}
+
+/*
+FNXC:ViewHeader 2026-06-23-04:15:
+Import Tasks embedded header now adopts the canonical ViewHeader chrome — edge-to-edge --surface bg, no bottom divider, --space-lg/--space-xl padding, and the shared --view-header-min-height (≈61px border-box) — so it matches Agents/Mailbox/Missions/Automations height + padding exactly. (Previously a plain padding-bottom title row with no surface/min-height.)
+*/
+.github-import-modal__embedded-header {
+  box-sizing: border-box;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  min-height: var(--view-header-min-height);
+  padding: var(--space-lg) var(--space-xl);
+  background: var(--surface);
+  border-bottom: none;
+}
+
+.github-import-modal__embedded-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: 0;
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* FNXC:ViewHeader 2026-06-23-04:15: Canonical --todo leading-icon tint at size 20, matching every other view header. */
+.github-import-modal__embedded-title svg {
+  flex-shrink: 0;
+  color: var(--todo);
+}
+
+/* Body re-applies the horizontal + bottom inset the now-edge-to-edge header no longer provides. */
+.github-import-modal--embedded .github-import-modal__body {
+  padding: var(--space-lg) var(--space-xl) var(--space-lg);
+  background: var(--bg);
+}
+
+/*
+FNXC:RightDockEmbedding 2026-06-22-12:30:
+Embedded "Import Tasks" main-content view must fit on screen and react to its OWN width, not the viewport.
+The shared two-pane code sets the list pane width via an inline flex-basis (default 360px) whenever the VIEWPORT is wide (canResizePanes => innerWidth > 860). In the embedded main area the host can be far narrower than the viewport, so that inline 360px list pane plus the preview overflowed horizontally.
+Fix (embedded variant only — modal path untouched): turn the embedded root into a query container (container-type: inline-size) and drive the layout off @container width.
+- Narrow container (default): stack list ABOVE preview in a single column; cap the list height and override the inline desktop flex-basis so nothing forces horizontal overflow. Long titles/repo names already truncate via .issue-title ellipsis / .issue-main min-width:0, and labels/branch info wrap.
+- Wide container (>= 720px): restore the two-pane row, but bound the list pane to a sane share of the container (clamp) instead of trusting the viewport-derived inline width.
+*/
+.github-import-embedded.right-dock-embedded-view {
+  container-type: inline-size;
+  container-name: github-import-embedded;
+}
+
+/*
+FNXC:RightDockEmbedding 2026-06-22-01:00:
+Embedded Import Tasks must scroll vertically so a long preview is fully reachable. The view body is the scroll container; in the stacked (narrow) layout the preview takes its natural (content) height and the body scrolls, so the preview can be much taller than the viewport. In the wide two-pane layout the preview keeps its own internal scroll.
+*/
+.github-import-modal--embedded .github-import-modal__body {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/*
+FNXC:RightDockEmbedding 2026-06-22-13:30:
+Default (narrow container): single stacked column. The workspace takes its natural (content) height
+(flex: 0 0 auto) rather than the shared `flex: 1`, so the tall preview can push the workspace past the
+body height and .github-import-modal__body scrolls to reveal it. The list pane stays internally capped.
+*/
+.github-import-modal--embedded .github-import-workspace {
+  flex-direction: column;
+  flex: 0 0 auto;
+}
+
+/* Override the inline viewport-derived flex-basis so the list never forces overflow when stacked. */
+.github-import-modal--embedded .github-import-list-pane {
+  flex: 0 0 auto !important;
+  width: 100%;
+  max-height: 40cqh;
+  padding-right: 0;
+}
+
+.github-import-modal--embedded .github-import-preview-pane {
+  flex: 0 0 auto;
+  width: 100%;
+  min-width: 0;
+}
+
+/*
+FNXC:RightDockEmbedding 2026-06-22-13:30:
+Stacked (narrow) embedded layout: the preview pane is natural-height (flex: 0 0 auto), so its inner
+.github-import-pane-content must NOT keep the side-by-side `flex: 1; min-height: 0; overflow-y: auto`
+treatment — under a natural-height parent that collapses the content to ~zero and clips the issue/PR
+body. Let the content take its full intrinsic height and hand vertical scrolling to .github-import-modal__body
+(the view scroll owner) so a long, tall preview is fully reachable by scrolling the whole view.
+*/
+.github-import-modal--embedded .github-import-preview-pane .github-import-pane-content {
+  flex: 0 0 auto;
+  min-height: auto;
+  overflow-y: visible;
+}
+
+/* Hide the col-resize handle when stacked; it only makes sense in the side-by-side layout. */
+.github-import-modal--embedded .github-import-workspace__resize-handle {
+  display: none;
+}
+
+@container github-import-embedded (min-width: 720px) {
+  .github-import-modal--embedded .github-import-workspace {
+    flex-direction: row;
+    /* Wide layout: fill the body height so the preview pane can scroll internally (not the whole view). */
+    flex: 1 1 auto;
+  }
+
+  /*
+  FNXC:GitHubImport 2026-06-23-00:30:
+  Wide (two-pane) embedded layout: the list pane must honor the user's inline `flex: 0 0 <listPaneWidth>px` from the resize
+  handle — the prior `flex: ... !important` clamp silently overrode it, which is why the embedded Import Tasks list "couldn't
+  be made smaller" and the preview stayed cramped. Reset only the stacked-mode overrides (width/max-height/padding) here and let
+  the inline flex win. The preview pane is `flex: 1 1 auto; min-width: 0` (below) so the freed width flows to the preview.
+  */
+  .github-import-modal--embedded .github-import-list-pane {
+    /*
+    FNXC:GitHubImport 2026-06-23-02:00:
+    min-width:0 is ESSENTIAL. Without it the flex item keeps min-width:auto, so once the GitHub data loads the wide issue/PR titles (large min-content width) override the 256px flex-basis and blow the pane out to ~978px, pushing the workspace into horizontal overflow — the user's "data loads → view too wide → can't make it smaller". With min-width:0 the inline flex-basis is honored and the list content truncates within the pane instead of dictating its width.
+    `!important` only neutralizes the stacked rule's own `!important`; the width comes from the inline CSS var.
+    */
+    flex: 0 0 var(--gh-import-list-width, clamp(160px, 30cqi, 480px)) !important;
+    min-width: 0 !important;
+    width: auto;
+    max-height: none;
+    padding-right: var(--space-md);
+  }
+
+  /*
+  FNXC:RightDockEmbedding 2026-06-22-13:30:
+  Wide (two-pane) embedded layout: the preview pane fills the available row height and scrolls
+  INTERNALLY so a long preview is reachable without moving the list. Restore the flex-fill pane and
+  let .github-import-pane-content own the vertical scroll (min-height:0 enables the overflow inside a
+  flex child). The list keeps its own internal scroll, so the two panes scroll independently.
+  */
+  .github-import-modal--embedded .github-import-preview-pane {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .github-import-modal--embedded .github-import-preview-pane .github-import-pane-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .github-import-modal--embedded .github-import-workspace__resize-handle {
+    display: block;
+  }
+}

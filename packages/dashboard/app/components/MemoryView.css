@@ -1,38 +1,27 @@
 /* === MemoryView === */
+/*
+FNXC:Navigation 2026-06-22-01:10:
+The title row now comes from the shared .view-header (which supplies the --space-lg top/side padding). The root drops its uniform padding; the tab bar and content area carry their own horizontal inset so they align under the header.
+*/
 .memory-view {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: var(--space-lg);
   overflow: hidden;
 }
 
-.memory-view-header {
-  display: flex;
-  flex-direction: row;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: var(--space-lg);
-}
-
-.memory-view-header h2 {
-  font-size: 18px;
-  color: var(--text);
-  margin: 0;
-}
-
-.memory-view-description {
-  color: var(--text-muted);
-  font-size: 13px;
-  margin: var(--space-xs) 0 0 0;
-}
-
+/*
+FNXC:Navigation 2026-06-22-02:30:
+After the header migrated to the shared .view-header (which is flex-shrink:0), the sibling tab bar must also be flex-shrink:0. Without it the tabs collapse under the flex column at constrained heights, letting .memory-view-content overlap the header/tabs. The scroll owner is the active tab pane (.memory-*-tab, flex:1 + min-height:0 + overflow-y:auto); the editor container keeps min-height:0 through the chain so CodeMirror bounds itself and never overruns the action bar.
+*/
 .memory-view-tabs {
   display: flex;
   flex-direction: row;
   gap: var(--space-xs);
   border-bottom: 1px solid var(--border);
-  margin-bottom: var(--space-lg);
+  margin: var(--space-md) 0 var(--space-lg);
+  padding: 0 var(--space-lg);
+  flex-shrink: 0;
 }
 
 .memory-view-tab {
@@ -67,6 +56,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
+  padding: 0 var(--space-lg) var(--space-lg);
 }
 
 .memory-working-tab,
@@ -79,20 +69,46 @@
   overflow-y: auto;
 }
 
-.memory-editor-section {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  flex: 1;
+/*
+FNXC:Memory 2026-06-22-18:10:
+REAL ROOT CAUSE of the "Working Memory" overlap (char-count over the MEMORY FILE label, a line struck through the <select>, the section header on top of its card): a CSS cascade collision, NOT vertical flex compression.
+
+`.memory-editor-section`, `.memory-editor-form-group`, and `.memory-file-summary` are defined in THREE stylesheets — styles.css, SettingsModal.css, and this file — because the SettingsModal MemorySection reuses the same class names. MemoryView.tsx imports BOTH ./MemoryView.css AND ./SettingsModal.css (in that order), so SettingsModal.css's copies (single-class, equal specificity) are injected LAST and WIN. Its `.memory-editor-section { flex: 1 1 auto }` made the editor section greedily claim the tab height while its child `.memory-editor-container` carried a large fixed `min-height` (the CodeMirror floor). On a constrained viewport the section box shrank to its flex allotment but the fixed-min-height editor frame could NOT, so the frame overflowed the (overflow:visible) section and BLED downward, painting on top of the next siblings — that bleed is the overlap, not shrunken siblings. The earlier flex-shrink:0 patch failed because the siblings were never the ones shrinking; the editor frame was overflowing onto them.
+
+Fix: scope the working-tab layout under `.memory-working-tab` so these rules out-specify the SettingsModal.css copies regardless of import order, and let the editor block size to its content (flex:0 0 auto). The tab itself (`.memory-working-tab`, overflow-y:auto) is the sole scroll owner, so every block flows in a clean intrinsic-height vertical stack and the tab scrolls instead of any box overflowing onto the next.
+*/
+.memory-action-bar,
+.memory-config-section {
+  flex-shrink: 0;
 }
 
-.memory-editor-form-group {
-  flex: 1;
-  min-height: 0;
+.memory-working-tab .memory-editor-section {
   display: flex;
   flex-direction: column;
+  flex: 0 0 auto;
+  min-height: 0;
 }
 
+/*
+FNXC:Memory 2026-06-22-18:10:
+Inside the working-tab editor section every block keeps its intrinsic height (flex:0 0 auto) so the file <select>, its hint, the layer summary, and the editor each occupy their own row with no overlap. The CodeMirror frame holds a fixed visible floor via .memory-editor-container's min-height; the surrounding tab scrolls.
+*/
+.memory-working-tab .memory-editor-section > .form-group,
+.memory-working-tab .memory-editor-section > .memory-file-summary {
+  flex: 0 0 auto;
+}
+
+.memory-working-tab .memory-editor-form-group {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: 0;
+}
+
+/*
+FNXC:Memory 2026-06-23-00:20:
+The memory editor box is CAPPED to about a page (max-height: 60vh) so a long memory file does not push the page into endless scrolling — the box itself stays bounded and the CodeMirror editor SCROLLS INTERNALLY. cm-editor fills the capped container (height:100%) and cm-scroller owns the vertical scroll.
+*/
 .memory-editor-container {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -101,6 +117,16 @@
   flex-direction: column;
   flex: 1 1 auto;
   min-height: calc(var(--space-xl) * 13 + var(--space-xs) * 2);
+  max-height: 60vh;
+}
+
+.memory-editor-container .cm-editor {
+  height: 100%;
+  min-height: 0;
+}
+
+.memory-editor-container .cm-scroller {
+  overflow: auto;
 }
 
 .memory-insights-editor-layout {
@@ -441,13 +467,13 @@
 
 /* Mobile responsive for memory view */
 @media (max-width: 768px) {
-  .memory-view {
-    padding: var(--space-md);
+  /* ViewHeader supplies its own responsive padding; the body blocks tighten their horizontal inset here. */
+  .memory-view-tabs {
+    padding-inline: var(--space-md);
   }
 
-  .memory-view-header {
-    flex-direction: column;
-    gap: var(--space-sm);
+  .memory-view-content {
+    padding: 0 var(--space-md) var(--space-md);
   }
 
   .memory-editor-container {
@@ -489,4 +515,3 @@
     padding-top: var(--space-md);
   }
 }
-

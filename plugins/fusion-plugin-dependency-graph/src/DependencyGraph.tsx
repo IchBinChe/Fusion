@@ -58,7 +58,6 @@ export function DependencyGraph({
   workflowStepNameLookup,
 }: DependencyGraphProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
-  const initialFitDoneRef = useRef(false);
   const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
   const pointerDraggedRef = useRef(false);
   const nodeRefs = useRef(new Map<string, HTMLDivElement>());
@@ -214,27 +213,6 @@ export function DependencyGraph({
     setGraphBounds,
   } = useGraphInteraction();
 
-  useEffect(() => {
-    if (initialFitDoneRef.current) return;
-    if (filteredTasks.length === 0) return;
-
-    const hasSavedPositions = Boolean(savedPositions && Object.keys(savedPositions).length > 0);
-    if (hasSavedPositions) {
-      initialFitDoneRef.current = true;
-      return;
-    }
-
-    const viewport = viewportRef.current;
-    if (!viewport) return;
-
-    fitToGraph(positions, viewport.clientWidth, viewport.clientHeight, {
-      nodeWidth: NODE_WIDTH,
-      nodeHeight: NODE_HEIGHT,
-      measuredHeights,
-    });
-    initialFitDoneRef.current = true;
-  }, [filteredTasks.length, fitToGraph, measuredHeights, positions, savedPositions]);
-
   const bounds = useMemo(() => {
     const values = Array.from(positions.values());
     if (values.length === 0) {
@@ -268,6 +246,120 @@ export function DependencyGraph({
   useEffect(() => {
     setGraphBounds({ minX: 0, minY: 0, maxX: bounds.width, maxY: bounds.height });
   }, [bounds.height, bounds.width, setGraphBounds]);
+
+  /*
+  FNXC:Graph 2026-06-23-00:10:
+  The Graph view must load CENTERED/fit in the viewport. This is a custom transform-based
+  canvas (not React Flow), so "fit" = compute zoom/pan from node positions via fitToGraph.
+  Two failure modes were producing an off-center / not-fit initial load:
+  1. Async nodes: tasks (and their computed `positions`) arrive after first paint. The old
+     guard latched `initialFitDoneRef` on the FIRST run, so it fit an empty/half-laid-out
+     graph (positions still stale, viewport unmeasured) and never re-fit once real nodes existed.
+  2. Re-entering the view: this component stays mounted when the user navigates away and back,
+     so a latched ref meant no re-fit on re-activation.
+  Fix: only fit once the graph is actually fittable — viewport measured (width/height > 0) AND
+  positions populated — and re-fit whenever the fitted geometry changes so a fresh or newly
+  settled node set centers. Guard against fitting an empty graph. User-saved positions preserve
+  relative node placement, but still fit into the visible viewport so the whole graph cannot load
+  off screen.
+
+  FNXC:Graph 2026-06-22-13:25:
+  Loading Graph view must always hit fit-to-graph after layout settles, including graphs with saved
+  manual node positions. The fit signature includes viewport size, bounds, and measured node heights
+  so a late height/ResizeObserver settle re-fits automatically instead of leaving cards off screen.
+
+  FNXC:Graph 2026-06-23-02:45:
+  Remaining "must click+drag once to recenter" bug was a coordinate-space + ordering race, NOT
+  just a measurement race:
+  - `fitToGraph` internally calls `clampPan`, which clamps against `graphBoundsRef` populated by
+    the `setGraphBounds` effect (immediately above) from NORMALIZED bounds (minX/minY shifted to 0).
+    On the first paint that ref is still its initial `{0,0,0,0}`, so `clampPan` took its degenerate
+    branch and clamped pan to ±viewport — visibly off-center. The fit never re-ran when bounds
+    later committed; only a manual drag re-clamped against correct bounds and snapped it centered.
+    This effect is now placed AFTER the setGraphBounds effect so, within a render commit, the
+    bounds ref is updated before the fit runs.
+  - We were also feeding raw `positions` (possibly non-zero minX/minY) to `fitToGraph` while the
+    canvas renders `normalizedPositions` (origin at 0,0). Fit must run on the SAME space the DOM
+    and `graphBoundsRef` use, so we fit on `normalizedPositions`.
+  Robust fix:
+  1. Fit on `normalizedPositions` so fit-space == render-space == clamp-bounds-space.
+  2. Defer the fit one paint via double `requestAnimationFrame` so the just-committed normalized
+     bounds are guaranteed live in `graphBoundsRef` before `clampPan` runs (rAF is allowed in the
+     plugin runtime; no eslint/no-restricted-globals rule forbids it here). Falls back to a
+     synchronous fit when rAF is unavailable (test/SSR), where effects in the same commit have
+     already set the bounds ref.
+  3. ResizeObserver (above) still drives the hidden→visible 0→N transition and later resizes; this
+     effect keys on `viewportSize` so a fit is (re)attempted the moment a real non-zero size lands.
+  First real paint now centers with zero user input, including navigating INTO the graph view.
+  */
+  // Stable signature of the current fitted geometry; changes when nodes, viewport,
+  // bounds, or measured heights settle so we re-center after the graph has its
+  // real box instead of latching an early off-screen layout.
+  const fitNodeKey = useMemo(
+    () => Array.from(normalizedPositions.keys()).sort().join("|"),
+    [normalizedPositions],
+  );
+  const fitGeometryKey = useMemo(
+    () => [
+      fitNodeKey,
+      viewportSize.width,
+      viewportSize.height,
+      bounds.width,
+      bounds.height,
+      Array.from(measuredHeights.entries()).sort(([left], [right]) => left.localeCompare(right)).map(([id, height]) => `${id}:${Math.round(height)}`).join("|"),
+    ].join("::"),
+    [bounds.height, bounds.width, fitNodeKey, measuredHeights, viewportSize.height, viewportSize.width],
+  );
+  const lastFittedGeometryKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (filteredTasks.length === 0) return;
+    if (normalizedPositions.size === 0) return;
+
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    // Viewport not yet measured: a 0-sized fit would mis-center. Wait for ResizeObserver.
+    const viewportWidth = viewport.clientWidth || viewportSize.width;
+    const viewportHeight = viewport.clientHeight || viewportSize.height;
+    if (viewportWidth === 0 || viewportHeight === 0) return;
+
+    // Re-fit on initial load and whenever layout geometry settles. This includes
+    // saved/manual positions: saved positions should preserve node placement, not
+    // allow the entire graph to load off screen.
+    if (lastFittedGeometryKeyRef.current === fitGeometryKey) return;
+
+    // FNXC:Graph 2026-06-23-02:45: defer one paint so the committed normalized bounds are live in
+    // graphBoundsRef before clampPan (inside fitToGraph) runs — otherwise pan mis-clamps to ±viewport.
+    let frameOne = 0;
+    let frameTwo = 0;
+    const runFit = () => {
+      const liveViewport = viewportRef.current;
+      if (!liveViewport) return;
+      const liveWidth = liveViewport.clientWidth || viewportSize.width;
+      const liveHeight = liveViewport.clientHeight || viewportSize.height;
+      if (liveWidth === 0 || liveHeight === 0) return;
+      fitToGraph(normalizedPositions, liveWidth, liveHeight, {
+        nodeWidth: NODE_WIDTH,
+        nodeHeight: NODE_HEIGHT,
+        measuredHeights,
+      });
+      lastFittedGeometryKeyRef.current = fitGeometryKey;
+    };
+
+    if (typeof requestAnimationFrame === "function") {
+      frameOne = requestAnimationFrame(() => {
+        frameTwo = requestAnimationFrame(runFit);
+      });
+    } else {
+      // Test/SSR environments without rAF: fit synchronously (bounds effect already ran this commit).
+      runFit();
+    }
+
+    return () => {
+      if (frameOne) cancelAnimationFrame(frameOne);
+      if (frameTwo) cancelAnimationFrame(frameTwo);
+    };
+  }, [filteredTasks.length, fitGeometryKey, fitToGraph, measuredHeights, normalizedPositions, viewportSize.height, viewportSize.width]);
 
   const handleResetLayout = useCallback(() => {
     clearSavedPositions();

@@ -16,8 +16,12 @@ type OpenListener = () => void;
 
 const HEARTBEAT_TIMEOUT_MS = 45_000;
 const RECONNECT_DELAY_MS = 3_000;
-const CLIENT_KEEPALIVE_INTERVAL_MS = 2_000;
-const CLIENT_KEEPALIVE_TIMEOUT_MS = 1_500;
+/*
+ * FNXC:DashboardSSE 2026-06-23-15:08:
+ * Dashboard SSE keepalive exists only to let the server reap abandoned browser streams. It must not create a visible storm of regular HTTP connections when the engine is off, so keep the liveness probe infrequent and let the server stale window absorb brief tab/network stalls.
+ */
+const CLIENT_KEEPALIVE_INTERVAL_MS = 30_000;
+const CLIENT_KEEPALIVE_TIMEOUT_MS = 5_000;
 const VISIBILITY_REOPEN_DEDUPE_MS = 1_000;
 const CLIENT_ID_STORAGE_KEY = "fusion:sse-client-id";
 

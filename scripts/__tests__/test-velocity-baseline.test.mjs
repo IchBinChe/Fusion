@@ -1,11 +1,24 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import {
+  main,
+  measureCommands,
   readQuarantineCount,
   renderReport,
   topSlowestFiles,
 } from "../test-velocity-baseline.mjs";
+
+function nullStream() {
+  return { write() {} };
+}
+
+function tempRoot() {
+  return mkdtempSync(path.join(tmpdir(), "fusion-test-velocity-"));
+}
 
 function makeTimings(count = 25) {
   const files = {};
@@ -69,6 +82,152 @@ describe("readQuarantineCount", () => {
     assert.deepEqual(result.deletionDueEntries, [
       { file: "due.test.ts", quarantinedAt: "2026-06-01", ageDays: 16 },
     ]);
+  });
+});
+
+describe("measureCommands", () => {
+  it("runs the build preflight before measured lanes and excludes setup time from lane ms", async () => {
+    const calls = [];
+    let built = false;
+    const result = await measureCommands({
+      timeoutMs: 10_000,
+      cwd: "/repo",
+      stdout: nullStream(),
+      stderr: nullStream(),
+      commandRunner: async (measurement) => {
+        calls.push(measurement.command === "pnpm" ? `pnpm ${measurement.args.join(" ")}` : measurement.label);
+        if (measurement.args[0] === "build") {
+          built = true;
+          return { ms: 50_000, failure: null };
+        }
+        if (measurement.args[0] === "smoke:boot") {
+          assert.equal(built, true, "boot smoke should only run after the build preflight creates CLI dist");
+          return { ms: 406, failure: null };
+        }
+        if (measurement.args[0] === "test") return { ms: 7_300, failure: null };
+        return { ms: 12_000, failure: null };
+      },
+    });
+
+    assert.deepEqual(calls, ["pnpm build", "pnpm test:gate", "pnpm smoke:boot", "pnpm test"]);
+    assert.equal(result.bootSmokeMs, 406);
+    assert.equal(result.testMs, 7_300);
+    assert.deepEqual(result.measurementFailures, []);
+  });
+
+  it("records preflight failure instead of silently attributing missing build output to boot smoke", async () => {
+    const calls = [];
+    const result = await measureCommands({
+      timeoutMs: 10_000,
+      cwd: "/repo",
+      stdout: nullStream(),
+      stderr: nullStream(),
+      commandRunner: async (measurement) => {
+        calls.push(`pnpm ${measurement.args.join(" ")}`);
+        return {
+          ms: null,
+          failure: { label: measurement.label, status: "exit 1 after 400ms" },
+        };
+      },
+    });
+
+    assert.deepEqual(calls, ["pnpm build"]);
+    assert.equal(result.gateMs, undefined);
+    assert.equal(result.bootSmokeMs, undefined);
+    assert.equal(result.testMs, undefined);
+    assert.deepEqual(result.measurementFailures, [
+      { label: "Build preflight (`pnpm build`)", status: "exit 1 after 400ms" },
+    ]);
+  });
+
+  it("honors --skip-build-preflight-style opt out while still measuring lanes", async () => {
+    const calls = [];
+    const result = await measureCommands({
+      timeoutMs: 10_000,
+      cwd: "/repo",
+      stdout: nullStream(),
+      stderr: nullStream(),
+      skipBuildPreflight: true,
+      commandRunner: async (measurement) => {
+        calls.push(`pnpm ${measurement.args.join(" ")}`);
+        return { ms: 100 + calls.length, failure: null };
+      },
+    });
+
+    assert.deepEqual(calls, ["pnpm test:gate", "pnpm smoke:boot", "pnpm test"]);
+    assert.equal(result.gateMs, 101);
+    assert.equal(result.bootSmokeMs, 102);
+    assert.equal(result.testMs, 103);
+  });
+});
+
+describe("main", () => {
+  it("keeps report-only regeneration cheap by invoking neither preflight nor suites", async () => {
+    const rootDir = tempRoot();
+    try {
+      const exitCode = await main([], {
+        rootDir,
+        stdout: nullStream(),
+        stderr: nullStream(),
+        now: new Date("2026-06-21T12:00:00.000Z"),
+        commandRunner: async (measurement) => {
+          throw new Error(`unexpected command: ${measurement.label}`);
+        },
+      });
+
+      assert.equal(exitCode, 0);
+      const report = readFileSync(path.join(rootDir, "docs/test-velocity-baseline.md"), "utf8");
+      assert.match(report, /Report-only regeneration is cheap and does not run any suite/);
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("honors --skip-build-preflight while still measuring lanes", async () => {
+    const rootDir = tempRoot();
+    const calls = [];
+    try {
+      const exitCode = await main(["--measure", "--write-report", "--skip-build-preflight"], {
+        rootDir,
+        stdout: nullStream(),
+        stderr: nullStream(),
+        now: new Date("2026-06-21T12:00:00.000Z"),
+        commandRunner: async (measurement) => {
+          calls.push(`pnpm ${measurement.args.join(" ")}`);
+          return { ms: 1_000 * calls.length, failure: null };
+        },
+      });
+
+      assert.equal(exitCode, 0);
+      assert.deepEqual(calls, ["pnpm test:gate", "pnpm smoke:boot", "pnpm test"]);
+      const report = readFileSync(path.join(rootDir, "docs/test-velocity-baseline.md"), "utf8");
+      assert.match(report, /Boot smoke wall-time \(`pnpm smoke:boot`\) \| 2\.0s/);
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("records preflight failure in the generated measurement failures section", async () => {
+    const rootDir = tempRoot();
+    try {
+      const exitCode = await main(["--measure", "--write-report"], {
+        rootDir,
+        stdout: nullStream(),
+        stderr: nullStream(),
+        now: new Date("2026-06-21T12:00:00.000Z"),
+        commandRunner: async (measurement) => ({
+          ms: null,
+          failure: { label: measurement.label, status: "exit 2 after 1.0s" },
+        }),
+      });
+
+      assert.equal(exitCode, 0);
+      const report = readFileSync(path.join(rootDir, "docs/test-velocity-baseline.md"), "utf8");
+      assert.match(report, /- Build preflight \(`pnpm build`\): exit 2 after 1\.0s/);
+      assert.doesNotMatch(report, /Boot smoke \(`pnpm smoke:boot`\):/);
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+    }
   });
 });
 

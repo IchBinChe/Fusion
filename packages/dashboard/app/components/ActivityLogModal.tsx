@@ -1,12 +1,15 @@
-// ActivityLogModal styles (.activity-log-*, .activity-icon, etc.) currently live
-// in ScriptsModal.css. Until extracted, import that file so this eager modal is styled.
+// Base ActivityLogModal styles (.activity-log-*, .activity-icon, etc.) currently live
+// in ScriptsModal.css. Until fully extracted, import that file so this eager modal is styled.
 import "./ScriptsModal.css";
+// Embedded (right-dock) activity-log styles were extracted to their own file next to this component.
+import "./ActivityLogModal.css";
 import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { X, History, Trash2, Filter, RefreshCw, CheckCircle, XCircle, ArrowRight, Plus, Settings, AlertCircle, Loader2, Folder } from "lucide-react";
 import { clearActivityLog, type ActivityLogEntry, type ActivityEventType, type ActivityFeedEntry } from "../api";
 import { useActivityLog } from "../hooks/useActivityLog";
+import { useEmbeddedPresentation, type ModalPresentation } from "../hooks/useEmbeddedPresentation";
 import type { Task, ProjectInfo } from "@fusion/core";
 import { linkifyFilePaths } from "../utils/filePathLinkify";
 import { getRelativeTimeBucket } from "../utils/relativeTimeAgo";
@@ -24,6 +27,11 @@ interface ActivityLogModalProps {
   onProjectFilterChange?: (projectId: string | undefined) => void;
   /** Current project context - when set, uses per-project activity log */
   currentProject?: ProjectInfo | null;
+  /*
+  FNXC:RightDockEmbedded 2026-06-22-00:00:
+  Right-dock redesign renders dock items inline (not as fixed popup overlays). When presentation="embedded" the component drops the .modal-overlay fixed full-screen host and the modal close button (the dock owns its own header/close), and disables modal-only Escape-to-close. presentation="modal" (default) stays byte-identical to preserve existing modal behavior.
+  */
+  presentation?: ModalPresentation;
 }
 
 function getEventTypeLabels(t: TFunction<"app">): Record<ActivityEventType, string> {
@@ -122,7 +130,9 @@ export function ActivityLogModal({
   projects = [],
   onProjectFilterChange,
   currentProject,
+  presentation = "modal",
 }: ActivityLogModalProps) {
+  const { isEmbedded, escapeEnabled } = useEmbeddedPresentation(presentation);
   const { t } = useTranslation("app");
   const EVENT_TYPE_LABELS = getEventTypeLabels(t);
   const [filteredType, setFilteredType] = useState<ActivityEventType | "all">("all");
@@ -197,9 +207,10 @@ export function ActivityLogModal({
     onProjectFilterChange?.(value === "all" ? undefined : value);
   };
 
-  // Handle escape key to close
+  // Handle escape key to close.
+  // FNXC:RightDockEmbedded 2026-06-22-00:00: Embedded presentation must not auto-close on Escape; the dock owns lifecycle.
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !escapeEnabled) return;
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (showConfirmClear) {
@@ -211,24 +222,22 @@ export function ActivityLogModal({
     };
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
-  }, [isOpen, onClose, showConfirmClear]);
+  }, [isOpen, escapeEnabled, onClose, showConfirmClear]);
 
   // Determine if any filter is active
   const isFilterActive = filteredType !== "all" || filteredProjectId !== "all";
 
   if (!isOpen) return null;
 
-  return (
-    <div
-      className="modal-overlay open"
-      onClick={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-      role="dialog"
-      aria-modal="true"
-      data-testid="activity-log-modal-overlay"
-    >
-      <div className="modal modal-lg activity-log-modal" data-testid="activity-log-modal">
+  /*
+  FNXC:RightDockEmbedded 2026-06-22-00:00:
+  Shared modal body for both presentations. In embedded mode the root is a plain flow container (.activity-log-embedded.right-dock-embedded-view) instead of a position:fixed .modal-overlay, the inner panel gains --embedded sizing, and the modal close "×" is dropped (dock supplies its own header/close). Modal mode stays byte-identical.
+  */
+  const body = (
+      <div
+        className={isEmbedded ? "modal modal-lg activity-log-modal activity-log-modal--embedded" : "modal modal-lg activity-log-modal"}
+        data-testid="activity-log-modal"
+      >
         {/* Header — uses shared modal-header pattern for consistent close control */}
         <div className="modal-header activity-log-header">
           <div className="activity-log-title">
@@ -296,16 +305,19 @@ export function ActivityLogModal({
               </button>
             )}
           </div>
-          {/* Close button — uses shared modal-close for consistent sizing and alignment */}
-          <button
-            className="modal-close"
-            onClick={onClose}
-            aria-label={t("actions.close", "Close")}
-            title={t("actions.close", "Close")}
-            data-testid="activity-close"
-          >
-            ×
-          </button>
+          {/* Close button — uses shared modal-close for consistent sizing and alignment.
+              FNXC:RightDockEmbedded 2026-06-22-00:00: Dropped in embedded mode; the dock provides its own close. */}
+          {!isEmbedded && (
+            <button
+              className="modal-close"
+              onClick={onClose}
+              aria-label={t("actions.close", "Close")}
+              title={t("actions.close", "Close")}
+              data-testid="activity-close"
+            >
+              ×
+            </button>
+          )}
         </div>
 
         {/* Active filters display */}
@@ -463,6 +475,24 @@ export function ActivityLogModal({
           </div>
         )}
       </div>
+  );
+
+  if (isEmbedded) {
+    // FNXC:RightDockEmbedded 2026-06-22-00:00: Plain flow container — no fixed overlay, no backdrop click-to-close. Dock owns the chrome.
+    return <div className="activity-log-embedded right-dock-embedded-view">{body}</div>;
+  }
+
+  return (
+    <div
+      className="modal-overlay open"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+      role="dialog"
+      aria-modal="true"
+      data-testid="activity-log-modal-overlay"
+    >
+      {body}
     </div>
   );
 }

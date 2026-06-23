@@ -15613,7 +15613,7 @@ You have access to the file system to review changes.${verdictBlock}`;
       */
       if (this.childSessions.get(agentId) === childSession) {
         try {
-          childSession.dispose();
+          await childSession.dispose();
         } catch (disposeErr) {
           executorLog.warn(`Child agent ${agentId} session dispose failed: ${disposeErr instanceof Error ? disposeErr.message : String(disposeErr)}`);
         }

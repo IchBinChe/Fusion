@@ -75,7 +75,7 @@ function summarizeToolResultValue(value: unknown, state: { remainingChars: numbe
   }
   const summarized: Record<string, unknown> = {};
   let count = 0;
-  for (const key in value as Record<string, unknown>) {
+  for (const key of Object.keys(value as Record<string, unknown>)) {
     if (count >= TOOL_RESULT_MAX_OBJECT_KEYS) {
       summarized.__truncatedKeys = true;
       break;

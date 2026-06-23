@@ -709,7 +709,7 @@ describe("Agent Spawning - runSpawnedChild", () => {
     // Should transition: running → active
     expect(agentStore.updateAgentState).toHaveBeenCalledWith("agent-test", "running");
     expect(agentStore.updateAgentState).toHaveBeenCalledWith("agent-test", "active");
-    // Should clean up and release session resources
+    // FNXC:AgentSpawning 2026-06-23-09:52: Completed spawned child sessions must dispose during cleanup so execution memory is released on the normal success path.
     expect(mockSession.dispose).toHaveBeenCalledOnce();
     expect(internals.childSessions.has("agent-test")).toBe(false);
     expect(internals.totalSpawnedCount).toBe(0);
@@ -733,7 +733,7 @@ describe("Agent Spawning - runSpawnedChild", () => {
 
     expect(agentStore.updateAgentState).toHaveBeenCalledWith("agent-test", "running");
     expect(agentStore.updateAgentState).toHaveBeenCalledWith("agent-test", "error");
-    // Should still clean up and release session resources
+    // FNXC:AgentSpawning 2026-06-23-09:52: Failed spawned child sessions must still dispose during cleanup so error paths do not retain provider/runtime state.
     expect(mockSession.dispose).toHaveBeenCalledOnce();
     expect(internals.childSessions.has("agent-test")).toBe(false);
     expect(internals.totalSpawnedCount).toBe(0);

@@ -216,6 +216,75 @@ describe("PlanningModeModal", () => {
       expect(screen.queryByText("Planning Mode")).toBeNull();
     });
 
+    it("does not auto-focus the initial textarea on mobile open until the user focuses it", () => {
+      mockViewport("mobile");
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />
+      );
+
+      const textarea = screen.getByLabelText("What do you want to build?") as HTMLTextAreaElement;
+      expect(document.activeElement).not.toBe(textarea);
+
+      act(() => {
+        textarea.focus();
+      });
+
+      expect(document.activeElement).toBe(textarea);
+    });
+
+    it("does not auto-focus the initial textarea in embedded desktop presentation", () => {
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          initialPlan={undefined}
+          presentation="embedded"
+        />
+      );
+
+      const textarea = screen.getByLabelText("What do you want to build?") as HTMLTextAreaElement;
+      expect(textarea.value).toBe("");
+      expect(document.activeElement).not.toBe(textarea);
+    });
+
+    it("auto-starts populated initialPlan handoffs without focusing the initial textarea", async () => {
+      const focusSpy = vi.spyOn(HTMLTextAreaElement.prototype, "focus");
+
+      try {
+        render(
+          <PlanningModeModal
+            isOpen={true}
+            onClose={mockOnClose}
+            onTaskCreated={mockOnTaskCreated}
+            onTasksCreated={vi.fn()}
+            tasks={mockTasks}
+            initialPlan="Build a login system from handoff"
+          />
+        );
+
+        await waitFor(() => {
+          expect(mockStartPlanningStreaming).toHaveBeenCalledWith("Build a login system from handoff", undefined, undefined, {
+            planningDepth: "medium",
+            customQuestionCount: undefined,
+          }, undefined);
+        });
+
+        expect(focusSpy).not.toHaveBeenCalled();
+      } finally {
+        focusSpy.mockRestore();
+      }
+    });
+
     it("mobile close path blurs focused input and resets viewport scroll", () => {
       mockViewport("mobile");
       const scrollToSpy = vi.spyOn(window, "scrollTo").mockImplementation(() => undefined);

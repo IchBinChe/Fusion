@@ -42,6 +42,13 @@ function expectVisibleActionIcon(button: HTMLElement) {
   expect(svgStyle.stroke).not.toBe(buttonStyle.backgroundColor);
 }
 
+// FNXC:Secrets 2026-06-23-01:30: The cross-node sync passphrase status/actions now live behind a collapsed-by-default
+// disclosure below the secrets list, so tests must click the toggle before the status text / Set passphrase / Clear
+// controls become visible.
+async function expandPassphraseDisclosure() {
+  await userEvent.click(screen.getByTestId("secrets-passphrase-disclosure"));
+}
+
 describe("SecretsView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -65,6 +72,7 @@ describe("SecretsView", () => {
 
     render(<SecretsView addToast={vi.fn()} />);
 
+    await expandPassphraseDisclosure();
     expect(await screen.findByText("Not configured")).toBeInTheDocument();
   });
 
@@ -79,6 +87,7 @@ describe("SecretsView", () => {
 
     render(<SecretsView addToast={vi.fn()} />);
 
+    await expandPassphraseDisclosure();
     expect(await screen.findByText("Configured")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear" })).toBeInTheDocument();
   });
@@ -94,6 +103,7 @@ describe("SecretsView", () => {
 
     render(<SecretsView addToast={vi.fn()} />);
 
+    await expandPassphraseDisclosure();
     await screen.findByText("Not configured");
     expect(screen.queryByRole("link", { name: "Learn more" })).not.toBeInTheDocument();
     expect(document.querySelector('a[href^="/docs/secrets.md"]')).toBeNull();
@@ -109,6 +119,7 @@ describe("SecretsView", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<SecretsView addToast={vi.fn()} />);
+    await expandPassphraseDisclosure();
     await screen.findByText("Not configured");
 
     await userEvent.click(screen.getByRole("button", { name: "Set passphrase" }));
@@ -134,6 +145,7 @@ describe("SecretsView", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<SecretsView addToast={vi.fn()} />);
+    await expandPassphraseDisclosure();
     await screen.findByText("Not configured");
 
     await userEvent.click(screen.getByRole("button", { name: "Set passphrase" }));
@@ -157,6 +169,7 @@ describe("SecretsView", () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
 
     render(<SecretsView addToast={vi.fn()} />);
+    await expandPassphraseDisclosure();
     await screen.findByText("Configured");
 
     await userEvent.click(screen.getByRole("button", { name: "Clear" }));
@@ -277,7 +290,7 @@ describe("SecretsView", () => {
     );
 
     render(<SecretsView addToast={vi.fn()} />);
-    await screen.findByText("Not configured");
+    await screen.findByTestId("secrets-passphrase-disclosure");
 
     await userEvent.click(screen.getByRole("button", { name: "Add Secret" }));
     expectVisibleActionIcon(screen.getByRole("button", { name: "Show value" }));

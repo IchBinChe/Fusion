@@ -110,6 +110,27 @@ describe("fast mode workflow/runtime invariants", () => {
     );
   });
 
+  it("falls back to the runner task when prepareWorktree cannot trust the live row", async () => {
+    const store = createMockStore();
+    store.getTask.mockResolvedValue({ ...task({ id: "FN-OTHER", worktree: "/tmp/wrong" }) });
+    const executor = new TaskExecutor(store, "/tmp/test");
+
+    const result = await (executor as any)
+      .createAuthoritativeWorkflowPrimitives({ experimentalFeatures: { workflowGraphExecutor: true } })
+      .prepareWorktree(
+        { run: { taskId: "FN-6226" }, node: { node: { id: "execute" }, context: {} } },
+        task({ id: "FN-6226", worktree: "/tmp/right", branch: "fusion/fn-6226" }),
+      );
+
+    expect(result).toMatchObject({
+      outcome: "success",
+      data: {
+        worktreePath: "/tmp/right",
+        branchName: "fusion/fn-6226",
+      },
+    });
+  });
+
   it("graph executor with builtin:coding selection skips the workflow-step seam in fast mode", async () => {
     const { executor } = makeExecutorForTask(task({ executionMode: "fast", worktree: "/tmp/wt" }));
     const runWorkflowSteps = vi.spyOn(executor as any, "runWorkflowSteps").mockResolvedValue(workflowResult());

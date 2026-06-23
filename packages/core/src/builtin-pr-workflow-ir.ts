@@ -11,9 +11,9 @@ import { parseWorkflowIr } from "./workflow-ir.js";
  * It mirrors the way `builtin-stepwise-coding-workflow-ir` authors a v2 IR
  * directly (the `linear` helper in `builtin-workflows.ts` only builds simple
  * pipelines). Like every built-in it is read-only, and like the stepwise built-in
- * it is **graph-only**: the PR node kinds (`pr-create`/`pr-respond`/`pr-merge`),
- * the hold-based await columns, and the top-level rework loop are interpreter-only
- * — it requires the `workflowGraphExecutor` flag at run time.
+ * it is graph-runtime-only: the PR node kinds (`pr-create`/`pr-respond`/`pr-merge`),
+ * the hold-based await columns, and the top-level rework loop are interpreter-owned
+ * and run on the default workflow graph runtime.
  *
  *   start
  *     → pr-create (in-progress)

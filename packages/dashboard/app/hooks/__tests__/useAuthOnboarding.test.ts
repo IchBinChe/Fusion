@@ -14,7 +14,7 @@ vi.mock("../../api", () => ({
 
 vi.mock("../../components/model-onboarding-state", () => ({
   isOnboardingCompleted: (...args: unknown[]) => mockIsOnboardingCompleted(...args),
-  ONBOARDING_FLOW_STEPS: ["ai-setup", "github", "project-setup", "first-task"],
+  ONBOARDING_FLOW_STEPS: ["ai-setup", "github", "project-setup", "agent", "first-task"],
 }));
 
 vi.mock("../../components/onboarding-events", () => ({
@@ -253,7 +253,7 @@ describe("useAuthOnboarding", () => {
     });
   });
 
-  it("does not auto-trigger before a projectId exists (fresh install pre-wizard race)", async () => {
+  it("auto-triggers model onboarding before a projectId exists so brand-new users start with AI setup", async () => {
     mockFetchAuthStatus.mockResolvedValue({
       providers: [{ id: "openai", name: "OpenAI", authenticated: false }],
     });
@@ -263,31 +263,17 @@ describe("useAuthOnboarding", () => {
       defaultModelId: undefined,
     } as never);
 
-    const { rerender } = renderHook(
-      ({ projectId, setupWizardOpen }: { projectId: string | undefined; setupWizardOpen: boolean }) =>
-        useAuthOnboarding({
-          projectId,
-          setupWizardOpen,
-          openModelOnboarding,
-          openSettings,
-        }),
-      {
-        initialProps: { projectId: undefined as string | undefined, setupWizardOpen: false },
-      },
+    renderHook(() =>
+      useAuthOnboarding({
+        projectId: undefined,
+        setupWizardOpen: false,
+        openModelOnboarding,
+        openSettings,
+      }),
     );
 
-    // No project yet — the setup wizard owns this phase. Don't fetch or open.
     await waitFor(() => {
-      expect(mockFetchAuthStatus).not.toHaveBeenCalled();
-      expect(openModelOnboarding).not.toHaveBeenCalled();
-    });
-
-    // Setup wizard opens, user fills it out…
-    rerender({ projectId: undefined, setupWizardOpen: true });
-    // …completes it: project registered, wizard closes.
-    rerender({ projectId: "proj_new", setupWizardOpen: false });
-
-    await waitFor(() => {
+      expect(mockFetchAuthStatus).toHaveBeenCalledTimes(1);
       expect(openModelOnboarding).toHaveBeenCalledTimes(1);
     });
   });

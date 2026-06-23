@@ -2,6 +2,8 @@
 FNXC:CommandCenter 2026-06-16-09:42:
 Command Center area component tests (PR #1683). Pin loading/error/unavailable-vs-zero rendering for each analytics area against mocked fixtures so the "—" sentinel and cost-unavailable contracts can't regress.
 */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within, act, renderHook } from "@testing-library/react";
 import type { OrgTreeNode } from "@fusion/core";
@@ -10,13 +12,17 @@ import type { OrgTreeNode } from "@fusion/core";
 const mocks = vi.hoisted(() => ({
   api: vi.fn(),
   backfillGithubSourceIssueClosedAt: vi.fn(),
+  backfillCommitAssociationDiffStats: vi.fn(),
   fetchOrgTree: vi.fn(),
   fetchExecutorStats: vi.fn(),
+  fetchSettings: vi.fn(),
+  updateSettings: vi.fn(),
   toggleEnginePause: vi.fn(),
   appSettings: { globalPaused: false, enginePaused: false },
 }));
 const apiMock = mocks.api;
 const backfillGithubSourceIssueClosedAtMock = mocks.backfillGithubSourceIssueClosedAt;
+const backfillCommitAssociationDiffStatsMock = mocks.backfillCommitAssociationDiffStats;
 const fetchOrgTreeMock = mocks.fetchOrgTree;
 const fetchExecutorStatsMock = mocks.fetchExecutorStats;
 const toggleEnginePauseMock = mocks.toggleEnginePause;
@@ -25,8 +31,12 @@ vi.mock("../../../../api/legacy", () => ({
   api: (path: string, opts?: RequestInit) => mocks.api(path, opts),
   apiBackfillGithubSourceIssueClosedAt: (options?: { offset?: number; limit?: number }, projectId?: string) =>
     mocks.backfillGithubSourceIssueClosedAt(options, projectId),
+  backfillCommitAssociationDiffStats: (options?: { dryRun?: boolean }, projectId?: string) =>
+    mocks.backfillCommitAssociationDiffStats(options, projectId),
   fetchOrgTree: mocks.fetchOrgTree,
   fetchExecutorStats: mocks.fetchExecutorStats,
+  fetchSettings: mocks.fetchSettings,
+  updateSettings: mocks.updateSettings,
 }));
 
 vi.mock("../../../../hooks/useAppSettings", () => ({
@@ -46,6 +56,7 @@ import { TeamArea } from "../TeamArea";
 import { ActivityArea } from "../ActivityArea";
 import { EcosystemArea } from "../EcosystemArea";
 import { useAnalyticsArea } from "../useAnalyticsArea";
+import { ConfirmDialogProvider } from "../../../../hooks/useConfirm";
 import type { DateRange } from "../DateRangePicker";
 
 const range7d: DateRange = { from: "2026-06-08", to: null, preset: "7d" };
@@ -129,6 +140,31 @@ function githubFixture() {
     ],
     resolved: [],
   };
+}
+
+function productivityFixture() {
+  return {
+    from: "2026-06-08",
+    to: null,
+    modifiedFiles: 7,
+    commits: 4,
+    pullRequests: 2,
+    byLanguage: [{ language: "TypeScript", count: 7 }],
+    loc: { value: null, unavailable: true },
+    hoursSaved: { value: null, unavailable: true },
+    taskDuration: {
+      completedTasks: 3,
+      averageMs: 90 * 60 * 1000,
+      medianMs: 60 * 60 * 1000,
+      p90Ms: 2 * 60 * 60 * 1000,
+      totalMs: 270 * 60 * 1000,
+      unavailable: false,
+    },
+  };
+}
+
+function installElementClientWidth(width: number) {
+  return vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(width);
 }
 
 function agentNode(id: string, name: string, children: OrgTreeNode[] = [], title = "Team Lead"): OrgTreeNode {
@@ -242,6 +278,7 @@ function activityFixture() {
 beforeEach(() => {
   apiMock.mockReset();
   backfillGithubSourceIssueClosedAtMock.mockReset();
+  backfillCommitAssociationDiffStatsMock.mockReset();
   fetchOrgTreeMock.mockReset();
   fetchOrgTreeMock.mockResolvedValue([]);
   fetchExecutorStatsMock.mockReset();
@@ -251,6 +288,10 @@ beforeEach(() => {
     maxConcurrent: 2,
     lastActivityAt: "2026-06-19T12:00:00.000Z",
   });
+  mocks.fetchSettings.mockReset();
+  mocks.fetchSettings.mockResolvedValue({ heartbeatMultiplier: 1 });
+  mocks.updateSettings.mockReset();
+  mocks.updateSettings.mockResolvedValue({});
   toggleEnginePauseMock.mockReset();
   appSettingsMock.globalPaused = false;
   appSettingsMock.enginePaused = false;
@@ -283,26 +324,43 @@ function expectSparklineHeightsFinite(testId: string): void {
   }
 }
 
+function viewBoxNumbers(chart: Element): [number, number, number, number] {
+  return (chart.getAttribute("viewBox") ?? "")
+    .split(/\s+/)
+    .map(Number) as [number, number, number, number];
+}
+
 function expectSvgLinePointsInsideViewBox(testId: string, label: string): void {
   const section = screen.getByTestId(testId);
   const chart = within(section).getByRole("img", { name: label });
+  const [, , viewBoxWidth, viewBoxHeight] = viewBoxNumbers(chart);
   for (const point of Array.from(chart.querySelectorAll(".cc-line-chart-point"))) {
     const cx = Number(point.getAttribute("cx"));
     const cy = Number(point.getAttribute("cy"));
     const r = Number(point.getAttribute("r"));
     expect(cx).toBeGreaterThanOrEqual(r);
-    expect(cx).toBeLessThanOrEqual(100 - r);
+    expect(cx).toBeLessThanOrEqual(viewBoxWidth - r);
     expect(cy).toBeGreaterThanOrEqual(r);
-    expect(cy).toBeLessThanOrEqual(100 - r);
+    expect(cy).toBeLessThanOrEqual(viewBoxHeight - r);
   }
 }
 
-function expectSvgLineMarkersUndistorted(testId: string, label: string): void {
+function expectSvgLineFillsBoxAndKeepsRoundMarkers(testId: string, label: string): void {
   const section = screen.getByTestId(testId);
   const chart = within(section).getByRole("img", { name: label });
-  expect(chart.getAttribute("preserveAspectRatio")).toBe("xMidYMid meet");
-  expect(chart.getAttribute("preserveAspectRatio")).not.toBe("none");
+  const [, , viewBoxWidth, viewBoxHeight] = viewBoxNumbers(chart);
+  const line = chart.querySelector(".cc-line-chart-path");
+  const pointPairs = (line?.getAttribute("points") ?? "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((pair) => pair.split(",").map(Number) as [number, number]);
+  expect(viewBoxWidth).toBeGreaterThan(viewBoxHeight);
+  expect(chart.getAttribute("preserveAspectRatio")).toBe("none");
+  expect(chart.getAttribute("viewBox")).not.toBe("0 0 100 100");
   expect(chart.querySelectorAll(".cc-line-chart-point").length).toBeGreaterThan(0);
+  expect(pointPairs[0]?.[0]).toBe(3);
+  expect(pointPairs.at(-1)?.[0]).toBe(viewBoxWidth - 3);
 }
 
 describe("useAnalyticsArea", () => {
@@ -399,13 +457,13 @@ describe("ActivityArea", () => {
     expect(screen.getByRole("img", { name: "Activity trend" })).toHaveAttribute("data-scale-mode", "series");
     expectRechartsWrapperWithin("cc-activity-pie", "Agent run outcome share");
     expectSvgLinePointsInsideViewBox("cc-activity-line-messages", "Messages / day");
-    expectSvgLineMarkersUndistorted("cc-activity-line-messages", "Messages / day");
+    expectSvgLineFillsBoxAndKeepsRoundMarkers("cc-activity-line-messages", "Messages / day");
     expectSvgLinePointsInsideViewBox("cc-activity-line-agents", "Active agents / day");
-    expectSvgLineMarkersUndistorted("cc-activity-line-agents", "Active agents / day");
+    expectSvgLineFillsBoxAndKeepsRoundMarkers("cc-activity-line-agents", "Active agents / day");
     expectSvgLinePointsInsideViewBox("cc-activity-line-nodes", "Active nodes / day");
-    expectSvgLineMarkersUndistorted("cc-activity-line-nodes", "Active nodes / day");
+    expectSvgLineFillsBoxAndKeepsRoundMarkers("cc-activity-line-nodes", "Active nodes / day");
     expectSvgLinePointsInsideViewBox("cc-activity-line-throughput", "Throughput / day");
-    expectSvgLineMarkersUndistorted("cc-activity-line-throughput", "Throughput / day");
+    expectSvgLineFillsBoxAndKeepsRoundMarkers("cc-activity-line-throughput", "Throughput / day");
     expect(within(screen.getByTestId("cc-activity-agent-runs-sparkline")).getByRole("img", { name: "Agent runs / day" }).classList).toContain("cc-sparkline");
     expectSparklineHeightsFinite("cc-activity-agent-runs-sparkline");
   });
@@ -841,6 +899,14 @@ describe("ToolsArea", () => {
 });
 
 describe("ProductivityArea", () => {
+  function renderProductivityWithConfirm() {
+    return render(
+      <ConfirmDialogProvider>
+        <ProductivityArea range={range7d} />
+      </ConfirmDialogProvider>,
+    );
+  }
+
   it("renders unavailable LOC and hours saved as dash sentinels, duration stats, and finite chart geometry", async () => {
     apiMock.mockResolvedValue({
       from: "2026-06-08",
@@ -1002,9 +1068,245 @@ describe("ProductivityArea", () => {
     expect(screen.getByTestId("cc-productivity-pie").textContent).not.toContain("NaN");
     expect(screen.getByTestId("cc-productivity-pie").textContent).not.toContain("Infinity");
   });
+
+  it("previews LOC backfill with dry-run counts and preserves the LOC sentinel", async () => {
+    apiMock.mockResolvedValue(productivityFixture());
+    backfillCommitAssociationDiffStatsMock.mockResolvedValueOnce({
+      scannedRows: 6,
+      distinctCommits: 4,
+      updatedRows: 3,
+      skippedUnavailableCommits: 2,
+      skippedInvalidShas: 1,
+      dryRun: true,
+    });
+
+    renderProductivityWithConfirm();
+    await screen.findByTestId("cc-area-productivity");
+    expect(screen.queryByTestId("cc-productivity-backfill-apply-button")).toBeNull();
+    expect(screen.getByTestId("cc-productivity-loc-unavailable").textContent).toBe("—");
+
+    fireEvent.click(screen.getByTestId("cc-productivity-backfill-button"));
+
+    await waitFor(() => expect(backfillCommitAssociationDiffStatsMock).toHaveBeenCalledWith({ dryRun: true }, undefined));
+    const result = await screen.findByTestId("cc-productivity-backfill-result");
+    expect(result.textContent).toContain("Dry-run preview");
+    expect(result.textContent).toContain("Scanned rows: 6");
+    expect(result.textContent).toContain("Distinct commits: 4");
+    expect(result.textContent).toContain("Updated rows: 3");
+    expect(result.textContent).toContain("Skipped unavailable commits: 2");
+    expect(result.textContent).toContain("Skipped invalid SHAs: 1");
+    expect(screen.getByTestId("cc-productivity-backfill-apply-button")).toBeTruthy();
+    expect(screen.getByTestId("cc-productivity-loc-unavailable").textContent).toBe("—");
+  });
+
+  it("requires confirmation before applying the LOC backfill and aborts cleanly on cancel", async () => {
+    apiMock.mockResolvedValue(productivityFixture());
+    backfillCommitAssociationDiffStatsMock.mockResolvedValueOnce({
+      scannedRows: 2,
+      distinctCommits: 2,
+      updatedRows: 2,
+      skippedUnavailableCommits: 0,
+      skippedInvalidShas: 0,
+      dryRun: true,
+    });
+
+    renderProductivityWithConfirm();
+    await screen.findByTestId("cc-area-productivity");
+    fireEvent.click(screen.getByTestId("cc-productivity-backfill-button"));
+    await screen.findByTestId("cc-productivity-backfill-apply-button");
+
+    fireEvent.click(screen.getByTestId("cc-productivity-backfill-apply-button"));
+    const dialog = await screen.findByRole("dialog", { name: "Apply LOC backfill?" });
+    expect(dialog.textContent).toContain("task_commit_associations");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Apply LOC backfill?" })).toBeNull());
+    expect(backfillCommitAssociationDiffStatsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies the LOC backfill only after the danger confirmation resolves", async () => {
+    apiMock.mockResolvedValue(productivityFixture());
+    backfillCommitAssociationDiffStatsMock
+      .mockResolvedValueOnce({
+        scannedRows: 5,
+        distinctCommits: 4,
+        updatedRows: 3,
+        skippedUnavailableCommits: 1,
+        skippedInvalidShas: 0,
+        dryRun: true,
+      })
+      .mockResolvedValueOnce({
+        scannedRows: 5,
+        distinctCommits: 4,
+        updatedRows: 3,
+        skippedUnavailableCommits: 1,
+        skippedInvalidShas: 0,
+        dryRun: false,
+      });
+
+    renderProductivityWithConfirm();
+    await screen.findByTestId("cc-area-productivity");
+    fireEvent.click(screen.getByTestId("cc-productivity-backfill-button"));
+    await screen.findByText("Dry-run preview");
+
+    fireEvent.click(screen.getByTestId("cc-productivity-backfill-apply-button"));
+    const dialog = await screen.findByRole("dialog", { name: "Apply LOC backfill?" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Apply backfill" }));
+
+    await waitFor(() => expect(backfillCommitAssociationDiffStatsMock).toHaveBeenNthCalledWith(2, { dryRun: false }, undefined));
+    const result = await screen.findByTestId("cc-productivity-backfill-result");
+    expect(result.textContent).toContain("Applied");
+    expect(result.textContent).toContain("Updated rows: 3");
+  });
+
+  it("disables the preview button and shows pending status while LOC backfill is in flight", async () => {
+    apiMock.mockResolvedValue(productivityFixture());
+    let resolveBackfill: ((value: { scannedRows: number; distinctCommits: number; updatedRows: number; skippedUnavailableCommits: number; skippedInvalidShas: number; dryRun: boolean }) => void) | null = null;
+    backfillCommitAssociationDiffStatsMock.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveBackfill = resolve;
+      }),
+    );
+
+    renderProductivityWithConfirm();
+    await screen.findByTestId("cc-area-productivity");
+    const button = screen.getByTestId("cc-productivity-backfill-button") as HTMLButtonElement;
+    fireEvent.click(button);
+
+    await waitFor(() => expect(button.disabled).toBe(true));
+    expect(screen.getByTestId("cc-productivity-backfill-result").textContent).toContain("LOC backfill check is running.");
+    expect(screen.getByTestId("cc-productivity-backfill-result").className).toContain("cc-productivity-backfill-status--warning");
+    fireEvent.click(button);
+    expect(backfillCommitAssociationDiffStatsMock).toHaveBeenCalledTimes(1);
+
+    resolveBackfill?.({
+      scannedRows: 1,
+      distinctCommits: 1,
+      updatedRows: 1,
+      skippedUnavailableCommits: 0,
+      skippedInvalidShas: 0,
+      dryRun: true,
+    });
+    await screen.findByText("Dry-run preview");
+  });
+
+  it("renders endpoint errors with the tokenized error status", async () => {
+    apiMock.mockResolvedValue(productivityFixture());
+    backfillCommitAssociationDiffStatsMock.mockRejectedValueOnce(new Error("loc endpoint failed"));
+
+    renderProductivityWithConfirm();
+    await screen.findByTestId("cc-area-productivity");
+    fireEvent.click(screen.getByTestId("cc-productivity-backfill-button"));
+
+    const result = await screen.findByTestId("cc-productivity-backfill-result");
+    expect(result.textContent).toContain("loc endpoint failed");
+    expect(result.className).toContain("cc-productivity-backfill-status--error");
+  });
+
+  it("renders an all-zero LOC backfill report truthfully", async () => {
+    apiMock.mockResolvedValue(productivityFixture());
+    backfillCommitAssociationDiffStatsMock.mockResolvedValueOnce({
+      scannedRows: 0,
+      distinctCommits: 0,
+      updatedRows: 0,
+      skippedUnavailableCommits: 0,
+      skippedInvalidShas: 0,
+      dryRun: true,
+    });
+
+    renderProductivityWithConfirm();
+    await screen.findByTestId("cc-area-productivity");
+    fireEvent.click(screen.getByTestId("cc-productivity-backfill-button"));
+
+    const result = await screen.findByTestId("cc-productivity-backfill-result");
+    expect(result.textContent).toContain("Scanned rows: 0");
+    expect(result.textContent).toContain("Distinct commits: 0");
+    expect(result.textContent).toContain("Updated rows: 0");
+    expect(result.textContent).toContain("Skipped unavailable commits: 0");
+    expect(result.textContent).toContain("Skipped invalid SHAs: 0");
+  });
+
+  it("keeps LOC backfill mobile actions stacked and full width in CSS", () => {
+    const css = readFileSync(join(process.cwd(), "app/components/command-center/CommandCenter.css"), "utf8");
+    expect(css).toMatch(/@media \(max-width: 768px\)[\s\S]*\.cc-productivity-backfill-actions[\s\S]*flex-direction: column;/);
+    expect(css).toMatch(/@media \(max-width: 768px\)[\s\S]*\.cc-productivity-backfill-actions \.btn[\s\S]*inline-size: 100%;/);
+  });
 });
 
 describe("TeamArea", () => {
+  it("applies horizontal org-chart layout when the measured container is wide enough", async () => {
+    const widthSpy = installElementClientWidth(1_400);
+    apiMock.mockResolvedValueOnce(emptyTeamFixture());
+    fetchOrgTreeMock.mockResolvedValueOnce([
+      agentNode("agent-root-a", "Root A", [
+        agentNode("agent-child-a", "Child A", [agentNode("agent-grandchild-a", "Grandchild A")]),
+        agentNode("agent-child-b", "Child B"),
+      ]),
+      agentNode("agent-root-b", "Root B"),
+    ]);
+
+    render(<TeamArea range={range7d} projectId="project-a" />);
+
+    const orgSection = await screen.findByTestId("cc-team-org-chart");
+    const orgScroll = orgSection.querySelector(".cc-team-org-scroll");
+    await waitFor(() => expect(orgScroll).toHaveAttribute("data-layout", "horizontal"));
+    expect(orgSection.querySelectorAll(".cc-team-org-card")).toHaveLength(5);
+    for (const name of ["Root A", "Child A", "Grandchild A", "Child B", "Root B"]) {
+      expect(within(orgSection).getByText(name)).toBeTruthy();
+    }
+    widthSpy.mockRestore();
+  });
+
+  it("keeps multi-root org charts vertical for narrow and zero-width containers", async () => {
+    for (const [width, projectId] of [[320, "project-narrow"], [0, "project-zero"]] as const) {
+      const widthSpy = installElementClientWidth(width);
+      apiMock.mockResolvedValueOnce(emptyTeamFixture());
+      fetchOrgTreeMock.mockResolvedValueOnce([
+        agentNode(`${projectId}-root-a`, `${projectId} Root A`, [agentNode(`${projectId}-child`, `${projectId} Child`)]),
+        agentNode(`${projectId}-root-b`, `${projectId} Root B`),
+      ]);
+
+      const { unmount } = render(<TeamArea range={range7d} projectId={projectId} />);
+      const orgSection = await screen.findByTestId("cc-team-org-chart");
+      const orgScroll = orgSection.querySelector(".cc-team-org-scroll");
+      await waitFor(() => expect(orgScroll).toHaveAttribute("data-layout", "vertical"));
+      expect(orgSection.querySelectorAll(".cc-team-org-card")).toHaveLength(3);
+      unmount();
+      widthSpy.mockRestore();
+    }
+  });
+
+  it("keeps loading, error, empty, and single-root org-chart states stable while measuring width", async () => {
+    const widthSpy = installElementClientWidth(0);
+    apiMock.mockResolvedValueOnce(emptyTeamFixture());
+    fetchOrgTreeMock.mockImplementationOnce(() => new Promise(() => undefined));
+    const loading = render(<TeamArea range={range7d} projectId="project-loading" />);
+    const loadingOrg = await screen.findByTestId("cc-team-org-chart");
+    expect(within(loadingOrg).getByText("Loading org chart…")).toBeTruthy();
+    expect(loadingOrg.querySelector(".cc-team-org-scroll")).toHaveAttribute("data-layout", "vertical");
+    loading.unmount();
+
+    apiMock.mockResolvedValueOnce(emptyTeamFixture());
+    fetchOrgTreeMock.mockRejectedValueOnce(new Error("org failed"));
+    const error = render(<TeamArea range={range7d} projectId="project-error" />);
+    expect(await within(await screen.findByTestId("cc-team-org-chart")).findByRole("alert")).toHaveTextContent("org failed");
+    error.unmount();
+
+    apiMock.mockResolvedValueOnce(emptyTeamFixture());
+    fetchOrgTreeMock.mockResolvedValueOnce([]);
+    const empty = render(<TeamArea range={range7d} projectId="project-empty" />);
+    expect(await within(await screen.findByTestId("cc-team-org-chart")).findByText("No agents are reporting in yet.")).toBeTruthy();
+    empty.unmount();
+
+    apiMock.mockResolvedValueOnce(emptyTeamFixture());
+    fetchOrgTreeMock.mockResolvedValueOnce([agentNode("agent-single", "Single Root")]);
+    render(<TeamArea range={range7d} projectId="project-single" />);
+    const singleOrg = await screen.findByTestId("cc-team-org-chart");
+    await waitFor(() => expect(singleOrg.querySelector(".cc-team-org-scroll")).toHaveAttribute("data-layout", "horizontal"));
+    expect(singleOrg.querySelectorAll(".cc-team-org-card")).toHaveLength(1);
+    widthSpy.mockRestore();
+  });
+
   it("renders relocated org chart and heartbeat outside analytics gating", async () => {
     apiMock.mockResolvedValueOnce(emptyTeamFixture());
     fetchOrgTreeMock.mockResolvedValueOnce([

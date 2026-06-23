@@ -1371,7 +1371,7 @@ describe("TaskStore", () => {
     it("getSettings returns global defaults when no overrides exist", async () => {
       const settings = await harness.store().getSettings();
       expect(settings.themeMode).toBe("dark");
-      expect(settings.colorTheme).toBe("default");
+      expect(settings.colorTheme).toBe("ocean");
       expect(settings.maxConcurrent).toBe(2);
     });
 
@@ -1423,6 +1423,31 @@ describe("TaskStore", () => {
       const settings = await harness.store().getSettings();
       expect(settings.defaultProvider).toBe("openai");
       expect(settings.defaultModelId).toBe("gpt-4o");
+    });
+
+    it("round-trips model pricing settings through global scope", async () => {
+      await harness.store().updateGlobalSettings({
+        modelPricingOverrides: {
+          "openai:gpt-4o": {
+            inputPer1M: 1,
+            outputPer1M: 2,
+            cacheReadPer1M: 0.5,
+            cacheWritePer1M: 1,
+            source: "test",
+          },
+        },
+        modelPricingFetchedAt: "2026-06-22T00:00:00.000Z",
+        modelPricingSource: "litellm/model_prices_and_context_window.json",
+      });
+
+      const settings = await harness.store().getSettings();
+      expect(settings.modelPricingOverrides?.["openai:gpt-4o"]?.outputPer1M).toBe(2);
+      expect(settings.modelPricingFetchedAt).toBe("2026-06-22T00:00:00.000Z");
+      expect(settings.modelPricingSource).toBe("litellm/model_prices_and_context_window.json");
+
+      const { global, project } = await harness.store().getSettingsByScope();
+      expect(global.modelPricingOverrides).toEqual(settings.modelPricingOverrides);
+      expect(project.modelPricingOverrides).toBeUndefined();
     });
 
     it("updateGlobalSettings emits settings:updated event", async () => {
@@ -1997,36 +2022,40 @@ describe("TaskStore", () => {
   });
 
   describe("experimentalFeatures settings", () => {
-    it("defaults to empty object {}", async () => {
+    const defaultExperimentalFeatures = {
+      workflowInterpreterDualObserve: false,
+    };
+
+    it("defaults workflow rollout flags to their supported runtime posture", async () => {
       const settings = await harness.store().getSettings();
-      expect(settings.experimentalFeatures).toEqual({});
+      expect(settings.experimentalFeatures).toEqual(defaultExperimentalFeatures);
     });
 
     it("can set experimental features via updateGlobalSettings", async () => {
       await harness.store().updateGlobalSettings({ experimentalFeatures: { "my-feature": true, "another-feature": false } });
       const settings = await harness.store().getSettings();
-      expect(settings.experimentalFeatures).toEqual({ "my-feature": true, "another-feature": false });
+      expect(settings.experimentalFeatures).toEqual({ ...defaultExperimentalFeatures, "my-feature": true, "another-feature": false });
     });
 
     it("can add and update features using merge semantics", async () => {
       await harness.store().updateGlobalSettings({ experimentalFeatures: { "feature-a": true } });
       await harness.store().updateGlobalSettings({ experimentalFeatures: { "feature-b": true, "feature-a": false } });
       const settings = await harness.store().getSettings();
-      expect(settings.experimentalFeatures).toEqual({ "feature-a": false, "feature-b": true });
+      expect(settings.experimentalFeatures).toEqual({ ...defaultExperimentalFeatures, "feature-a": false, "feature-b": true });
     });
 
     it("can remove an experimental feature by setting it to null", async () => {
       await harness.store().updateGlobalSettings({ experimentalFeatures: { "feature-a": true, "feature-b": true } });
       await harness.store().updateGlobalSettings({ experimentalFeatures: { "feature-a": null } as unknown as Record<string, boolean> });
       const settings = await harness.store().getSettings();
-      expect(settings.experimentalFeatures).toEqual({ "feature-b": true });
+      expect(settings.experimentalFeatures).toEqual({ ...defaultExperimentalFeatures, "feature-b": true });
     });
 
     it("can clear experimentalFeatures with null", async () => {
       await harness.store().updateGlobalSettings({ experimentalFeatures: { "my-feature": true } });
       await harness.store().updateGlobalSettings({ experimentalFeatures: null as unknown as undefined });
       const settings = await harness.store().getSettings();
-      expect(settings.experimentalFeatures).toEqual({});
+      expect(settings.experimentalFeatures).toEqual(defaultExperimentalFeatures);
     });
 
     it("preserves project settings while experimentalFeatures changes", async () => {
@@ -2035,20 +2064,20 @@ describe("TaskStore", () => {
       const settings = await harness.store().getSettings();
       expect(settings.maxConcurrent).toBe(5);
       expect(settings.autoMerge).toBe(false);
-      expect(settings.experimentalFeatures).toEqual({ "my-feature": true });
+      expect(settings.experimentalFeatures).toEqual({ ...defaultExperimentalFeatures, "my-feature": true });
     });
 
     it("handles experimentalFeatures in getSettingsByScope", async () => {
       await harness.store().updateGlobalSettings({ experimentalFeatures: { "scoped-feature": true } });
       const { global, project } = await harness.store().getSettingsByScope();
-      expect(global.experimentalFeatures).toEqual({ "scoped-feature": true });
+      expect(global.experimentalFeatures).toEqual({ ...defaultExperimentalFeatures, "scoped-feature": true });
       expect((project as Record<string, unknown>).experimentalFeatures).toBeUndefined();
     });
 
     it("handles experimentalFeatures in getSettingsFast", async () => {
       await harness.store().updateGlobalSettings({ experimentalFeatures: { "fast-feature": true } });
       const settings = await harness.store().getSettingsFast();
-      expect(settings.experimentalFeatures).toEqual({ "fast-feature": true });
+      expect(settings.experimentalFeatures).toEqual({ ...defaultExperimentalFeatures, "fast-feature": true });
     });
 
     it("project-level experimentalFeatures does not override global value", async () => {
@@ -2063,11 +2092,11 @@ describe("TaskStore", () => {
 
       // getSettingsFast should ignore the project-level global key
       const fastSettings = await harness.store().getSettingsFast();
-      expect(fastSettings.experimentalFeatures).toEqual({ insights: true, roadmap: true });
+      expect(fastSettings.experimentalFeatures).toEqual({ ...defaultExperimentalFeatures, insights: true, roadmap: true });
 
       // getSettings should also ignore the project-level global key
       const settings = await harness.store().getSettings();
-      expect(settings.experimentalFeatures).toEqual({ insights: true, roadmap: true });
+      expect(settings.experimentalFeatures).toEqual({ ...defaultExperimentalFeatures, insights: true, roadmap: true });
     });
   });
 

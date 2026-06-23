@@ -8,12 +8,10 @@ import type { Toast, ToastType } from "../hooks/useToast";
 import { ModalErrorBoundary } from "./ErrorBoundary";
 import { TaskDetailModal } from "./TaskDetailModal";
 import { GitHubImportModal } from "./GitHubImportModal";
-import { PlanningModeModal } from "./PlanningModeModal";
 import { SubtaskBreakdownModal } from "./SubtaskBreakdownModal";
 import { TerminalModal } from "./TerminalModal";
 import { ScriptsModal } from "./ScriptsModal";
 import { FileBrowserModal } from "./FileBrowserModal";
-import { TodoModal } from "./TodoModal";
 import { UsageIndicator } from "./UsageIndicator";
 import { ScheduledTasksModal } from "./ScheduledTasksModal";
 import { NewTaskModal } from "./NewTaskModal";
@@ -53,6 +51,8 @@ interface AppModalsProps {
   modalManager: ModalManager;
   projectActions: Pick<UseProjectActionsResult, "handleAddProject" | "handleSetupComplete" | "handleModelOnboardingComplete">;
   taskHandlers: Pick<UseTaskHandlersResult, "handleModalCreate" | "handlePlanningTaskCreated" | "handlePlanningTasksCreated" | "handleSubtaskTasksCreated" | "handleGitHubImport">;
+  onPlanningMode?: (initialPlan: string, workflowId?: string | null) => void;
+  onSubtaskBreakdown?: (description: string, workflowId?: string | null) => void;
   taskOperations: {
     moveTask: (taskId: string, column: Column, optionsOrPosition?: { preserveProgress?: boolean } | number) => Promise<Task>;
     deleteTask: (taskId: string, options?: {
@@ -76,9 +76,13 @@ interface AppModalsProps {
     themeMode: ThemeMode;
     colorTheme: ColorTheme;
     dashboardFontScalePct: number;
+    shadcnCustomColors: Record<string, string>;
+    resolvedThemeMode: "dark" | "light";
     setThemeMode: (mode: ThemeMode) => void;
     setColorTheme: (theme: ColorTheme) => void;
     setDashboardFontScalePct: (scalePct: number) => void;
+    setShadcnCustomColors: (colors: Record<string, string>) => void;
+    setQuickChatButtonModeImmediate: (mode: "floating" | "footer" | "off") => void;
   };
   /** Optional override for the settings modal close handler. When provided, this is called instead of modalManager.closeSettings. */
   onSettingsClose?: () => void;
@@ -86,6 +90,8 @@ interface AppModalsProps {
   onReopenOnboarding?: () => void;
   /** Optional callback to open mailbox approvals from Settings. */
   onOpenApprovals?: (approvalId?: string) => void;
+  /** Enables planning-style agent onboarding entry points inside setup. */
+  agentOnboardingEnabled?: boolean;
 }
 
 export function AppModals({
@@ -99,12 +105,15 @@ export function AppModals({
   modalManager,
   projectActions,
   taskHandlers,
+  onPlanningMode,
+  onSubtaskBreakdown,
   taskOperations,
   deepLink,
   settings,
   onSettingsClose,
   onReopenOnboarding,
   onOpenApprovals,
+  agentOnboardingEnabled = false,
 }: AppModalsProps) {
   const { pushNav, removeNav } = useNavigationHistoryContext();
   const [firstCreatedTask, setFirstCreatedTask] = useState<Task | null>(null);
@@ -151,11 +160,6 @@ export function AppModals({
     modalManager.closeGitHubImport();
   }, [modalManager.closeGitHubImport, removeNav]);
 
-  const closePlanningWithNav = useCallback(() => {
-    removeNav(modalManager.closePlanning);
-    modalManager.closePlanning();
-  }, [modalManager.closePlanning, removeNav]);
-
   const closeSubtaskWithNav = useCallback(() => {
     removeNav(modalManager.closeSubtask);
     modalManager.closeSubtask();
@@ -175,11 +179,6 @@ export function AppModals({
     removeNav(modalManager.closeFiles);
     modalManager.closeFiles();
   }, [modalManager.closeFiles, removeNav]);
-
-  const closeTodosWithNav = useCallback(() => {
-    removeNav(modalManager.closeTodos);
-    modalManager.closeTodos();
-  }, [modalManager.closeTodos, removeNav]);
 
   const closeUsageWithNav = useCallback(() => {
     removeNav(modalManager.closeUsage);
@@ -330,7 +329,11 @@ export function AppModals({
               onThemeModeChange={settings.setThemeMode}
               onColorThemeChange={settings.setColorTheme}
               dashboardFontScalePct={settings.dashboardFontScalePct}
+              shadcnCustomColors={settings.shadcnCustomColors}
+              resolvedThemeMode={settings.resolvedThemeMode}
               onDashboardFontScaleChange={settings.setDashboardFontScalePct}
+              onShadcnCustomColorsChange={settings.setShadcnCustomColors}
+              onQuickChatButtonModeChange={settings.setQuickChatButtonModeImmediate}
               onReopenOnboarding={onReopenOnboarding}
               onOpenApprovals={onOpenApprovals}
               onOpenWorkflowSettings={() => {
@@ -349,20 +352,6 @@ export function AppModals({
         tasks={tasks}
         projectId={projectId}
       />
-
-      <ModalErrorBoundary>
-        <PlanningModeModal
-          isOpen={modalManager.isPlanningOpen}
-          onClose={closePlanningWithNav}
-          onTaskCreated={taskHandlers.handlePlanningTaskCreated}
-          onTasksCreated={taskHandlers.handlePlanningTasksCreated}
-          tasks={tasks}
-          initialPlan={modalManager.planningInitialPlan ?? undefined}
-          projectId={projectId}
-          workflowId={modalManager.planningWorkflowId}
-          resumeSessionId={modalManager.planningResumeSessionId}
-        />
-      </ModalErrorBoundary>
 
       <ModalErrorBoundary>
         <SubtaskBreakdownModal
@@ -405,16 +394,6 @@ export function AppModals({
         />
       )}
 
-      {modalManager.todosOpen && (
-        <TodoModal
-          isOpen={true}
-          onClose={closeTodosWithNav}
-          addToast={addToast}
-          projectId={projectId}
-          onPlanningMode={modalManager.openPlanningWithInitialPlan}
-        />
-      )}
-
       <UsageIndicator
         isOpen={modalManager.usageOpen}
         onClose={closeUsageWithNav}
@@ -439,6 +418,8 @@ export function AppModals({
           addToast={addToast}
           projectId={projectId}
           initialDescription={modalManager.newTaskInitialDescription ?? ""}
+          onPlanningMode={onPlanningMode}
+          onSubtaskBreakdown={onSubtaskBreakdown}
         />
       </ModalErrorBoundary>
 
@@ -495,11 +476,14 @@ export function AppModals({
           <SetupWizardModal
             onProjectRegistered={projectActions.handleSetupComplete}
             onClose={closeSetupWizardWithNav}
+            agentOnboardingEnabled={agentOnboardingEnabled}
+            includeAgentStep={!modalManager.modelOnboardingOpen}
           />
         </Suspense>
       )}
 
-      {modalManager.modelOnboardingOpen && (
+      {/* FNXC:Onboarding 2026-06-22-05:06: Brand-new onboarding owns AI/GitHub first, then opens the project setup wizard only as the Project step sub-flow. Hide model onboarding while that project wizard is mounted so users never see both flows at once. */}
+      {modalManager.modelOnboardingOpen && !modalManager.setupWizardOpen && (
         <ModelOnboardingModal
           onComplete={projectActions.handleModelOnboardingComplete}
           addToast={addToast}
@@ -509,6 +493,7 @@ export function AppModals({
           onOpenGitHubImport={handleOpenGitHubImport}
           firstCreatedTask={firstCreatedTask}
           onViewTask={handleOnboardingViewTask}
+          agentOnboardingEnabled={agentOnboardingEnabled}
         />
       )}
 

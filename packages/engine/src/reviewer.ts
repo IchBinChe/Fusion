@@ -34,6 +34,7 @@ import { buildPromptLayers, collapsePromptLayers } from "./prompt-layers.js";
 import { createFallbackModelObserver } from "./fallback-model-observer.js";
 import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
 import { createMemoryGetTool, createMemorySearchTool, createWebFetchTool } from "./agent-tools.js";
+import { buildUserCommentsPromptSection } from "./agent-user-comments.js";
 
 export type ReviewType = "plan" | "code" | "spec";
 export type ReviewVerdict = "APPROVE" | "REVISE" | "RETHINK" | "UNAVAILABLE";
@@ -750,6 +751,12 @@ function buildReviewRequest(
       "Read relevant source files to understand the current codebase state.",
       "Check for risks, missing edge cases, and gaps in the plan.",
     );
+    const userCommentsSection = buildUserCommentsPromptSection(userComments ?? [], {
+      intro: "The following user comments were posted on this task. Account for this feedback when assessing the plan; raise concerns when the plan conflicts with or ignores relevant user feedback.",
+    });
+    if (userCommentsSection) {
+      parts.push("", userCommentsSection);
+    }
   } else {
     parts.push(
       "## What to review",
@@ -761,6 +768,12 @@ function buildReviewRequest(
       "Verify that implementation changes are in this worktree. If you find changes or commits in the primary project checkout or any other path, issue REVISE unless the outside path is an expected project-root exception such as .fusion/memory/ files, task attachments, or explicitly documented Fusion metadata.",
       "",
     );
+    const userCommentsSection = buildUserCommentsPromptSection(userComments ?? [], {
+      intro: "The following user comments were posted on this task. Account for this feedback when reviewing the code; raise concerns when the implementation conflicts with or ignores relevant user feedback.",
+    });
+    if (userCommentsSection) {
+      parts.push(userCommentsSection, "");
+    }
     if (baseline) {
       parts.push(
         "To see the changes for this step, run:",

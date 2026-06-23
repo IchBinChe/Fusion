@@ -89,7 +89,7 @@
 }
 
 .wf-optional-step-remove:hover:not(:disabled) {
-  color: var(--danger, #ef4444);
+  color: var(--color-error);
 }
 
 .wf-optional-steps-add {

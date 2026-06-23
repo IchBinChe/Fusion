@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Scheduler } from "../scheduler.js";
-import type { Task, TaskStore } from "@fusion/core";
+import type { Agent, AgentStore, Task, TaskStore } from "@fusion/core";
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -16,6 +16,23 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     updatedAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
   } as Task;
+}
+
+function createAgentStore(agents: Agent[]): AgentStore {
+  return {
+    listAgents: vi.fn(async (filter?: { state?: Agent["state"]; includeEphemeral?: boolean }) => {
+      return agents.filter((agent) => !filter?.state || agent.state === filter.state);
+    }),
+    getActiveHeartbeatRun: vi.fn(async () => null),
+    updateAgentState: vi.fn(async (agentId: string, state: Agent["state"]) => {
+      const agent = agents.find((candidate) => candidate.id === agentId);
+      if (agent) agent.state = state;
+    }),
+    syncExecutionTaskLink: vi.fn(async (agentId: string, taskId?: string) => {
+      const agent = agents.find((candidate) => candidate.id === agentId);
+      if (agent) agent.taskId = taskId;
+    }),
+  } as unknown as AgentStore;
 }
 
 function createStore(tasks: Task[], scopes: Record<string, string[]>): TaskStore {
@@ -147,6 +164,55 @@ describe("scheduler overlap starvation regression (FN-057)", () => {
       "queued — blocked by active file-scope lease FN-039 (column=in-progress)",
     );
     expect(store.moveTask).toHaveBeenCalledWith("FN-031", "in-progress", expect.objectContaining({ allocateWorktree: expect.any(Function) }));
+  });
+
+  it("FN-6954: clears stale running durable agents when overlap requeue parks todo task", async () => {
+    const tasks = [
+      makeTask({ id: "FN-6827", column: "in-progress", priority: "normal" }),
+      makeTask({ id: "FN-6709", column: "todo", priority: "urgent" }),
+    ];
+    const agents = [{ id: "agent-backend", state: "running", taskId: "FN-6709" } as Agent];
+    const agentStore = createAgentStore(agents);
+    const store = createStore(tasks, {
+      "FN-6827": ["packages/engine/src/scheduler.ts"],
+      "FN-6709": ["packages/engine/src/scheduler.ts"],
+    });
+
+    const scheduler = new Scheduler(store, { agentStore, hasActiveAgentExecution: () => false });
+    (scheduler as any).running = true;
+    await scheduler.schedule();
+
+    expect(store.updateTask).toHaveBeenCalledWith("FN-6709", {
+      status: "queued",
+      blockedBy: null,
+      overlapBlockedBy: "FN-6827",
+    });
+    expect(agents[0]).toMatchObject({ state: "active", taskId: undefined });
+    expect((agentStore as any).updateAgentState).toHaveBeenCalledWith("agent-backend", "active");
+    expect((agentStore as any).syncExecutionTaskLink).toHaveBeenCalledWith("agent-backend", undefined);
+    expect(tasks.find((task) => task.id === "FN-6709")).toMatchObject({ status: "queued", overlapBlockedBy: "FN-6827" });
+  });
+
+  it("FN-6954: preserves running durable agent when overlap requeue has live execution proof", async () => {
+    const tasks = [
+      makeTask({ id: "FN-6827", column: "in-progress", priority: "normal" }),
+      makeTask({ id: "FN-6709", column: "todo", priority: "urgent" }),
+    ];
+    const agents = [{ id: "agent-backend", state: "running", taskId: "FN-6709" } as Agent];
+    const agentStore = createAgentStore(agents);
+    const store = createStore(tasks, {
+      "FN-6827": ["packages/engine/src/scheduler.ts"],
+      "FN-6709": ["packages/engine/src/scheduler.ts"],
+    });
+
+    const scheduler = new Scheduler(store, { agentStore, hasActiveAgentExecution: (agentId) => agentId === "agent-backend" });
+    (scheduler as any).running = true;
+    await scheduler.schedule();
+
+    expect((agentStore as any).updateAgentState).not.toHaveBeenCalled();
+    expect((agentStore as any).syncExecutionTaskLink).not.toHaveBeenCalled();
+    expect(agents[0]).toMatchObject({ state: "running", taskId: "FN-6709" });
+    expect(tasks.find((task) => task.id === "FN-6709")).toMatchObject({ status: "queued", overlapBlockedBy: "FN-6827" });
   });
 
   it("does not defer FN-078-style ready work behind non-runnable queued overlaps", async () => {

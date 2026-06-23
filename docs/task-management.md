@@ -164,7 +164,7 @@ Recovery is reversible: restore archived tasks via dashboard **Unarchive** or `f
 
 ### 2) Plan Mode (AI interview)
 
-Use the 💡 button to open planning mode:
+On desktop/tablet, open **Planning** from the left sidebar to start or resume a planning session. You can also hand a draft from the board quick-entry row or New Task dialog to Planning with the **Plan** action.
 
 - AI asks clarifying questions
 - AI reasoning (thinking output) is preserved and visible throughout the session — expand the reasoning toggle to review the model's analysis before answering each question or accepting the summary
@@ -174,7 +174,7 @@ Use the 💡 button to open planning mode:
 - Break-into-tasks mode includes per-subtask **Priority** selectors (`low`, `normal`, `high`, `urgent`) so each generated task can be prioritized before creation
 - Break-into-tasks descriptions are structured with subtask-specific guidance first, then a separate larger-plan context section (plus `## Planning Interview Context` when interview history exists)
 - Final multi-task creation now uses a compact request payload: unchanged generated subtask descriptions stay server-side, while any edits to title, description, size, priority, and dependencies are preserved when tasks are created
-- Sessions persist when the modal is closed — resume from the sidebar list at any time; reasoning context is restored automatically
+- Sessions persist when the planning surface is closed or you navigate away — resume from the Planning sidebar list at any time; reasoning context is restored automatically
 - Back navigation rewinds the server-side planning session to the previous answered question so you can revise earlier answers and continue from the corrected turn
 - On the summary screen, **Refine Further** continues through the backend planning session (including resumed completed sessions) and waits for a real follow-up question or updated summary; it does not switch to an empty question view
 

@@ -122,6 +122,9 @@ html {
   --font-mono: "SF Mono", Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   /* FNXC:DashboardStyling 2026-06-19-05:50: FN-6703 defines the xs font-size token so tokenized mobile mailbox tabs satisfy the dashboard CSS token-validity guard without relying on an undefined fallback. */
   --font-size-xs: 0.8rem;
+  /* FNXC:DashboardStyling 2026-06-21-11:24: Dashboard components must use defined typography tokens so the raw CSS token-validity gate catches real missing custom properties instead of shared type-scale omissions. */
+  --font-size-base: 1rem;
+  --line-height-tight: 1.25;
 
   /* Spacing Scale */
   --space-xs: 4px;
@@ -144,6 +147,29 @@ html {
   --card-padding: 10px 12px;
   --modal-padding: var(--space-lg) 20px;
   --header-padding: var(--space-md) var(--space-xl);
+  /*
+  FNXC:DashboardTheming 2026-06-23-19:10:
+  Divider chrome defaults to invisible for the cleaner app shell, but uses tokens instead of `border: none` so a theme can opt any participating header/sidebar/view divider back in by setting --chrome-divider-color or a component-specific alias.
+  */
+  --chrome-divider-width: 1px;
+  --chrome-divider-color: transparent;
+  --right-dock-shell-divider-color: var(--chrome-divider-color);
+  --right-dock-toolbar-divider-color: var(--chrome-divider-color);
+  --right-dock-view-header-divider-color: var(--chrome-divider-color);
+  --right-dock-expand-header-divider-color: var(--chrome-divider-color);
+  --right-dock-view-divider-color: var(--chrome-divider-color);
+  /*
+  FNXC:ViewHeader 2026-06-23-04:15:
+  Canonical main-content view-header height. Headers with btn-sm action buttons render taller (~61px border-box) than title-only headers (~54px), so every canonical header (ViewHeader, Missions, embedded Planning, Goals, Automations, Import Tasks) pins this min-height to stay pixel-identical regardless of whether actions are present.
+  FNXC:ViewHeader 2026-06-22-18:00:
+  The 1px reserve remains after removing header dividers so existing header height stays stable while the visible line disappears.
+  */
+  --view-header-min-height: calc(var(--space-lg) * 2 + 28px + 1px);
+  /*
+  FNXC:ViewHeader 2026-06-23-05:00:
+  Canonical content-row height (28px = btn-sm box: 4+4 padding + 1+1 border + ~18px line). ViewHeader bounds every action child to this so taller controls (touch-target 44px close buttons, view-toggle 32px segmented switches, base .btn 36px primary buttons) collapse to the canonical row instead of stretching the header past --view-header-min-height. Skills (was 77px / 44px touch-target), Goals (was 69px / 36px primary btn), and Agents (was 65px / 32px view-toggle) all clamp to ~61px without clipping their 16-18px icons, which stay centered.
+  */
+  --view-header-content-row: 28px;
   --column-gap: var(--space-md);
   --board-padding: var(--space-lg) var(--space-xl);
   --icon-size-md: 16px;
@@ -198,6 +224,15 @@ html {
   --xsmall-breakpoint: 640px;
 }
 
+/*
+FNXC:LoadingIndicators 2026-06-23-20:40:
+Use a uniquely named global spinner keyframe for shared loading utilities. Component CSS files also define `@keyframes spin`; because keyframes are global, later-loaded modal/sidebar CSS can replace the shared `spin` definition and make SVG spinners appear frozen or inconsistent across sections such as Git Manager.
+*/
+@keyframes fusion-spinner-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 /* Global spinner animation — used by 25+ components via className="animate-spin"
    or inline animation: "spin ...". Must live at the stylesheet top level (not
    inside any selector block) so the keyframes and utility class are available
@@ -207,18 +242,34 @@ html {
   to { transform: rotate(360deg); }
 }
 .animate-spin {
-  animation: spin 1s linear infinite;
+  animation: fusion-spinner-spin 1s linear infinite;
   transform-origin: center;
 }
 
 .spin {
-  animation: spin 1s linear infinite;
+  animation: fusion-spinner-spin 1s linear infinite;
   transform-origin: center;
 }
 
+.spinner,
+.spinning {
+  animation-name: fusion-spinner-spin;
+  animation-duration: 1s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  transform-origin: center;
+}
+
+/*
+FNXC:PlanningMode 2026-06-21-23:45:
+Lucide SVG loaders must rotate on the first Planning loading paint, before later streaming output forces a repaint.
+Use the painted geometry box for shared spinner utilities so `transform-origin: center` is resolved immediately instead of waiting on the SVG viewBox layout.
+*/
 svg.animate-spin,
-svg.spin {
-  transform-box: view-box;
+svg.spin,
+svg.spinner,
+svg.spinning {
+  transform-box: fill-box;
 }
 
 :root {
@@ -328,6 +379,11 @@ svg.spin {
   --cta-bg-hover: #2ea043;
   --cta-border-hover: #3fb950;
   --cta-glow: 0 0 8px color-mix(in srgb, var(--cta-border) 30%, transparent);
+
+  /* Toast status text tokens */
+  --toast-text: var(--text);
+  --toast-error-text: #fff;
+  --toast-info-text: #fff;
 
   /* === Agent State Colors === */
   --state-idle-bg: color-mix(in srgb, var(--state-idle-text) 15%, transparent);
@@ -583,11 +639,10 @@ html .column.drag-over * {
   transition: none !important;
 }
 
-[data-theme="light"] .modal-overlay,
 [data-theme="light"] .agent-detail-overlay,
 [data-theme="light"] .agent-dialog-overlay,
 [data-theme="light"] .chat-new-dialog-backdrop {
-  background: color-mix(in srgb, var(--text) 50%, transparent);
+  background: transparent;
 }
 
 [data-theme="light"] .modal-header {
@@ -604,6 +659,7 @@ html .column.drag-over * {
 
 [data-theme="light"] .toast-success {
   background: var(--cta-bg);
+  color: var(--cta-text);
 }
 
 [data-theme="light"] .toast-error {
@@ -1148,12 +1204,17 @@ body {
 
 
 /* === Modals === */
+/*
+FNXC:ModalChrome 2026-06-23-21:36:
+Modal and dock pop-out surfaces should not darken or blur the app behind them. Keep the overlay for positioning, stacking, and click/escape dismissal, but make it visually transparent; panel depth comes from each `.modal` box-shadow instead of a dimmed backdrop. This shared contract covers Git Manager, Terminal, Dev Server, Secrets, and future sidebar/tool modals without per-modal overrides.
+*/
 .modal-overlay {
   display: none;
   position: fixed;
   inset: 0;
-  background: color-mix(in srgb, var(--text) 60%, transparent);
-  backdrop-filter: blur(4px);
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   /* Must remain above sticky top banners (e.g. onboarding/session resume cards). */
   z-index: 100;
   justify-content: center;
@@ -1219,8 +1280,7 @@ body {
   justify-content: space-between;
   align-items: center;
   padding: var(--modal-padding);
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--text) 10%, transparent);
+  background: var(--surface);
 }
 .modal-header h3 {
   font-size: 15px;
@@ -1681,7 +1741,6 @@ input[type="range"]:focus-visible {
   padding: var(--space-lg) 0 var(--space-md);
   margin: 0;
   color: var(--text);
-  border-bottom: 1px solid var(--border);
   margin-bottom: var(--space-xs);
 }
 
@@ -2698,6 +2757,10 @@ input[type="range"]:focus-visible {
 }
 
 /* === Toasts === */
+/*
+FNXC:ToastTheming 2026-06-21-00:00:
+Toast text must contrast its status background across every dashboard theme and mode. Success toasts default to --cta-text because Shadcn dark themes can pair a near-white --cta-bg with dark CTA copy; Shadcn color-family success/info overrides choose existing page text tokens when the family CTA/info token pairs are below AA contrast.
+*/
 .toast-container {
   position: fixed;
   bottom: 20px;
@@ -2712,18 +2775,50 @@ input[type="range"]:focus-visible {
   padding: 10px 16px;
   border-radius: var(--radius);
   font-size: 13px;
-  color: #fff;
+  color: var(--toast-text);
   animation: toast-in 0.25s ease-out;
   box-shadow: var(--shadow);
 }
 .toast-success {
   background: var(--cta-bg);
+  color: var(--cta-text);
 }
 .toast-error {
   background: var(--color-error-dark);
+  color: var(--toast-error-text);
 }
 .toast-info {
   background: var(--color-info);
+  color: var(--toast-info-text);
+}
+
+[data-color-theme^="shadcn"] .toast-success,
+[data-color-theme^="shadcn"] .toast-info {
+  color: var(--bg);
+}
+
+[data-color-theme="shadcn-gray"]:not([data-theme="light"]) .toast-success,
+[data-color-theme="shadcn-gray-blue"]:not([data-theme="light"]) .toast-success,
+[data-color-theme="shadcn-gray-blue"]:not([data-theme="light"]) .toast-info {
+  color: var(--text);
+}
+
+[data-color-theme^="shadcn"][data-theme="light"] .toast-success,
+[data-color-theme^="shadcn"][data-theme="light"] .toast-info {
+  color: var(--bg);
+}
+
+[data-color-theme="shadcn"][data-theme="light"] .toast-info,
+[data-color-theme="shadcn-green"][data-theme="light"] .toast-success,
+[data-color-theme="shadcn-green"][data-theme="light"] .toast-info,
+[data-color-theme="shadcn-orange"][data-theme="light"] .toast-success,
+[data-color-theme="shadcn-orange"][data-theme="light"] .toast-info,
+[data-color-theme="shadcn-yellow"][data-theme="light"] .toast-success,
+[data-color-theme="shadcn-yellow"][data-theme="light"] .toast-info,
+[data-color-theme="shadcn-mono-green"][data-theme="light"] .toast-success,
+[data-color-theme="shadcn-mono-orange"][data-theme="light"] .toast-success,
+[data-color-theme="shadcn-mono-yellow"][data-theme="light"] .toast-success {
+  color: var(--text);
 }
 
 @media (max-width: 768px) {
@@ -3790,4 +3885,31 @@ input[type="range"]:focus-visible {
 .column-menu-item-hint {
   font-size: 11px;
   color: var(--text-muted);
+}
+
+/*
+FNXC:Navigation 2026-06-22-00:00:
+Board card clicks open task detail as a full main-content view that replaces the board ("Full main panel" design). This layout fills the main content area with a scrollable embedded TaskDetailContent body. Theme tokens only; mobile shell renders it unchanged because the panel just fills its host.
+
+FNXC:TaskDetail 2026-06-22-18:40:
+The panel and its body must be width-bounded (width:100%; min-width:0; max-width:100%) so the embedded detail content cannot exceed the full-width host and get clipped on the right; the body scrolls vertically only (overflow-x:hidden). The separate back-row was removed; "Back to board" now lives inside TaskDetailContent's gray header (see .task-detail-header-back-btn).
+*/
+.task-detail-main-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.task-detail-main-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
 }

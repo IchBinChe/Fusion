@@ -1,0 +1,99 @@
+/*
+FNXC:EngineControls 2026-06-21-00:00:
+FN-6862 guards the footer engine-control popover at raw CSS-text level because jsdom does not resolve undefined custom properties. The popover must keep an opaque dashboard surface (`var(--card)`) and this component stylesheet must not reference custom properties absent from the dashboard CSS vocabulary.
+*/
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
+import { describe, expect, it } from "vitest";
+
+const APP_DIR = resolve(__dirname, "..", "..");
+const COMPONENT_CSS = join(APP_DIR, "components", "EngineControlMenu.css");
+const STYLES_CSS = join(APP_DIR, "styles.css");
+const THEME_DATA_CSS = join(APP_DIR, "public", "theme-data.css");
+
+function stripCssComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+function collectCssFiles(dir: string): string[] {
+  const files: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    if (entry === "node_modules" || entry === "dist" || entry.startsWith(".")) continue;
+    const fullPath = join(dir, entry);
+    const info = statSync(fullPath);
+    if (info.isDirectory()) {
+      files.push(...collectCssFiles(fullPath));
+    } else if (info.isFile() && entry.endsWith(".css")) {
+      files.push(fullPath);
+    }
+  }
+  return files;
+}
+
+function collectDefinedProperties(css: string, into: Set<string>): void {
+  const uncommented = stripCssComments(css);
+  for (const match of uncommented.matchAll(/(^|[\s{;])(--[A-Za-z0-9_-]+)\s*:/g)) {
+    into.add(match[2]);
+  }
+}
+
+function collectReferencedProperties(css: string): Map<string, number[]> {
+  const refs = new Map<string, number[]>();
+  stripCssComments(css)
+    .split("\n")
+    .forEach((line, index) => {
+      for (const match of line.matchAll(/var\(\s*(--[A-Za-z0-9_-]+)/g)) {
+        const name = match[1];
+        const lineNumbers = refs.get(name) ?? [];
+        lineNumbers.push(index + 1);
+        refs.set(name, lineNumbers);
+      }
+    });
+  return refs;
+}
+
+function extractRuleBlock(css: string, selector: string): string {
+  const ruleStart = css.indexOf(`${selector} {`);
+  expect(ruleStart, `Expected ${selector} to exist in EngineControlMenu.css`).toBeGreaterThanOrEqual(0);
+  const bodyStart = css.indexOf("{", ruleStart);
+  const bodyEnd = css.indexOf("\n}", bodyStart);
+  expect(bodyEnd, `Expected ${selector} rule to have a closing brace`).toBeGreaterThan(bodyStart);
+  return css.slice(bodyStart + 1, bodyEnd);
+}
+
+describe("EngineControlMenu CSS token validity (FN-6862)", () => {
+  const componentCss = readFileSync(COMPONENT_CSS, "utf8");
+  const stylesCss = readFileSync(STYLES_CSS, "utf8");
+  const themeDataCss = readFileSync(THEME_DATA_CSS, "utf8");
+
+  const defined = new Set<string>();
+  collectDefinedProperties(stylesCss, defined);
+  collectDefinedProperties(themeDataCss, defined);
+  for (const cssFile of collectCssFiles(APP_DIR)) {
+    collectDefinedProperties(readFileSync(cssFile, "utf8"), defined);
+  }
+
+  it("uses the defined solid card token for the footer popover background", () => {
+    expect(defined.has("--card"), "--card must be part of the dashboard token vocabulary").toBe(true);
+    expect(stylesCss, "styles.css should define --card for the default and light themes").toMatch(/--card\s*:/);
+    expect(themeDataCss, "theme-data.css should define --card for theme-generated palettes").toMatch(/--card\s*:/);
+
+    const popoverBlock = extractRuleBlock(componentCss, ".engine-control-menu__popover");
+    expect(popoverBlock).toMatch(/(^|\n)\s*background\s*:\s*var\(--card\)\s*;/);
+  });
+
+  it("does not reference the undefined elevated surface token", () => {
+    expect(componentCss).not.toContain("--surface-elevated");
+  });
+
+  it("references only defined dashboard custom properties", () => {
+    const violations: string[] = [];
+    for (const [name, lineNumbers] of collectReferencedProperties(componentCss)) {
+      if (!defined.has(name)) {
+        violations.push(`${relative(APP_DIR, COMPONENT_CSS)}: var(${name}) at line(s) ${lineNumbers.join(", ")}`);
+      }
+    }
+
+    expect(violations, `Undefined CSS custom properties referenced in EngineControlMenu.css:\n${violations.join("\n")}`).toEqual([]);
+  });
+});

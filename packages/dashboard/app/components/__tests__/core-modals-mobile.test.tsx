@@ -236,12 +236,34 @@ describe("core modals mobile css coverage", () => {
     expect(mobileBlock).toContain("flex-direction: row;");
   });
 
-  it("GitManagerModal: nav items keep 36px touch target on mobile", () => {
+  it("GitManagerModal: mobile section toolbar opts back into horizontal touch scrolling", () => {
+    const css = loadAllAppCss();
+    const mobileBlock = getMainMobileBlock(css);
+
+    const sidebarRules = getRuleBlocks(mobileBlock, ".gm-sidebar");
+    expect(sidebarRules.length).toBeGreaterThan(0);
+    for (const sidebarRule of sidebarRules) {
+      expect(sidebarRule).toContain("flex: 0 0 auto;");
+      expect(sidebarRule).toContain("min-height: calc(var(--space-2xl) + var(--space-md));");
+      expect(sidebarRule).toContain("overflow-x: auto;");
+      expect(sidebarRule).toContain("overflow-y: hidden;");
+      expect(sidebarRule).toContain("touch-action: pan-x pan-y;");
+      expect(sidebarRule).toContain("-webkit-overflow-scrolling: touch;");
+    }
+
+    const navItemRules = getRuleBlocks(mobileBlock, ".gm-nav-item");
+    expect(navItemRules.length).toBeGreaterThan(0);
+    for (const navItemRule of navItemRules) {
+      expect(navItemRule).toMatch(/flex:\s*0 0 auto;|flex-shrink:\s*0;/);
+    }
+  });
+
+  it("GitManagerModal: nav items keep a token-sized touch target on mobile", () => {
     const css = loadAllAppCss();
     const mobileBlock = getMainMobileBlock(css);
 
     expect(mobileBlock).toContain(".gm-nav-item {");
-    expect(mobileBlock).toContain("min-height: 36px;");
+    expect(mobileBlock).toContain("min-height: calc(var(--space-xl) + var(--space-sm));");
   });
 
   it("GitManagerModal: panel allows content scrolling on mobile", () => {
@@ -257,9 +279,12 @@ describe("core modals mobile css coverage", () => {
     const mobileBlock = getMainMobileBlock(css);
 
     expect(mobileBlock).toContain(".modal-overlay.git-manager-modal-overlay,");
-    expect(mobileBlock).toContain(".modal.gm-modal[style*=\"--keyboard-overlap\"]");
+    // FNXC:GitManager 2026-06-22-09:30: The mobile viewport-takeover (and its keyboard rule)
+    // is now scoped to the NON-embedded dialog via :not(.gm-modal--embedded) so the right-dock
+    // embedded Git Manager keeps its 100%-of-pane sizing instead of hiding the Header/MobileNavBar.
+    expect(mobileBlock).toContain(".modal.gm-modal:not(.gm-modal--embedded)[style*=\"--keyboard-overlap\"]");
 
-    const keyboardRule = mobileBlock.match(/\.modal\.gm-modal\[style\*=\"--keyboard-overlap\"\]\s*\{[^}]+\}/s);
+    const keyboardRule = mobileBlock.match(/\.modal\.gm-modal:not\(\.gm-modal--embedded\)\[style\*=\"--keyboard-overlap\"\]\s*\{[^}]+\}/s);
     expect(keyboardRule).not.toBeNull();
     expect(keyboardRule![0]).toContain("height: var(--vv-height, 100dvh)");
     expect(keyboardRule![0]).toContain("min-height: var(--vv-height, 100dvh)");
@@ -289,11 +314,16 @@ describe("core modals mobile css coverage", () => {
   it("GitManagerModal: file sections and file lists keep independent scrolling constraints", () => {
     const css = loadAllAppCss();
 
-    const fileSectionRule = css.match(/\.gm-file-section\s*\{[^}]+\}/s);
-    expect(fileSectionRule).not.toBeNull();
-    expect(fileSectionRule![0]).toContain("display: flex");
-    expect(fileSectionRule![0]).toContain("flex-direction: column");
-    expect(fileSectionRule![0]).toContain("min-height: 0");
+    // FNXC:GitManager 2026-06-22-09:30: Multiple .gm-file-section rules exist (base + mobile
+    // overrides), and concatenation order is not guaranteed, so select the BASE rule by its
+    // defining flex-column property instead of relying on first-match.
+    const fileSectionRule = [...css.matchAll(/\.gm-file-section\s*\{[^}]+\}/gs)]
+      .map((m) => m[0])
+      .find((rule) => rule.includes("display: flex"));
+    expect(fileSectionRule).toBeTruthy();
+    expect(fileSectionRule!).toContain("display: flex");
+    expect(fileSectionRule!).toContain("flex-direction: column");
+    expect(fileSectionRule!).toContain("min-height: 0");
 
     const fileListRule = css.match(/\.gm-file-list\s*\{[^}]+\}/s);
     expect(fileListRule).not.toBeNull();

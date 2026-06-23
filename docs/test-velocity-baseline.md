@@ -4,8 +4,8 @@
 
 ## Latest baseline
 
-- Cycle: **2026-W25**
-- Captured at: **2026-06-18T16:12:01.248Z**
+- Cycle: **2026-W26**
+- Captured at: **2026-06-23T07:29:54.383Z**
 - Timing snapshot: `scripts/test-timings.json` captured at **2026-06-03T23:45:49.672Z**
 - Quarantine ledger: `scripts/lib/test-quarantine.json`
 
@@ -13,10 +13,10 @@
 
 | Metric | Current | Delta vs previous |
 |---|---:|---:|
-| Merge gate wall-time (`pnpm test:gate`) | 5.4s | -779ms |
-| Boot smoke wall-time (`pnpm smoke:boot`) | 18.1s | -123ms |
-| Changed-only test wall-time (`pnpm test`) | 7.2s | -500ms |
-| Quarantine / flake count | 0 | -2 |
+| Merge gate wall-time (`pnpm test:gate`) | 15.9s | +9.5s |
+| Boot smoke wall-time (`pnpm smoke:boot`) | 21.1s | +2.3s |
+| Changed-only test wall-time (`pnpm test`) | 1m 07s | +57.2s |
+| Quarantine / flake count | 0 | -1 |
 | Deletion-due quarantines | 0 | n/a |
 
 ## Measurement failures
@@ -67,16 +67,16 @@
 
 | Row | Captured at | Gate | Boot smoke | `pnpm test` | Quarantine count |
 |---|---|---:|---:|---:|---:|
-| Previous | 2026-06-18T03:04:28.794Z | 6.2s | 18.2s | 7.7s | 2 |
-| Latest | 2026-06-18T16:12:01.248Z | 5.4s | 18.1s | 7.2s | 0 |
-| Delta | — | -779ms | -123ms | -500ms | -2 |
+| Previous | 2026-06-22T08:03:10.119Z | 6.5s | 18.8s | 9.8s | 1 |
+| Latest | 2026-06-23T07:29:54.383Z | 15.9s | 21.1s | 1m 07s | 0 |
+| Delta | — | +9.5s | +2.3s | +57.2s | -1 |
 
 _Future weekly rows append to `scripts/test-velocity-history.json`; compare the latest row against the previous row before posting to #leads._
 
 ## Post to #leads
 
 ```text
-FN-6612 weekly test velocity: gate 5.4s (-779ms), boot smoke 18.1s (-123ms), pnpm test 7.2s (-500ms), quarantine ledger 0 (-2). Slowest file: packages/engine/src/__tests__/reliability-interactions/shared-branch-group-lifecycle.test.ts at 13.9s. Deletion-due quarantines: 0.
+FN-6612 weekly test velocity: gate 15.9s (+9.5s), boot smoke 21.1s (+2.3s), pnpm test 1m 07s (+57.2s), quarantine ledger 0 (-1). Slowest file: packages/engine/src/__tests__/reliability-interactions/shared-branch-group-lifecycle.test.ts at 13.9s. Deletion-due quarantines: 0.
 ```
 
 ## How to refresh
@@ -84,6 +84,8 @@ FN-6612 weekly test velocity: gate 5.4s (-779ms), boot smoke 18.1s (-123ms), pnp
 ```bash
 pnpm test:velocity -- --measure --write-report
 ```
+
+In measure mode, the script runs a non-measured `pnpm build` preflight before timing `pnpm test:gate`, `pnpm smoke:boot`, or `pnpm test`. The preflight time is setup only and is excluded from lane metrics; if it fails, the Measurement failures section records `Build preflight (pnpm build)` as the reason. Use `--skip-build-preflight` only when the workspace is already built by CI.
 
 Report-only regeneration is cheap and does not run any suite:
 

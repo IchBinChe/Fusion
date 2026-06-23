@@ -111,7 +111,7 @@ describe("FN-6257 AI-merge cleanup ENOENT idempotency (real git)", () => {
     expect(git(rootDir, "rev-parse main")).not.toBe(mainBefore);
     expect(task.column).toBe("done");
     expect(task.status ?? null).toBeNull();
-    expect(task.error).toBeUndefined();
+    expect(task.error ?? null).toBeNull();
     expect(task.mergeRetries ?? 0).not.toBeGreaterThanOrEqual(3);
     expect(task.mergeDetails).toEqual(expect.objectContaining({
       commitSha: result.commitSha,

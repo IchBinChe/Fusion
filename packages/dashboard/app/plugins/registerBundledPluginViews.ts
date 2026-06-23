@@ -25,18 +25,6 @@ async function loadDependencyGraphView(): Promise<{ default: PluginViewComponent
   return { default: component as PluginViewComponent };
 }
 
-async function loadRoadmapView(): Promise<{ default: PluginViewComponent }> {
-  const moduleId = "@fusion-plugin-examples/roadmap/dashboard-view";
-  const exportName = "RoadmapDashboardView";
-  const mod = await import("@fusion-plugin-examples/roadmap/dashboard-view") as unknown as Record<string, ComponentType<{ context?: PluginDashboardViewContext }>>;
-  const component = mod[exportName];
-  if (!component) {
-    console.warn(`[plugin-views] Missing export ${exportName} from ${moduleId}`);
-    return { default: createMissingPluginView(moduleId, exportName) };
-  }
-  return { default: component as PluginViewComponent };
-}
-
 async function loadCompoundEngineeringView(): Promise<{ default: PluginViewComponent }> {
   const moduleId = "@fusion-plugin-examples/compound-engineering/dashboard-view";
   const exportName = "CompoundEngineeringDashboardView";
@@ -89,12 +77,6 @@ export function registerBundledPluginViews(): void {
     "fusion-plugin-dependency-graph",
     "graph",
     lazy(loadDependencyGraphView),
-  );
-
-  registerPluginView(
-    "fusion-plugin-roadmap",
-    "roadmaps",
-    lazy(loadRoadmapView),
   );
 
   registerPluginView(

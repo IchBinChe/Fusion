@@ -2,7 +2,7 @@
 
 [← Docs index](./README.md)
 
-Todo View is an experimental dashboard surface for personal/project todo lists that can feed directly into Fusion planning and task workflows.
+Todo View is an experimental full-height dashboard surface for personal/project todo lists that can feed directly into Fusion planning and task workflows. It renders in the project right-content area like other views rather than opening a modal overlay.
 
 ## Overview
 
@@ -37,7 +37,8 @@ Behavior when disabled:
 
 When enabled:
 
-- Desktop: header overflow menu (**More views**) → **Todos** (the only desktop Todos navigation entry)
+- Desktop/tablet with Left Sidebar Navigation enabled: left sidebar → **Todos**
+- Desktop/tablet without the left sidebar: header overflow menu (**More views**) → **Todos**
 - Mobile: **More** sheet in the mobile nav bar → **Todos**
 
 ## List management

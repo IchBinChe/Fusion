@@ -17,12 +17,15 @@
 import { getBuiltinWorkflow, isBuiltinWorkflowId } from "./builtin-workflows.js";
 import { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
 import { parseWorkflowIr } from "./workflow-ir.js";
+import { applyPromptOverridesToIr } from "./workflow-prompt-overrides.js";
 import type { WorkflowIr } from "./workflow-ir-types.js";
 
 /** Minimal store surface the resolver needs (public APIs only). */
 export interface WorkflowIrResolverStore {
   getTaskWorkflowSelection(taskId: string): { workflowId: string; stepIds: string[] } | undefined;
   getWorkflowDefinition(id: string): Promise<{ ir: string | WorkflowIr } | undefined>;
+  getWorkflowSettingsProjectId?(): string;
+  getWorkflowPromptOverrides?(workflowId: string, projectId: string): Record<string, string>;
 }
 
 /**
@@ -80,26 +83,42 @@ export async function resolveTaskPlanningPrompt(
  *   sweep. Hits short-circuit before any builtin/db lookup.
  */
 export async function resolveWorkflowIrById(
-  store: Pick<WorkflowIrResolverStore, "getWorkflowDefinition">,
+  store: Pick<WorkflowIrResolverStore, "getWorkflowDefinition"> & Partial<Pick<WorkflowIrResolverStore, "getWorkflowSettingsProjectId" | "getWorkflowPromptOverrides">>,
   workflowId: string,
   irCache?: Map<string, WorkflowIr>,
 ): Promise<WorkflowIr> {
-  const cached = irCache?.get(workflowId);
+  let projectId: string | undefined;
+  try {
+    projectId = store.getWorkflowSettingsProjectId?.();
+  } catch {
+    /*
+     * FNXC:CustomWorkflows 2026-06-22-23:27:
+     * Workflow IR resolution is an engine-entry fallback path, so project identity failures must behave like no scoped project is available.
+     * Keep built-in/default IRs usable and skip project-scoped prompt overrides instead of propagating identity lookup errors.
+     */
+    projectId = undefined;
+  }
+  const cacheKey = projectId ? `${workflowId}\u0000${projectId}` : workflowId;
+  const cached = irCache?.get(cacheKey);
   if (cached) return cached;
 
   if (isBuiltinWorkflowId(workflowId)) {
     const builtin = getBuiltinWorkflow(workflowId);
     const ir = builtin?.ir ?? BUILTIN_CODING_WORKFLOW_IR;
     const resolved = typeof ir === "string" ? parseWorkflowIr(ir) : ir;
-    irCache?.set(workflowId, resolved);
-    return resolved;
+    const overrides = projectId ? store.getWorkflowPromptOverrides?.(workflowId, projectId) : undefined;
+    // FNXC:CustomWorkflows 2026-06-21-19:12:
+    // Public IR resolution must see the same project-scoped built-in prompt overrides as task execution, while callers without the new store methods keep the canonical built-in IR.
+    const effective = applyPromptOverridesToIr(resolved, overrides);
+    irCache?.set(cacheKey, effective);
+    return effective;
   }
 
   try {
     const def = await store.getWorkflowDefinition(workflowId);
     if (!def) return BUILTIN_CODING_WORKFLOW_IR;
     const ir = typeof def.ir === "string" ? parseWorkflowIr(def.ir) : def.ir;
-    irCache?.set(workflowId, ir);
+    irCache?.set(cacheKey, ir);
     return ir;
   } catch {
     return BUILTIN_CODING_WORKFLOW_IR;
@@ -121,6 +140,6 @@ export async function resolveWorkflowIrForTask(
   } catch {
     return BUILTIN_CODING_WORKFLOW_IR;
   }
-  if (!workflowId) return BUILTIN_CODING_WORKFLOW_IR;
+  if (!workflowId) return resolveWorkflowIrById(store, "builtin:coding", irCache);
   return resolveWorkflowIrById(store, workflowId, irCache);
 }

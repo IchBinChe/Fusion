@@ -380,7 +380,7 @@ describe("WorkflowTaskRuntime", () => {
     const result = await runtime.run(task, settings);
 
     expect(result.disposition).toBe("completed");
-    expect(observedSettings?.experimentalFeatures?.workflowGraphExecutor).toBe(true);
+    expect(observedSettings?.experimentalFeatures?.workflowGraphExecutor).toBeUndefined();
     expect(observedSettings?.experimentalFeatures?.workflowColumns).toBe(true);
     expect((observedSettings as Settings | undefined)?.testMode).toBe(true);
   });

@@ -14,16 +14,10 @@ const plugin = definePlugin({
     onSchemaInit: ensureRoadmapSchema,
   },
   routes: createRoadmapPluginRoutes(),
-  dashboardViews: [
-    {
-      viewId: "roadmaps",
-      label: "Roadmaps",
-      componentPath: "./dashboard-view",
-      icon: "Map",
-      placement: "primary",
-      order: 30,
-    },
-  ],
+  /*
+  FNXC:RoadmapsNavigation 2026-06-22-18:50:
+  The roadmap dashboard view was removed from the product surface. Keep the plugin's schema/routes/domain exports available for compatibility, but do not advertise a dashboardViews entry.
+  */
 });
 
 export default plugin;

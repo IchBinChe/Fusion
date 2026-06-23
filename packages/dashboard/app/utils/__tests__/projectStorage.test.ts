@@ -85,6 +85,7 @@ describe("projectStorage", () => {
         "kb-dashboard-list-sidebar-width",
         "kb-dashboard-mailbox-sidebar-width",
         "kb-dashboard-agents-sidebar-width",
+        "kb-dashboard-github-import-list-width",
         "kb-quick-entry-text",
         "kb-inline-create-text",
         "fn-agent-view",
@@ -101,10 +102,11 @@ describe("projectStorage", () => {
         "kb-dashboard-base-branch-filter",
         "kb-capacity-risk-banner-dismissed",
         "kb-files-line-numbers",
+        "kb-dashboard-dock-files-current",
         "fusion-plugin-dependency-graph:positions",
       ]),
     );
-    expect(PROJECT_STORAGE_KEYS).toHaveLength(26);
+    expect(PROJECT_STORAGE_KEYS).toHaveLength(28);
   });
 
   it("stores branch filter values as scoped strings per project", () => {

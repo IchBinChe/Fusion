@@ -5,11 +5,10 @@
  * and file-scope enforcement mode into *configuration* over the substrate merge
  * capability (KTD-6). This module owns `resolveMergePolicy` — a small
  * read-through resolver consulted by `merger.ts` at its existing policy-knob
- * read sites. When the `workflowColumns` flag is ON it reads the merge-trait
- * config from the task's resolved workflow; otherwise (and when the workflow's
- * merge trait carries no config, e.g. the built-in default workflow) it falls
- * back to the existing settings knobs (`directMergeCommitStrategy`,
- * `mergeStrategy`, scope settings) for back-compat.
+ * read sites. It reads merge-trait config from the task's resolved workflow;
+ * when the workflow's merge trait carries no config, e.g. the built-in default
+ * workflow, it falls back to the existing settings knobs
+ * (`directMergeCommitStrategy`, `mergeStrategy`, scope settings).
  *
  * The three 2026-05-23 lost-work guards stay in `merger.ts` mechanics and are
  * UNREACHABLE from this config (KTD-6 / R10): sibling `fusion/fn-*` merge-target

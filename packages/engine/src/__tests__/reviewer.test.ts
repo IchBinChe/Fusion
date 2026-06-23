@@ -1009,7 +1009,7 @@ describe("reviewStep — user comments in spec review", () => {
     expect(capturedPrompt).not.toContain("User Comment Coverage");
   });
 
-  it("does not include user comments for non-spec review types", async () => {
+  it.each(["plan", "code"] as const)("includes user comments for %s reviews without spec coverage gating", async (reviewType) => {
     let capturedPrompt = "";
     mockedCreateFnAgent.mockResolvedValue({
       session: {
@@ -1036,14 +1036,41 @@ describe("reviewStep — user comments in spec review", () => {
     ];
 
     await reviewStep(
-      "/tmp/worktree", "FN-050", 1, "Implementation", "code",
+      "/tmp/worktree", "FN-050", 1, "Implementation", reviewType,
       "# Task: FN-050\n\n## Mission\nDo something",
-      "abc123",
+      reviewType === "code" ? "abc123" : undefined,
       { userComments },
     );
 
-    // Code reviews should not have user comment coverage checks
-    expect(capturedPrompt).not.toContain("User Comment Coverage");
+    expect(capturedPrompt).toContain("## User Comments");
+    expect(capturedPrompt).toContain("Some user feedback");
+    expect(capturedPrompt).not.toContain("User Comment Coverage (MANDATORY)");
+  });
+
+  it.each(["plan", "code"] as const)("omits the user comments section for %s reviews when no comments are provided", async (reviewType) => {
+    let capturedPrompt = "";
+    mockedCreateFnAgent.mockResolvedValue({
+      session: {
+        prompt: vi.fn().mockImplementation(async (prompt: string) => {
+          capturedPrompt = prompt;
+        }),
+        subscribe: vi.fn().mockImplementation((cb: any) => {
+          cb({
+            type: "message_update",
+            assistantMessageEvent: { type: "text_delta", delta: "### Verdict: APPROVE\n### Summary\nOK" },
+          });
+        }),
+        dispose: vi.fn(),
+      },
+    } as any);
+
+    await reviewStep(
+      "/tmp/worktree", "FN-050", 1, "Implementation", reviewType,
+      "# Task: FN-050\n\n## Mission\nDo something",
+      reviewType === "code" ? "abc123" : undefined,
+    );
+
+    expect(capturedPrompt).not.toContain("## User Comments");
   });
 
   it("includes assigned worktree boundary instructions for code reviews", async () => {

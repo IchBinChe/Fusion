@@ -28,6 +28,7 @@ import {
   parseReviewVerdict,
   buildMergeSystemPrompt,
   buildMergePrompt,
+  buildReviewPrompt,
   buildReviewSystemPrompt,
   REVIEW_VERDICT_MARKER,
   AiMergeBlockedError,
@@ -152,6 +153,59 @@ describe("parseReviewVerdict", () => {
     expect(p).toContain("Verify before committing");
   });
 
+  it("merge prompt includes user comments when present and omits the section when absent", () => {
+    const baseInput = {
+      taskId: "FN-1",
+      branch: "fusion/fn-1",
+      integrationBranch: "main",
+      tipSha: "abc1234567890",
+      includeTaskId: true,
+      trailers: ["Fusion-Task-Id: FN-1"],
+    };
+
+    const withComments = buildMergePrompt({
+      ...baseInput,
+      userComments: [{
+        id: "c1",
+        text: "Please keep the old API export",
+        author: "user",
+        createdAt: "2026-06-21T10:00:00.000Z",
+      }],
+    });
+    const withoutComments = buildMergePrompt(baseInput);
+
+    expect(withComments).toContain("## User Comments");
+    expect(withComments).toContain("Please keep the old API export");
+    expect(withoutComments).not.toContain("## User Comments");
+  });
+
+  it("review prompt includes user comments when present and omits the section when absent", () => {
+    const baseInput = {
+      taskId: "FN-1",
+      branch: "fusion/fn-1",
+      integrationBranch: "main",
+      tipSha: "abc1234567890",
+      squashSha: "def1234567890",
+      diffStat: "file.ts | 1 +",
+      priorReasons: [],
+    };
+
+    const withComments = buildReviewPrompt({
+      ...baseInput,
+      userComments: [{
+        id: "c1",
+        text: "Please preserve the public export",
+        author: "user",
+        createdAt: "2026-06-21T10:00:00.000Z",
+      }],
+    });
+    const withoutComments = buildReviewPrompt(baseInput);
+
+    expect(withComments).toContain("## User Comments");
+    expect(withComments).toContain("Please preserve the public export");
+    expect(withoutComments).not.toContain("## User Comments");
+  });
+
   it("merge prompt requires subject, body summary, and diff-stat in commit message", () => {
     const prompt = buildMergePrompt({
       taskId: "FN-1",
@@ -201,7 +255,7 @@ describe("runAiMerge", () => {
         mergeDetails: expect.objectContaining({ mergeConfirmed: true }),
       }),
     );
-    expect(store.moveTask).toHaveBeenCalledWith("FN-1", "done");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-1", "done", expect.objectContaining({ moveSource: "engine", preserveProgress: true }));
     expect(emitted.some((e) => e.event === "task:merged")).toBe(true);
   });
 
@@ -364,7 +418,7 @@ describe("runAiMerge", () => {
     expect(result.noOp).toBe(true);
     expect(result.ok).toBe(true);
     expect(task.column).toBe("done");
-    expect(store.moveTask).toHaveBeenCalledWith("FN-1", "done");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-1", "done", expect.objectContaining({ moveSource: "engine", preserveProgress: true }));
   });
 
   it("fails loudly when an executed, never-merged task has no branch (possible lost work)", async () => {
@@ -386,7 +440,7 @@ describe("runAiMerge", () => {
       mergeAgent: vi.fn(), reviewAgent: vi.fn(),
     });
     expect(result.noOp).toBe(true);
-    expect(store.moveTask).toHaveBeenCalledWith("FN-1", "done");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-1", "done", expect.objectContaining({ moveSource: "engine", preserveProgress: true }));
   });
 
   it("finalizes as a no-op when a never-executed task has no branch", async () => {
@@ -397,7 +451,7 @@ describe("runAiMerge", () => {
       mergeAgent: vi.fn(), reviewAgent: vi.fn(),
     });
     expect(result.noOp).toBe(true);
-    expect(store.moveTask).toHaveBeenCalledWith("FN-1", "done");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-1", "done", expect.objectContaining({ moveSource: "engine", preserveProgress: true }));
   });
 
   it("throws a clear error when the task's target branch has no local ref", async () => {

@@ -1,15 +1,15 @@
 // @vitest-environment node
 
 import express, { type NextFunction, type Request, type Response } from "express";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { EventEmitter } from "node:events";
 
-import { Database, emitUsageEvent } from "@fusion/core";
-import type { TaskStore } from "@fusion/core";
+import { Database, emitUsageEvent, LITELLM_PRICING_SOURCE_URL } from "@fusion/core";
+import type { GlobalSettings, TaskStore } from "@fusion/core";
 import { request } from "../test-request.js";
 import { ApiError } from "../api-error.js";
 import {
@@ -20,6 +20,14 @@ import {
   DEFAULT_WINDOW_DAYS,
 } from "../routes/register-command-center-routes.js";
 import type { ApiRoutesContext } from "../routes/types.js";
+
+const { mockInvalidateAllGlobalSettingsCaches } = vi.hoisted(() => ({
+  mockInvalidateAllGlobalSettingsCaches: vi.fn(),
+}));
+
+vi.mock("../project-store-resolver.js", () => ({
+  invalidateAllGlobalSettingsCaches: mockInvalidateAllGlobalSettingsCaches,
+}));
 
 /** Seed a temp DB with a token-bearing task and a tool-call usage event. */
 function seedDb(db: Database, opts: { taskId: string; model: string; tokens: number }): void {
@@ -196,10 +204,29 @@ function buildApp(stores: Record<string, TaskStore>, fallback: TaskStore) {
   return app;
 }
 
-/** A minimal TaskStore exposing only getDatabase(), which is all the routes use. */
-function storeFor(db: Database): TaskStore {
+/** A minimal TaskStore exposing only the methods Command Center routes use. */
+function storeFor(
+  db: Database,
+  overrides: Partial<TaskStore> = {},
+  globalSettings: Partial<GlobalSettings> = {},
+): TaskStore {
   const store = new EventEmitter() as unknown as TaskStore & { getDatabase(): Database };
+  const settings = {
+    modelPricingOverrides: undefined,
+    modelPricingFetchedAt: undefined,
+    modelPricingSource: undefined,
+    ...globalSettings,
+  } as GlobalSettings;
   store.getDatabase = () => db;
+  store.getGlobalSettingsStore = () => ({
+    getSettings: async () => settings,
+    invalidateCache: vi.fn(),
+  } as unknown as ReturnType<TaskStore["getGlobalSettingsStore"]>);
+  store.updateGlobalSettings = vi.fn(async (patch: Partial<GlobalSettings>) => {
+    Object.assign(settings, patch);
+    return settings;
+  }) as TaskStore["updateGlobalSettings"];
+  Object.assign(store, overrides);
   return store;
 }
 
@@ -226,6 +253,8 @@ describe("register-command-center-routes", () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
+    mockInvalidateAllGlobalSettingsCaches.mockClear();
     dbA.close();
     dbB.close();
     rmSync(tmpDir, { recursive: true, force: true });
@@ -260,6 +289,119 @@ describe("register-command-center-routes", () => {
       expect.objectContaining({ bucket: "2026-03-01", totalTokens: 200 }),
     ]);
     expect(body.series?.[0]).toHaveProperty("cost");
+  });
+
+  it("token analytics applies persisted pricing overrides", async () => {
+    const storeA = storeFor(dbA, {}, {
+      modelPricingOverrides: {
+        "anthropic:claude-sonnet-4-5": {
+          inputPer1M: 1_000_000,
+          outputPer1M: 1_000_000,
+          cacheReadPer1M: 1_000_000,
+          cacheWritePer1M: 1_000_000,
+          source: "manual",
+        },
+      },
+    });
+    app = buildApp({ "proj-a": storeA }, storeA);
+
+    const res = await request(
+      app,
+      "GET",
+      "/api/command-center/tokens?from=2026-02-01T00:00:00.000Z&to=2026-04-01T00:00:00.000Z&projectId=proj-a",
+    );
+
+    expect(res.status).toBe(200);
+    expect((res.body as { cost: { usd: number } }).cost.usd).toBeCloseTo(200, 2);
+  });
+
+  it("fetches latest pricing and persists merged global overrides", async () => {
+    const storeA = storeFor(dbA, {}, {
+      modelPricingOverrides: {
+        "manual:custom": {
+          inputPer1M: 9,
+          outputPer1M: 9,
+          cacheReadPer1M: 9,
+          cacheWritePer1M: 9,
+          source: "manual",
+        },
+      },
+    });
+    app = buildApp({ "proj-a": storeA }, storeA);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        "gpt-test": {
+          litellm_provider: "openai",
+          mode: "chat",
+          input_cost_per_token: 0.000001,
+          output_cost_per_token: 0.000002,
+        },
+      }),
+      text: async () => "",
+    } as Response);
+
+    const res = await request(app, "POST", "/api/command-center/pricing/fetch?projectId=proj-a");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ count: 1, source: LITELLM_PRICING_SOURCE_URL });
+    expect((res.body as { fetchedAt: string }).fetchedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(storeA.updateGlobalSettings).toHaveBeenCalledWith(expect.objectContaining({
+      modelPricingFetchedAt: expect.any(String),
+      modelPricingSource: LITELLM_PRICING_SOURCE_URL,
+      modelPricingOverrides: expect.objectContaining({
+        "manual:custom": expect.objectContaining({ source: "manual" }),
+        "openai:gpt-test": expect.objectContaining({ inputPer1M: 1, outputPer1M: 2 }),
+      }),
+    }));
+    expect(mockInvalidateAllGlobalSettingsCaches).toHaveBeenCalledTimes(1);
+  });
+
+  it("pricing fetch failures preserve existing overrides", async () => {
+    const existing = {
+      "anthropic:claude-sonnet-4-5": {
+        inputPer1M: 99,
+        outputPer1M: 99,
+        cacheReadPer1M: 99,
+        cacheWritePer1M: 99,
+        source: "manual",
+      },
+    };
+    const storeA = storeFor(dbA, {}, { modelPricingOverrides: existing });
+    app = buildApp({ "proj-a": storeA }, storeA);
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
+
+    const res = await request(app, "POST", "/api/command-center/pricing/fetch?projectId=proj-a");
+
+    expect(res.status).toBe(500);
+    expect(storeA.updateGlobalSettings).not.toHaveBeenCalled();
+    expect((await storeA.getGlobalSettingsStore().getSettings()).modelPricingOverrides).toEqual(existing);
+    expect(mockInvalidateAllGlobalSettingsCaches).not.toHaveBeenCalled();
+  });
+
+  it("pricing fetch rejects empty parsed data without clobbering overrides", async () => {
+    const existing = {
+      "anthropic:claude-sonnet-4-5": {
+        inputPer1M: 99,
+        outputPer1M: 99,
+        cacheReadPer1M: 99,
+        cacheWritePer1M: 99,
+        source: "manual",
+      },
+    };
+    const storeA = storeFor(dbA, {}, { modelPricingOverrides: existing });
+    app = buildApp({ "proj-a": storeA }, storeA);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({ sample_spec: {}, "embedding-test": { litellm_provider: "openai", mode: "embedding" } }),
+      text: async () => "",
+    } as Response);
+
+    const res = await request(app, "POST", "/api/command-center/pricing/fetch?projectId=proj-a");
+
+    expect(res.status).toBe(502);
+    expect(storeA.updateGlobalSettings).not.toHaveBeenCalled();
+    expect((await storeA.getGlobalSettingsStore().getSettings()).modelPricingOverrides).toEqual(existing);
   });
 
   it("ignores invalid token granularity rather than erroring", async () => {
@@ -300,6 +442,31 @@ describe("register-command-center-routes", () => {
         filesChanged: 1,
       }),
     );
+  });
+
+  it("team analytics applies persisted pricing overrides", async () => {
+    seedTeamMetrics(dbA, { agentId: "agent-route-a", name: "Route Alpha", tokens: 100, taskId: "FN-A-team-override" });
+    const storeA = storeFor(dbA, {}, {
+      modelPricingOverrides: {
+        "anthropic:claude-sonnet-4-5": {
+          inputPer1M: 1_000_000,
+          outputPer1M: 1_000_000,
+          cacheReadPer1M: 1_000_000,
+          cacheWritePer1M: 1_000_000,
+          source: "manual",
+        },
+      },
+    });
+    app = buildApp({ "proj-a": storeA }, storeA);
+
+    const res = await request(
+      app,
+      "GET",
+      "/api/command-center/team?from=2026-02-01T00:00:00.000Z&to=2026-04-01T00:00:00.000Z&projectId=proj-a",
+    );
+
+    expect(res.status).toBe(200);
+    expect((res.body as { totals: { cost: { usd: number } } }).totals.cost.usd).toBeCloseTo(200, 2);
   });
 
   it("returns the tools / activity / productivity aggregator shapes", async () => {
@@ -355,6 +522,48 @@ describe("register-command-center-routes", () => {
     expect(signals.body).toHaveProperty("mttr");
     expect(signals.body).toHaveProperty("bySource");
     expect(signals.body).toHaveProperty("bySeverity");
+  });
+
+  it("runs the productivity LOC backfill route as a dry-run by default and respects writes", async () => {
+    const backfill = vi.fn(async (options?: { dryRun?: boolean }) => ({
+      scannedRows: 3,
+      distinctCommits: 2,
+      updatedRows: options?.dryRun === false ? 3 : 0,
+      skippedUnavailableCommits: 1,
+      skippedInvalidShas: 0,
+      dryRun: options?.dryRun ?? true,
+    }));
+    const scopedStore = storeFor(dbA, { backfillCommitAssociationDiffStats: backfill } as unknown as Partial<TaskStore>);
+    const scopedApp = buildApp({ "proj-a": scopedStore }, scopedStore);
+
+    const preview = await request(
+      scopedApp,
+      "POST",
+      "/api/command-center/productivity/backfill-loc?projectId=proj-a",
+      JSON.stringify({}),
+      { "content-type": "application/json" },
+    );
+    expect(preview.status).toBe(200);
+    expect(preview.body).toMatchObject({
+      scannedRows: 3,
+      distinctCommits: 2,
+      updatedRows: 0,
+      skippedUnavailableCommits: 1,
+      skippedInvalidShas: 0,
+      dryRun: true,
+    });
+    expect(backfill).toHaveBeenLastCalledWith({ dryRun: true });
+
+    const write = await request(
+      scopedApp,
+      "POST",
+      "/api/command-center/productivity/backfill-loc?projectId=proj-a",
+      JSON.stringify({ dryRun: false }),
+      { "content-type": "application/json" },
+    );
+    expect(write.status).toBe(200);
+    expect(write.body).toMatchObject({ updatedRows: 3, dryRun: false });
+    expect(backfill).toHaveBeenLastCalledWith({ dryRun: false });
   });
 
   it("returns the live snapshot shape", async () => {

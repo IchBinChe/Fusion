@@ -45,6 +45,7 @@ import {
   createSendMessageTool,
   createReadMessagesTool,
   createAskQuestionTool,
+  createChatArtifactTools,
   createChatTaskDocumentTools,
   createWorkflowAuthoringTools,
 } from "@fusion/engine";
@@ -1820,8 +1821,11 @@ export class ChatManager {
       const documentTools = this.taskStore
         ? createChatTaskDocumentTools(this.taskStore)
         : [];
+      const artifactTools = this.taskStore
+        ? createChatArtifactTools(this.taskStore, this.messageStore)
+        : [];
 
-      const customTools = [createAskQuestionTool(), ...messagingTools, ...workflowTools, ...documentTools];
+      const customTools = [createAskQuestionTool(), ...messagingTools, ...workflowTools, ...documentTools, ...artifactTools];
 
       const sessionOptions = {
         cwd: this.rootDir,

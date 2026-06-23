@@ -165,6 +165,12 @@ describe("Agent CSS classes", () => {
     expect(roleFocusBlock).toContain("box-shadow: var(--focus-ring-strong)");
   });
 
+  it("should use provider icons instead of decorative role glyphs in the create-agent role picker", () => {
+    expect(newAgentDialogContent).toContain("<ProviderIcon provider={selectedModelProvider} size=\"sm\" />");
+    expect(newAgentDialogContent).not.toMatch(/icon:\s*"[⊕▶⊙⊞◷⎔✦]"/);
+    expect(newAgentDialogContent).not.toContain("selectedRole?.icon");
+  });
+
   it("should keep the create-agent empty-state action copy", () => {
     expect(agentEmptyStateContent).toContain("Create Agent");
   });

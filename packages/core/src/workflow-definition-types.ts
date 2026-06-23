@@ -55,8 +55,8 @@ export interface WorkflowDefinitionUpdate {
    * U5 (R20): when an IR update removes a column that still holds cards, the
    * update is blocked with a typed {@link import("./workflow-reconciliation.js").OccupiedColumnsError}
    * unless `rehomeTo` is supplied — an explicit "save and re-home occupants to
-   * column X" target. The target must survive in the new IR. Only consulted when
-   * the `workflowColumns` flag is ON.
+   * column X" target. The target must survive in the new IR. Consulted by the
+   * default workflow-column runtime.
    */
   rehomeTo?: string;
   /**

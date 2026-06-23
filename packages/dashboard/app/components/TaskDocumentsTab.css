@@ -1,4 +1,32 @@
 /* === Task Documents === */
+.task-artifacts-section,
+.task-documents-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  margin-top: var(--space-lg);
+}
+
+.task-artifacts-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.task-artifacts-section-header h5 {
+  margin: 0;
+}
+
+.task-artifacts-section-count {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+.task-artifacts-gallery {
+  width: 100%;
+}
+
 .task-documents-list {
   display: flex;
   flex-direction: column;
@@ -225,6 +253,11 @@
 }
 
 @media (max-width: 768px) {
+  .task-artifacts-section-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .task-document-card-header {
     flex-direction: column;
     gap: var(--space-sm);

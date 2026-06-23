@@ -32,11 +32,15 @@ Defaults from `DEFAULT_GLOBAL_SETTINGS`; key scope from `GLOBAL_SETTINGS_KEYS`.
 | Setting | Type | Default | Description |
 |---|---|---:|---|
 | `themeMode` | `"dark" \| "light" \| "system"` | `"dark"` | Dashboard theme mode. |
-| `colorTheme` | `ColorTheme` | `"default"` | Dashboard color theme preset. |
+| `colorTheme` | `ColorTheme` | `"default"` | Dashboard color theme preset. Use `"shadcn-custom"` to show the custom shadcn color picker in Settings → Appearance and the Command Center theme card. |
+| `shadcnCustomColors` | `Record<string, string>` | `undefined` | Optional shadcn design-token override map for `"shadcn-custom"` only. Keys are CSS token names such as `--accent`, `--bg`, `--surface`, `--card`, `--border`, `--text`, `--text-muted`, workflow status tokens, and `--color-success`/`--color-warning`/`--color-error`; values must be sanitized `#RGB` or `#RRGGBB` hex colors. Missing or invalid entries fall back to the `shadcn-custom` base defaults and are not applied to other themes. |
 | `language` | `"en" \| "zh-CN" \| "zh-TW" \| "fr" \| "es" \| "ko"` | `undefined` | UI language for the dashboard and TUI. When unset, the dashboard detects from localStorage → browser language and the CLI from `--lang` flag → environment locale, falling back to `en`. Validated at the store write boundary (`validateLocale`); invalid values are dropped. Reset to auto-detect via the dashboard's "Auto" language option or `fn settings set language auto` (clears the persisted key). |
 | `dashboardFontScalePct` | `number` | `100` | Dashboard font scale percentage used by Appearance settings. Valid range: `85` to `125`; applied pre-hydration via document root font-size so board typography (column headers/counts, task cards, and quick-entry text) scales with the setting from first paint. |
 | `defaultProvider` | `string` | `undefined` | Default AI provider. |
 | `defaultModelId` | `string` | `undefined` | Default AI model ID. |
+| `modelPricingOverrides` | `Record<string, ModelPricing>` | `undefined` | Optional global Command Center pricing overrides keyed by lowercased `provider:model` or bare `:model`. Values store USD per 1M input, output, cache-read, and cache-write tokens plus optional `source`; they override the built-in pricing table for cost estimates only and are editable in Settings → Global Models. |
+| `modelPricingFetchedAt` | `string` | `undefined` | ISO timestamp for the last successful one-click pricing refresh from the Settings → Global Models pricing editor. |
+| `modelPricingSource` | `string` | `undefined` | Source label/URL for the current pricing override set, currently the LiteLLM model pricing JSON when fetched through the dashboard. |
 | `fallbackProvider` | `string` | `undefined` | Fallback provider when the primary default model hits transient provider failures or model-compatibility/auth-tier rejections. |
 | `fallbackModelId` | `string` | `undefined` | Fallback model ID (must pair with `fallbackProvider`). |
 | `defaultThinkingLevel` | `"off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh"` | `undefined` | Default reasoning effort for AI sessions. `xhigh` requests maximum reasoning effort; Claude CLI adapters map it to `high` for non-Opus models and `max` for Opus models. If a provider/runtime rejects simultaneous `thinking` and `reasoning_effort` parameters, Fusion retries without the explicit thinking override instead of failing the run. |
@@ -222,6 +226,8 @@ default — so an untuned project behaves exactly as before. Switching a project
 **new** custom workflow starts that workflow from its own declaration defaults, not
 the project's prior customized values.
 
+**Built-in prompt overrides.** Built-in workflow prompt/gate node text has a similar project-scoped persistence model, but it is separate from workflow settings: prompt overrides are stored per `(workflowId, nodeId, projectId)` and resolve as `stored prompt ?? shipped prompt`. Resetting a prompt deletes the stored node override and restores the built-in IR text; graph structure and setting declarations remain read-only for built-ins. See [Workflow Steps → Overriding built-in workflow prompts](./workflow-steps.md#overriding-built-in-workflow-prompts).
+
 **Agents.** `fn_workflow_create`/`fn_workflow_update` accept `settings` declarations,
 and the `fn_workflow_settings` tool reads and writes values with the same typed
 validation as the editor (invalid values are rejected, never persisted). See
@@ -250,6 +256,11 @@ These groups moved out of project settings and into workflow settings (built-in
 
 ### Workflow-native triage policy settings
 
+<!--
+FNXC:WorkflowRouting 2026-06-22-12:00:
+Triage workflow defaults are policy inputs, not permission to reroute tasks autonomously. Prompt guidance allows workflow selection only for explicit user requests or tasks the agent created.
+-->
+
 The built-in workflows also declare triage/spec policy settings that were **not** moved from project settings. They are workflow-native declarations: they never lived in `DEFAULT_PROJECT_SETTINGS`, are not `MOVED_SETTINGS_KEYS`, and resolve only through the workflow effective-settings path.
 
 | Setting | Default | Purpose |
@@ -264,8 +275,8 @@ The built-in workflows also declare triage/spec policy settings that were **not*
 | `triageSubtaskFileScopeThreshold` | `20` | File Scope entry count that signals broad work. |
 | `triageSubtaskRemediationBatchThreshold` | `30` | Large remediation batch threshold. |
 | `triageNoCommitsDecisionVerbs` | all seven built-ins | Decision-only verbs: Decide, Evaluate, Verify, Confirm, Audit, Review whether, Investigate and report. |
-| `triageDecisionOnlyWorkflowId` | `builtin:quick-fix` | Preferred workflow for decision-only/no-commit tasks. |
-| `triageDefaultWorkflowId` | `builtin:coding` | Default workflow for standard coding tasks. |
+| `triageDecisionOnlyWorkflowId` | `builtin:quick-fix` | Preferred workflow for decision-only/no-commit tasks when the user explicitly requests that routing or the agent is creating the task. |
+| `triageDefaultWorkflowId` | `builtin:coding` | Default workflow for standard coding tasks and for existing tasks without an explicit user-requested or creator-owned workflow selection. |
 | `leanPlanning` | `false` | Workflow-native fast-mode policy: select the lean `planning-fast` prompt variant instead of the full triage spec prompt. |
 | `autoApproveSpec` | `false` | Workflow-native fast-mode policy: auto-approve generated specs and skip the independent spec reviewer. |
 

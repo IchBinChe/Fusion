@@ -27,6 +27,9 @@ import type {
   TaskDocument,
   TaskDocumentRevision,
   TaskDocumentWithTask,
+  Artifact,
+  ArtifactType,
+  ArtifactWithTask,
 
   Message,
   MessageMetadata,
@@ -89,10 +92,11 @@ import type {
   WorkflowSettingOption,
   WorkflowSettingRender,
   WorkflowSettingRejection,
+  CommitAssociationDiffBackfillReport,
 } from "@fusion/core";
 import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
 import type { GithubIssueAction, ScheduledTask, ScheduledTaskCreateInput, ScheduledTaskUpdateInput, AutomationRunResult, Routine, RoutineCreateInput, RoutineUpdateInput, RoutineExecutionResult } from "@fusion/core";
-import type { DiscoveredSkill, CatalogEntry, CatalogFetchResult, ToggleSkillResult, SkillContent, SkillFileEntry } from "@fusion/dashboard";
+import type { DiscoveredSkill, CatalogEntry, CatalogFetchResult, ToggleSkillResult, SkillContent, SkillFileEntry, SkillFileContent } from "@fusion/dashboard";
 import type { MilestoneValidationTelemetry, MissionInterviewDraftSummary } from "../components/mission-types";
 import type {
   ResearchAvailability,
@@ -109,7 +113,8 @@ import { dedupe, type DedupeOptions } from "./dedupe";
 export type FetchOptions = DedupeOptions;
 
 // Re-export skills types for use by hooks and components
-export type { DiscoveredSkill, CatalogEntry, CatalogFetchResult, ToggleSkillResult, SkillContent, SkillFileEntry };
+export type { DiscoveredSkill, CatalogEntry, CatalogFetchResult, ToggleSkillResult, SkillContent, SkillFileEntry, SkillFileContent };
+export type { CommitAssociationDiffBackfillReport };
 
 export class ApiRequestError extends Error {
   readonly status: number;
@@ -1474,6 +1479,37 @@ export interface MarkdownFileListResponse {
   files: MarkdownFileEntry[];
 }
 
+export type { Artifact, ArtifactType, ArtifactWithTask };
+
+export interface FetchArtifactsOptions {
+  type?: ArtifactType;
+  authorId?: string;
+  taskId?: string;
+  q?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export async function fetchArtifacts(
+  options?: FetchArtifactsOptions,
+  projectId?: string,
+): Promise<ArtifactWithTask[]> {
+  const params = new URLSearchParams();
+  if (options?.type) params.set("type", options.type);
+  if (options?.authorId) params.set("authorId", options.authorId);
+  if (options?.taskId) params.set("taskId", options.taskId);
+  if (options?.q) params.set("q", options.q);
+  if (options?.limit !== undefined) params.set("limit", String(options.limit));
+  if (options?.offset !== undefined) params.set("offset", String(options.offset));
+  const queryString = params.toString();
+  const path = `/artifacts${queryString ? `?${queryString}` : ""}`;
+  return api<ArtifactWithTask[]>(withProjectId(path, projectId));
+}
+
+export function artifactMediaUrl(id: string, projectId?: string): string {
+  return buildApiUrl(withProjectId(`/artifacts/${encodeURIComponent(id)}/media`, projectId));
+}
+
 export async function fetchAllDocuments(
   options?: FetchAllDocumentsOptions,
   projectId?: string,
@@ -2303,12 +2339,19 @@ export function clearApiKey(provider: string): Promise<{ success: boolean }> {
 // --- GitHub Import API ---
 
 /** GitHub issue returned by the fetch endpoint */
+/*
+FNXC:GitHubImport 2026-06-22-18:30:
+The Import Tasks preview pane renders the FULL issue (full body + metadata), so the list response carries the complete body plus author/state.
+The GitHub issue-list endpoint already returns the full (untruncated) `body`; no per-item detail fetch is needed. `author`/`state` are surfaced for the preview metadata row.
+*/
 export interface GitHubIssue {
   number: number;
   title: string;
   body: string | null;
   html_url: string;
   labels: Array<{ name: string }>;
+  state?: "open" | "closed";
+  author?: string | null;
 }
 
 /** Fetch open GitHub issues from a repository */
@@ -2358,7 +2401,10 @@ export function apiBatchImportGitHubIssues(
 
 // --- GitHub Pull Request Import API ---
 
-/** GitHub pull request returned by the fetch endpoint */
+/*
+FNXC:GitHubImport 2026-06-22-18:30:
+The PR-list endpoint already returns the full (untruncated) `body`; the import preview renders it in full with no per-item detail fetch. `state`/`author` surface PR metadata in the preview.
+*/
 export interface GitHubPull {
   number: number;
   title: string;
@@ -2366,6 +2412,8 @@ export interface GitHubPull {
   html_url: string;
   headBranch: string;
   baseBranch: string;
+  state?: "open" | "closed" | "merged";
+  author?: string | null;
 }
 
 /** Fetch open GitHub pull requests from a repository */
@@ -2377,6 +2425,61 @@ export function apiFetchGitHubPulls(
   return api<GitHubPull[]>("/github/pulls/fetch", {
     method: "POST",
     body: JSON.stringify({ owner, repo, limit }),
+  });
+}
+
+/*
+FNXC:GitHubImport 2026-06-23-01:00:
+Per-PR detail for the Import Tasks PR preview pane. `gh pr list` (apiFetchGitHubPulls) returns only comment COUNT + no per-check status, so the preview fetches the FULL comment thread + per-check status ON SELECTION via this client fn (never for the whole list — too expensive).
+`status` is the gh CheckRun status (queued/in_progress/completed) or StatusContext state; `conclusion` (success/failure/neutral/...) is present once a check completes.
+*/
+/*
+FNXC:GitHubImport 2026-06-23-03:30:
+Comment shape carries `authorAvatarUrl?` (optional, backward-compatible) and `authorIsBot` so the preview renders an avatar + human/bot badge per comment. `authorIsBot` is derived server-side (author type is a GitHub Bot OR login ends in `[bot]`); `authorAvatarUrl` is omitted for bots whose synthetic login does not resolve to a real avatar.
+*/
+export interface GitHubCommentDetail {
+  author: string;
+  body: string;
+  createdAt: string;
+  authorAvatarUrl?: string;
+  authorIsBot: boolean;
+}
+
+export interface GitHubPullDetail {
+  comments: GitHubCommentDetail[];
+  checks: Array<{ name: string; status: string; conclusion?: string; detailsUrl?: string }>;
+}
+
+/** Fetch the full comment thread + per-check status for a single GitHub PR (called on selection in the import preview). */
+export function apiFetchGitHubPullDetail(repo: string, number: number): Promise<GitHubPullDetail> {
+  return api<GitHubPullDetail>("/github/pulls/detail", {
+    method: "POST",
+    body: JSON.stringify({ repo, number }),
+  });
+}
+
+/*
+FNXC:GitHubImport 2026-06-23-03:15:
+Per-issue detail for the Import Tasks issue preview pane. Mirrors apiFetchGitHubPullDetail: `gh issue list` has no comment thread, so the preview fetches the FULL comment thread ON SELECTION (never for the whole list).
+Issues have no checks rollup, so only `comments` is returned.
+*/
+export interface GitHubIssueDetail {
+  comments: GitHubCommentDetail[];
+}
+
+/** Fetch the full comment thread for a single GitHub issue (called on selection in the import preview). */
+export function apiFetchGitHubIssueDetail(repo: string, number: number): Promise<GitHubIssueDetail> {
+  return api<GitHubIssueDetail>("/github/issues/detail", {
+    method: "POST",
+    body: JSON.stringify({ repo, number }),
+  });
+}
+
+/** Close a GitHub issue (Close issue button in the import preview). */
+export async function apiCloseGitHubIssue(repo: string, number: number): Promise<void> {
+  await api<{ ok: boolean }>("/github/issues/close", {
+    method: "POST",
+    body: JSON.stringify({ repo, number }),
   });
 }
 
@@ -5198,6 +5301,15 @@ export interface WorkflowSettingValuesPayload {
   orphaned: Array<{ id: string; value: unknown }>;
 }
 
+/** Per-project workflow prompt override payload. `defaults` is the shipped prompt
+ *  by node id, `stored` is the persisted override map, and `effective` is the
+ *  prompt text the editor/executor sees after stored-over-default resolution. */
+export interface WorkflowPromptOverridesPayload {
+  stored: Record<string, string>;
+  effective: Record<string, string>;
+  defaults: Record<string, string>;
+}
+
 /** Read the setting VALUES (stored/effective/orphaned) for a workflow in the
  *  current project context (U6). The project is bound server-side to the
  *  scoped store. */
@@ -5224,6 +5336,31 @@ export function updateWorkflowSettingValues(
     {
       method: "PATCH",
       body: JSON.stringify({ values }),
+    },
+  );
+}
+
+/** Read per-node prompt overrides for a workflow in the current project context. */
+export function fetchWorkflowPromptOverrides(
+  id: string,
+  projectId?: string,
+): Promise<WorkflowPromptOverridesPayload> {
+  return api<WorkflowPromptOverridesPayload>(
+    withProjectId(`/workflows/${encodeURIComponent(id)}/prompt-overrides`, projectId),
+  );
+}
+
+/** Patch per-node prompt overrides. Null, empty, and whitespace values reset to the shipped default. */
+export function updateWorkflowPromptOverrides(
+  id: string,
+  overrides: Record<string, string | null>,
+  projectId?: string,
+): Promise<WorkflowPromptOverridesPayload> {
+  return api<WorkflowPromptOverridesPayload>(
+    withProjectId(`/workflows/${encodeURIComponent(id)}/prompt-overrides`, projectId),
+    {
+      method: "PATCH",
+      body: JSON.stringify({ overrides }),
     },
   );
 }
@@ -6572,8 +6709,13 @@ export interface ProjectHealth {
   updatedAt: string;
 }
 
-/** Executor state values */
-export type ExecutorState = "idle" | "running" | "paused";
+/**
+ * Executor state values.
+ *
+ * FNXC:EngineControls 2026-06-22-00:00:
+ * A globally stopped AI engine (`globalPause`) is an operator action, not idleness; the footer must expose it as "Stopped" in error red with the stop-rectangle icon.
+ */
+export type ExecutorState = "idle" | "running" | "paused" | "stopped";
 
 /** Aggregated executor statistics for the status bar.
  * 
@@ -6584,7 +6726,8 @@ export type ExecutorState = "idle" | "running" | "paused";
  * lastActivityAt from the activity log.
  * 
  * The executorState is derived from:
- * - "idle": globalPause is true OR (enginePaused is true AND runningTaskCount is 0)
+ * - "stopped": globalPause is true
+ * - "idle": (enginePaused is true AND runningTaskCount is 0) OR not paused with nothing running
  * - "paused": enginePaused is true AND runningTaskCount > 0
  * - "running": globalPause is false AND enginePaused is false AND runningTaskCount > 0
  */
@@ -6599,7 +6742,7 @@ export interface ExecutorStats {
   queuedTaskCount: number;
   /** Number of tasks in "in-review" column */
   inReviewCount: number;
-  /** Derived executor state: "idle", "running", or "paused" */
+  /** Derived executor state: "idle", "running", "paused", or "stopped" */
   executorState: ExecutorState;
   /** Maximum concurrent tasks allowed from settings */
   maxConcurrent: number;
@@ -7213,13 +7356,23 @@ export interface GithubSourceIssueClosedAtBackfillResult {
   hasMore: boolean;
 }
 
+/*
+FNXC:CommandCenter 2026-06-21-00:00:
+The Command Center System area keeps the direct local /system-stats client and uses the explicit /nodes/:id/system-stats route for selected remote nodes so authenticated node proxying stays server-side and local project scoping is not forwarded across nodes.
+*/
 export function fetchSystemStats(projectId?: string): Promise<SystemStatsResponse> {
   return api<SystemStatsResponse>(withProjectId("/system-stats", projectId));
 }
 
-export function killVitestProcesses(projectId?: string): Promise<KillVitestResponse> {
-  return api<KillVitestResponse>(withProjectId("/kill-vitest", projectId), {
+export function fetchNodeSystemStats(nodeId: string, projectId?: string): Promise<SystemStatsResponse> {
+  return api<SystemStatsResponse>(withProjectId(`/nodes/${encodeURIComponent(nodeId)}/system-stats`, projectId));
+}
+
+export function killVitestProcesses(projectId?: string, nodeId?: string, localNodeId?: string): Promise<KillVitestResponse> {
+  return proxyApi<KillVitestResponse>(withProjectId("/kill-vitest", projectId), {
     method: "POST",
+    nodeId,
+    localNodeId,
   });
 }
 
@@ -7588,6 +7741,20 @@ export function backfillMissionAssertions(
 ): Promise<MissionAssertionBackfillReport> {
   return api<MissionAssertionBackfillReport>(
     withProjectId(`/missions/${encodeURIComponent(missionId)}/backfill-assertions`, projectId),
+    {
+      method: "POST",
+      body: JSON.stringify({ dryRun: options?.dryRun ?? true }),
+    },
+  );
+}
+
+/** Backfill historical Command Center LOC stats for commit associations. Defaults to dry-run. */
+export function backfillCommitAssociationDiffStats(
+  options?: { dryRun?: boolean },
+  projectId?: string,
+): Promise<CommitAssociationDiffBackfillReport> {
+  return api<CommitAssociationDiffBackfillReport>(
+    withProjectId("/command-center/productivity/backfill-loc", projectId),
     {
       method: "POST",
       body: JSON.stringify({ dryRun: options?.dryRun ?? true }),
@@ -9415,6 +9582,19 @@ export async function fetchSkillContent(skillId: string, projectId?: string): Pr
   return response.content;
 }
 
+/*
+FNXC:Skills 2026-06-23-04:15:
+Fetch one supplementary file's content for the SkillsView detail-pane file viewer. The skill-dir-relative path is passed as an encoded `path` query param; the server resolves + traversal-guards it. Returns isText:false for binary/oversized files so the UI shows a non-previewable notice.
+*/
+export async function fetchSkillFileContent(skillId: string, relativePath: string, projectId?: string): Promise<SkillFileContent> {
+  const base = withProjectId(`/skills/${encodeURIComponent(skillId)}/file`, projectId);
+  const sep = base.includes("?") ? "&" : "?";
+  const response = await api<{ file: SkillFileContent }>(
+    `${base}${sep}path=${encodeURIComponent(relativePath)}`
+  );
+  return response.file;
+}
+
 // ── Chat API ─────────────────────────────────────────────────────────────────
 
 // EnrichedChatSession is imported from @fusion/core above
@@ -9468,7 +9648,7 @@ export interface ChatSessionResumeLookupInput {
 }
 
 /**
- * Fetch the most relevant active session for quick-chat resume semantics.
+ * Fetch the most relevant active session for chat resume semantics.
  * Returns at most one session for the provided target.
  */
 export async function fetchResumeChatSession(

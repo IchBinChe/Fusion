@@ -4,24 +4,45 @@
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/*
+FNXC:DashboardHeader 2026-06-22-16:42:
+Dashboard overview uses the canonical ViewHeader at the top; the overview body owns padding, max-width, and vertical scrolling below that header so the header aligns with Artifacts/Skills while the project content keeps its readable width.
+
+FNXC:DashboardHeader 2026-06-22-16:55:
+The Dashboard header itself must remain the same full-width chrome as other main views (surface background, no divider, shared padding from ViewHeader). Only the content below is centered/constrained; never put the header inside the 1400px overview body.
+
+FNXC:DashboardHeader 2026-06-22-17:20:
+Keep Dashboard on the canonical header model instead of changing every other view to match a flat Dashboard. The shared ViewHeader owns the shaded surface without a bottom divider so Dashboard matches Missions and Chat; this file only keeps the header full-width and prevents local overview body constraints from changing that chrome.
+*/
+.project-overview > :where(.view-header) {
+  width: 100%;
+  flex: 0 0 auto;
+}
+
+.project-overview__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   gap: var(--space-lg);
-  padding: var(--space-xl);
+  min-height: 0;
+  width: 100%;
   max-width: 1400px;
   margin: 0 auto;
-  width: 100%;
+  padding: var(--space-xl);
   overflow-y: auto;
-  height: 100%;
   -webkit-overflow-scrolling: touch;
 }
 
-.project-overview--empty {
+.project-overview__body--empty {
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.project-overview--loading {
-  padding: var(--space-xl);
 }
 
 /* --- Overview Header --- */

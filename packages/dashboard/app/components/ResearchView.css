@@ -2,6 +2,10 @@
 FNXC:ResearchViewStyling 2026-06-20-01:33:
 FN-6789 mounts Research as a flex child of .project-content; grow, zero min-width, and use 100% width so the view fills the viewport instead of collapsing to intrinsic content width, mirroring the FN-6446 SecretsView fix.
 */
+/*
+FNXC:Navigation 2026-06-22-01:10:
+The title row now comes from the shared .view-header, which supplies the --space-lg top/side padding. The root drops its top/side inset (keeping a bottom inset) and the remaining body blocks (subtitle, layout, setup state) carry their own horizontal padding so they stay aligned with the header.
+*/
 .research-view {
   display: flex;
   flex: 1 1 auto;
@@ -12,29 +16,17 @@ FN-6789 mounts Research as a flex child of .project-content; grow, zero min-widt
   min-width: 0;
   width: 100%;
   overflow: hidden;
-  padding: var(--space-lg);
-  padding-bottom: var(--space-lg);
-}
-
-.research-view__header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-md);
-  min-width: 0;
-}
-
-.research-view__header-actions {
-  flex-shrink: 0;
-}
-
-.research-view__title {
-  margin: 0;
+  padding: 0 0 var(--space-lg);
 }
 
 .research-view__subtitle {
-  margin: var(--space-xs) 0 0;
+  margin: 0;
+  padding-inline: var(--space-lg);
   color: var(--text-muted);
+}
+
+.research-view__state {
+  margin-inline: var(--space-lg);
 }
 
 .research-view__layout {
@@ -44,6 +36,7 @@ FN-6789 mounts Research as a flex child of .project-content; grow, zero min-widt
   min-height: 0;
   flex: 1;
   overflow: hidden;
+  padding-inline: var(--space-lg);
 }
 
 .research-view__sidebar,
@@ -256,8 +249,16 @@ FN-6789 mounts Research as a flex child of .project-content; grow, zero min-widt
     overflow-y: auto;
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
-    padding: var(--space-md);
+    padding: 0;
     padding-bottom: calc(var(--space-md) + var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + var(--standalone-bottom-gap));
+  }
+
+  .research-view__subtitle {
+    padding-inline: var(--space-md);
+  }
+
+  .research-view__state {
+    margin-inline: var(--space-md);
   }
 
   .research-view__layout {
@@ -268,6 +269,7 @@ FN-6789 mounts Research as a flex child of .project-content; grow, zero min-widt
     flex: initial;
     min-height: auto;
     overflow: visible;
+    padding-inline: var(--space-md);
   }
 
   .research-view__sidebar,
@@ -282,14 +284,6 @@ FN-6789 mounts Research as a flex child of .project-content; grow, zero min-widt
     flex: initial;
     min-height: auto;
     overflow: visible;
-  }
-
-  .research-view__header {
-    flex-direction: column;
-  }
-
-  .research-view__header-actions {
-    align-self: flex-start;
   }
 
   .research-view__stats {

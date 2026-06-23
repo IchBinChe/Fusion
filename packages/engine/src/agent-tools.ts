@@ -11,7 +11,7 @@ import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/p
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, relative, resolve } from "node:path";
-import type { AgentState, AgentCapability, AgentUpdateInput, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore, WorkflowSettingDefinition, GoalStatus } from "@fusion/core";
+import type { AgentState, AgentCapability, AgentUpdateInput, Artifact, ArtifactCreateInput, ArtifactWithTask, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore, WorkflowSettingDefinition, GoalStatus } from "@fusion/core";
 import { listTraits, isBuiltinWorkflowId, AgentStore, validateColumnAgentBindings, ColumnAgentBindingError, stripApprovalBypassFlags, WorkflowSettingRejectionError, resolveEffectiveSettingsById, resolveWorkflowIrById, findOrphanedSettingValues, BUILTIN_WORKFLOW_SETTINGS } from "@fusion/core";
 import { promoteHeldTask } from "./hold-release.js";
 import { DASHBOARD_USER_ID, canAgentTakeImplementationTaskForExplicitRouting, dailyMemoryPath, ensureOpenClawMemoryFiles, extractAgentProvisioningRequest, formatRoleMismatchReason, getMemoryBackendCapabilities, getProjectMemory, isEphemeralAgent, memoryLongTermPath, normalizeMessageParticipant, reconcileDeterministicDuplicate, resolveAgentProvisioningPolicy, resolveMemoryBackend, resolveResearchSettings, resolveTaskGithubTracking, runDeterministicDuplicateGuard, scheduleQmdProjectMemoryRefresh, searchProjectMemory, shouldSkipBackgroundQmdRefresh } from "@fusion/core";
@@ -95,6 +95,53 @@ export const chatTaskDocumentReadParams = Type.Object({
   key: Type.Optional(
     Type.String({ description: "Document key to read. Omit to list all documents for this task." }),
   ),
+});
+
+const ARTIFACT_TYPE_VALUES = ["document", "image", "video", "audio", "other"] as const;
+const artifactTypeSchema = Type.Union(ARTIFACT_TYPE_VALUES.map((type) => Type.Literal(type)), {
+  description: "Artifact type: document, image, video, audio, or other.",
+});
+
+export const artifactRegisterParams = Type.Object({
+  type: artifactTypeSchema,
+  title: Type.String({ description: "Human-readable artifact title." }),
+  description: Type.Optional(Type.String({ description: "Optional longer artifact description or caption." })),
+  mimeType: Type.Optional(Type.String({ description: "Optional MIME type, e.g. text/markdown or image/png." })),
+  uri: Type.Optional(Type.String({ description: "Optional URI/path reference when content is stored elsewhere." })),
+  content: Type.Optional(Type.String({ description: "Optional inline text content for document/text artifacts." })),
+  taskId: Type.Optional(Type.String({ description: "Optional associated task ID (e.g. 'FN-001')." })),
+});
+
+export const artifactListParams = Type.Object({
+  type: Type.Optional(artifactTypeSchema),
+  authorId: Type.Optional(Type.String({ description: "Filter by registering author/agent ID." })),
+  taskId: Type.Optional(Type.String({ description: "Filter by associated task ID." })),
+  search: Type.Optional(Type.String({ description: "Search artifact titles, descriptions, content, and task metadata." })),
+  limit: Type.Optional(Type.Number({ description: "Maximum number of artifacts to return." })),
+  offset: Type.Optional(Type.Number({ description: "Number of artifacts to skip." })),
+});
+
+export const artifactViewParams = Type.Object({
+  id: Type.String({ description: "Artifact ID to view." }),
+});
+
+export const chatArtifactRegisterParams = Type.Object({
+  type: artifactTypeSchema,
+  title: Type.String({ description: "Human-readable artifact title." }),
+  description: Type.Optional(Type.String({ description: "Optional longer artifact description or caption." })),
+  mimeType: Type.Optional(Type.String({ description: "Optional MIME type, e.g. text/markdown or image/png." })),
+  uri: Type.Optional(Type.String({ description: "Optional URI/path reference when content is stored elsewhere." })),
+  content: Type.Optional(Type.String({ description: "Optional inline text content for document/text artifacts." })),
+  task_id: Type.String({ description: "Associated task ID (e.g. 'FN-001')." }),
+});
+
+export const chatArtifactListParams = Type.Object({
+  type: Type.Optional(artifactTypeSchema),
+  authorId: Type.Optional(Type.String({ description: "Filter by registering author/agent ID." })),
+  task_id: Type.String({ description: "Associated task ID to list artifacts for." }),
+  search: Type.Optional(Type.String({ description: "Search artifact titles, descriptions, content, and task metadata." })),
+  limit: Type.Optional(Type.Number({ description: "Maximum number of artifacts to return." })),
+  offset: Type.Optional(Type.Number({ description: "Number of artifacts to skip." })),
 });
 
 export const workflowListParams = Type.Object({});
@@ -1129,6 +1176,245 @@ export function createChatTaskDocumentTools(store: TaskStore): ToolDefinition[] 
       ),
     },
   ];
+}
+
+/**
+ * FNXC:ArtifactRegistry 2026-06-21-06:50:
+ * Agents need to register multi-type artifacts across agents and tasks while using the existing task store registry. A new artifact registration must also announce itself to the dashboard user's inbox, but that notification is best-effort and must never fail the artifact write.
+ */
+export function createArtifactRegisterTool(store: TaskStore, authorId: string, messageStore?: MessageStore): ToolDefinition {
+  return {
+    name: "fn_artifact_register",
+    label: "Register Artifact",
+    description:
+      "Register an artifact (document, image, video, audio, or other) so other agents and tasks can discover it. " +
+      "Provide either inline content or a uri/path reference; optionally associate it with a taskId.",
+    parameters: artifactRegisterParams,
+    execute: async (_id: string, params: Static<typeof artifactRegisterParams>) => registerArtifactForAgent(store, authorId, params, messageStore),
+  };
+}
+
+/**
+ * FNXC:ArtifactRegistry 2026-06-21-06:50:
+ * Agents need a read-only cross-agent discovery surface for registered multi-type artifacts. Keep list rendering concise so agents can scan ids, media classes, authors, and task context before calling `fn_artifact_view`.
+ */
+export function createArtifactListTool(store: TaskStore): ToolDefinition {
+  return {
+    name: "fn_artifact_list",
+    label: "List Artifacts",
+    description:
+      "List registered artifacts across agents and tasks. Supports filters for type, authorId, taskId, search, limit, and offset.",
+    parameters: artifactListParams,
+    execute: async (_id: string, params: Static<typeof artifactListParams>) => listArtifactsForAgent(store, params),
+  };
+}
+
+/**
+ * FNXC:ArtifactRegistry 2026-06-21-06:50:
+ * Agents need to inspect artifact metadata plus inline content or URI references without relying on dashboard UI. Render binary media as references so tool output remains lightweight and safe for agent contexts.
+ */
+export function createArtifactViewTool(store: TaskStore): ToolDefinition {
+  return {
+    name: "fn_artifact_view",
+    label: "View Artifact",
+    description:
+      "View a registered artifact by id, including metadata and inline content when present or the uri/path reference for media artifacts.",
+    parameters: artifactViewParams,
+    execute: async (_id: string, params: Static<typeof artifactViewParams>) => viewArtifactForAgent(store, params.id),
+  };
+}
+
+/**
+ * FNXC:ArtifactRegistry 2026-06-21-06:50:
+ * Dashboard chat and planning lanes have no ambient task, so artifact tools require an explicit task target for register/list parity while keeping the canonical `fn_artifact_*` tool names available to agents.
+ */
+export function createChatArtifactTools(store: TaskStore, messageStore?: MessageStore): ToolDefinition[] {
+  const chatAuthorId = "dashboard-chat";
+  return [
+    {
+      name: "fn_artifact_register",
+      label: "Register Artifact",
+      description:
+        "Register an artifact for a specific task so other agents can discover it. Requires task_id and notifies the dashboard inbox best-effort.",
+      parameters: chatArtifactRegisterParams,
+      execute: async (_id: string, params: Static<typeof chatArtifactRegisterParams>) => registerArtifactForAgent(
+        store,
+        chatAuthorId,
+        {
+          type: params.type,
+          title: params.title,
+          description: params.description,
+          mimeType: params.mimeType,
+          uri: params.uri,
+          content: params.content,
+          taskId: params.task_id,
+        },
+        messageStore,
+      ),
+    },
+    {
+      name: "fn_artifact_list",
+      label: "List Artifacts",
+      description:
+        "List registered artifacts for a specific task. Supports filters for type, authorId, search, limit, and offset. Requires task_id.",
+      parameters: chatArtifactListParams,
+      execute: async (_id: string, params: Static<typeof chatArtifactListParams>) => listArtifactsForAgent(store, {
+        type: params.type,
+        authorId: params.authorId,
+        taskId: params.task_id,
+        search: params.search,
+        limit: params.limit,
+        offset: params.offset,
+      }),
+    },
+    createArtifactViewTool(store),
+  ];
+}
+
+async function registerArtifactForAgent(
+  store: TaskStore,
+  authorId: string,
+  params: Static<typeof artifactRegisterParams>,
+  messageStore?: MessageStore,
+) {
+  const input: ArtifactCreateInput = {
+    type: params.type,
+    title: params.title,
+    description: params.description,
+    mimeType: params.mimeType,
+    uri: params.uri,
+    content: params.content,
+    authorId,
+    authorType: "agent",
+    taskId: params.taskId,
+  };
+
+  try {
+    const artifact: Artifact = await store.registerArtifact(input);
+    notifyArtifactRegistered(messageStore, artifact, authorId);
+    return {
+      content: [{
+        type: "text" as const,
+        text: `Registered artifact "${artifact.title}" (${artifact.type}) with id ${artifact.id}.`,
+      }],
+      details: { artifactId: artifact.id },
+    };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } catch (err: any) {
+    return {
+      content: [{
+        type: "text" as const,
+        text: `ERROR: Failed to register artifact "${params.title}": ${err.message}`,
+      }],
+      details: {},
+    };
+  }
+}
+
+function notifyArtifactRegistered(messageStore: MessageStore | undefined, artifact: Artifact, authorId: string): void {
+  if (!messageStore) return;
+
+  try {
+    messageStore.sendMessage({
+      fromType: "system",
+      toType: "user",
+      toId: DASHBOARD_USER_ID,
+      type: "system",
+      content: `New ${artifact.type} artifact registered: ${artifact.title}`,
+      metadata: {
+        artifactId: artifact.id,
+        artifactType: artifact.type,
+        title: artifact.title,
+        authorId,
+        taskId: artifact.taskId,
+      },
+    });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } catch (err: any) {
+    log.warn(`Failed to send best-effort artifact registration notification for ${artifact.id}: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+async function listArtifactsForAgent(store: TaskStore, params: Static<typeof artifactListParams>) {
+  try {
+    const artifacts: ArtifactWithTask[] = await store.listArtifacts({
+      type: params.type,
+      authorId: params.authorId,
+      taskId: params.taskId,
+      search: params.search,
+      limit: params.limit,
+      offset: params.offset,
+    });
+
+    if (artifacts.length === 0) {
+      return {
+        content: [{ type: "text" as const, text: "No artifacts found." }],
+        details: {},
+      };
+    }
+
+    const lines = artifacts.map((artifact) => {
+      const task = artifact.taskId ? `${artifact.taskId}${artifact.taskTitle ? ` (${artifact.taskTitle})` : ""}` : "no task";
+      return `- ${artifact.id} [${artifact.type}] ${artifact.title} — author: ${artifact.authorId}; task: ${task}`;
+    });
+    return {
+      content: [{
+        type: "text" as const,
+        text: `Artifacts:\n${lines.join("\n")}`,
+      }],
+      details: { artifactIds: artifacts.map((artifact) => artifact.id) },
+    };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } catch (err: any) {
+    return {
+      content: [{
+        type: "text" as const,
+        text: `ERROR: Failed to list artifacts: ${err.message}`,
+      }],
+      details: {},
+    };
+  }
+}
+
+async function viewArtifactForAgent(store: TaskStore, id: string) {
+  try {
+    const artifact: Artifact | null = await store.getArtifact(id);
+    if (!artifact) {
+      return {
+        content: [{ type: "text" as const, text: `Artifact "${id}" not found.` }],
+        details: {},
+      };
+    }
+
+    const lines = [
+      `Artifact: ${artifact.title}`,
+      `ID: ${artifact.id}`,
+      `Type: ${artifact.type}`,
+      `Author: ${artifact.authorId} (${artifact.authorType})`,
+      `Created: ${artifact.createdAt}`,
+      `Updated: ${artifact.updatedAt}`,
+    ];
+    if (artifact.taskId) lines.push(`Task: ${artifact.taskId}`);
+    if (artifact.description) lines.push(`Description: ${artifact.description}`);
+    if (artifact.mimeType) lines.push(`MIME type: ${artifact.mimeType}`);
+    if (typeof artifact.sizeBytes === "number") lines.push(`Size: ${artifact.sizeBytes} bytes`);
+    if (artifact.uri) lines.push(`URI: ${artifact.uri}`);
+    if (artifact.content) lines.push("", artifact.content);
+
+    return {
+      content: [{ type: "text" as const, text: lines.join("\n") }],
+      details: { artifactId: artifact.id },
+    };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } catch (err: any) {
+    return {
+      content: [{
+        type: "text" as const,
+        text: `ERROR: Failed to view artifact "${id}": ${err.message}`,
+      }],
+      details: {},
+    };
+  }
 }
 
 async function readTaskDocuments(store: TaskStore, taskId: string, key?: string) {
@@ -3612,8 +3898,11 @@ export function createAcquireRepoWorktreeTool(opts: {
   short-circuit (the path was registered on the original fresh acquire).
   */
   onAcquired?: (worktreePath: string) => void;
+  // FNXC:Workspace 2026-06-22 — thread the configured worktree-init runner so sub-repo worktrees run configured setup.
+  runConfiguredCommand?: import("./worktree-acquisition.js").AcquireWorkspaceRepoWorktreeOptions["runConfiguredCommand"];
+  taskEnv?: NodeJS.ProcessEnv;
 }): ToolDefinition {
-  const { workspaceRootDir, workspaceRepos, task, store, settings, logger, secretsStore, runContext, audit, onAcquired } = opts;
+  const { workspaceRootDir, workspaceRepos, task, store, settings, logger, secretsStore, runContext, audit, onAcquired, runConfiguredCommand, taskEnv } = opts;
   return {
     name: "fn_acquire_repo_worktree",
     label: "Acquire Repo Worktree",
@@ -3632,15 +3921,6 @@ export function createAcquireRepoWorktreeTool(opts: {
         };
       }
       const freshTask = await store.getTask(task.id);
-      /*
-      FNXC:Workspace 2026-06-21-22:30:
-      F1 — acquireWorkspaceRepoWorktree can throw WorkspaceRepoAcquireBusyError on
-      same-sub-repo contention (KTD4) or a generic failure. Both must surface as a
-      structured isError tool result, never an uncaught throw that crashes the agent
-      loop. The busy message is sanitized — it does NOT leak the holder task id into
-      agent-facing text (only into details). runContext is forwarded so the helper's
-      audit/log entries keep run attribution.
-      */
       let result: Awaited<ReturnType<typeof acquireWorkspaceRepoWorktree>>;
       try {
         result = await acquireWorkspaceRepoWorktree({
@@ -3653,6 +3933,8 @@ export function createAcquireRepoWorktreeTool(opts: {
           secretsStore,
           audit,
           runContext,
+          runConfiguredCommand,
+          taskEnv,
         });
       } catch (err) {
         if (err instanceof WorkspaceRepoAcquireBusyError) {

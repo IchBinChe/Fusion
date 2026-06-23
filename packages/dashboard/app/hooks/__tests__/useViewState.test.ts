@@ -66,6 +66,17 @@ describe("useViewState", () => {
     });
   });
 
+  // FNXC:ViewState 2026-06-22-15:30: Persisted Command Center ("Dashboard") must not be the auto-restored landing view; it lands on the Board instead.
+  it("lands on board when the persisted taskView is command-center", async () => {
+    localStorage.setItem("kb-dashboard-task-view", "command-center");
+
+    const { result } = renderHook(() => useViewState(createOptions()));
+
+    await waitFor(() => {
+      expect(result.current.taskView).toBe("board");
+    });
+  });
+
   it("migrates legacy reliability taskView from localStorage to Command Center", async () => {
     localStorage.setItem("kb-dashboard-task-view", "reliability");
 
@@ -88,6 +99,34 @@ describe("useViewState", () => {
         expect(result.current.taskView).toBe("command-center");
       });
       expect(localStorage.getItem("kb-dashboard-task-view")).toBe("command-center");
+    } finally {
+      window.history.replaceState({}, "", originalUrl || "/");
+    }
+  });
+
+  it("migrates retired stash recovery taskView from localStorage to board", async () => {
+    localStorage.setItem("kb-dashboard-task-view", "stash-recovery");
+
+    const { result } = renderHook(() => useViewState(createOptions()));
+
+    await waitFor(() => {
+      expect(result.current.taskView).toBe("board");
+    });
+    expect(localStorage.getItem("kb-dashboard-task-view")).toBe("board");
+  });
+
+  it("migrates retired stash recovery URL param to board", async () => {
+    const originalUrl = `${window.location.pathname}${window.location.search}`;
+    localStorage.setItem("kb-dashboard-task-view", "list");
+    window.history.replaceState({}, "", "?view=stash-recovery");
+
+    try {
+      const { result } = renderHook(() => useViewState(createOptions()));
+
+      await waitFor(() => {
+        expect(result.current.taskView).toBe("board");
+      });
+      expect(localStorage.getItem("kb-dashboard-task-view")).toBe("board");
     } finally {
       window.history.replaceState({}, "", originalUrl || "/");
     }
@@ -195,7 +234,7 @@ describe("useViewState", () => {
     });
   });
 
-  it("calls openSetupWizard when no projects and no current project after loading", async () => {
+  it("does NOT call openSetupWizard automatically when no projects exist", async () => {
     vi.useFakeTimers();
     const openSetupWizard = vi.fn();
 
@@ -213,7 +252,7 @@ describe("useViewState", () => {
       vi.advanceTimersByTime(500);
     });
 
-    expect(openSetupWizard).toHaveBeenCalledTimes(1);
+    expect(openSetupWizard).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 

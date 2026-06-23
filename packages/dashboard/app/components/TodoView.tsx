@@ -8,6 +8,7 @@ import {
   X,
   ChevronUp,
   ChevronDown,
+  ChevronLeft,
   Loader2,
   ListChecks,
   Bot,
@@ -27,8 +28,6 @@ interface TodoViewProps {
   addToast: (message: string, type?: "success" | "error" | "info") => void;
   onPlanningMode?: (initialPlan: string) => void;
   onTaskCreated?: (task: Task) => void;
-  onClose?: () => void;
-  mobileKeyboardActive?: boolean;
 }
 
 function sortItems(items: TodoItem[]): TodoItem[] {
@@ -40,7 +39,6 @@ export function TodoView({
   addToast,
   onPlanningMode,
   onTaskCreated,
-  mobileKeyboardActive = false,
 }: TodoViewProps) {
   const { t } = useTranslation("app");
   const {
@@ -83,6 +81,12 @@ export function TodoView({
   const agentPickerRef = useRef<HTMLDivElement>(null);
   const { confirm } = useConfirm();
 
+  /*
+  FNXC:Todos 2026-06-22-00:00:
+  TodoView mounts in the narrow right dock (no width prop) where the two side-by-side panels (list selection + items) cannot fit. The layout switch is driven by a CSS container query on `.todo-view` (container-name: todo-view), NOT a prop. In the NARROW container we render a single-panel navigation stack: the master list-selection panel first, and selecting a list navigates forward to its items panel with a Back affordance. `mobileStackView` tracks which panel the narrow stack shows; the WIDE two-panel layout ignores it entirely (both panels always render). Selecting a list pushes to "detail"; Back returns to "list".
+  */
+  const [mobileStackView, setMobileStackView] = useState<"list" | "detail">("list");
+
   const selectedList = useMemo(
     () => lists.find((list) => list.id === selectedListId) ?? null,
     [lists, selectedListId],
@@ -91,6 +95,22 @@ export function TodoView({
     () => sortItems(items.filter((item) => item.listId === selectedListId)),
     [items, selectedListId],
   );
+  const listItemStats = useMemo(() => {
+    const stats = new Map<string, { total: number; completed: number }>();
+    for (const list of lists) {
+      stats.set(list.id, { total: 0, completed: 0 });
+    }
+    for (const item of items) {
+      const current = stats.get(item.listId) ?? { total: 0, completed: 0 };
+      current.total += 1;
+      if (item.completed) {
+        current.completed += 1;
+      }
+      stats.set(item.listId, current);
+    }
+    return stats;
+  }, [items, lists]);
+  const selectedListStats = selectedList ? (listItemStats.get(selectedList.id) ?? { total: sortedItems.length, completed: sortedItems.filter((item) => item.completed).length }) : null;
 
   function resetListDraftState(): void {
     setEditingListId(null);
@@ -109,6 +129,13 @@ export function TodoView({
     resetListDraftState();
     resetItemDraftState();
     setSelectedListId(listId);
+    // FNXC:Todos 2026-06-22-00:00: Narrow stack navigates forward to the items panel on selection; no-op visually in the wide two-panel layout.
+    setMobileStackView("detail");
+  }
+
+  // FNXC:Todos 2026-06-22-00:00: Narrow-stack Back affordance returns to the master list-selection panel. Inert in the wide layout where both panels are always visible.
+  function handleMobileBack(): void {
+    setMobileStackView("list");
   }
 
   const loadAgents = useCallback(async () => {
@@ -305,9 +332,16 @@ export function TodoView({
     }
   }, [projectId, addToast, agents, onTaskCreated, t]);
 
+  /*
+  FNXC:Todos 2026-06-22-17:45:
+  The redundant "Todos" title + "Manage reusable todo lists" subtitle are removed — Todos lives in the right dock (and left-sidebar nav) which already labels the view, so a repeated in-view header is noise. The list/detail layout owns the full height with no header above it.
+  */
+  const header = null;
+
   if (loading) {
     return (
-      <div className="todo-view">
+      <div className="todo-view" data-testid="todo-view-root">
+        {header}
         <div className="todo-loading">
           <Loader2 className="todo-loading-icon" aria-hidden="true" />
           <p>{t("todo.loading", "Loading todos...")}</p>
@@ -317,11 +351,9 @@ export function TodoView({
   }
 
   return (
-    <div
-      className={`todo-view${mobileKeyboardActive ? " todo-view--mobile-keyboard-active" : ""}`}
-      data-testid="todo-view-root"
-    >
-      <div className="todo-view-layout">
+    <div className="todo-view" data-testid="todo-view-root">
+      {header}
+      <div className="todo-view-layout" data-mobile-stack-view={mobileStackView}>
         <aside className="todo-view-sidebar" aria-label={t("todo.listsLabel", "Todo lists sidebar")}>
           <div className="todo-sidebar-header">
             <h3 className="todo-sidebar-title">{t("todo.lists", "Lists")}</h3>
@@ -403,6 +435,7 @@ export function TodoView({
               {lists.map((list) => {
                 const isActive = list.id === selectedListId;
                 const isEditing = list.id === editingListId;
+                const stats = listItemStats.get(list.id) ?? { total: 0, completed: 0 };
 
                 return (
                   <div
@@ -457,6 +490,9 @@ export function TodoView({
                           data-testid={`todo-list-${list.id}`}
                         >
                           <span className="todo-list-item-name">{list.title}</span>
+                          <span className="todo-list-item-count">
+                            {stats.completed}/{stats.total}
+                          </span>
                         </button>
                         <div className="todo-list-item-actions">
                           <button
@@ -509,7 +545,27 @@ export function TodoView({
           ) : (
             <>
               <div className="todo-items-header">
-                <h3>{selectedList.title}</h3>
+                {/* FNXC:Todos 2026-06-22-00:00: Back button is visible only in the narrow container (CSS-gated) to pop the items panel back to the list-selection panel. Hidden in the wide two-panel layout where both panels coexist. */}
+                <button
+                  type="button"
+                  className="btn btn-sm btn-icon todo-icon-btn todo-mobile-back-btn"
+                  onClick={handleMobileBack}
+                  aria-label={t("todo.backToLists", "Back to lists")}
+                  data-testid="todo-mobile-back-button"
+                >
+                  <ChevronLeft />
+                </button>
+                <div className="todo-items-heading">
+                  <h3>{selectedList.title}</h3>
+                  {selectedListStats && (
+                    <span className="todo-items-progress">
+                      {t("todo.completedCount", "{{completed}}/{{total}} complete", {
+                        completed: selectedListStats.completed,
+                        total: selectedListStats.total,
+                      })}
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div className="todo-add-item-row">
@@ -535,6 +591,7 @@ export function TodoView({
                     void handleAddItem();
                   }}
                 >
+                  <Plus size={14} />
                   {t("actions.add", "Add")}
                 </button>
               </div>

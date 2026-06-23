@@ -1,5 +1,5 @@
 import type { Database } from "./db.js";
-import { costFor, type CostResult } from "./model-pricing.js";
+import { costFor, type CostResult, type ModelPricingOverrides } from "./model-pricing.js";
 import type { TokenTotals } from "./token-analytics.js";
 
 export interface TeamAnalyticsQuery {
@@ -9,6 +9,8 @@ export interface TeamAnalyticsQuery {
   to?: string;
   /** Epoch ms "now" used only for pricing-staleness. */
   now?: number;
+  /** User-managed pricing overrides that take precedence over the built-in baseline. */
+  pricingOverrides?: ModelPricingOverrides;
 }
 
 export interface TeamMetricTotals {
@@ -106,7 +108,12 @@ function addTokenRow(totals: TokenTotals, row: TaskTokenRow): void {
   totals.nTasks += 1;
 }
 
-function addRowCost(acc: CostAccumulator, row: TaskTokenRow, now?: number): void {
+function addRowCost(
+  acc: CostAccumulator,
+  row: TaskTokenRow,
+  now?: number,
+  pricingOverrides?: ModelPricingOverrides,
+): void {
   const result = costFor(
     {
       inputTokens: row.inputTokens ?? 0,
@@ -116,6 +123,7 @@ function addRowCost(acc: CostAccumulator, row: TaskTokenRow, now?: number): void
     },
     { provider: row.modelProvider, model: row.modelId },
     now,
+    pricingOverrides,
   );
   if (result.stale) acc.anyStale = true;
   if (result.unavailable || result.usd === null) {
@@ -188,6 +196,7 @@ export function aggregateTeamAnalytics(
   const costAccumulators = new Map<string, CostAccumulator>();
   const totalTokens = emptyTokenTotals();
   const totalCost = emptyCostAccumulator();
+  const pricingOverrides = query.pricingOverrides;
 
   const agents = db
     .prepare(`SELECT id, name, role, state FROM agents ORDER BY id`)
@@ -231,8 +240,8 @@ export function aggregateTeamAnalytics(
     costAccumulators.set(row.agentId, agentCost);
     addTokenRow(summary.tokens, row);
     addTokenRow(totalTokens, row);
-    addRowCost(agentCost, row, query.now);
-    addRowCost(totalCost, row, query.now);
+    addRowCost(agentCost, row, query.now, pricingOverrides);
+    addRowCost(totalCost, row, query.now, pricingOverrides);
   }
 
   const completedClauses = ["assignedAgentId IS NOT NULL", `"column" = 'done'`, "columnMovedAt IS NOT NULL"];

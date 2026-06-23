@@ -1,14 +1,22 @@
 import { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react";
 import { COLOR_THEMES, type ThemeMode, type ColorTheme } from "@fusion/core";
 import { fetchGlobalSettings, updateGlobalSettings } from "../api";
+import {
+  SHADCN_CUSTOM_COLOR_TOKENS,
+  applyShadcnCustomColorOverrides,
+  cleanupShadcnCustomColorOverrides,
+  sanitizeShadcnCustomColors,
+} from "../components/shadcnCustomColors";
 
 const THEME_MODE_STORAGE_KEY = "kb-dashboard-theme-mode";
 const COLOR_THEME_STORAGE_KEY = "kb-dashboard-color-theme";
+const SHADCN_CUSTOM_COLORS_STORAGE_KEY = "kb-dashboard-shadcn-custom-colors";
 const FONT_SCALE_STORAGE_KEY = "kb-dashboard-font-scale-pct";
 const DEFAULT_FONT_SCALE_PCT = 100;
 const MIN_FONT_SCALE_PCT = 85;
 const MAX_FONT_SCALE_PCT = 125;
 const VALID_COLOR_THEMES = [...COLOR_THEMES] satisfies ColorTheme[];
+const DEFAULT_COLOR_THEME: ColorTheme = "ocean";
 const THEME_DATA_ID = "theme-data";
 const THEME_DATA_FILENAME = "theme-data.css";
 
@@ -49,9 +57,12 @@ interface UseThemeReturn {
   themeMode: ThemeMode;
   colorTheme: ColorTheme;
   dashboardFontScalePct: number;
+  shadcnCustomColors: Record<string, string>;
+  resolvedThemeMode: "dark" | "light";
   setThemeMode: (mode: ThemeMode) => void;
   setColorTheme: (theme: ColorTheme) => void;
   setDashboardFontScalePct: (scalePct: number) => void;
+  setShadcnCustomColors: (colors: Record<string, string>) => void;
   isSystemDark: boolean;
 }
 
@@ -73,16 +84,22 @@ function readCachedThemeMode(): ThemeMode {
 }
 
 function readCachedColorTheme(): ColorTheme {
-  if (!isBrowser) return "default";
+  if (!isBrowser) return DEFAULT_COLOR_THEME;
   try {
-    const saved = localStorage.getItem(COLOR_THEME_STORAGE_KEY);
-    if (saved && VALID_COLOR_THEMES.includes(saved as ColorTheme)) {
-      return saved as ColorTheme;
+    let colorTheme = localStorage.getItem(COLOR_THEME_STORAGE_KEY);
+    // FNXC:DashboardTheming 2026-06-20-00:00: FN-6813 keeps existing shadcn-mono users on the renamed red mono variant before the validity guard would otherwise fall back to default.
+    if (colorTheme === 'shadcn-mono') colorTheme = 'shadcn-mono-red';
+    if (colorTheme && VALID_COLOR_THEMES.includes(colorTheme as ColorTheme)) {
+      return colorTheme as ColorTheme;
     }
   } catch {
     // localStorage not available, use default
   }
-  return "default";
+  /*
+  FNXC:DashboardTheming 2026-06-22-18:36:
+  Missing/invalid cached theme resolves to Ocean for new installs, but an explicit cached "default" remains valid above and stays on Fusion Legacy.
+  */
+  return DEFAULT_COLOR_THEME;
 }
 
 function writeCachedThemeMode(mode: ThemeMode): void {
@@ -98,6 +115,25 @@ function writeCachedColorTheme(theme: ColorTheme): void {
   if (!isBrowser) return;
   try {
     localStorage.setItem(COLOR_THEME_STORAGE_KEY, theme);
+  } catch {
+    // localStorage not available, skip cache write
+  }
+}
+
+function readCachedShadcnCustomColors(): Record<string, string> {
+  if (!isBrowser) return {};
+  try {
+    const saved = localStorage.getItem(SHADCN_CUSTOM_COLORS_STORAGE_KEY);
+    return saved ? sanitizeShadcnCustomColors(JSON.parse(saved)) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeCachedShadcnCustomColors(colors: Record<string, string>): void {
+  if (!isBrowser) return;
+  try {
+    localStorage.setItem(SHADCN_CUSTOM_COLORS_STORAGE_KEY, JSON.stringify(sanitizeShadcnCustomColors(colors)));
   } catch {
     // localStorage not available, skip cache write
   }
@@ -148,6 +184,7 @@ function applyThemeAttributes(
   colorTheme: ColorTheme,
   dashboardFontScalePct: number,
   systemIsDark: boolean,
+  shadcnCustomColors: Record<string, string>,
 ): void {
   if (!isBrowser) return;
 
@@ -155,6 +192,11 @@ function applyThemeAttributes(
   document.documentElement.setAttribute("data-theme", effectiveMode);
   document.documentElement.setAttribute("data-color-theme", colorTheme);
   document.documentElement.style.fontSize = `${normalizeFontScalePct(dashboardFontScalePct)}%`;
+  if (colorTheme === "shadcn-custom") {
+    applyShadcnCustomColorOverrides(document.documentElement, shadcnCustomColors);
+  } else {
+    cleanupShadcnCustomColorOverrides(document.documentElement);
+  }
 }
 
 /**
@@ -205,6 +247,7 @@ export function useTheme(): UseThemeReturn {
   const [themeMode, setThemeModeState] = useState<ThemeMode>(() => readCachedThemeMode());
   const [colorTheme, setColorThemeState] = useState<ColorTheme>(() => readCachedColorTheme());
   const [dashboardFontScalePct, setDashboardFontScalePctState] = useState<number>(() => readCachedDashboardFontScalePct());
+  const [shadcnCustomColors, setShadcnCustomColorsState] = useState<Record<string, string>>(() => readCachedShadcnCustomColors());
   const [isHydrating, setIsHydrating] = useState(true);
 
   // Track system color scheme preference
@@ -216,9 +259,11 @@ export function useTheme(): UseThemeReturn {
   const themeModeRef = useRef(themeMode);
   const colorThemeRef = useRef(colorTheme);
   const dashboardFontScalePctRef = useRef(dashboardFontScalePct);
+  const shadcnCustomColorsRef = useRef(shadcnCustomColors);
   const userSetThemeModeRef = useRef(false);
   const userSetColorThemeRef = useRef(false);
   const userSetDashboardFontScalePctRef = useRef(false);
+  const userSetShadcnCustomColorsRef = useRef(false);
 
   useEffect(() => {
     themeModeRef.current = themeMode;
@@ -231,6 +276,10 @@ export function useTheme(): UseThemeReturn {
   useEffect(() => {
     dashboardFontScalePctRef.current = dashboardFontScalePct;
   }, [dashboardFontScalePct]);
+
+  useEffect(() => {
+    shadcnCustomColorsRef.current = shadcnCustomColors;
+  }, [shadcnCustomColors]);
 
   // Hydrate canonical theme values from backend global settings.
   useEffect(() => {
@@ -278,6 +327,17 @@ export function useTheme(): UseThemeReturn {
             writeCachedDashboardFontScalePct(hydratedScalePct);
           }
         }
+
+        if (!userSetShadcnCustomColorsRef.current) {
+          const hydratedColors = sanitizeShadcnCustomColors(globalSettings.shadcnCustomColors);
+          if (JSON.stringify(shadcnCustomColorsRef.current) !== JSON.stringify(hydratedColors)) {
+            shadcnCustomColorsRef.current = hydratedColors;
+            setShadcnCustomColorsState(hydratedColors);
+          }
+          if (JSON.stringify(readCachedShadcnCustomColors()) !== JSON.stringify(hydratedColors)) {
+            writeCachedShadcnCustomColors(hydratedColors);
+          }
+        }
       })
       .catch((error) => {
         console.warn("[useTheme] Failed to hydrate theme from global settings", error);
@@ -308,8 +368,8 @@ export function useTheme(): UseThemeReturn {
 
   // Apply theme immediately on mount and when theme changes
   useIsomorphicLayoutEffect(() => {
-    applyThemeAttributes(themeMode, colorTheme, dashboardFontScalePct, isSystemDark);
-  }, [themeMode, colorTheme, dashboardFontScalePct, isSystemDark]);
+    applyThemeAttributes(themeMode, colorTheme, dashboardFontScalePct, isSystemDark, shadcnCustomColors);
+  }, [themeMode, colorTheme, dashboardFontScalePct, isSystemDark, shadcnCustomColors]);
 
   // Ensure theme-data.css is loaded/unloaded based on colorTheme.
   // This handles both initial hydration from backend and runtime theme changes.
@@ -366,13 +426,30 @@ export function useTheme(): UseThemeReturn {
     });
   }, []);
 
+  const setShadcnCustomColors = useCallback((colors: Record<string, string>) => {
+    const sanitizedColors = sanitizeShadcnCustomColors(colors);
+    userSetShadcnCustomColorsRef.current = true;
+    shadcnCustomColorsRef.current = sanitizedColors;
+    setShadcnCustomColorsState(sanitizedColors);
+    writeCachedShadcnCustomColors(sanitizedColors);
+
+    void updateGlobalSettings({ shadcnCustomColors: sanitizedColors }).catch((error) => {
+      console.warn("[useTheme] Failed to persist shadcnCustomColors to global settings", error);
+    });
+  }, []);
+
+  const resolvedThemeMode = getEffectiveThemeMode(themeMode, isSystemDark);
+
   return {
     themeMode,
     colorTheme,
     dashboardFontScalePct,
+    shadcnCustomColors,
+    resolvedThemeMode,
     setThemeMode,
     setColorTheme,
     setDashboardFontScalePct,
+    setShadcnCustomColors,
     isSystemDark,
   };
 }
@@ -388,10 +465,13 @@ export function getThemeInitScript(): string {
     (function() {
       try {
         var mode = localStorage.getItem('${THEME_MODE_STORAGE_KEY}') || 'dark';
-        var colorTheme = localStorage.getItem('${COLOR_THEME_STORAGE_KEY}') || 'default';
+        var colorTheme = localStorage.getItem('${COLOR_THEME_STORAGE_KEY}') || '${DEFAULT_COLOR_THEME}';
         var validThemes = ${JSON.stringify(VALID_COLOR_THEMES)};
+        // FNXC:DashboardTheming 2026-06-22-18:36: Unset startup theme is Ocean; an explicit stored "default" remains the Fusion Legacy theme and must not be migrated.
+        // FNXC:DashboardTheming 2026-06-20-00:00: FN-6813 remaps the legacy mono id before bootstrap validation so persisted users keep the red mono accent.
+        if (colorTheme === 'shadcn-mono') colorTheme = 'shadcn-mono-red';
         if (!validThemes.includes(colorTheme)) {
-          colorTheme = 'default';
+          colorTheme = '${DEFAULT_COLOR_THEME}';
         }
         var fontScale = Number(localStorage.getItem('${FONT_SCALE_STORAGE_KEY}') || '${DEFAULT_FONT_SCALE_PCT}');
         if (!Number.isFinite(fontScale)) {
@@ -403,6 +483,23 @@ export function getThemeInitScript(): string {
         document.documentElement.setAttribute('data-theme', effectiveMode);
         document.documentElement.setAttribute('data-color-theme', colorTheme);
         document.documentElement.style.fontSize = fontScale + '%';
+        var shadcnCustomColorTokens = ${JSON.stringify(SHADCN_CUSTOM_COLOR_TOKENS.map((token) => token.cssVar))};
+        for (var cleanupIndex = 0; cleanupIndex < shadcnCustomColorTokens.length; cleanupIndex += 1) {
+          document.documentElement.style.removeProperty(shadcnCustomColorTokens[cleanupIndex]);
+        }
+        if (colorTheme === 'shadcn-custom') {
+          try {
+            var shadcnCustomColors = JSON.parse(localStorage.getItem('${SHADCN_CUSTOM_COLORS_STORAGE_KEY}') || '{}');
+            var validHex = /^#(?:[\\da-f]{3}|[\\da-f]{6})$/i;
+            for (var colorIndex = 0; colorIndex < shadcnCustomColorTokens.length; colorIndex += 1) {
+              var cssVar = shadcnCustomColorTokens[colorIndex];
+              var value = shadcnCustomColors && shadcnCustomColors[cssVar];
+              if (typeof value === 'string' && validHex.test(value.trim())) {
+                document.documentElement.style.setProperty(cssVar, value.trim());
+              }
+            }
+          } catch (customColorError) {}
+        }
         if (colorTheme !== 'default') {
           var base = document.baseURI || (document.location && document.location.href) || '';
           var themeDataUrl;
@@ -430,7 +527,7 @@ export function getThemeInitScript(): string {
         }
       } catch (e) {
         document.documentElement.setAttribute('data-theme', 'dark');
-        document.documentElement.setAttribute('data-color-theme', 'default');
+        document.documentElement.setAttribute('data-color-theme', '${DEFAULT_COLOR_THEME}');
         document.documentElement.style.fontSize = '${DEFAULT_FONT_SCALE_PCT}%';
       }
     })();

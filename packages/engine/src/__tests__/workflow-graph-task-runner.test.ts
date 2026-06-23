@@ -11,7 +11,10 @@ const flagOn = { experimentalFeatures: { workflowGraphExecutor: true } } as unkn
   Settings,
   "experimentalFeatures"
 >;
-const flagOff = { experimentalFeatures: {} } as unknown as Pick<Settings, "experimentalFeatures">;
+const flagOff = { experimentalFeatures: { workflowGraphExecutor: false } } as unknown as Pick<
+  Settings,
+  "experimentalFeatures"
+>;
 
 /** start → lint(custom) → execute → review → merge → notify(custom) → end, with seam failure edges to end. */
 function fullLifecycleIr(): WorkflowIr {
@@ -185,15 +188,20 @@ describe("WorkflowGraphTaskRunner (CU-U2)", () => {
     expect(calls).toEqual(["custom:lint"]);
   });
 
-  it("falls back when the flag is off", async () => {
+  it("ignores stale workflowGraphExecutor=false and still runs the graph", async () => {
+    const calls: string[] = [];
     const runner = new WorkflowGraphTaskRunner({
       store: storeWith(definition(fullLifecycleIr())),
-      seams: recordingSeams([]),
-      runCustomNode: async () => ({ outcome: "success" }),
+      seams: recordingSeams(calls),
+      runCustomNode: async (node) => {
+        calls.push(`custom:${node.id}`);
+        return { outcome: "success" };
+      },
     });
     const result = await runner.run(task, flagOff);
-    expect(result.disposition).toBe("fell-back");
-    expect(result.reason).toBe("flag-off");
+    expect(result.disposition).toBe("completed");
+    expect(calls).toEqual(["custom:lint", "execute", "review", "merge", "custom:notify"]);
+    expect(result.visitedNodeIds).toEqual(["start", "lint", "execute", "review", "merge", "notify"]);
   });
 
   it("falls back when the task has no workflow selection", async () => {

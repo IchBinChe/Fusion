@@ -1,5 +1,11 @@
 /* === InsightsView === */
 .insights-view {
+  /*
+  FNXC:Insights 2026-06-23-19:20:
+  Insights page horizontal dividers should default invisible with the current seamless header treatment. Keep a local token so themes can restore those dividers with --insights-divider-color or the shared --chrome-divider-color.
+  */
+  --insights-divider-color: var(--chrome-divider-color, transparent);
+
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -7,41 +13,14 @@
   overflow: hidden;
 }
 
-.insights-view-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-lg);
-  border-bottom: 1px solid var(--border);
-  background: var(--surface);
-  flex-shrink: 0;
-}
-
-.insights-view-title {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-}
-
-.insights-view-title h2 {
-  margin: 0;
-  font-size: 1.125rem;
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-}
-
+/*
+FNXC:Insights 2026-06-22-01:00:
+Header migrated to the shared ViewHeader component (.view-header). The old .insights-view-header / .insights-view-title / .insights-view-actions rules were removed; the count badge and action toggles still render inside ViewHeader's actions slot, so their styling rules are retained below.
+*/
 .insights-view-count {
   font-size: 0.8125rem;
   color: var(--text-muted);
   font-weight: normal;
-}
-
-.insights-view-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
 }
 
 /* Model configuration row — collapsible, below the action bar */
@@ -50,7 +29,7 @@
   align-items: center;
   gap: var(--space-sm);
   padding: var(--space-sm) var(--space-lg);
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--chrome-divider-width, 1px) solid var(--insights-divider-color);
   background: var(--surface-subtle);
 }
 
@@ -86,6 +65,10 @@
 
 .insights-view-close:hover {
   color: var(--text);
+}
+
+.insights-refresh-btn {
+  flex: 0 0 auto;
 }
 
 /* Status region */
@@ -306,7 +289,7 @@
   justify-content: space-between;
   padding: var(--space-md) var(--space-lg);
   background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  border-bottom: var(--chrome-divider-width, 1px) solid var(--insights-divider-color);
 }
 
 .insights-section-title {
@@ -487,31 +470,6 @@
 
 /* Mobile responsive: stack panes vertically; sidebar becomes a horizontal scroller */
 @media (max-width: 768px) {
-  .insights-view-header {
-    flex-wrap: nowrap;
-    gap: var(--space-sm);
-    padding: var(--space-md);
-  }
-
-  .insights-view-title {
-    min-width: 0;
-    flex: 1 1 auto;
-  }
-
-  .insights-view-title h2 {
-    font-size: 1rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .insights-view-actions {
-    flex-shrink: 0;
-    justify-content: flex-end;
-    flex-wrap: nowrap;
-    gap: var(--space-xs);
-  }
-
   .insights-body {
     flex-direction: column;
   }
@@ -519,7 +477,7 @@
   .insights-sidebar {
     width: 100%;
     border-right: none;
-    border-bottom: 1px solid var(--border);
+    border-bottom: var(--chrome-divider-width, 1px) solid var(--insights-divider-color);
     overflow-x: auto;
     overflow-y: hidden;
     flex-shrink: 0;
@@ -585,7 +543,7 @@
     height: calc(var(--space-2xl) + var(--space-sm));
   }
 
-  .insights-view-actions .btn {
+  .view-header__actions .insights-view-actions-btn {
     min-height: calc(var(--space-2xl) + var(--space-xs));
   }
 
@@ -627,19 +585,6 @@ Insights tablets at 769px–1024px were inheriting the desktop fixed category si
     overflow: hidden;
   }
 
-  .insights-view-header {
-    min-inline-size: 0;
-  }
-
-  .insights-view-title {
-    flex: 1 1 auto;
-    min-inline-size: 0;
-  }
-
-  .insights-view-actions {
-    flex-shrink: 0;
-  }
-
   .insights-body {
     flex-direction: column;
     inline-size: 100%;
@@ -654,7 +599,7 @@ Insights tablets at 769px–1024px were inheriting the desktop fixed category si
     min-width: 0;
     min-inline-size: 0;
     border-right: none;
-    border-bottom: var(--btn-border-width) solid var(--border);
+    border-bottom: var(--chrome-divider-width, 1px) solid var(--insights-divider-color);
     overflow-x: auto;
     overflow-y: hidden;
   }

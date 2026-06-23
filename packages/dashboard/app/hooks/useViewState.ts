@@ -5,7 +5,11 @@ import { getScopedItem, setScopedItem } from "../utils/projectStorage";
 import { getPluginViewId, isPluginViewId, isPluginViewRegistered } from "../plugins/pluginViewRegistry";
 
 export type ViewMode = "overview" | "project";
-export type BuiltInTaskView = "board" | "list" | "graph" | "agents" | "missions" | "chat" | "documents" | "research" | "evals" | "goalsView" | "skills" | "mailbox" | "insights" | "memory" | "command-center" | "secrets" | "devserver" | "dev-server" | "stash-recovery" | "pull-requests";
+/*
+FNXC:ViewState 2026-06-22-00:00:
+Workflows, Import Tasks, and Automations are promoted to top-level main-content task views (left-sidebar destinations) instead of modal-only overlays, so they render in the main panel like Command Center.
+*/
+export type BuiltInTaskView = "board" | "list" | "graph" | "agents" | "missions" | "chat" | "documents" | "research" | "evals" | "goalsView" | "todos" | "planning" | "skills" | "mailbox" | "insights" | "memory" | "command-center" | "secrets" | "devserver" | "dev-server" | "pull-requests" | "workflows" | "import-tasks" | "automations" | "settings" | "task-detail";
 export type PluginTaskView = `plugin:${string}:${string}`;
 export type TaskView = BuiltInTaskView | PluginTaskView;
 
@@ -20,6 +24,16 @@ const BUILT_IN_TASK_VIEWS: readonly BuiltInTaskView[] = [
   "research",
   "evals",
   "goalsView",
+  /*
+  FNXC:ViewState 2026-06-21-09:14:
+  FN-6829 promotes project Todos from modal-only state into the persisted built-in task-view registry so dashboard navigation can dock it in the right content area.
+  */
+  "todos",
+  /*
+  FNXC:Navigation 2026-06-21-00:00:
+  FN-6886 promotes Planning Mode into a persisted top-level docked task view instead of treating it as a modal-only overlay.
+  */
+  "planning",
 
   "skills",
   "mailbox",
@@ -29,8 +43,20 @@ const BUILT_IN_TASK_VIEWS: readonly BuiltInTaskView[] = [
   "secrets",
   "devserver",
   "dev-server",
-  "stash-recovery",
   "pull-requests",
+  "workflows",
+  "import-tasks",
+  "automations",
+  /*
+  FNXC:ViewState 2026-06-22-00:00:
+  Settings is promoted from a modal-only overlay into a top-level main-content task view so the header/sidebar Settings entry points dock it in the main panel like Command Center, while preserving deep-link section navigation.
+  */
+  "settings",
+  /*
+  FNXC:Navigation 2026-06-22-00:00:
+  Clicking a task card on the Board opens its detail as a full main-content view ("Full main panel (replaces board)") with a Back-to-board button, instead of the TaskDetailModal overlay. The detail is hosted under this registered `task-detail` task view so navigation/persistence treat it like any other docked main-panel destination.
+  */
+  "task-detail",
 ];
 
 function isBuiltInTaskView(value: string | null): value is BuiltInTaskView {
@@ -47,6 +73,14 @@ function normalizeTaskView(value: TaskView): TaskView {
   return value === "devserver" ? "dev-server" : value;
 }
 
+/*
+FNXC:ViewState 2026-06-22-15:30:
+Fusion must land on the Board on load, never the Command Center "Dashboard" view. A persisted/normalized `command-center` value resolves to `board` for the auto-restored landing view only (initializer + project-hydration effect). Deep links (`?view=command-center`) and explicit user navigation still reach the Command Center — this only governs the restored landing surface.
+*/
+function resolveLandingTaskView(value: TaskView): TaskView {
+  return value === "command-center" ? "board" : value;
+}
+
 function migrateLegacyRoadmapsView(value: string): TaskView {
   if (value !== "roadmaps") {
     return "board";
@@ -60,6 +94,14 @@ FN-6702 removed the top-level Reliability task view after moving the page into C
 */
 function migrateLegacyReliabilityView(value: string | null): TaskView | null {
   return value === "reliability" ? "command-center" : null;
+}
+
+/*
+FNXC:ViewState 2026-06-21-00:00:
+FN-6881 removed the standalone Stash Recovery task view after moving recovery into Git Manager. Persisted or linked `stash-recovery` values must land on Board instead of restoring an orphaned route.
+*/
+function migrateRetiredStashRecoveryView(value: string | null): TaskView | null {
+  return value === "stash-recovery" ? "board" : null;
 }
 
 interface UseViewStateOptions {
@@ -86,12 +128,8 @@ export interface UseViewStateResult {
 export function useViewState(options: UseViewStateOptions): UseViewStateResult {
   const {
     projectsLoading,
-    projectsError,
     currentProjectLoading,
     currentProject,
-    projectsLength,
-    setupWizardOpen,
-    openSetupWizard,
     themeMode,
     setThemeMode,
   } = options;
@@ -108,8 +146,10 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
     const saved = getScopedItem("kb-dashboard-task-view");
     const legacyReliabilityView = migrateLegacyReliabilityView(saved);
     if (legacyReliabilityView) return legacyReliabilityView;
+    const retiredStashRecoveryView = migrateRetiredStashRecoveryView(saved);
+    if (retiredStashRecoveryView) return retiredStashRecoveryView;
     if (saved === "roadmaps") return migrateLegacyRoadmapsView(saved);
-    if (isTaskView(saved)) return saved;
+    if (isTaskView(saved)) return resolveLandingTaskView(normalizeTaskView(saved));
     return "board";
   });
   const hasHydratedScopedTaskViewRef = useRef(false);
@@ -121,15 +161,20 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
   useEffect(() => {
     const saved = getScopedItem("kb-dashboard-task-view", currentProject?.id);
     const legacyReliabilityView = migrateLegacyReliabilityView(saved);
+    const retiredStashRecoveryView = migrateRetiredStashRecoveryView(saved);
     if (legacyReliabilityView) {
       setTaskView(legacyReliabilityView);
+    } else if (retiredStashRecoveryView) {
+      setTaskView(retiredStashRecoveryView);
     } else if (saved === "roadmaps") {
       setTaskView(migrateLegacyRoadmapsView(saved));
     } else if (isTaskView(saved)) {
       const preserveLegacyOnFirstScopedHydration =
         !hasHydratedScopedTaskViewRef.current && saved === "devserver";
 
-      setTaskView(preserveLegacyOnFirstScopedHydration ? "devserver" : normalizeTaskView(saved));
+      setTaskView(
+        preserveLegacyOnFirstScopedHydration ? "devserver" : resolveLandingTaskView(normalizeTaskView(saved)),
+      );
     } else {
       setTaskView("board");
     }
@@ -150,8 +195,11 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
 
     const viewParam = new URLSearchParams(window.location.search).get("view");
     const legacyReliabilityView = migrateLegacyReliabilityView(viewParam);
+    const retiredStashRecoveryView = migrateRetiredStashRecoveryView(viewParam);
     if (legacyReliabilityView) {
       setTaskView(legacyReliabilityView);
+    } else if (retiredStashRecoveryView) {
+      setTaskView(retiredStashRecoveryView);
     } else if (viewParam && isTaskView(viewParam)) {
       setTaskView(normalizeTaskView(viewParam));
     }
@@ -165,26 +213,11 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
     }
   }, [projectsLoading, currentProjectLoading, currentProject, viewMode]);
 
-  useEffect(() => {
-    if (projectsLoading || currentProjectLoading) return;
-    if (setupWizardOpen) return;
-    if (projectsError) return;
-    if (projectsLength > 0 || currentProject) return;
-
-    const timer = window.setTimeout(() => {
-      openSetupWizard();
-    }, 500);
-
-    return () => window.clearTimeout(timer);
-  }, [
-    projectsLoading,
-    projectsError,
-    projectsLength,
-    currentProjectLoading,
-    currentProject,
-    setupWizardOpen,
-    openSetupWizard,
-  ]);
+  /*
+  FNXC:Onboarding 2026-06-22-05:06:
+  Brand-new users should enter the unified onboarding sequence first: AI setup, GitHub, Project, Agent, then First Task.
+  Do not auto-open the project-only setup wizard just because there are zero projects; that wizard is opened from the Project step or explicit Add Project actions.
+  */
 
   const handleChangeTaskView = useCallback((newView: TaskView) => {
     setTaskView(newView);

@@ -25,7 +25,7 @@ const defaultSettings: Settings = {
   worktreeInitCommand: "",
   testCommand: "",
   buildCommand: "",
-  experimentalFeatures: { insights: true, roadmap: true, skillsView: true, agentsView: true, evalsView: true },
+  experimentalFeatures: { insights: true, roadmap: true, skillsView: true, agentsView: true, evalsView: true, todoView: true, leftSidebarNav: false, rightDock: false },
 };
 
 const mockSubscribeSse = vi.fn((..._args: any[]) => vi.fn());
@@ -85,6 +85,7 @@ const mockUseTasks = vi.fn(() => ({
   archiveTask: vi.fn(),
   unarchiveTask: vi.fn(),
   archiveAllDone: vi.fn(),
+  refreshTasks: vi.fn(),
 }));
 
 vi.mock("../../hooks/useTasks", () => ({
@@ -141,16 +142,31 @@ vi.mock("../../components/model-onboarding-state", () => ({
   getOnboardingCompletedAt: () => null,
   getSkippedSteps: () => [],
   getStepData: () => null,
-  ONBOARDING_FLOW_STEPS: ["ai-setup", "github", "project-setup", "first-task"],
+  ONBOARDING_FLOW_STEPS: ["ai-setup", "github", "project-setup", "agent", "first-task"],
 }));
 
 vi.mock("../../components/Board", () => ({
-  Board: ({ tasks, onOpenDetail }: { tasks: Task[]; onOpenDetail: (task: Task) => void }) => (
+  Board: ({
+    tasks,
+    onOpenDetail,
+    onOpenDetailWithTab,
+  }: {
+    tasks: Task[];
+    onOpenDetail: (task: Task) => void;
+    onOpenDetailWithTab?: (task: Task, initialTab: "changes" | "retries" | "workflow") => void;
+  }) => (
     <div data-testid="board-view">
       {tasks.map((task) => (
-        <button key={task.id} type="button" data-testid={`open-task-${task.id}`} onClick={() => onOpenDetail(task)}>
-          {task.title}
-        </button>
+        <div key={task.id}>
+          <button type="button" data-testid={`open-task-${task.id}`} onClick={() => onOpenDetail(task)}>
+            {task.title}
+          </button>
+          {task.modifiedFiles && task.modifiedFiles.length > 0 ? (
+            <button type="button" data-testid={`open-task-changes-${task.id}`} onClick={() => onOpenDetailWithTab?.(task, "changes")}>
+              Files changed
+            </button>
+          ) : null}
+        </div>
       ))}
     </div>
   ),
@@ -165,11 +181,39 @@ vi.mock("../../components/TaskDetailModal", () => ({
       </div>
     </div>
   ),
+  // FNXC:Navigation 2026-06-22-00:00: Board card clicks now open task detail in the full main panel via TaskDetailContent (not the modal). The mock exposes a stable testid so the embedded-panel popstate tests can assert on the new surface.
+  // FNXC:TaskDetail 2026-06-22-18:40: "Back to board" moved into TaskDetailContent's gray header (rendered when embedded && onBackToBoard). The mock surfaces that button via onBackToBoard so the panel-dismiss popstate tests still drive the same affordance.
+  TaskDetailContent: ({
+    task,
+    onBackToBoard,
+    initialTab,
+  }: {
+    task: { id: string; title?: string };
+    onBackToBoard?: () => void;
+    initialTab?: string;
+  }) => (
+    <div data-testid="task-detail-main-panel-content">
+      {onBackToBoard && (
+        <button type="button" onClick={onBackToBoard}>
+          Back to board
+        </button>
+      )}
+      <p>tab:{initialTab ?? "chat"}</p>
+      <h2>{task.title ?? task.id}</h2>
+    </div>
+  ),
 }));
 
 vi.mock("../../components/SettingsModal", () => ({
   SettingsModal: ({ onClose }: { onClose: () => void }) => (
     <div className="modal-overlay open" data-testid="settings-modal">
+      <h2>Settings</h2>
+      <button type="button" data-testid="settings-close-btn" onClick={onClose}>Close</button>
+    </div>
+  ),
+  // FNXC:Settings 2026-06-22-12:00: Settings now opens as an embedded main-content view (presentation="embedded").
+  SettingsView: ({ onClose }: { onClose: () => void }) => (
+    <div data-testid="settings-view">
       <h2>Settings</h2>
       <button type="button" data-testid="settings-close-btn" onClick={onClose}>Close</button>
     </div>
@@ -358,6 +402,7 @@ describe("Navigation history integration", () => {
       archiveTask: vi.fn(),
       unarchiveTask: vi.fn(),
       archiveAllDone: vi.fn(),
+      refreshTasks: vi.fn(),
     }));
     mockProjectsState.projects = [];
     mockProjectsState.loading = false;
@@ -414,7 +459,8 @@ describe("Navigation history integration", () => {
   }
 
   // 1. Desktop: opening Settings pushes a history entry
-  it("pushes history entry when opening Settings modal on desktop", async () => {
+  // FNXC:Settings 2026-06-22-12:00: Settings opens as an embedded main-content view (settings-view), not a modal overlay.
+  it("pushes history entry when opening Settings view on desktop", async () => {
     await renderAppAndWait();
 
     const pushCallsBefore = (window.history.pushState as any).mock.calls.length;
@@ -422,30 +468,35 @@ describe("Navigation history integration", () => {
     fireEvent.click(settingsBtn);
 
     await waitFor(() => {
-      expect(screen.getByTestId("settings-modal")).toBeTruthy();
+      expect(screen.getByTestId("settings-view")).toBeTruthy();
     });
 
-    // Back-button nav is enabled on desktop too — pushState called for the modal open
+    // Back-button nav is enabled on desktop too — pushState called for the view navigation
     expect((window.history.pushState as any).mock.calls.length).toBeGreaterThan(pushCallsBefore);
   });
 
-  // 2. Desktop: popstate dismisses modals
-  it("dismisses Settings modal on popstate in desktop mode", async () => {
+  // 2. Desktop: popstate reverts the Settings view back to the previous view
+  it("dismisses Settings view on popstate in desktop mode", async () => {
+    localStorage.setItem("kb-dashboard-view-mode", "project");
+    const taskViewStorageKey = scopedKey("kb-dashboard-task-view", DEFAULT_PROJECT_ID);
+    localStorage.setItem(taskViewStorageKey, "board");
+
     await renderAppAndWait();
 
     const settingsBtn = screen.getByTitle("Settings");
     fireEvent.click(settingsBtn);
 
     await waitFor(() => {
-      expect(screen.getByTestId("settings-modal")).toBeTruthy();
+      expect(screen.getByTestId("settings-view")).toBeTruthy();
     });
 
     // Simulate back button
     dispatchPopState({ navIndex: 0 });
 
-    // Settings modal should be dismissed
+    // Settings view should be dismissed (reverted to the previous board view)
     await waitFor(() => {
-      expect(screen.queryByTestId("settings-modal")).toBeNull();
+      expect(screen.queryByTestId("settings-view")).toBeNull();
+      expect(screen.getByTestId("board-view")).toBeTruthy();
     });
   });
 
@@ -489,6 +540,29 @@ describe("Navigation history integration", () => {
     expect((window.history.pushState as any).mock.calls.length).toBeGreaterThan(pushCallsBefore);
   });
 
+  it("pushes history entry and reverts when switching to todos from overflow", async () => {
+    localStorage.setItem("kb-dashboard-view-mode", "project");
+    const taskViewStorageKey = scopedKey("kb-dashboard-task-view", DEFAULT_PROJECT_ID);
+    localStorage.setItem(taskViewStorageKey, "board");
+
+    await renderAppAndWait();
+
+    const pushCallsBefore = (window.history.pushState as any).mock.calls.length;
+    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+    fireEvent.click(screen.getByTestId("view-overflow-todos"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("todo-view")).toBeTruthy();
+    });
+    expect((window.history.pushState as any).mock.calls.length).toBeGreaterThan(pushCallsBefore);
+
+    dispatchPopState({ navIndex: 0 });
+    await waitFor(() => {
+      expect(screen.queryByTestId("todo-view")).toBeNull();
+      expect(screen.getByTestId("board-view")).toBeTruthy();
+    });
+  });
+
   // 4. Desktop: popstate reverts view changes
   it("reverts view change on popstate in desktop mode", async () => {
     localStorage.setItem("kb-dashboard-view-mode", "project");
@@ -529,20 +603,23 @@ describe("Navigation history integration", () => {
       archiveTask: vi.fn(),
       unarchiveTask: vi.fn(),
       archiveAllDone: vi.fn(),
+      refreshTasks: vi.fn(),
     }));
 
     await renderMobileAppAndWait();
 
+    // FNXC:Navigation 2026-06-22-00:00: Board card click opens the full main-panel task detail (TaskDetailContent), and mobile popstate (swipe back) reverts the pushed `task-detail` view entry back to the board.
     fireEvent.click(screen.getByTestId("open-task-FN-1"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("task-detail-modal")).toBeTruthy();
+      expect(screen.getByTestId("task-detail-main-panel-content")).toBeTruthy();
     });
 
     dispatchPopState({ navIndex: 0 });
 
     await waitFor(() => {
-      expect(screen.queryByTestId("task-detail-modal")).toBeNull();
+      expect(screen.queryByTestId("task-detail-main-panel-content")).toBeNull();
+      expect(screen.getByTestId("board-view")).toBeTruthy();
     });
   });
 
@@ -561,35 +638,77 @@ describe("Navigation history integration", () => {
       archiveTask: vi.fn(),
       unarchiveTask: vi.fn(),
       archiveAllDone: vi.fn(),
+      refreshTasks: vi.fn(),
     }));
 
     await renderMobileAppAndWait();
 
+    // FNXC:Navigation 2026-06-22-00:00: Board card click opens the full main-panel detail; the "Back to board" button reverts to the board, and a subsequent reopen + mobile popstate must also dismiss it (the regression this test guards).
     fireEvent.click(screen.getByTestId("open-task-FN-1"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("task-detail-modal")).toBeTruthy();
+      expect(screen.getByTestId("task-detail-main-panel-content")).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to board" }));
     // removeNav drives history.back(); consume the self-triggered popstate
     // before reopening so the next popstate represents the user's swipe-back.
     dispatchPopState({ navIndex: 0 });
 
     await waitFor(() => {
-      expect(screen.queryByTestId("task-detail-modal")).toBeNull();
+      expect(screen.queryByTestId("task-detail-main-panel-content")).toBeNull();
+      expect(screen.getByTestId("board-view")).toBeTruthy();
     });
 
     fireEvent.click(screen.getByTestId("open-task-FN-1"));
 
     await waitFor(() => {
-      expect(screen.getByTestId("task-detail-modal")).toBeTruthy();
+      expect(screen.getByTestId("task-detail-main-panel-content")).toBeTruthy();
     });
 
     dispatchPopState({ navIndex: 0 });
 
     await waitFor(() => {
-      expect(screen.queryByTestId("task-detail-modal")).toBeNull();
+      expect(screen.queryByTestId("task-detail-main-panel-content")).toBeNull();
+      expect(screen.getByTestId("board-view")).toBeTruthy();
+    });
+  });
+
+  it("opens board files-changed actions inline on the changes tab instead of in a modal", async () => {
+    const task = {
+      ...makeTask("FN-1", "Inline Changes Detail"),
+      modifiedFiles: ["packages/dashboard/app/App.tsx"],
+    };
+    mockUseTasks.mockImplementation(() => ({
+      tasks: [task],
+      createTask: mockCreateTask,
+      moveTask: vi.fn(),
+      deleteTask: vi.fn(),
+      mergeTask: vi.fn(),
+      retryTask: vi.fn(),
+      updateTask: vi.fn(),
+      duplicateTask: vi.fn(),
+      archiveTask: vi.fn(),
+      unarchiveTask: vi.fn(),
+      archiveAllDone: vi.fn(),
+      refreshTasks: vi.fn(),
+    }));
+
+    await renderMobileAppAndWait();
+
+    // FNXC:TaskDetail 2026-06-23-00:41: Board files-changed chips must deep-link to the embedded main-panel Changes tab. They should not open the TaskDetailModal, otherwise the board loses the inline changes-page flow.
+    fireEvent.click(screen.getByTestId("open-task-changes-FN-1"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("task-detail-main-panel-content")).toBeTruthy();
+      expect(screen.getByText("tab:changes")).toBeTruthy();
+    });
+    expect(screen.queryByTestId("task-detail-modal")).toBeNull();
+
+    dispatchPopState({ navIndex: 0 });
+    await waitFor(() => {
+      expect(screen.queryByTestId("task-detail-main-panel-content")).toBeNull();
+      expect(screen.getByTestId("board-view")).toBeTruthy();
     });
   });
 

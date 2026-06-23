@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="./demo/assets/fusion-logo.png" alt="Fusion" width="120" />
-
-# Fusion
+# <img src="./demo/assets/fusion-logo-orange.svg" alt="" width="34" align="center" /> Fusion
 
 ### From rough idea to production code — automatically.
 
-**Multi-node agent orchestrator** — tasks, agents, missions, git, files, and worktrees, with any model, local or cloud.
+### 🏭 A software factory, run by a multi-agent orchestrator.
+
+Describe what you want — a team of AI agents **plans, builds, reviews, and ships** it for you. Fusion is your software factory: an assembly line for code that runs across tasks, agents, missions, git, files, and worktrees, with any model, local or cloud.
 
 [**runfusion.ai →**](https://runfusion.ai) · [Docs](./docs/README.md) · [GitHub](https://github.com/Runfusion/Fusion) · [npm](https://www.npmjs.com/package/@runfusion/fusion) · [Discord](https://discord.gg/ksrfuy7WYR)
 
@@ -40,6 +40,72 @@ Describe a task in plain language. A planning agent reads your project, understa
 One board. Controlled from anywhere. Laptop, Mac mini, Linux server, cloud VM, phone — all connected.
 
 > Like Trello, but your tasks get specified, executed, and delivered by AI. Built on the great work of [dustinbyrne/kb](https://github.com/dustinbyrne/kb).
+
+---
+
+## Quick start
+
+**Zero install, straight from npm:**
+
+```bash
+npx runfusion.ai
+```
+
+That launches the dashboard. Subcommands forward through: `npx runfusion.ai task create "fix X"`, `npx runfusion.ai --help`, etc. (Or verbosely: `npx @runfusion/fusion dashboard`.)
+
+**One-line installer** (macOS & Linux — auto-picks Homebrew, falls back to npm):
+
+```bash
+curl -fsSL https://runfusion.ai/install.sh | sh
+fusion dashboard
+```
+
+**Homebrew** (macOS & Linux):
+
+```bash
+brew tap runfusion/fusion
+brew install fusion
+fusion dashboard            # or: fn dashboard
+```
+
+Or as a one-liner (auto-taps): `brew install runfusion/fusion/fusion`.
+
+**npm global**:
+
+```bash
+npm install -g @runfusion/fusion
+fn dashboard                # or: fusion dashboard
+```
+
+**From a clone** (for development):
+
+```bash
+pnpm dev dashboard
+```
+
+Then click the `Open:` URL printed in the terminal. It embeds a bearer token
+(`http://localhost:4040/?token=fn_...`) that the browser captures to
+`localStorage` on first visit and reuses automatically thereafter. On the
+server side, Fusion now persists the dashboard/daemon token in
+`~/.fusion/settings.json` on first authenticated run and reuses it on later
+starts unless you override it (`--token`, `FUSION_DASHBOARD_TOKEN`,
+`FUSION_DAEMON_TOKEN`) or disable auth with `--no-auth`. See
+[CLI reference → fn dashboard → Authentication](./docs/cli-reference.md#fn-dashboard)
+for full precedence and reset/revocation options.
+
+### First-run setup
+
+On first launch, Fusion opens the **onboarding wizard** with three guided steps:
+
+1. **AI Setup** — Use a simplified quick-start provider list (recommended providers plus any already-connected providers), then expand **Advanced provider settings** only if you need additional providers or setup details. You only need one provider to get started. Deprecated Google Gemini CLI / Antigravity provider entries are intentionally hidden; Google/Gemini API key, Google Generative AI, Vertex, and Cloud Code paths remain supported.
+2. **GitHub (Optional)** — Connect GitHub for issue import and PR management
+3. **First Task** — Create your first task or import from GitHub (if no project is active, onboarding first prompts you to register/select a project directory)
+
+The wizard is **dismissible and non-blocking** — click **Skip for now** to use the dashboard immediately. Re-trigger it later from **Settings → Authentication → Reopen onboarding guide**.
+
+### Mobile
+
+For Capacitor + PWA workflow, see [MOBILE.md](./MOBILE.md).
 
 ---
 
@@ -81,6 +147,141 @@ Every task shows its plan, its reviews, its diffs, and its file changes in real 
 | 🔬 **Research** | Bounded research runs with web search, GitHub, local docs, and LLM synthesis (plus runtime builtin WebSearch/WebFetch support in planning + synthesis flows when available). Turn findings into tasks. ([Docs](./docs/research.md)) |
 | 🧪 **Self-improvement** | Agents reflect on their own output and update their prompts as they learn your codebase. |
 | 🔓 **Open source. MIT.** | No vendor lock-in. Run it on your own hardware. Shipping weekly. |
+
+---
+
+## See it in action
+
+<!--
+FNXC:Docs 2026-06-21-19:55:
+README must lead with a smaller wordmark and a visual showcase of the latest surfaces (Command Center, selectable workflows, agent chat, multi-agent chat rooms, agent mail) so the value lands fast.
+Each feature pairs a short looping GIF with value copy; Command Center additionally carries real fleet stats, the token/productivity/team graph trio, and the 70+-theme grid (incl. shadcn light/mono/orange/black) to make the data pop.
+Media lives in demo/assets/ (committed, GitHub-inline GIFs); stat numbers are sourced from a live seeded fleet — refresh them if the captures are re-shot.
+Each feature keeps its original Tokyo Night capture and adds a Shadcn Light + Shadcn Dark Gray pair; the theme showcase is split into a light-themes grid and a dark-themes grid. Workflow GIFs feature the Stepwise coding graph with node-level zoom/pan.
+-->
+
+The newest surfaces in Fusion, at a glance — mission control, visual workflows, agent chat, multi-agent rooms, and inter-agent mail.
+
+### 🛰️ Command Center — mission control for your agent fleet
+
+<div align="center">
+  <img src="./demo/assets/command-center.gif" alt="Fusion Command Center: live concurrency gauges, token charts, and fleet telemetry across tabs" width="900" />
+</div>
+
+One screen for everything your agents are doing. Tune live scheduler capacity, watch token spend by model in real time, and prove the value with hard numbers.
+
+<table>
+<tr>
+<td width="33%"><img src="./demo/assets/command-center-tokens.png" alt="Tokens by model, token trend, and tokens-over-time charts" /><br/><sub><b>Tokens</b> — spend by model, cached vs. input vs. output, over time.</sub></td>
+<td width="33%"><img src="./demo/assets/command-center-productivity.png" alt="Productivity: commits, human-hours saved, task duration percentiles, and files by language" /><br/><sub><b>Productivity</b> — outcomes, duration percentiles, language mix.</sub></td>
+<td width="33%"><img src="./demo/assets/command-center-team.png" alt="Agent org chart with token share and tokens-by-agent breakdown" /><br/><sub><b>Team</b> — agent org chart and token share per agent.</sub></td>
+</tr>
+</table>
+
+> Tokens · Tools · Activity · Productivity · Team · Ecosystem · GitHub · Signals · System · Reliability · Mission Control — every tab is a different lens on the same live fleet.
+
+**The same fleet, your way** — Command Center (and the whole dashboard) re-skins live across **70+ color themes**. Here it is in Shadcn Light and Shadcn Dark Gray:
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/command-center-light.gif" alt="Command Center in Shadcn Light theme" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/command-center-gray.gif" alt="Command Center in Shadcn Dark Gray theme" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
+
+<details>
+<summary><b>A dozen light themes &amp; a dozen dark themes</b> (click to expand)</summary>
+
+<br/>
+
+<div align="center">
+  <img src="./demo/assets/command-center-themes-light.png" alt="Command Center across 12 light color themes" width="900" />
+  <br/><br/>
+  <img src="./demo/assets/command-center-themes-dark.png" alt="Command Center across 12 dark color themes" width="900" />
+</div>
+
+</details>
+
+### 🔁 Selectable workflows, authored visually
+
+<div align="center">
+  <img src="./demo/assets/workflows.gif" alt="Fusion Workflow Editor: switching between built-in workflow graphs" width="820" />
+</div>
+
+A task's journey from idea to merge is a **workflow** — and it's yours to choose and shape. Pick a built-in (Coding, Quick fix, Review-heavy, Stepwise, PR lifecycle, Compound engineering, and more), inspect its graph, then duplicate and customize columns, gates, model lanes, and review policy in the visual [Workflow Editor](./docs/workflow-editor.md). No engine fork required.
+
+Here's the **Stepwise coding** graph — plan, execute, and review every step before the next — explored node-by-node in Shadcn Light and Dark Gray:
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/workflows-light.gif" alt="Stepwise coding workflow graph in Shadcn Light, panning across nodes" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/workflows-gray.gif" alt="Stepwise coding workflow graph in Shadcn Dark Gray, panning across nodes" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
+
+### 🗨️ Agent chat — talk to your agents, mid-flight
+
+<div align="center">
+  <img src="./demo/assets/agent-chat.gif" alt="Fusion agent chat: a threaded conversation with an agent diagnosing a failed task" width="900" />
+</div>
+
+Direct chat and per-task chat with any agent, on any model. Ask why a task failed, steer an approach, drop attachments, answer in-chat question cards, and resume streams where you left off — full markdown and code rendering throughout.
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/agent-chat-light.png" alt="Agent chat thread in Shadcn Light" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/agent-chat-gray.png" alt="Agent chat thread in Shadcn Dark Gray" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
+
+### 👥 Multi-agent chat rooms
+
+<div align="center">
+  <img src="./demo/assets/chat-rooms.gif" alt="Fusion chat room: CEO, Product Manager, and CTO agents coordinating in #leads" width="900" />
+</div>
+
+Put multiple agents in a room and let them coordinate. Mention a member and it responds directly; ambient members can join the conversation up to a cap. Here the **CEO**, **Product Manager**, and **CTO** agents align on task ownership in `#leads` — no human in the loop. ([Chat docs](./docs/dashboard-guide.md#chat-view))
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/chat-rooms-light.gif" alt="Multi-agent chat room in Shadcn Light" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/chat-rooms-gray.gif" alt="Multi-agent chat room in Shadcn Dark Gray" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
+
+### 📬 Agent mail — an inbox between your agents
+
+<div align="center">
+  <img src="./demo/assets/agent-mail.gif" alt="Fusion mailbox: inter-agent messages with triage summaries and approvals" width="900" />
+</div>
+
+A built-in mailbox for delegation, clarification, and hand-offs. Agents file triage summaries, request approvals, and coordinate work across the fleet — with Inbox, Outbox, Agents, and Approvals views, so you can audit every exchange.
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/agent-mail-light.gif" alt="Agent mailbox in Shadcn Light" /><br/><sub><b>Shadcn Light</b></sub></td>
+<td width="50%"><img src="./demo/assets/agent-mail-gray.gif" alt="Agent mailbox in Shadcn Dark Gray" /><br/><sub><b>Shadcn Dark Gray</b></sub></td>
+</tr>
+</table>
+
+### 📱 Fusion is an AI factory in your pocket
+
+The full board, Command Center, missions, agents, and chat travel with you — native **iOS** and **Android** apps (Capacitor) plus an installable PWA. Start a run on your laptop, steer it from your phone.
+
+<table>
+<tr>
+<td width="33%"><img src="./demo/assets/mobile-board.png" alt="Fusion mobile: board" /></td>
+<td width="33%"><img src="./demo/assets/mobile-command-center.png" alt="Fusion mobile: Command Center" /></td>
+<td width="33%"><img src="./demo/assets/mobile-missions.png" alt="Fusion mobile: missions" /></td>
+</tr>
+<tr>
+<td width="33%"><img src="./demo/assets/mobile-agents.png" alt="Fusion mobile: agents" /></td>
+<td width="33%"><img src="./demo/assets/mobile-chat.png" alt="Fusion mobile: agent chat" /></td>
+<td width="33%"><img src="./demo/assets/mobile-chat-list.png" alt="Fusion mobile: chat list" /></td>
+</tr>
+</table>
+
+<sub>See [MOBILE.md](./MOBILE.md) for the Capacitor + PWA workflow.</sub>
 
 ---
 
@@ -224,72 +425,6 @@ npx companies.sh add paperclipai/companies/gstack
 <br />
 
 > **Hermes**, **Paperclip**, and **OpenClaw** are **experimental** runtime plugins — APIs and wire formats may shift between minor releases.
-
----
-
-## Quick start
-
-**Zero install, straight from npm:**
-
-```bash
-npx runfusion.ai
-```
-
-That launches the dashboard. Subcommands forward through: `npx runfusion.ai task create "fix X"`, `npx runfusion.ai --help`, etc. (Or verbosely: `npx @runfusion/fusion dashboard`.)
-
-**One-line installer** (macOS & Linux — auto-picks Homebrew, falls back to npm):
-
-```bash
-curl -fsSL https://runfusion.ai/install.sh | sh
-fusion dashboard
-```
-
-**Homebrew** (macOS & Linux):
-
-```bash
-brew tap runfusion/fusion
-brew install fusion
-fusion dashboard            # or: fn dashboard
-```
-
-Or as a one-liner (auto-taps): `brew install runfusion/fusion/fusion`.
-
-**npm global**:
-
-```bash
-npm install -g @runfusion/fusion
-fn dashboard                # or: fusion dashboard
-```
-
-**From a clone** (for development):
-
-```bash
-pnpm dev dashboard
-```
-
-Then click the `Open:` URL printed in the terminal. It embeds a bearer token
-(`http://localhost:4040/?token=fn_...`) that the browser captures to
-`localStorage` on first visit and reuses automatically thereafter. On the
-server side, Fusion now persists the dashboard/daemon token in
-`~/.fusion/settings.json` on first authenticated run and reuses it on later
-starts unless you override it (`--token`, `FUSION_DASHBOARD_TOKEN`,
-`FUSION_DAEMON_TOKEN`) or disable auth with `--no-auth`. See
-[CLI reference → fn dashboard → Authentication](./docs/cli-reference.md#fn-dashboard)
-for full precedence and reset/revocation options.
-
-### First-run setup
-
-On first launch, Fusion opens the **onboarding wizard** with three guided steps:
-
-1. **AI Setup** — Use a simplified quick-start provider list (recommended providers plus any already-connected providers), then expand **Advanced provider settings** only if you need additional providers or setup details. You only need one provider to get started. Deprecated Google Gemini CLI / Antigravity provider entries are intentionally hidden; Google/Gemini API key, Google Generative AI, Vertex, and Cloud Code paths remain supported.
-2. **GitHub (Optional)** — Connect GitHub for issue import and PR management
-3. **First Task** — Create your first task or import from GitHub (if no project is active, onboarding first prompts you to register/select a project directory)
-
-The wizard is **dismissible and non-blocking** — click **Skip for now** to use the dashboard immediately. Re-trigger it later from **Settings → Authentication → Reopen onboarding guide**.
-
-### Mobile
-
-For Capacitor + PWA workflow, see [MOBILE.md](./MOBILE.md).
 
 ---
 

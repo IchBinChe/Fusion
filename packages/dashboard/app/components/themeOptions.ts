@@ -4,6 +4,9 @@ import type { ColorTheme, ThemeMode } from "@fusion/core";
 /*
 FNXC:Theme 2026-06-19-12:00:
 The Settings theme grid and Command Center theme dropdown must share one source of truth for theme labels and swatch classes so color-chip affordances stay synchronized across both theme selectors.
+
+FNXC:DashboardTheming 2026-06-22-18:36:
+Ocean is the default theme label for new/unset users. The historical "default" id remains selectable as Fusion Legacy so users who already chose default are not silently moved to Ocean.
 */
 export const THEME_MODES: { value: ThemeMode; label: string; icon: LucideIcon }[] = [
   { value: "light", label: "Light", icon: Sun },
@@ -12,8 +15,8 @@ export const THEME_MODES: { value: ThemeMode; label: string; icon: LucideIcon }[
 ];
 
 export const COLOR_THEMES: { value: ColorTheme; label: string; className: string }[] = [
-  { value: "default", label: "Default", className: "theme-swatch-default" },
-  { value: "ocean", label: "Ocean", className: "theme-swatch-ocean" },
+  { value: "default", label: "Fusion Legacy", className: "theme-swatch-default" },
+  { value: "ocean", label: "Ocean (Default)", className: "theme-swatch-ocean" },
   { value: "forest", label: "Forest", className: "theme-swatch-forest" },
   { value: "sunset", label: "Sunset", className: "theme-swatch-sunset" },
   { value: "zen", label: "Zen", className: "theme-swatch-zen" },
@@ -69,6 +72,7 @@ export const COLOR_THEMES: { value: ColorTheme; label: string; className: string
   { value: "neon-bloom", label: "Neon Bloom", className: "theme-swatch-neon-bloom" },
   { value: "sepia", label: "Sepia", className: "theme-swatch-sepia" },
   { value: "shadcn", label: "Shadcn", className: "theme-swatch-shadcn" },
+  { value: "shadcn-custom", label: "Shadcn Custom", className: "theme-swatch-shadcn-custom" },
   { value: "shadcn-blue", label: "Shadcn Blue", className: "theme-swatch-shadcn-blue" },
   { value: "shadcn-green", label: "Shadcn Green", className: "theme-swatch-shadcn-green" },
   { value: "shadcn-red", label: "Shadcn Red", className: "theme-swatch-shadcn-red" },
@@ -76,8 +80,16 @@ export const COLOR_THEMES: { value: ColorTheme; label: string; className: string
   { value: "shadcn-pink", label: "Shadcn Pink", className: "theme-swatch-shadcn-pink" },
   { value: "shadcn-orange", label: "Shadcn Orange", className: "theme-swatch-shadcn-orange" },
   { value: "shadcn-yellow", label: "Shadcn Yellow", className: "theme-swatch-shadcn-yellow" },
-  { value: "shadcn-mono", label: "Shadcn Mono", className: "theme-swatch-shadcn-mono" },
+  { value: "shadcn-mono-red", label: "Shadcn Mono Red", className: "theme-swatch-shadcn-mono-red" },
+  { value: "shadcn-mono-blue", label: "Shadcn Mono Blue", className: "theme-swatch-shadcn-mono-blue" },
+  { value: "shadcn-mono-green", label: "Shadcn Mono Green", className: "theme-swatch-shadcn-mono-green" },
+  { value: "shadcn-mono-purple", label: "Shadcn Mono Purple", className: "theme-swatch-shadcn-mono-purple" },
+  { value: "shadcn-mono-pink", label: "Shadcn Mono Pink", className: "theme-swatch-shadcn-mono-pink" },
+  { value: "shadcn-mono-orange", label: "Shadcn Mono Orange", className: "theme-swatch-shadcn-mono-orange" },
+  { value: "shadcn-mono-yellow", label: "Shadcn Mono Yellow", className: "theme-swatch-shadcn-mono-yellow" },
   { value: "shadcn-black", label: "Shadcn Black", className: "theme-swatch-shadcn-black" },
   /* FNXC:DashboardTheming 2026-06-20-00:00: Shadcn Gray is the fully-neutral zinc accent option; keep it adjacent to Shadcn Black so selectors mirror the core COLOR_THEMES order. */
   { value: "shadcn-gray", label: "Shadcn Gray", className: "theme-swatch-shadcn-gray" },
+  /* FNXC:DashboardTheming 2026-06-21-00:00: FN-6815 exposes the slate-neutral Shadcn Gray Blue option next to Shadcn Gray so users can pick a blue-tinted gray surface ramp rather than only a blue accent. */
+  { value: "shadcn-gray-blue", label: "Shadcn Gray Blue", className: "theme-swatch-shadcn-gray-blue" },
 ];

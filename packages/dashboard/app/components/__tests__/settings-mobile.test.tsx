@@ -469,6 +469,6 @@ describe("SettingsModal mobile adaptations", () => {
 
     expectBaseRule(css, ".settings-section-heading", "padding: var(--space-lg) 0 var(--space-md);");
     expectBaseRule(css, ".settings-section-heading", "margin: 0;");
-    expectBaseRule(css, ".settings-section-heading", "border-bottom: 1px solid var(--border);");
+    expect(css).not.toMatch(/\.settings-section-heading\s*\{[^}]*border-bottom:\s*1px solid var\(--border\);/);
   });
 });

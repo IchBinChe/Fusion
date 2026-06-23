@@ -18,25 +18,37 @@ export function resolveDroidBinaryPath(settings?: Record<string, unknown>): stri
 
 async function run(binary: string, args: string[], timeoutMs = 2000): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(binary, args, { stdio: ["ignore", "pipe", "pipe"] });
+    } catch {
+      resolve({ code: 127, stdout, stderr });
+      return;
+    }
+
+    /*
+    FNXC:CliRuntime 2026-06-21-12:00:
+    Droid binary probes run on dashboard and engine startup status paths, so they must never reject or wait forever. Convert synchronous spawn guards, ENOENT, and timeout hangs into sentinel exit codes so boot degrades provider availability instead of blocking on a broken local `droid` install.
+    */
+    let settled = false;
+    const settle = (code: number | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ code, stdout, stderr });
+    };
     const timer = setTimeout(() => {
       try { child.kill("SIGKILL"); } catch {
         // ignore kill errors
       }
-      resolve({ code: 124, stdout, stderr });
+      settle(124);
     }, timeoutMs);
     child.stdout?.on("data", (c: Buffer) => { stdout += c.toString("utf-8"); });
     child.stderr?.on("data", (c: Buffer) => { stderr += c.toString("utf-8"); });
-    child.on("error", () => {
-      clearTimeout(timer);
-      resolve({ code: 127, stdout, stderr });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ code, stdout, stderr });
-    });
+    child.on("error", () => settle(127));
+    child.on("close", (code) => settle(code));
   });
 }
 

@@ -3,6 +3,9 @@
 /**
  * Footer status bar that displays real-time executor statistics.
  * Fixed at bottom of viewport, only visible in project view.
+ *
+ * FNXC:FooterChrome 2026-06-22-18:00:
+ * The bottom executor footer must sit flush against main content without visible divider chrome; keep the draggable/layout affordances elsewhere, but do not draw a top border between content and footer or internal separator lines between footer groups.
  */
 .executor-status-bar {
   position: fixed;
@@ -17,7 +20,7 @@
   gap: var(--space-sm);
   padding: var(--space-xs) var(--space-lg);
   background: var(--surface);
-  border-top: 1px solid var(--border);
+  border-top: none;
   font-size: 12px;
   color: var(--text-muted);
   height: 36px;
@@ -44,6 +47,56 @@
 
 .executor-status-bar__segment--time {
   color: var(--text-dim);
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/*
+FNXC:Terminal 2026-06-21-22:13:
+FN-6887 makes the footer status bar the canonical desktop/tablet terminal launcher surface. Mobile continues to use MobileNavBar's More sheet, so this segment is hidden at the mobile breakpoint.
+*/
+.executor-status-bar__segment--terminal-launcher {
+  flex-shrink: 0;
+}
+
+.executor-status-bar__segment--quick-chat-launcher {
+  flex-shrink: 0;
+}
+
+.executor-status-bar__footer-launcher {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-height: calc(var(--space-lg) + var(--space-xs));
+  padding: 0 var(--space-xs);
+  border: none;
+  background: transparent;
+  /*
+   * FNXC:FooterChrome 2026-06-23-00:20:
+   * Quick Chat and Terminal are peer footer launchers. Pin both to the footer's compact UI font and color token so switching the launcher location does not make one control read heavier or dimmer than the other.
+   */
+  color: inherit;
+  font-family: var(--font-primary);
+  font-size: inherit;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.executor-status-bar__footer-launcher:hover {
+  color: var(--text);
+}
+
+.executor-status-bar__footer-launcher:hover span {
+  text-decoration: underline;
+  text-underline-offset: calc(var(--space-xs) / 2);
+}
+
+.executor-status-bar__footer-launcher:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+  border-radius: var(--radius-sm);
 }
 
 .executor-status-bar__segment--stuck {
@@ -161,10 +214,7 @@
 
 /* Divider between segments */
 .executor-status-bar__divider {
-  width: 1px;
-  height: 16px;
-  background: var(--border);
-  flex-shrink: 0;
+  display: none;
 }
 
 /* Project directory toggle/link */
@@ -247,6 +297,9 @@
 /* Time display */
 .executor-status-bar__time {
   color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .executor-status-bar__icon {
@@ -322,6 +375,14 @@
 
 /* Responsive: collapse on small screens */
 @media (max-width: 768px) {
+  /*
+  FNXC:MobileFooter 2026-06-23-22:10:
+  The footer's "last updated" freshness text is useful but lower priority than terminal/script access, chat launch, and status counters on narrow mobile. Hide the time segment first when mobile footer space is tight instead of letting it squeeze controls or counts.
+  */
+  .executor-status-bar__segment--time {
+    display: none;
+  }
+
   .executor-status-bar__fanout-summary {
     max-width: 14ch;
   }
@@ -359,10 +420,6 @@
     display: none;
   }
 
-  .executor-status-bar__divider {
-    height: 12px;
-  }
-
   .executor-status-bar__project-path {
     max-width: min(26ch, 30vw);
   }
@@ -375,7 +432,7 @@
 /* Light theme support */
 [data-theme="light"] .executor-status-bar {
   background: var(--surface);
-  border-top-color: var(--border);
+  border-top: none;
 }
 
 [data-theme="light"] .executor-status-bar__count {
@@ -385,4 +442,3 @@
 [data-theme="light"] .executor-status-bar__state {
   color: var(--color-success);
 }
-

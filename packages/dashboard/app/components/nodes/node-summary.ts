@@ -98,6 +98,10 @@ export function bareSkillName(name: string): string {
  * Catalog name resolution is best-effort: when a catalog is missing or the id is
  * unknown, the raw id/command/name is returned — never blank for a configured
  * node (KTD-6 raw-id fallback).
+ *
+ * FNXC:WorkflowNodeSummary 2026-06-21-00:00:
+ * Built-in prompt nodes that use the default model are configured by their inline prompt or display name even when they do not pin modelProvider/modelId.
+ * Show "Default model" for that model-executor state so workflow editor and mobile graph summaries never imply those built-ins are incomplete.
  */
 export function nodeConfigSummary(
   data: WorkflowFlowNodeData,
@@ -163,6 +167,9 @@ export function nodeConfigSummary(
       const model = modelSummary(config, catalogs);
       if (model) return model;
       if (config.awaitInput === true) return t("workflowNodes.summaryAwaitInput", "Waits for user input");
+      if (str(config.prompt).trim() || str(config.name).trim()) {
+        return t("workflowNodes.summaryDefaultModel", "Default model");
+      }
       return t("workflowNodes.summaryNotConfigured", "Not configured");
     }
     case "script": {

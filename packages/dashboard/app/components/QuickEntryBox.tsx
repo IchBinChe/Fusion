@@ -48,6 +48,16 @@ interface QuickEntryBoxProps {
    * Defaults to true for backward compatibility.
    */
   autoExpand?: boolean;
+  /*
+  FNXC:QuickEntry 2026-06-22-01:10:
+  Initial disclosure (expanded controls) state. List view passes false so quick-add starts COLLAPSED; Board/columns keep the default true so quick-add stays OPEN. This is independent of autoExpand (which only governs expand-on-focus).
+  */
+  defaultExpanded?: boolean;
+  /*
+  FNXC:QuickEntry 2026-06-22-19:25:
+  List view renders quick-add as a COMPACT single-line input so the box isn't tall. When true, the textarea stays one line: isExpanded initializes false, focus does NOT auto-expand it, and auto-resize-to-scrollHeight is short-circuited (capped to the one-line min-height). Board/columns omit singleLine, preserving the tall 80px + auto-grow behavior. singleLine governs only textarea height, not the disclosure/controls panel (which List already collapses via defaultExpanded={false}).
+  */
+  singleLine?: boolean;
   /**
    * Favorited provider IDs from shared app-level state.
    * When provided (alongside availableModels), the component uses these
@@ -91,7 +101,7 @@ function parseModelSelection(value: string): { provider?: string; modelId?: stri
   };
 }
 
-export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels, onPlanningMode, onSubtaskBreakdown, workflowId, projectId, autoExpand = true, favoriteProviders: parentFavoriteProviders, favoriteModels: parentFavoriteModels, onToggleFavorite: parentToggleFavorite, onToggleModelFavorite: parentToggleModelFavorite, onOpenTask }: QuickEntryBoxProps) {
+export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels, onPlanningMode, onSubtaskBreakdown, workflowId, projectId, autoExpand = true, defaultExpanded = true, singleLine = false, favoriteProviders: parentFavoriteProviders, favoriteModels: parentFavoriteModels, onToggleFavorite: parentToggleFavorite, onToggleModelFavorite: parentToggleModelFavorite, onOpenTask }: QuickEntryBoxProps) {
   const { t } = useTranslation("app");
   const [description, setDescription] = useState(() => {
     if (typeof window !== "undefined") {
@@ -102,10 +112,11 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [postSubmitFocusRequest, setPostSubmitFocusRequest] = useState(0);
   // isExpanded controls textarea height styling (auto-resize)
-  const [isExpanded, setIsExpanded] = useState(true);
+  // FNXC:QuickEntry 2026-06-22-19:25: singleLine (List view) starts collapsed so the textarea is one line, not the tall 80px variant.
+  const [isExpanded, setIsExpanded] = useState(!singleLine);
   // isDisclosureExpanded controls visibility of the controls panel (Deps, Models, etc.)
   // Starts expanded by default — controls visible immediately
-  const [isDisclosureExpanded, setIsDisclosureExpanded] = useState(true);
+  const [isDisclosureExpanded, setIsDisclosureExpanded] = useState(defaultExpanded);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const touchButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -320,11 +331,12 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
   }, []);
 
   // Resize when description changes (not in fullscreen mode since CSS handles it)
+  // FNXC:QuickEntry 2026-06-22-19:25: singleLine (List view) must stay one line — skip auto-resize-to-scrollHeight so the textarea never grows tall with content; CSS clamps it to the one-line height.
   useEffect(() => {
-    if (isExpanded) {
+    if (isExpanded && !singleLine) {
       autoResize();
     }
-  }, [description, isExpanded, autoResize]);
+  }, [description, isExpanded, autoResize, singleLine]);
 
   const requestFocusAfterSuccessfulSubmit = useCallback(() => {
     setPostSubmitFocusRequest((request) => request + 1);
@@ -681,7 +693,10 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
         if (e.shiftKey) {
           // Allow Shift+Enter to insert a newline in any quick-entry state
           // Don't prevent default - let the newline be inserted
-          setIsExpanded(true);
+          // FNXC:QuickEntry 2026-06-22-19:25: singleLine (List view) stays one line even on Shift+Enter — do not expand the textarea.
+          if (!singleLine) {
+            setIsExpanded(true);
+          }
           return;
         }
         // Enter without Shift submits
@@ -758,6 +773,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
       projectId,
       setIsDisclosureExpanded,
       duplicateMatches,
+      singleLine,
     ],
   );
 
@@ -771,10 +787,11 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
 
   const handleFocus = useCallback(() => {
     // Auto-expand on focus when autoExpand prop is true (default)
-    if (autoExpand) {
+    // FNXC:QuickEntry 2026-06-22-19:25: never auto-expand the textarea on focus when singleLine (List view) — it must stay one line.
+    if (autoExpand && !singleLine) {
       setIsExpanded(true);
     }
-  }, [autoExpand]);
+  }, [autoExpand, singleLine]);
 
   const toggleDep = useCallback((id: string) => {
     setDependencies((prev) =>
@@ -1351,9 +1368,11 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     } else {
       onPlanningMode?.(trimmed);
     }
-    // Clear the form after triggering planning mode
-    resetForm();
-  }, [description, onPlanningMode, workflowId, addToast, resetForm]);
+    /*
+    FNXC:QuickAddPlanningPreserve 2026-06-22-00:00:
+    Opening planning mode must preserve the quick-add description and scoped draft so exiting planning without creating tasks restores the user's text. The draft is cleared only by planning-completion handlers.
+    */
+  }, [description, onPlanningMode, workflowId, addToast, t]);
 
   const handleSubtaskClick = useCallback(() => {
     const trimmed = description.trim();
@@ -1473,13 +1492,13 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
 
   return (
     <>
-      <div className={`quick-entry-box ${isDisclosureExpanded ? "quick-entry-box--expanded" : "quick-entry-box--collapsed"}`} data-testid="quick-entry-box">
+      <div className={`quick-entry-box ${isDisclosureExpanded ? "quick-entry-box--expanded" : "quick-entry-box--collapsed"}${singleLine ? " quick-entry--single-line" : ""}`} data-testid="quick-entry-box">
       <div className="description-with-refine">
         <div className="quick-entry-main-row">
           <div className="quick-entry-textarea-wrap">
             <textarea
               ref={textareaRef}
-              className={`quick-entry-input ${isExpanded ? "quick-entry-input--expanded" : ""}`}
+              className={`quick-entry-input ${isExpanded && !singleLine ? "quick-entry-input--expanded" : ""}`}
               placeholder={isSubmitting ? t("tasks.creating", "Creating...") : t("tasks.addTaskPlaceholder", "Add a task...")}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
@@ -1489,7 +1508,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
               onBlur={handleBlur}
               disabled={isSubmitting || isDisabled}
               data-testid="quick-entry-input"
-              rows={2}
+              rows={singleLine ? 1 : 2}
               aria-controls="quick-entry-controls"
               aria-expanded={isDisclosureExpanded}
             />
@@ -1656,18 +1675,21 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
               <Lightbulb size={12} style={{ verticalAlign: "middle", marginRight: 4 }} />
               {t("tasks.plan", "Plan")}
             </button>
-            <button
-              type="button"
-              className="btn btn-sm"
-              onClick={handleSubtaskClick}
-              onMouseDown={(e) => e.preventDefault()}
-              disabled={!description.trim()}
-              data-testid="subtask-button"
-              title={t("tasks.subtaskButtonTitle", "Break down into AI-generated subtasks")}
-            >
-              <ListTree size={12} style={{ verticalAlign: "middle", marginRight: 4 }} />
-              {t("tasks.subtask", "Subtask")}
-            </button>
+            {/* FNXC:QuickAddSubtaskFlag 2026-06-21-00:00: Render no Subtask button or click target unless App wires the default-off `subtaskBreakdown` experiment callback. */}
+            {onSubtaskBreakdown && (
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={handleSubtaskClick}
+                onMouseDown={(e) => e.preventDefault()}
+                disabled={!description.trim()}
+                data-testid="subtask-button"
+                title={t("tasks.subtaskButtonTitle", "Break down into AI-generated subtasks")}
+              >
+                <ListTree size={12} style={{ verticalAlign: "middle", marginRight: 4 }} />
+                {t("tasks.subtask", "Subtask")}
+              </button>
+            )}
             <div className="refine-trigger-wrap" ref={refineMenuRef}>
               <button
                 type="button"

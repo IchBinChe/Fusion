@@ -200,6 +200,31 @@ describe("PlanningModeModal", () => {
     });
   });
 
+  describe("embedded presentation", () => {
+    it("renders as a main-content region without modal overlay or backdrop-close behavior", async () => {
+      const { container } = render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          presentation="embedded"
+        />
+      );
+
+      const region = await screen.findByTestId("planning-view");
+      expect(region.getAttribute("role")).toBe("region");
+      expect(region.getAttribute("aria-modal")).toBeNull();
+      expect(container.querySelector(".modal-overlay")).toBeNull();
+      expect(container.querySelector(".planning-modal--embedded")).toBeTruthy();
+
+      fireEvent.mouseDown(region);
+      fireEvent.click(region);
+      expect(mockOnClose).not.toHaveBeenCalled();
+    });
+  });
+
   describe("Planning flow", () => {
     it("starts planning and shows question view", async () => {
       render(

@@ -223,6 +223,7 @@
   "workflowNodes": {
     "summaryAwaitInput": "Waits for user input",
     "summaryCodeDefault": "TypeScript",
+    "summaryDefaultModel": "Default model",
     "summaryGateAdvisory": "Advisory",
     "summaryGateBlocks": "Gate (blocks)",
     "summaryHoldRelease": "Release: {{release}}",

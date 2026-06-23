@@ -17,6 +17,7 @@ const mockSaveApiKey = vi.fn();
 const mockClearApiKey = vi.fn();
 const mockUpdateGlobalSettings = vi.fn();
 const mockCreateTask = vi.fn();
+const mockCreateAgent = vi.fn();
 
 vi.mock("../../api", () => ({
   fetchAuthStatus: (...args: unknown[]) => mockFetchAuthStatus(...args),
@@ -28,6 +29,7 @@ vi.mock("../../api", () => ({
   clearApiKey: (...args: unknown[]) => mockClearApiKey(...args),
   updateGlobalSettings: (...args: unknown[]) => mockUpdateGlobalSettings(...args),
   createTask: (...args: unknown[]) => mockCreateTask(...args),
+  createAgent: (...args: unknown[]) => mockCreateAgent(...args),
 }));
 
 const mockGetOnboardingState = vi.fn();
@@ -56,7 +58,7 @@ vi.mock("../model-onboarding-state", () => ({
   isOnboardingCompleted: (...args: unknown[]) => mockIsOnboardingCompleted(...args),
   isPostOnboardingDismissed: (...args: unknown[]) => mockIsPostOnboardingDismissed(...args),
   dismissPostOnboardingRecommendations: (...args: unknown[]) => mockDismissPostOnboardingRecommendations(...args),
-  ONBOARDING_FLOW_STEPS: ["ai-setup", "github", "project-setup", "first-task"],
+  ONBOARDING_FLOW_STEPS: ["ai-setup", "github", "project-setup", "agent", "first-task"],
 }));
 
 vi.mock("../CustomModelDropdown", () => ({
@@ -196,7 +198,8 @@ async function advanceThroughSteps(_renderResult: RenderResult, actions: Array<"
     } else {
       const skipButton =
         screen.queryByRole("button", { name: "Skip setup →" })
-        ?? screen.queryByRole("button", { name: "Skip GitHub →" });
+        ?? screen.queryByRole("button", { name: "Skip GitHub →" })
+        ?? screen.queryByRole("button", { name: "Skip for now" });
 
       expect(skipButton).toBeTruthy();
       fireEvent.click(skipButton!);
@@ -334,6 +337,7 @@ beforeEach(() => {
   mockClearApiKey.mockResolvedValue({ success: true });
   mockUpdateGlobalSettings.mockResolvedValue({});
   mockCreateTask.mockResolvedValue(createdTaskMock);
+  mockCreateAgent.mockResolvedValue({ id: "agent-1" });
 });
 
 afterEach(() => {
@@ -540,6 +544,11 @@ describe("onboarding flow integration", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Next →" }));
       await waitFor(() => {
+        expect(screen.getByText("Create Your First Agent")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+      await waitFor(() => {
         expect(screen.getByText("Create Your First Task")).toBeInTheDocument();
       });
     });
@@ -586,7 +595,7 @@ describe("onboarding flow integration", () => {
     it("dismissal flow: dismissing on first-task step saves skipped GitHub state", async () => {
       const renderResult = renderModal();
 
-      await advanceThroughSteps(renderResult, ["next", "skip", "next"]);
+      await advanceThroughSteps(renderResult, ["next", "skip", "next", "skip"]);
 
       await waitFor(() => {
         expect(screen.getByText("Create Your First Task")).toBeInTheDocument();
@@ -626,7 +635,7 @@ describe("onboarding flow integration", () => {
 
       expect(screen.getByText("Continue Setup")).toBeInTheDocument();
       expect(screen.getByText(/GitHub/)).toBeInTheDocument();
-      expect(screen.getByText(/1 of 4 step complete/)).toBeInTheDocument();
+      expect(screen.getByText(/1 of 5 step complete/)).toBeInTheDocument();
     });
   });
 
@@ -682,7 +691,7 @@ describe("onboarding flow integration", () => {
         expect(screen.getByText("Connect GitHub")).toBeInTheDocument();
       });
 
-      await advanceThroughSteps(renderResult, ["next", "next"]);
+      await advanceThroughSteps(renderResult, ["next", "next", "skip"]);
 
       await waitFor(() => {
         expect(screen.getByText("Create Your First Task")).toBeInTheDocument();
@@ -802,7 +811,7 @@ describe("onboarding flow integration", () => {
 
       const renderResult = renderModal();
 
-      await advanceThroughSteps(renderResult, ["next", "next", "next"]);
+      await advanceThroughSteps(renderResult, ["next", "next", "next", "skip"]);
 
       await waitFor(() => {
         expect(screen.getByText("Create Your First Task")).toBeInTheDocument();
@@ -821,7 +830,7 @@ describe("onboarding flow integration", () => {
         expect(screen.getByText("Anthropic")).toBeInTheDocument();
       });
 
-      await advanceThroughSteps(renderResult, ["skip", "skip", "next"]);
+      await advanceThroughSteps(renderResult, ["skip", "skip", "next", "skip"]);
 
       await waitFor(() => {
         expect(screen.getByText("Create Your First Task")).toBeInTheDocument();
@@ -842,7 +851,7 @@ describe("onboarding flow integration", () => {
 
       const renderResult = renderModal();
 
-      await advanceThroughSteps(renderResult, ["next", "next", "next"]);
+      await advanceThroughSteps(renderResult, ["next", "next", "next", "skip"]);
 
       await waitFor(() => {
         expect(screen.getByText("Create Your First Task")).toBeInTheDocument();
@@ -869,7 +878,7 @@ describe("onboarding flow integration", () => {
 
       const renderResult = renderModal();
 
-      await advanceThroughSteps(renderResult, ["next", "next", "next"]);
+      await advanceThroughSteps(renderResult, ["next", "next", "next", "skip"]);
 
       await waitFor(() => {
         expect(screen.getByText("Create Your First Task")).toBeInTheDocument();
@@ -881,7 +890,7 @@ describe("onboarding flow integration", () => {
     it("skip warnings: Import from GitHub CTA shows connection requirement note when GitHub not connected", async () => {
       const renderResult = renderModal();
 
-      await advanceThroughSteps(renderResult, ["next", "next", "next"]);
+      await advanceThroughSteps(renderResult, ["next", "next", "next", "skip"]);
 
       await waitFor(() => {
         expect(screen.getByText("Create Your First Task")).toBeInTheDocument();
@@ -900,7 +909,7 @@ describe("onboarding flow integration", () => {
 
       const renderResult = renderModal();
 
-      await advanceThroughSteps(renderResult, ["next", "next", "next"]);
+      await advanceThroughSteps(renderResult, ["next", "next", "next", "skip"]);
 
       await waitFor(() => {
         expect(screen.getByText("Create Your First Task")).toBeInTheDocument();
@@ -918,7 +927,7 @@ describe("onboarding flow integration", () => {
     it("task creation flow: inline task creation shows success state and marks onboarding complete", async () => {
       const renderResult = renderModal();
 
-      await advanceThroughSteps(renderResult, ["next", "next", "next"]);
+      await advanceThroughSteps(renderResult, ["next", "next", "next", "skip"]);
       await simulateFirstTaskCreation(renderResult, "Ship onboarding telemetry");
 
       await waitFor(() => {
@@ -938,7 +947,7 @@ describe("onboarding flow integration", () => {
     it("task creation flow: View Task button navigates and completes onboarding", async () => {
       const renderResult = renderModal();
 
-      await advanceThroughSteps(renderResult, ["next", "next", "next"]);
+      await advanceThroughSteps(renderResult, ["next", "next", "next", "skip"]);
       await simulateFirstTaskCreation(renderResult, "View task flow");
 
       await waitFor(() => {
@@ -990,6 +999,12 @@ describe("onboarding flow integration", () => {
       fireEvent.click(screen.getByRole("button", { name: "Next →" }));
 
       await waitFor(() => {
+        expect(screen.getByText("Create Your First Agent")).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+
+      await waitFor(() => {
         expect(screen.getByText("Create Your First Task")).toBeInTheDocument();
       });
 
@@ -1013,7 +1028,7 @@ describe("onboarding flow integration", () => {
     it("task creation flow: Finish Setup button (without creating task) completes onboarding", async () => {
       const renderResult = renderModal();
 
-      await advanceThroughSteps(renderResult, ["next", "next", "next"]);
+      await advanceThroughSteps(renderResult, ["next", "next", "next", "skip"]);
 
       fireEvent.click(screen.getByRole("button", { name: "Finish Setup" }));
 
@@ -1027,7 +1042,7 @@ describe("onboarding flow integration", () => {
     it("task creation flow: Create a New Task CTA completes onboarding and triggers external task dialog", async () => {
       const renderResult = renderModal();
 
-      await advanceThroughSteps(renderResult, ["next", "next", "next"]);
+      await advanceThroughSteps(renderResult, ["next", "next", "next", "skip"]);
 
       fireEvent.click(screen.getByRole("button", { name: /Create a New Task/i }));
 
@@ -1049,7 +1064,7 @@ describe("onboarding flow integration", () => {
 
       const renderResult = renderModal();
 
-      await advanceThroughSteps(renderResult, ["next", "next", "next"]);
+      await advanceThroughSteps(renderResult, ["next", "next", "next", "skip"]);
 
       fireEvent.click(screen.getByRole("button", { name: /Import from GitHub/i }));
 
@@ -1064,7 +1079,7 @@ describe("onboarding flow integration", () => {
     it("task creation flow: validation error on empty description does not call createTask", async () => {
       const renderResult = renderModal();
 
-      await advanceThroughSteps(renderResult, ["next", "next", "next"]);
+      await advanceThroughSteps(renderResult, ["next", "next", "next", "skip"]);
 
       fireEvent.click(screen.getByTestId("onboarding-first-task-submit"));
 
@@ -1076,7 +1091,7 @@ describe("onboarding flow integration", () => {
       mockCreateTask.mockRejectedValueOnce(new Error("Task API unavailable"));
       const renderResult = renderModal();
 
-      await advanceThroughSteps(renderResult, ["next", "next", "next"]);
+      await advanceThroughSteps(renderResult, ["next", "next", "next", "skip"]);
       await simulateFirstTaskCreation(renderResult, "Retryable task");
 
       await waitFor(() => {
@@ -1090,7 +1105,7 @@ describe("onboarding flow integration", () => {
     it("task creation flow: Get Started button on complete step closes the modal", async () => {
       const renderResult = renderModal();
 
-      await advanceThroughSteps(renderResult, ["next", "next", "next"]);
+      await advanceThroughSteps(renderResult, ["next", "next", "next", "skip"]);
 
       fireEvent.click(screen.getByRole("button", { name: "Finish Setup" }));
 

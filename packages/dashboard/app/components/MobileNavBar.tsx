@@ -13,7 +13,6 @@ import {
   Gauge,
   GitBranch,
   Grid3X3,
-  History,
   LayoutGrid,
   Lightbulb,
   Loader2,
@@ -85,8 +84,6 @@ export interface MobileNavBarProps {
   onOpenScripts?: () => void;
   onToggleTerminal?: () => void;
   onOpenFiles?: () => void;
-  onOpenTodos?: () => void;
-  todosOpen?: boolean;
   onOpenGitHubImport?: () => void;
   onOpenPlanning?: () => void;
   onResumePlanning?: () => void;
@@ -148,8 +145,6 @@ export function MobileNavBar({
   onOpenScripts,
   onToggleTerminal,
   onOpenFiles,
-  onOpenTodos,
-  todosOpen = false,
   onOpenGitHubImport,
   onOpenPlanning,
   onResumePlanning,
@@ -267,7 +262,11 @@ export function MobileNavBar({
 
   // Keep optional primary tabs limited to preserve touch-target width.
   // Overflowed destinations remain available in the More sheet.
-  const showSkillsTopLevel = skillsEnabled;
+  /*
+  FNXC:Navigation 2026-06-22-01:40:
+  Skills is never a top-level mobile tab; when enabled it lives only in the three-dot More overflow sheet.
+  */
+  const showSkillsTopLevel = false;
   const showSkillsInMore = skillsEnabled && !showSkillsTopLevel;
   const sortedPrimaryPluginViews = pluginDashboardViews
     .filter((entry) => entry.view.placement === "primary")
@@ -299,10 +298,9 @@ export function MobileNavBar({
     || view === "secrets"
     || view === "devserver"
     || view === "dev-server"
-    || (todosOpen && todoViewEnabled)
+    || (view === "todos" && todoViewEnabled)
     || (view === "skills" && !showSkillsTopLevel)
     || view === "graph"
-    || view === "stash-recovery"
     || (isPluginViewId(view) && !topLevelPrimaryPluginViews.some((entry) => buildPluginTaskViewId(entry.pluginId, entry.view.viewId) === view));
 
   return (
@@ -313,6 +311,24 @@ export function MobileNavBar({
         role="tablist"
         aria-label={t("nav.primaryNavAriaLabel", "Primary navigation")}
       >
+        {/*
+        FNXC:Navigation 2026-06-22-01:40:
+        Dashboard (Command Center) is the first mobile tab, before Tasks, matching the desktop sidebar order.
+        */}
+        <button
+          type="button"
+          className={`mobile-nav-tab${view === "command-center" ? " mobile-nav-tab--active" : ""}`}
+          data-testid="mobile-nav-tab-command-center"
+          role="tab"
+          aria-selected={view === "command-center"}
+          onClick={() => onChangeView("command-center")}
+        >
+          <span className="mobile-nav-tab-icon-wrapper">
+            <Gauge />
+          </span>
+          <span className="mobile-nav-tab-label">{t("nav.commandCenter", "Dashboard")}</span>
+        </button>
+
         <button
           type="button"
           className={`mobile-nav-tab${view === "board" || view === "list" ? " mobile-nav-tab--active" : ""}`}
@@ -405,20 +421,6 @@ export function MobileNavBar({
           )}
         </button>
 
-        <button
-          type="button"
-          className={`mobile-nav-tab${view === "command-center" ? " mobile-nav-tab--active" : ""}`}
-          data-testid="mobile-nav-tab-command-center"
-          role="tab"
-          aria-selected={view === "command-center"}
-          onClick={() => onChangeView("command-center")}
-        >
-          <span className="mobile-nav-tab-icon-wrapper">
-            <Gauge />
-          </span>
-          <span className="mobile-nav-tab-label">{t("nav.commandCenter", "Command Center")}</span>
-        </button>
-
         {showSkillsTopLevel && (
           <button
             type="button"
@@ -506,6 +508,7 @@ export function MobileNavBar({
             >
               <GitBranch />
               <span>{t("nav.gitManager", "Git Manager")}</span>
+              {stashOrphanCount > 0 ? <span className="mobile-more-item-badge">{formatCount(stashOrphanCount)}</span> : null}
             </button>
 
             <div className="mobile-more-split-row">
@@ -674,7 +677,8 @@ export function MobileNavBar({
               onClick={() => handleMoreAction(() => onChangeView("documents"))}
             >
               <FileText />
-              <span>{t("nav.documents", "Documents")}</span>
+              {/* FNXC:Navigation 2026-06-21-18:25: FN-6890 changes only the displayed top-level label to Artifacts; mobile-more-item-documents and the documents view id stay stable. */}
+              <span>{t("nav.documents", "Artifacts")}</span>
             </button>
 
             {experimentalFeatures?.evalsView && (
@@ -711,19 +715,6 @@ export function MobileNavBar({
                 <span>{t("nav.skills", "Skills")}</span>
               </button>
             )}
-
-
-
-            <button
-              type="button"
-              className="mobile-more-item"
-              data-testid="mobile-more-item-stash-recovery"
-              onClick={() => handleMoreAction(() => onChangeView("stash-recovery"))}
-            >
-              <History />
-              <span>{t("nav.stashRecovery", "Stash Recovery")}</span>
-              {stashOrphanCount > 0 ? <span className="mobile-more-item-badge">{formatCount(stashOrphanCount)}</span> : null}
-            </button>
 
             {experimentalFeatures?.researchView && (
               <button
@@ -790,7 +781,7 @@ export function MobileNavBar({
                 type="button"
                 className="mobile-more-item"
                 data-testid="mobile-more-item-todos"
-                onClick={() => handleMoreAction(() => onOpenTodos?.())}
+                onClick={() => handleMoreAction(() => onChangeView("todos"))}
               >
                 <CheckSquare />
                 <span>{t("nav.todos", "Todos")}</span>

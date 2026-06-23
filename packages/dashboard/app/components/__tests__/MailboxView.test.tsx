@@ -181,6 +181,8 @@ describe("MailboxView", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    window.history.replaceState({}, "", "/");
+    Element.prototype.scrollIntoView = vi.fn();
     window.localStorage.clear();
     sseSubscriptions.length = 0;
     mockUseViewportMode.mockReturnValue("desktop");
@@ -865,6 +867,134 @@ describe("MailboxView", () => {
       expect(screen.queryByTestId("mailbox-message-detail")).toBeNull();
       expect(screen.getByTestId("mailbox-inbox-list")).toBeDefined();
     });
+  });
+
+  it("keeps a manually selected mobile message after a stale deep link and refresh", async () => {
+    mockUseViewportMode.mockReturnValue("mobile");
+    window.history.replaceState({}, "", "?view=mailbox&mailbox-message=msg-001#message-msg-001");
+    const clickedMessage: Message = {
+      ...mockReadMessage,
+      read: false,
+      content: "Newer mobile selection body",
+      fromId: mockMessage.fromId,
+      fromType: mockMessage.fromType,
+    };
+
+    mockFetchInbox
+      .mockResolvedValueOnce(makeInboxResponse([mockMessage, clickedMessage], 1))
+      .mockResolvedValue(makeInboxResponse([mockMessage, clickedMessage], 1));
+    const staleThread = [mockMessage];
+    mockFetchConversation.mockResolvedValue(staleThread);
+    mockMarkMessageRead.mockImplementation(async (messageId) => ({
+      ...(messageId === clickedMessage.id ? clickedMessage : mockMessage),
+      read: true,
+    }));
+
+    render(<MailboxView {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-message-body")).toHaveTextContent(mockMessage.content);
+      expect(mockMarkMessageRead).toHaveBeenCalledWith("msg-001", undefined);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mailbox-back-to-list"));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-item-msg-002")).toBeDefined();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-002"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-message-body")).toHaveTextContent("Newer mobile selection body");
+      expect(mockMarkMessageRead).toHaveBeenCalledWith("msg-002", undefined);
+      expect(mockFetchConversation).toHaveBeenLastCalledWith(clickedMessage.fromId, clickedMessage.fromType, undefined);
+    });
+
+    await act(async () => {
+      sseSubscriptions.at(-1)?.["message:received"]?.();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-message-body")).toHaveTextContent("Newer mobile selection body");
+      expect(screen.getByTestId("mailbox-message-detail")).toHaveAttribute("id", "mailbox-detail-message-msg-002");
+    });
+  });
+
+  it("lets desktop split-pane row selection override a stale deep link", async () => {
+    window.history.replaceState({}, "", "?view=mailbox&mailbox-message=msg-001#message-msg-001");
+    const clickedMessage: Message = {
+      ...mockReadMessage,
+      read: false,
+      content: "Desktop selected message body",
+      fromId: mockMessage.fromId,
+      fromType: mockMessage.fromType,
+    };
+
+    mockFetchInbox.mockResolvedValue(makeInboxResponse([mockMessage, clickedMessage], 1));
+    mockFetchConversation.mockResolvedValue([mockMessage]);
+    mockMarkMessageRead.mockImplementation(async (messageId) => ({
+      ...(messageId === clickedMessage.id ? clickedMessage : mockMessage),
+      read: true,
+    }));
+
+    render(<MailboxView {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-message-body")).toHaveTextContent(mockMessage.content);
+      expect(screen.getByTestId("mailbox-inbox-list")).toBeDefined();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-002"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-message-body")).toHaveTextContent("Desktop selected message body");
+      expect(screen.getByTestId("mailbox-message-detail")).toHaveAttribute("id", "mailbox-detail-message-msg-002");
+    });
+  });
+
+  it("keeps tab changes from restoring a consumed mailbox deep link", async () => {
+    window.history.replaceState({}, "", "?view=mailbox&mailbox-message=msg-001#message-msg-001");
+    mockFetchInbox.mockResolvedValue(makeInboxResponse([mockMessage], 1));
+    mockFetchOutbox.mockResolvedValue(makeOutboxResponse([]));
+    mockFetchConversation.mockResolvedValue([mockMessage]);
+    mockMarkMessageRead.mockResolvedValue({ ...mockMessage, read: true });
+
+    render(<MailboxView {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-message-detail")).toHaveAttribute("id", "mailbox-detail-message-msg-001");
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mailbox-tab-outbox"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-outbox-empty")).toBeDefined();
+      expect(screen.queryByTestId("mailbox-message-detail")).toBeNull();
+    });
+  });
+
+  it("ignores unknown deep links and empty inboxes without fabricating a selected message", async () => {
+    window.history.replaceState({}, "", "?view=mailbox&mailbox-message=missing#message-missing");
+    mockFetchInbox.mockResolvedValue(makeInboxResponse([], 0));
+    mockFetchConversation.mockResolvedValue([]);
+
+    render(<MailboxView {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-inbox-empty")).toBeDefined();
+    });
+
+    expect(screen.queryByTestId("mailbox-message-detail")).toBeNull();
+    expect(mockMarkMessageRead).not.toHaveBeenCalled();
+    expect(mockFetchConversation).not.toHaveBeenCalled();
   });
 
   it("shows agent names in message detail participant rows", async () => {
@@ -1794,11 +1924,12 @@ describe("MailboxView", () => {
       const afterRight = Number(handle.getAttribute("aria-valuenow"));
       expect(afterRight).toBeGreaterThanOrEqual(afterLeft);
 
+      // FNXC:Mailbox 2026-06-22-18:05: Home clamps to MAILBOX_SIDEBAR_MIN_WIDTH (locked at 180); End clamps to the container max ratio.
       fireEvent.keyDown(handle, { key: "Home" });
-      expect(Number(handle.getAttribute("aria-valuenow"))).toBe(280);
+      expect(Number(handle.getAttribute("aria-valuenow"))).toBe(180);
 
       fireEvent.keyDown(handle, { key: "End" });
-      expect(Number(handle.getAttribute("aria-valuenow"))).toBeGreaterThanOrEqual(280);
+      expect(Number(handle.getAttribute("aria-valuenow"))).toBeGreaterThanOrEqual(180);
     });
 
     it("persists and restores scoped mailbox sidebar width", async () => {
@@ -1854,21 +1985,52 @@ describe("MailboxView", () => {
       expect(contentBlock).toContain("min-height: 0;");
       expect(contentBlock).toContain("overflow-y: auto;");
       expect(contentBlock).toContain("max-height: none;");
+      expect(contentBlock).toContain("padding: 0;");
     });
 
     it("defines desktop/tablet split-pane selectors under .mailbox-view scope", async () => {
       const css = loadAllAppCss();
 
-      expect(css).toMatch(/\.mailbox-view\s+\.mailbox-split-layout\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*auto\s+auto\s+minmax\(0,\s*1fr\);[^}]*gap:\s*0;[^}]*min-height:\s*0;[^}]*\}/);
+      // FNXC:Mailbox 2026-06-22-18:05: split layout is a flex row so the list pane's inline width is honored (drag-resizable); grid `auto` tracks ignored it.
+      expect(css).toMatch(/\.mailbox-view\s+\.mailbox-split-layout\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*row;[^}]*gap:\s*0;[^}]*min-height:\s*0;[^}]*\}/);
 
       const splitPaneBlockMatch = css.match(/\.mailbox-view\s+\.mailbox-split-list-pane,\s*\n\.mailbox-view\s+\.mailbox-split-detail-pane\s*\{([^}]*)\}/);
       expect(splitPaneBlockMatch).toBeTruthy();
       const splitPaneBlock = splitPaneBlockMatch![1];
       expect(splitPaneBlock).toContain("overflow-y: auto;");
-      expect(splitPaneBlock).toContain("border: var(--btn-border-width) solid var(--border);");
       expect(splitPaneBlock).toContain("background: var(--surface);");
+      expect(splitPaneBlock).not.toContain("border: var(--btn-border-width) solid var(--border);");
+      expect(splitPaneBlock).not.toContain("border-radius: var(--radius-md);");
 
-      expect(css).toMatch(/\.mailbox-view\s+\.mailbox-split-resize-handle\s*\{[^}]*cursor:\s*col-resize;[^}]*background:\s*color-mix\(in srgb,\s*var\(--border\)\s*70%,\s*transparent\);[^}]*\}/);
+      // FNXC:MailboxView 2026-06-22-12:58: full-page Mailbox list pane mirrors Chat's left sidebar surface and spacing.
+      const listPaneBlockMatch = css.match(/\.mailbox-view\s+\.mailbox-split-list-pane\s*\{([^}]*)\}/);
+      expect(listPaneBlockMatch).toBeTruthy();
+      expect(listPaneBlockMatch![1]).toContain("flex: 0 0 auto;");
+      expect(listPaneBlockMatch![1]).toContain("min-width: 0;");
+      expect(listPaneBlockMatch![1]).toContain("max-width: 500px;");
+      expect(listPaneBlockMatch![1]).toContain("border-right: var(--btn-border-width) solid var(--border);");
+      expect(listPaneBlockMatch![1]).toContain("background: var(--bg-secondary);");
+
+      // Match the standalone detail-pane rule (the one declaring `display: flex;`), not the shared border/background block.
+      const detailPaneBlockMatch = css.match(/\.mailbox-view\s+\.mailbox-split-detail-pane\s*\{([^}]*display:\s*flex;[^}]*)\}/);
+      expect(detailPaneBlockMatch).toBeTruthy();
+      expect(detailPaneBlockMatch![1]).toContain("flex: 1 1 auto;");
+      expect(detailPaneBlockMatch![1]).toContain("min-width: 0;");
+      expect(detailPaneBlockMatch![1]).toContain("padding: var(--space-lg);");
+
+      const resizeHandleBlockMatch = css.match(/\.mailbox-view\s+\.mailbox-split-resize-handle\s*\{([^}]*)\}/);
+      expect(resizeHandleBlockMatch).toBeTruthy();
+      const resizeHandleBlock = resizeHandleBlockMatch![1];
+      // FNXC:SidebarDivider 2026-06-22-13:26: handle mirrors the Chat sidebar divider — hit area var(--space-sm), transparent handle background, centered hover-only var(--space-xs) tint.
+      expect(resizeHandleBlock).toContain("width: var(--space-sm);");
+      expect(resizeHandleBlock).toContain("cursor: col-resize;");
+      expect(resizeHandleBlock).toContain("background: transparent;");
+
+      const resizeHandleTargetBlockMatch = css.match(/\.mailbox-view\s+\.mailbox-split-resize-handle::before\s*\{([^}]*)\}/);
+      expect(resizeHandleTargetBlockMatch).toBeTruthy();
+      expect(resizeHandleTargetBlockMatch![1]).toContain("width: var(--space-xs);");
+      expect(resizeHandleTargetBlockMatch![1]).not.toContain("background: var(--border);");
+      expect(css).toMatch(/\.mailbox-view\s+\.mailbox-split-resize-handle:hover::before,\s*\n\.mailbox-view\s+\.mailbox-split-resize-handle:active::before\s*\{[^}]*background:\s*color-mix\(in srgb,\s*var\(--todo\)\s*30%,\s*transparent\);[^}]*\}/);
 
       const splitEmptyBlockMatch = css.match(/\.mailbox-view\s+\.mailbox-split-empty\s*\{([^}]*)\}/);
       expect(splitEmptyBlockMatch).toBeTruthy();
@@ -2003,9 +2165,12 @@ describe("MailboxView", () => {
       // Verify root element with data-testid
       expect(screen.getByTestId("mailbox-view")).toBeDefined();
 
-      // Verify header
-      const header = container.querySelector(".mailbox-header");
+      // FNXC:Navigation 2026-06-22-01:10: MailboxView migrated its bespoke
+      // .mailbox-header to the shared ViewHeader (.view-header) modeled after
+      // Command Center; assert the shared header element with the Mailbox title.
+      const header = container.querySelector(".view-header");
       expect(header).toBeTruthy();
+      expect(header?.querySelector(".view-header__title")?.textContent).toContain("Mailbox");
 
       // Verify tabs
       const tabs = container.querySelector(".mailbox-tabs");

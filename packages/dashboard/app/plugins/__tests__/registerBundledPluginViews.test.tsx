@@ -8,7 +8,6 @@ import {
 
 const MockDependencyGraphDashboardView = () => createElement("div", { "data-testid": "dep-graph-view" });
 const MockCompoundEngineeringDashboardView = () => createElement("div", { "data-testid": "ce-view" });
-const MockRoadmapDashboardView = () => createElement("div", { "data-testid": "roadmap-view" });
 const MockCliPrintingPressWizardView = () => createElement("div", { "data-testid": "cli-printing-press-view" });
 const MockCliPrintingPressManageView = () => createElement("div", { "data-testid": "cli-printing-press-manage-view" });
 
@@ -18,10 +17,6 @@ vi.mock("@fusion-plugin-examples/dependency-graph/dashboard-view", () => ({
 
 vi.mock("@fusion-plugin-examples/compound-engineering/dashboard-view", () => ({
   CompoundEngineeringDashboardView: (...args: unknown[]) => MockCompoundEngineeringDashboardView(...args),
-}));
-
-vi.mock("@fusion-plugin-examples/fusion-plugin-roadmap/dashboard-view", () => ({
-  RoadmapDashboardView: (...args: unknown[]) => MockRoadmapDashboardView(...args),
 }));
 
 vi.mock("@fusion-plugin-examples/cli-printing-press/dashboard-view", () => ({
@@ -41,7 +36,7 @@ describe("registerBundledPluginViews", () => {
     __test_resetBundledPluginViewRegistration();
   });
 
-  it("registers dependency graph, compound engineering, roadmap, and cli printing press bundled views", () => {
+  it("registers dependency graph, compound engineering, and cli printing press bundled views", () => {
     registerBundledPluginViews();
 
     // This registration is independent of engine-side plugin load success; the
@@ -50,7 +45,8 @@ describe("registerBundledPluginViews", () => {
     expect(getPluginViewComponent("fusion-plugin-dependency-graph", "graph")).toBeTruthy();
     expect(isPluginViewRegistered("fusion-plugin-compound-engineering", "compound-engineering")).toBe(true);
     expect(getPluginViewComponent("fusion-plugin-compound-engineering", "compound-engineering")).toBeTruthy();
-    expect(getPluginViewComponent("fusion-plugin-roadmap", "roadmaps")).toBeTruthy();
+    // FNXC:RoadmapsNavigation 2026-06-22-18:50: Roadmaps no longer registers as a dashboard view.
+    expect(getPluginViewComponent("fusion-plugin-roadmap", "roadmaps")).toBeNull();
     expect(getPluginViewComponent("fusion-plugin-cli-printing-press", "wizard")).toBeTruthy();
     expect(getPluginViewComponent("fusion-plugin-cli-printing-press", "manage")).toBeTruthy();
   });
@@ -70,7 +66,7 @@ describe("registerBundledPluginViews", () => {
 
     expect(isPluginViewRegistered("fusion-plugin-dependency-graph", "graph")).toBe(true);
     expect(isPluginViewRegistered("fusion-plugin-compound-engineering", "compound-engineering")).toBe(true);
-    expect(isPluginViewRegistered("fusion-plugin-roadmap", "roadmaps")).toBe(true);
+    expect(isPluginViewRegistered("fusion-plugin-roadmap", "roadmaps")).toBe(false);
     expect(isPluginViewRegistered("fusion-plugin-cli-printing-press", "wizard")).toBe(true);
     expect(isPluginViewRegistered("fusion-plugin-cli-printing-press", "manage")).toBe(true);
     // Unknown plugin/view should not be registered

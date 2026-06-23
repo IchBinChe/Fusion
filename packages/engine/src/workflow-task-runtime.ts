@@ -99,7 +99,7 @@ export class WorkflowTaskRuntime {
       runId: this.deps.runId ?? `${task.id}:${target.workflowId}`,
     });
 
-    const runtimeSettings = forceWorkflowGraphExecutor(settings);
+    const runtimeSettings = buildWorkflowRuntimeSettings(settings);
     let result: Awaited<ReturnType<WorkflowGraphExecutor["run"]>>;
     try {
       result = await executor.run(task, runtimeSettings, target.ir);
@@ -187,7 +187,7 @@ export class WorkflowTaskRuntime {
       return this.failWorkItem(workItem, `workflow-work-item-node-unhandled:${node.kind}`);
     }
 
-    const runtimeSettings = forceWorkflowGraphExecutor(settings);
+    const runtimeSettings = buildWorkflowRuntimeSettings(settings);
     let outcome: WorkflowNodeOutcome = "success";
     let reason: string | undefined;
     let context: Record<string, unknown> = {
@@ -322,14 +322,8 @@ function builtinCodingTarget(): WorkflowRuntimeTarget {
   return { workflowId: "builtin:coding", ir: BUILTIN_CODING_WORKFLOW_IR };
 }
 
-function forceWorkflowGraphExecutor(
+function buildWorkflowRuntimeSettings(
   settings: (Pick<Settings, "experimentalFeatures"> & Partial<Settings>) | undefined,
 ): Pick<Settings, "experimentalFeatures"> & Partial<Settings> {
-  return {
-    ...(settings ?? {}),
-    experimentalFeatures: {
-      ...(settings?.experimentalFeatures ?? {}),
-      workflowGraphExecutor: true,
-    },
-  };
+  return { ...(settings ?? {}) };
 }

@@ -10,7 +10,7 @@ import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode, WorkflowIrNodeKind } from "@fusion/core";
 import { getUnmetSchedulingDependencies } from "./scheduler.js";
-import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, isWorkflowColumnsEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker, allowsAutoMergeProcessing, isSharedBranchGroupMemberIntegration, resolveMaxAutoMergeRetries } from "@fusion/core";
+import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker, allowsAutoMergeProcessing, isSharedBranchGroupMemberIntegration, resolveMaxAutoMergeRetries } from "@fusion/core";
 import { mergeEffectiveSettings } from "./effective-settings.js";
 import type { TaskStep, WorkflowIr, WorkflowFieldDefinition, WorkflowColumnAgent, EffectiveAgentInput, WorkflowWorkEngineDispatchResult } from "@fusion/core";
 import {
@@ -78,6 +78,7 @@ import {
 } from "./agent-session-helpers.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
 import { reviewStep, type ReviewVerdict, type ReviewResult } from "./reviewer.js";
+import { selectUserCommentsForAgentContext } from "./agent-user-comments.js";
 import { resolveSandboxBackend } from "./sandbox/index.js";
 import type { SandboxBackend } from "./sandbox/types.js";
 import { ModelRegistry, SessionManager, type ToolDefinition, type AgentSession } from "@earendil-works/pi-coding-agent";
@@ -187,6 +188,9 @@ import {
   createUpdateAgentConfigTool,
   createResearchTools,
   createSendMessageTool,
+  createArtifactListTool as sharedCreateArtifactListTool,
+  createArtifactRegisterTool as sharedCreateArtifactRegisterTool,
+  createArtifactViewTool as sharedCreateArtifactViewTool,
   createTaskCreateTool as sharedCreateTaskCreateTool,
   createTaskDocumentReadTool as sharedCreateTaskDocumentReadTool,
   createTaskDocumentWriteTool as sharedCreateTaskDocumentWriteTool,
@@ -1264,6 +1268,10 @@ You can save and retrieve named documents for this task. Use these to store plan
 
 Documents are versioned — each write creates a new revision. Use meaningful keys like "plan", "notes", "research", "architecture".
 
+## Artifact Registry
+
+Use \`fn_artifact_register\` to register multi-type artifacts for discovery across agents and tasks, \`fn_artifact_list\` to find registered artifacts by type/author/task/search, and \`fn_artifact_view\` to inspect artifact metadata plus inline content or URI references. Artifact registration sends a best-effort system inbox notification to the dashboard user; notification failures do not make registration fail.
+
 **IMPORTANT — Save your deliverables as documents:** When your task produces written output (documentation, specifications, reports, API references, README updates, guides, or any other content), you MUST save that content as a task document using \`fn_task_document_write\`. Use a key that describes the deliverable (e.g., key="readme", key="api-docs", key="changelog"). Do this in addition to writing the file to disk — the document persists in the task for review even after the worktree is cleaned up.
 
 If the task's PROMPT.md includes a "Documentation Requirements" section listing files to update, save each updated file's final content as a task document with a matching key.
@@ -1300,6 +1308,11 @@ You are running in an **isolated git worktree**. This means:
 If you attempt to write to a path outside the worktree, the file tools will reject the operation with an error explaining the boundary.
 
 ## Guardrails
+<!--
+FNXC:WorkflowRouting 2026-06-22-17:26:
+Executors must not move the workflow of the task they are executing unless the user explicitly asked for that task's workflow. Agents remain free to set workflows on tasks they create because they are the creator for those new tasks.
+-->
+- Do not call \`fn_workflow_select\` to change the workflow of the task you are executing; you did not create that task, the user or triage did. The only exception is when the user explicitly requested a specific workflow for this task in a steering comment, task instruction, or similar direct instruction. You may still set the workflow on tasks you create via \`fn_task_create\` or \`fn_delegate_task\`, because you are the creator of those new tasks.
 - **NEVER kill processes on port 4040.** Port 4040 is the production dashboard. Do not run \`kill\`, \`pkill\`, \`killall\`, or \`lsof -ti:4040 | xargs kill\` against it. If you need to start a test server, use \`--port 0\` for a random free port. If port 4040 is occupied, pick a different port — do NOT kill the occupant.
 - Treat the File Scope in PROMPT.md as the expected starting scope, not a hard boundary when quality gates fail
 - Read "Context to Read First" files before starting
@@ -1568,6 +1581,11 @@ export class TaskExecutor {
   private stuckAborted = new Map<string, boolean>();
   /** Tasks explicitly canceled by user move (in-progress → todo). */
   private userCanceledTaskIds = new Set<string>();
+  /*
+  FNXC:WorkflowLifecycle 2026-06-23-21:16:
+  During graph-owned execute nodes, the inner executor may intentionally self-requeue a task to `todo` for recoverable worktree/session repair. Persisted rows can be stale in tests or during store races, so keep a run-local marker that tells the outer graph failure sink not to overwrite that recovery with an in-review handoff.
+  */
+  private graphExecuteSelfRequeued = new Set<string>();
   /** In-memory loop recovery state per task. Keyed by taskId, not persisted.
    *  Tracks compact-and-resume attempt count per execute() lifecycle.
    *  Reset at execute() lifecycle end (finally block). */
@@ -1605,6 +1623,12 @@ export class TaskExecutor {
   private setActiveSession(taskId: string, sessionState: ActiveExecutorSessionState, worktreePath: string): void {
     this.activeSessions.set(taskId, sessionState);
     activeSessionRegistry.registerPath(worktreePath, { taskId, kind: "executor", ownerKey: taskId });
+  }
+
+  private markGraphExecuteSelfRequeued(taskId: string): void {
+    if (this.graphRouting.has(taskId)) {
+      this.graphExecuteSelfRequeued.add(taskId);
+    }
   }
 
   private deleteActiveSession(taskId: string, worktreePath?: string): void {
@@ -3405,6 +3429,7 @@ export class TaskExecutor {
         nextRecoveryAt: decision.nextState.nextRecoveryAt,
         sessionFile: null,
       });
+      this.markGraphExecuteSelfRequeued(task.id);
       await this.store.moveTask(task.id, "todo", { preserveResumeState: true });
       return true;
     }
@@ -3838,10 +3863,9 @@ export class TaskExecutor {
       }
     }
 
-    // Pass 2: tasks whose EFFECTIVE column agent resolves to `agentId`. Only
-    // experimental graph-executor tasks can carry a column binding; the IR resolve
-    // is best-effort and skipped for tasks already dispatched/executing.
-    if (!isExperimentalFeatureEnabled(settings, "workflowGraphExecutor")) return;
+    // Pass 2: tasks whose EFFECTIVE column agent resolves to `agentId`. The graph
+    // engine is the default runtime; the IR resolve is best-effort and skipped
+    // for tasks already dispatched/executing.
     for (const task of tasks) {
       if (dispatched.has(task.id) || !isDispatchable(task)) continue;
       // Skip tasks the assigned-agent filter already covers — a redundant column
@@ -3863,11 +3887,10 @@ export class TaskExecutor {
    *  `resumeTaskForAgent` second pass to re-dispatch column-bound tasks the
    *  `assignedAgentId` filter misses. Best-effort: an unresolvable IR yields false. */
   private async taskEffectiveAgentMatches(task: Task, agentId: string): Promise<boolean> {
-    // R10 kill-switch (PR #1432 review): this path resolves the IR directly (it
-    // does not go through the per-run resolver map), so it needs its own flag
-    // guard — resume pass 2 must be inert when workflowColumns is off.
-    const settings = await this.store.getSettings();
-    if (!isWorkflowColumnsEnabled(settings)) return false;
+    /*
+    FNXC:WorkflowColumns 2026-06-22-18:00:
+    Workflow columns are the default runtime, so resume pass 2 always resolves the task workflow IR. Persisted experimentalFeatures.workflowColumns=false values must not make column-agent dispatch inert.
+    */
     const ir = await resolveWorkflowIrForTask(this.store, task.id);
     if (!ir || ir.version !== "v2") return false;
 
@@ -4045,12 +4068,11 @@ export class TaskExecutor {
    */
   // ── Workflow graph interpreter (cutover M-B/M-C) ─────────────────────────
   //
-  // When `experimentalFeatures.workflowGraphExecutor` is enabled and a task has
-  // a selected custom workflow, the graph runner owns lifecycle SEQUENCING:
+  // The workflow graph runner owns lifecycle SEQUENCING for every task:
   // custom prompt/script/gate nodes run via the WorkflowStep machinery, and the
-  // planning/execute/review/merge seam nodes delegate to the legacy engine
-  // implementations. Any interpreter-level error falls back to the legacy
-  // pipeline — a task is never stranded by interpreter bugs.
+  // planning/execute/review/merge seam nodes delegate to the engine primitives.
+  // Interpreter-level failure parks the task as a workflow failure rather than
+  // falling through to a second runtime path.
 
   /** Completion interceptors for graph-driven tasks: when present for a task,
    *  execute() stops at the implementation-complete boundary (no workflow
@@ -4150,19 +4172,21 @@ export class TaskExecutor {
         });
         return true;
       }
-      const hasWorkflowResolver = typeof this.store.getTaskWorkflowSelection === "function";
-      const explicitlyEnabled = isExperimentalFeatureEnabled(settings, "workflowGraphExecutor");
-      if (!hasWorkflowResolver && !explicitlyEnabled) return false;
-      settings = {
-        ...settings,
-        experimentalFeatures: {
-          ...(settings.experimentalFeatures ?? {}),
-          workflowGraphExecutor: true,
-        },
-      };
+      /*
+      FNXC:WorkflowExecution 2026-06-22-18:00:
+      workflowGraphExecutor graduated from Experimental. Every task routes through the graph runner by default, and stale persisted experimentalFeatures.workflowGraphExecutor=false values are ignored so the product no longer has a user-facing or runtime graph-engine kill switch.
+      */
+      settings = { ...settings };
       let selection: { workflowId: string; stepIds: string[] } | undefined;
+      if (typeof this.store.getTaskWorkflowSelection !== "function") {
+        /*
+        FNXC:WorkflowExecution 2026-06-23-22:01:
+        Graph execution is the default for production TaskStore implementations, which expose workflow-selection APIs. Minimal test stores and older embedded adapters can lack that API; fall back to the legacy executor instead of half-entering graph routing with no workflow persistence surface.
+        */
+        return false;
+      }
       try {
-        selection = this.store.getTaskWorkflowSelection?.(task.id);
+        selection = this.store.getTaskWorkflowSelection(task.id);
       } catch (err) {
         await this.handleGraphFailure(task, {
           disposition: "failed",
@@ -4198,19 +4222,15 @@ export class TaskExecutor {
       // node callback. Resolve the IR ONCE per run (never an uncached per-node
       // fetch — mirrors the hold-release.ts irCache posture); best-effort, so a
       // resolution failure simply yields no bindings (R8 graceful degradation).
-      // R10 kill-switch (PR #1432 review): column agents require BOTH flags. The
-      // graph executor gate above covers workflowGraphExecutor; this guard makes
-      // disabling workflowColumns alone actually render bindings inert at
-      // execution time (the documented rollback) — no resolver installed means
-      // every downstream consumer (custom nodes, seams, watcher) sees no binding.
-      const columnAgentsEnabled = isWorkflowColumnsEnabled(settings);
+      /*
+      FNXC:WorkflowColumns 2026-06-22-18:00:
+      Column-agent binding now participates in every graph run. The former workflowColumns kill switch was removed, so stale persisted false values cannot silently disable custom-node, seam, or watcher bindings.
+      */
       let columnAgentIr: WorkflowIr | undefined;
-      if (columnAgentsEnabled) {
-        try {
-          columnAgentIr = await resolveWorkflowIrForTask(this.store, task.id);
-        } catch {
-          columnAgentIr = undefined;
-        }
+      try {
+        columnAgentIr = await resolveWorkflowIrForTask(this.store, task.id);
+      } catch {
+        columnAgentIr = undefined;
       }
       const resolveBindingForNode = (nodeId: string): WorkflowColumnAgent | undefined =>
         columnAgentIr ? resolveColumnAgentBinding(columnAgentIr, nodeId) : undefined;
@@ -4218,9 +4238,7 @@ export class TaskExecutor {
       // execute / step-execute seams (which key off a governing node id stamped
       // into context), so the coding/step session runs as the column agent under
       // the SAME binding lookup the custom-node seam uses (KTD-2 single resolver).
-      if (columnAgentsEnabled) {
-        this.graphColumnAgentResolver.set(task.id, resolveBindingForNode);
-      }
+      this.graphColumnAgentResolver.set(task.id, resolveBindingForNode);
 
       // (U3) Genuinely-unattended run signal. This is an EXPLICIT opt-in, not an
       // inferred heuristic: a run is unattended only when an entrypoint that
@@ -4306,7 +4324,14 @@ export class TaskExecutor {
       });
       let result: WorkflowGraphTaskRunResult;
       try {
-        const detail = await this.store.getTask(task.id);
+        const loadedDetail = await this.store.getTask(task.id);
+        /*
+        FNXC:WorkflowExecution 2026-06-23-11:36:
+        Graph dispatch must preserve the row identity that entered execute(). Minimal test stores and stale adapters can return an unrelated fallback task from getTask(); trusting that row would run the workflow under the wrong task id and bypass executor invariants. Use the refreshed row only when it matches the dispatch task.
+        */
+        const detail: TaskDetail = loadedDetail?.id === task.id
+          ? loadedDetail
+          : { ...task, prompt: task.prompt ?? task.description ?? "" };
         result = await runner.run(detail, settings);
       } catch (err) {
         executorLog.error(
@@ -4363,6 +4388,7 @@ export class TaskExecutor {
       this.graphColumnAgentResolver.delete(task.id);
       this.graphUnattendedRuns.delete(task.id);
       this.graphSeamGoverningNodeId.delete(task.id);
+      this.graphExecuteSelfRequeued.delete(task.id);
       // Per-instance keys: clear every instance slot owned by this task.
       const ctxPrefix = `${task.id}:`;
       for (const key of this.graphStepActiveContext.keys()) {
@@ -5107,6 +5133,12 @@ export class TaskExecutor {
     // completes; a step-review node (when present) decides done-ness instead.
     try {
       const live = await this.store.getTask(task.id);
+      if (!live || live.id !== task.id) {
+        return {
+          success: false,
+          error: `step ${stepIndex} live task unavailable after implementation pass`,
+        };
+      }
       const active = this.foreachActiveForTask(task.id, instanceId);
       const status = live.steps[stepIndex]?.status;
       if (status === "done" || status === "skipped") return { success: true };
@@ -5160,10 +5192,18 @@ export class TaskExecutor {
 
     return {
       prepareWorktree: async (_ctx, task) => {
-        const live = await this.store.getTask(task.id);
+        const live = await this.store.getTask(task.id).catch(() => null);
+        const liveTask = live?.id === task.id ? live : null;
+        /*
+        FNXC:WorkflowExecution 2026-06-23-11:49:
+        The workflow execute node must not perform a second worktree acquisition ahead of the authoritative executor. Passing the repo root as a prepared worktree makes the inner execute() reject a valid fresh-worktree task as repo-root reuse; pass only an existing task worktree and let execute() acquire when none exists.
+
+        FNXC:WorkflowExecution 2026-06-23-22:31:
+        Upgrade safety requires the graph primitive to tolerate older or minimal stores that return null or a mismatched row during startup/cutover. Only trust the live row when it is for the requested task; otherwise fall back to the runner snapshot.
+        */
         const prepared: PreparedWorktree = {
-          worktreePath: live.worktree || this.rootDir,
-          branchName: live.branch,
+          worktreePath: liveTask?.worktree || task.worktree || "",
+          branchName: liveTask?.branch || task.branch,
         };
         return { outcome: "success", value: "worktree-ready", data: prepared };
       },
@@ -6764,7 +6804,17 @@ export class TaskExecutor {
     this.clearCompletedTaskWatchdog(task.id);
     this.options.stuckTaskDetector?.untrackTask(task.id);
     try {
-      const live = await this.store.getTask(task.id);
+      const loadedLive = await this.store.getTask(task.id);
+      /*
+      FNXC:WorkflowLifecycle 2026-06-23-12:01:
+      Graph failure handling must never mutate a different task row than the one that entered execute(). Minimal stores can return fallback rows from getTask(); treat that as an unavailable live snapshot and leave the inner executor recovery result intact instead of handing off the wrong task.
+      */
+      if (!loadedLive || loadedLive.id !== task.id) {
+        executorLog.warn(`${task.id}: graph failure live-state refetch returned ${loadedLive?.id ?? "null"} — preserving inner executor result`);
+        await this.persistTokenUsage(task.id);
+        return;
+      }
+      const live = loadedLive;
       // A paused/aborted implementation is not a graph failure while the task
       // is still in-progress — leave the pause machinery in charge instead of
       // parking the task in review.
@@ -7027,6 +7077,21 @@ export class TaskExecutor {
       const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1];
       const mergeGraphFailure = this.isMergeGraphFailure(failedNode);
       const failureValue = this.graphFailureValue(result);
+      const executeNodeSelfRequeued = failedNode === "execute" && this.graphExecuteSelfRequeued.has(task.id);
+      if (failedNode === "execute" && (live.column === "todo" || executeNodeSelfRequeued)) {
+        /*
+        FNXC:WorkflowLifecycle 2026-06-23-12:03:
+        The graph execute node delegates to the authoritative executor. If that inner executor requeues the task to todo for self-heal/retry, the outer graph failure must not override it by parking the task in review.
+
+        FNXC:WorkflowLifecycle 2026-06-23-21:19:
+        Also honor the in-process self-requeue marker. Upgrade/restart races and minimal stores can return a stale `in-progress` live row even after the inner executor already moved the task to `todo`; stale reads must not strand progressing tasks in review.
+        */
+        const benignMessage = `Workflow graph execute node ended after executor re-queued task to todo (${failureValue ?? "no-value"}) — executor recovery preserved`;
+        executorLog.log(`${task.id}: ${benignMessage}`);
+        await this.store.logEntry(task.id, benignMessage, undefined, this.getRunContextFor(task.id));
+        await this.persistTokenUsage(task.id);
+        return;
+      }
       if (mergeGraphFailure && !this.isTerminalMergeGraphFailureValue(failureValue) && await this.routeGraphMergeFailureToRetry(live, result, abortProvenance)) {
         return;
       }
@@ -7462,7 +7527,15 @@ export class TaskExecutor {
       if (this.workspaceConfig === undefined) {
         this.workspaceConfig = await loadWorkspaceConfig(this.rootDir);
       }
-      if (!this.workspaceConfig && !await isGitRepository(this.rootDir)) {
+      /*
+      FNXC:Workspace 2026-06-22-00:00:
+      Workspace mode is only meaningful with at least one usable sub-repo. An empty `{ repos: [] }`
+      must NOT bypass the git-repository guard, inject workspace instructions, or expose the
+      workspace tool — otherwise a non-git directory with an empty config would skip validation
+      and enable a workspace with nothing to work on. Gate every workspace check on repos.length > 0.
+      */
+      const hasWorkspaceRepos = (this.workspaceConfig?.repos.length ?? 0) > 0;
+      if (!hasWorkspaceRepos && !await isGitRepository(this.rootDir)) {
         await this.store.logEntry(
           task.id,
           "Cannot execute task: project directory is not a Git repository. Fusion requires a Git repository for worktree-based task execution.",
@@ -7673,18 +7746,34 @@ export class TaskExecutor {
         const priorRequeues = task.taskDoneRetryCount ?? 0;
         const nextRequeueCount = priorRequeues + 1;
         const terminalAction = priorRequeues < MAX_TASK_DONE_REQUEUE_RETRIES ? "requeue-todo" : "park-in-review";
-        if (livenessClassification) {
+        const isRepoRootCollision = livenessFailure === "realpath_matches_repo_root";
+        const auditClassification = livenessClassification ?? (isRepoRootCollision ? "repo-root" : null);
+        const auditReason = livenessFailureReason ?? (isRepoRootCollision ? "worktree path realpath matches the project root, not a task worktree" : null);
+        /*
+         * FNXC:WorktreeLiveness 2026-06-21-11:10:
+         * The executor still keeps the repo-root realpath check as defense in depth. If acquisition ever hands the root to this gate, emit structured evidence that separates the invalid checkout path from the normal git registered-worktree snapshot and the configured task-worktree pattern.
+         */
+        if (auditClassification) {
+          const registeredContainsObserved = registeredPaths.includes(observedWorktreeRealpath);
           await audit.git({
             type: "worktree:incomplete-detected",
             target: worktreePath,
             metadata: {
-              classification: livenessClassification,
-              reason: livenessFailureReason ?? undefined,
+              classification: auditClassification,
+              reason: auditReason ?? undefined,
               source: "executor-liveness-gate",
               taskId: task.id,
               retryCount: nextRequeueCount,
               maxRetries: MAX_TASK_DONE_REQUEUE_RETRIES,
               terminalAction,
+              observed: worktreePath,
+              observedRealpath: observedWorktreeRealpath,
+              expected,
+              registered: visibleRegistered,
+              registeredTotal: registeredPaths.length,
+              registeredContainsObserved,
+              invalidCheckoutPath: isRepoRootCollision ? "repo-root" : undefined,
+              expectedPatternExcludesRepoRoot: isRepoRootCollision,
             },
           });
         }
@@ -7706,6 +7795,7 @@ export class TaskExecutor {
             undefined,
             this.getRunContextFor(task.id),
           );
+          this.markGraphExecuteSelfRequeued(task.id);
           await this.store.moveTask(task.id, "todo", { preserveProgress: true });
           executorLog.log(`✗ ${task.id} worktree liveness failed — requeued to todo (${nextRequeueCount}/${MAX_TASK_DONE_REQUEUE_RETRIES})`);
         } else {
@@ -7888,6 +7978,7 @@ export class TaskExecutor {
             }
             this.clearPausedAborted(task.id);
             await this.store.logEntry(task.id, "Execution paused — step sessions terminated, moved to todo", undefined, this.getRunContextFor(task.id));
+            this.markGraphExecuteSelfRequeued(task.id);
             await this.store.moveTask(task.id, "todo", { preserveResumeState: true });
             return;
           }
@@ -8181,6 +8272,7 @@ export class TaskExecutor {
             }
             this.clearPausedAborted(task.id);
             await this.store.logEntry(task.id, "Execution paused during step-session", undefined, this.getRunContextFor(task.id));
+            this.markGraphExecuteSelfRequeued(task.id);
             await this.store.moveTask(task.id, "todo", { preserveResumeState: true });
           } else if (this.stuckAborted.has(task.id)) {
             stuckRequeue = this.stuckAborted.get(task.id) ?? true;
@@ -8224,6 +8316,7 @@ export class TaskExecutor {
                 worktree: null,
                 branch: null,
               });
+              this.markGraphExecuteSelfRequeued(task.id);
               await this.store.moveTask(task.id, "todo", { preserveProgress: true });
               stuckRequeue = null; // Prevent outer finally from re-processing
               return;
@@ -8317,6 +8410,7 @@ export class TaskExecutor {
                   branch: null,
                 });
                 if (latestTask.column !== "todo") {
+                  this.markGraphExecuteSelfRequeued(task.id);
                   await this.store.moveTask(task.id, "todo", preserveProgress ? { preserveProgress: true } : undefined);
                   executorLog.log(`${task.id} moved to todo for retry after stuck kill${preserveProgress ? " (progress preserved)" : ""}`);
                 }
@@ -8405,6 +8499,12 @@ export class TaskExecutor {
         this.createSpawnAgentTool(task.id, worktreePath, settings, taskEnv),
         this.createTaskDocumentWriteTool(task.id),
         this.createTaskDocumentReadTool(task.id),
+        // FNXC:ArtifactRegistry 2026-06-21-07:04: Artifact list/view are read-only discovery tools and must remain available even when the task has no assigned agent identity; only registration requires an authorId for persisted attribution and best-effort inbox notification.
+        this.createArtifactListTool(),
+        this.createArtifactViewTool(),
+        ...(assignedAgentId ? [
+          this.createArtifactRegisterTool(assignedAgentId),
+        ] : []),
         this.createWorkflowListTool(),
         this.createWorkflowGetTool(),
         this.createWorkflowSelectTool(task.id),
@@ -8458,7 +8558,7 @@ export class TaskExecutor {
         ...getEnabledPluginTools(this.options.pluginRunner),
       ];
 
-      if (this.workspaceConfig) {
+      if (this.workspaceConfig && this.workspaceConfig.repos.length > 0) {
         customTools.push(createAcquireRepoWorktreeTool({
           workspaceRootDir: this.rootDir,
           workspaceRepos: this.workspaceConfig.repos,
@@ -8471,6 +8571,10 @@ export class TaskExecutor {
           audit,
           // FNXC:Workspace 2026-06-21-22:30: F2 — register each freshly-acquired sub-repo worktree path in this task's activeWorktrees Set (KTD2) so owner/liveness checks see live per-repo worktrees, not just the browse-only root.
           onAcquired: (worktreePath: string) => this.addActiveWorktree(task.id, worktreePath),
+          taskEnv,
+          // FNXC:Workspace 2026-06-22 — forward the configured worktree-init runner so sub-repo worktrees run configured setup.
+          runConfiguredCommand: (command, cwd, timeoutMs, env) =>
+            runConfiguredCommand(command, cwd, timeoutMs, env, audit),
         }));
       }
 
@@ -8841,6 +8945,7 @@ export class TaskExecutor {
             } else {
               executorLog.log(`${task.id} paused (graceful session exit) — moving to todo`);
               await this.store.logEntry(task.id, "Execution paused — session preserved for resume, moved to todo");
+              this.markGraphExecuteSelfRequeued(task.id);
               await this.store.moveTask(task.id, "todo", { preserveResumeState: true });
             }
             return;
@@ -9239,6 +9344,7 @@ export class TaskExecutor {
               // the next pickup will re-anchor it on the fresh checkout.
               await this.store.updateTask(task.id, { worktree: null, branch: null, baseCommitSha: null });
               await this.persistTokenUsage(task.id);
+              this.markGraphExecuteSelfRequeued(task.id);
               await this.store.moveTask(task.id, "todo", { preserveProgress: true });
               executorLog.log(silentMessage);
             } else if (refusalHandled) {
@@ -9266,6 +9372,7 @@ export class TaskExecutor {
                   undefined,
                   this.getRunContextFor(task.id),
                 );
+                this.markGraphExecuteSelfRequeued(task.id);
                 await this.store.moveTask(task.id, "todo", { preserveProgress: true });
                 executorLog.log(`✗ ${task.id} failed after ${MAX_TASK_DONE_SESSION_RETRIES} retries — requeued to todo (${nextRequeueCount}/${MAX_TASK_DONE_REQUEUE_RETRIES})`);
               } else {
@@ -9447,6 +9554,7 @@ export class TaskExecutor {
             hasResumableProgress ? { worktree: undefined } : { worktree: undefined, branch: undefined },
           );
           await this.store.logEntry(task.id, "Execution paused — agent terminated, moved to todo", undefined, this.getRunContextFor(task.id));
+          this.markGraphExecuteSelfRequeued(task.id);
           await this.store.moveTask(task.id, "todo", hasResumableProgress ? { preserveResumeState: true } : undefined);
         }
       } else if (this.stuckAborted.has(task.id)) {
@@ -9554,6 +9662,7 @@ export class TaskExecutor {
               nextRecoveryAt: decision.nextState.nextRecoveryAt,
               sessionFile: null,
             });
+            this.markGraphExecuteSelfRequeued(task.id);
             await this.store.moveTask(task.id, "todo", { preserveResumeState: true });
             return;
           }
@@ -9736,6 +9845,7 @@ export class TaskExecutor {
               // "worktree gone" from "pointer not yet repopulated". Matches sibling
               // recovery paths in auto-recovery-handlers/contamination.ts,
               // tryBootstrapMisbindingRecovery, and self-healing reclaim.
+              this.markGraphExecuteSelfRequeued(task.id);
               await this.store.moveTask(task.id, "todo", { preserveResumeState: true, preserveWorktree: true });
               return;
             }
@@ -9927,6 +10037,7 @@ export class TaskExecutor {
               worktree: null,
               branch: null,
             });
+            this.markGraphExecuteSelfRequeued(task.id);
             await this.store.moveTask(task.id, "todo", { preserveProgress: true });
             return;
           }
@@ -10070,6 +10181,7 @@ export class TaskExecutor {
             // the captured snapshot can be hours old and would race against
             // any concurrent recovery (see comment above).
             if (latestTask.column !== "todo") {
+              this.markGraphExecuteSelfRequeued(task.id);
               await this.store.moveTask(task.id, "todo", preserveProgress ? { preserveProgress: true } : undefined);
               // Audit trail: record task move (FN-1404)
               await audit.database({ type: "task:move", target: task.id, metadata: { to: "todo" } });
@@ -10393,6 +10505,18 @@ export class TaskExecutor {
 
   private createTaskDocumentReadTool(taskId: string): ToolDefinition {
     return sharedCreateTaskDocumentReadTool(this.store, taskId);
+  }
+
+  private createArtifactRegisterTool(authorId: string): ToolDefinition {
+    return sharedCreateArtifactRegisterTool(this.store, authorId, this.options.messageStore);
+  }
+
+  private createArtifactListTool(): ToolDefinition {
+    return sharedCreateArtifactListTool(this.store);
+  }
+
+  private createArtifactViewTool(): ToolDefinition {
+    return sharedCreateArtifactViewTool(this.store);
   }
 
   private createWorkflowListTool(): ToolDefinition {
@@ -11098,6 +11222,7 @@ export class TaskExecutor {
         undefined,
         this.getRunContextFor(task.id),
       );
+      this.markGraphExecuteSelfRequeued(task.id);
       await this.store.moveTask(task.id, "todo", { preserveProgress: true });
     } else {
       await this.store.updateTask(task.id, {
@@ -11497,7 +11622,9 @@ export class TaskExecutor {
           // Merge per-task effective workflow settings (U3, KTD-3) so the
           // validator model-lane reads below pick up workflow values; this tool
           // closure re-fetches independently. Behavior-inert by default.
-          const settings = await mergeEffectiveSettings(store, detail, await store.getSettings());
+          const latestDetailForReview = await store.getTask(taskId);
+          const userComments = selectUserCommentsForAgentContext(latestDetailForReview);
+          const settings = await mergeEffectiveSettings(store, latestDetailForReview, await store.getSettings());
           // Run the reviewer via semaphore.runNested so its slot accounting
           // is honest: activeCount transiently bumps to reflect the second
           // agent session, but the reviewer doesn't enter the wait queue
@@ -11522,10 +11649,10 @@ export class TaskExecutor {
               defaultModelId: settings.defaultModelId,
               fallbackProvider: settings.fallbackProvider,
               fallbackModelId: settings.fallbackModelId,
-              defaultThinkingLevel: detail.thinkingLevel ?? settings.defaultThinkingLevel,
+              defaultThinkingLevel: latestDetailForReview.thinkingLevel ?? settings.defaultThinkingLevel,
               // Task-level validator override (from task)
-              taskValidatorProvider: detail.validatorModelProvider,
-              taskValidatorModelId: detail.validatorModelId,
+              taskValidatorProvider: latestDetailForReview.validatorModelProvider,
+              taskValidatorModelId: latestDetailForReview.validatorModelId,
               // Project-level validator override
               projectValidatorProvider: settings.validatorProvider,
               projectValidatorModelId: settings.validatorModelId,
@@ -11540,7 +11667,8 @@ export class TaskExecutor {
               projectDefaultOverrideModelId: settings.defaultModelIdOverride,
               store,
               taskId,
-              task: detail,
+              task: latestDetailForReview,
+              userComments: userComments.length > 0 ? userComments : undefined,
               agentPrompts: settings.agentPrompts,
               agentStore: this.options.agentStore,
               rootDir: this.rootDir,
@@ -13680,6 +13808,7 @@ You have access to the file system to review changes.${verdictBlock}`;
         paused: false,
         pausedReason: null,
       });
+      this.markGraphExecuteSelfRequeued(task.id);
       await this.store.moveTask(task.id, "todo", { preserveResumeState: false, preserveWorktree: true });
       return true;
     } catch (error) {
@@ -14304,6 +14433,9 @@ You have access to the file system to review changes.${verdictBlock}`;
       source: "executor-session-start",
       auditor: audit,
     });
+    if (recovery.outcome !== "escalate-exhausted") {
+      this.markGraphExecuteSelfRequeued(task.id);
+    }
 
     await audit.git({
       type: "worktree:auto-recovered",
@@ -15996,7 +16128,18 @@ You have access to the file system to review changes.${verdictBlock}`;
       const errorMessage = err instanceof Error ? err.message : String(err);
       executorLog.warn(`Child agent ${agentId} failed: ${errorMessage}`);
     } finally {
-      this.childSessions.delete(agentId);
+      /*
+      FNXC:AgentSpawning 2026-06-23-12:25:
+      Server memory must return to baseline after spawned child execution. A normally completed child session owns provider/runtime state until disposed; deleting it from childSessions first makes later parent cleanup unable to reach it.
+      */
+      if (this.childSessions.get(agentId) === childSession) {
+        try {
+          await childSession.dispose();
+        } catch (disposeErr) {
+          executorLog.warn(`Child agent ${agentId} session dispose failed: ${disposeErr instanceof Error ? disposeErr.message : String(disposeErr)}`);
+        }
+        this.childSessions.delete(agentId);
+      }
       this.totalSpawnedCount = Math.max(0, this.totalSpawnedCount - 1);
     }
   }
@@ -16432,7 +16575,7 @@ Use \`fn_task_create\` for truly separate follow-up work, including unrelated/pr
 If lint is configured and failing, fix that too before completion.
 Do not repeatedly rerun a broad failing or hanging workspace command without a new hypothesis and a narrower confirming command.`;
 
-  if (workspaceConfig) {
+  if (workspaceConfig && workspaceConfig.repos.length > 0) {
     return executionPrompt + `\n\n## Workspace mode\n` +
       `This project is a workspace containing multiple git repositories.\n` +
       `Available repos:\n` +

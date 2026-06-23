@@ -1,5 +1,19 @@
 # @fusion/i18n
 
+## 0.39.9
+
+### Patch Changes
+
+- @fusion/core@0.46.0
+
+## 0.39.8
+
+### Patch Changes
+
+- Updated dependencies [26ebb92]
+- Updated dependencies [7e7eb62]
+  - @fusion/core@0.45.0
+
 ## 0.39.7
 
 ### Patch Changes

@@ -12,6 +12,9 @@ vi.mock("lucide-react", () => ({
   X: () => null,
   Maximize2: () => null,
   Minimize2: () => null,
+  Paperclip: () => null,
+  Flag: () => null,
+  Zap: () => null,
 }));
 
 // Mock the api module
@@ -140,7 +143,7 @@ describe("TaskForm", () => {
       onThinkingLevelChange: vi.fn(),
     });
 
-    fireEvent.click(screen.getByRole("button", { name: /More options/i }));
+    fireEvent.click(screen.getByTestId("task-form-more-options-toggle"));
 
     await waitFor(() => {
       expect(screen.getByRole("combobox", { name: /Thinking/i })).toBeTruthy();

@@ -11,6 +11,12 @@ FN-6702 removes ReliabilityView from the App-level lazy inventory because Reliab
 
 FNXC:CommandCenter 2026-06-19-00:00:
 FN-6717 removes NodesView from the App-level lazy inventory because Nodes now mounts inside the lazy CommandCenter chunk.
+
+FNXC:GitManager 2026-06-21-00:00:
+FN-6881 removes StashRecoveryView from the App-level lazy inventory because Stash Recovery now mounts through the lazy GitManagerModal chunk.
+
+FNXC:DashboardLazyViews 2026-06-22-00:00:
+The navigation reshuffle promotes Workflows, Import Tasks, Automations, and Settings as embedded views that reuse existing lazy chunks. Their underscore-prefixed App consts stay out of the curated inventory so the docs count each heavy chunk once.
 */
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -30,7 +36,6 @@ const EXPECTED_DOCUMENTED_VIEWS = new Set([
   "EvalsView",
   "TodoView",
   "GoalsView",
-  "StashRecoveryView",
   "PullRequestView",
   "SetupWizardModal",
   "SettingsModal",
@@ -54,7 +59,6 @@ const EXPECTED_APP_LEVEL_VIEWS = new Set([
   "DevServerView",
   "TodoView",
   "GoalsView",
-  "StashRecoveryView",
   "PullRequestView",
 ]);
 
@@ -89,15 +93,7 @@ function extractConstLazyViews(source: string): string[] {
 
 function extractAppLazyViews(appSource: string): Set<string> {
   const normalized = extractConstLazyViews(appSource)
-    .map((name) => {
-      if (name === "_TodoView") {
-        return "TodoView";
-      }
-      if (name.startsWith("_")) {
-        return null;
-      }
-      return name;
-    })
+    .map((name) => (name.startsWith("_") ? null : name))
     .filter((name): name is string => Boolean(name));
   return new Set(normalized);
 }
@@ -107,7 +103,7 @@ function extractAppModalsLazyViews(appModalsSource: string): Set<string> {
 }
 
 describe("AGENTS lazy-loaded views inventory", () => {
-  it("documents the App-level and AppModals lazy views accurately and keeps the curated 21-view list in sync", () => {
+  it("documents the App-level and AppModals lazy views accurately and keeps the curated 20-view list in sync", () => {
     const agentsDoc = readFileSync(resolve(__dirname, "../../../../AGENTS.md"), "utf-8");
     const appSource = readFileSync(resolve(__dirname, "../App.tsx"), "utf-8");
     const appModalsSource = readFileSync(resolve(__dirname, "../components/AppModals.tsx"), "utf-8");
@@ -115,16 +111,18 @@ describe("AGENTS lazy-loaded views inventory", () => {
     const section = extractLazyLoadedSection(agentsDoc);
     const countMatch = section.match(/These\s+(\d+)\s+views\s+are lazy-loaded/);
     expect(countMatch).toBeTruthy();
-    expect(Number(countMatch?.[1])).toBe(21);
+    expect(Number(countMatch?.[1])).toBe(20);
 
     const documentedViews = extractBacktickedNamesFromBullets(section);
     expect(new Set(documentedViews)).toEqual(EXPECTED_DOCUMENTED_VIEWS);
-    expect(documentedViews).toHaveLength(21);
+    expect(documentedViews).toHaveLength(20);
 
     expect(section).toContain("`ResearchView`");
     expect(section).toContain("`TodoView`");
     expect(section).toContain("`SettingsModal`");
     expect(section).toContain("`WorkflowNodeEditor`");
+    expect(section).toContain("`_ImportTasksView`");
+    expect(section).toContain("`_AutomationsView`");
     expect((section.match(/`AgentDetailView`/g) ?? []).length).toBe(1);
 
     const appLevelViews = extractAppLazyViews(appSource);

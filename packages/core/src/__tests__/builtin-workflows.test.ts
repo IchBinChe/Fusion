@@ -9,6 +9,7 @@ import {
   isBuiltinWorkflowPluginGated,
 } from "../builtin-workflows.js";
 import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
+import { builtinPromptConfig, BUILTIN_SEAM_PROMPTS } from "../builtin-workflow-prompts.js";
 import { BUILTIN_WORKFLOW_SETTINGS } from "../builtin-workflow-settings.js";
 import { resolveColumnFlags } from "../trait-registry.js";
 import { compileWorkflowToSteps } from "../workflow-compiler.js";
@@ -207,6 +208,7 @@ describe("built-in workflows", () => {
     expect(execute?.id).toBe("draft");
     expect(execute?.config?.name).toBe("Draft content");
     expect(String(execute?.config?.prompt ?? "")).toContain("marketing copywriter");
+    expect(String(execute?.config?.prompt ?? "")).toContain("fn_task_document_write");
     expect(String(execute?.config?.prompt ?? "").length).toBeGreaterThan(100);
     expect(review?.id).toBe("editorial");
     expect(review?.config?.name).toBe("Editorial review");
@@ -224,6 +226,13 @@ describe("built-in workflows", () => {
     const authoredNodeIds = design!.ir.nodes.filter((node) => node.id !== "start" && node.id !== "end").map((node) => node.id);
     expect(authoredNodeIds).toEqual(["execute", "design-review", "review", "merge"]);
 
+    const execute = design!.ir.nodes.find((node) => node.id === "execute");
+    expect(execute?.config?.seam).toBe("execute");
+    expect(execute?.config?.name).toBe("Execute");
+    const executePrompt = String(execute?.config?.prompt ?? "");
+    expect(executePrompt).toContain("fn_task_document_write");
+    expect(executePrompt).toContain("preview");
+
     const designReview = design!.ir.nodes.find((node) => node.id === "design-review");
     expect(designReview?.kind).toBe("gate");
     expect(designReview?.config?.name).toBe("Design review");
@@ -233,6 +242,19 @@ describe("built-in workflows", () => {
     expect(prompt).toContain("visual hierarchy");
     expect(prompt).toContain("design tokens");
     expect(prompt).toContain("responsive behavior");
+  });
+
+  it("leaves coding-oriented built-in prompts and shared seam defaults on their existing paths", () => {
+    const reviewHeavy = getBuiltinWorkflow("builtin:review-heavy")!;
+    const security = reviewHeavy.ir.nodes.find((node) => node.id === "security");
+    expect(security?.config?.prompt).toBe(
+      "Review the diff for security issues: injection, auth/authorization gaps, secret handling, unsafe deserialization. Block on any exploitable finding.",
+    );
+
+    expect(builtinPromptConfig("execute", "Execute").prompt).toBe(BUILTIN_SEAM_PROMPTS.execute);
+    expect(
+      getBuiltinWorkflow("builtin:quick-fix")!.ir.nodes.find((node) => node.id === "execute")?.config?.prompt,
+    ).toBe(BUILTIN_SEAM_PROMPTS.execute);
   });
 
   it("repeated catalog reads and listings keep builtin:coding in the enabled order", () => {
@@ -354,13 +376,15 @@ describe("built-in workflows", () => {
     }
   });
 
-  it("compound-engineering compiles its skill nodes to steps", () => {
+  it("compound-engineering compiles exactly one ce-code-review step and no generic review seam", () => {
     const ce = getBuiltinWorkflow("builtin:compound-engineering")!;
     const steps = compileWorkflowToSteps(ce.ir);
-    // plan + execute (ce-work) + code-review (pre-merge) + document (post-merge)
-    // — review/merge seams are skipped.
-    expect(steps.length).toBeGreaterThanOrEqual(4);
+    // plan + execute (ce-work) + code-review (pre-merge) + commit-pr +
+    // resolve-feedback + document (post-merge) — merge seams are skipped.
+    expect(steps.length).toBeGreaterThanOrEqual(6);
     expect(steps.some((s) => s.name === "Plan")).toBe(true);
+    expect(steps.filter((s) => s.skillName === "compound-engineering:ce-code-review")).toHaveLength(1);
+    expect(steps.some((s) => s.name === "Review" && !s.skillName)).toBe(false);
   });
 
   it("compound-engineering runs ce-work for the execute step in coding mode", () => {
@@ -375,6 +399,24 @@ describe("built-in workflows", () => {
     const execute = steps.find((s) => s.name === "Execute");
     expect(execute).toBeDefined();
     expect(execute!.toolMode).toBe("coding");
+  });
+
+  it("compound-engineering skill-node prompts name their /ce- slash commands", () => {
+    const ce = getBuiltinWorkflow("builtin:compound-engineering")!;
+    const byId = (id: string) => ce.ir.nodes.find((n) => n.id === id);
+    const expectedPrompts = new Map([
+      ["plan", "/ce-plan"],
+      ["execute", "/ce-work"],
+      ["code-review", "/ce-code-review"],
+      ["commit-pr", "/ce-commit-push-pr"],
+      ["resolve-feedback", "/ce-resolve-pr-feedback"],
+      ["document", "/ce-compound"],
+    ]);
+
+    for (const [nodeId, slashCommand] of expectedPrompts) {
+      expect(String(byId(nodeId)?.config?.prompt ?? "")).toContain(slashCommand);
+    }
+    expect(String(byId("merge")?.config?.prompt ?? "")).not.toContain("/ce-");
   });
 
   it("compound-engineering merge stage uses the CE commit/PR + resolve-feedback skills", () => {
@@ -393,6 +435,44 @@ describe("built-in workflows", () => {
     expect(ids.indexOf("merge")).toBeLessThan(ids.indexOf("document"));
   });
 
+  it("compound-engineering review stage is ce-code-review, with graph ordering and layout intact", () => {
+    const ce = getBuiltinWorkflow("builtin:compound-engineering")!;
+    const byId = (id: string) => ce.ir.nodes.find((n) => n.id === id);
+    const authoredNodeIds = ce.ir.nodes.filter((node) => node.id !== "start" && node.id !== "end").map((node) => node.id);
+    expect(authoredNodeIds).toEqual([
+      "plan",
+      "execute",
+      "code-review",
+      "commit-pr",
+      "resolve-feedback",
+      "merge",
+      "document",
+    ]);
+    expect(ce.ir.nodes.some((node) => node.config?.seam === "review")).toBe(false);
+
+    const codeReview = byId("code-review");
+    expect(codeReview?.kind).toBe("gate");
+    expect(codeReview?.config?.skillName).toBe("compound-engineering:ce-code-review");
+    expect(codeReview?.config?.gateMode).toBe("gate");
+    expect(codeReview?.config?.toolMode).toBe("coding");
+
+    const layout = ce.layout ?? {};
+    expect(Object.keys(layout).sort()).toEqual(ce.ir.nodes.map((node) => node.id).sort());
+    for (let i = 1; i < ce.ir.nodes.length; i += 1) {
+      expect(layout[ce.ir.nodes[i].id].x - layout[ce.ir.nodes[i - 1].id].x).toBe(170);
+    }
+    expect(ce.ir.edges.some((edge) => edge.from === "execute" && edge.to === "code-review")).toBe(true);
+    expect(ce.ir.edges.some((edge) => edge.from === "code-review" && edge.to === "commit-pr")).toBe(true);
+  });
+
+  it("other built-in workflows retain their generic review nodes", () => {
+    const coding = getBuiltinWorkflow("builtin:coding")!;
+    const reviewHeavy = getBuiltinWorkflow("builtin:review-heavy")!;
+
+    expect(coding.ir.nodes.some((node) => node.id === "review" && node.config?.seam === "review")).toBe(true);
+    expect(reviewHeavy.ir.nodes.some((node) => node.id === "review" && node.config?.seam === "review")).toBe(true);
+  });
+
   it("compound-engineering runs plan/code-review/document in coding mode and carries skillName onto compiled steps (U1/U4)", () => {
     const ce = getBuiltinWorkflow("builtin:compound-engineering")!;
     const byId = (id: string) => ce.ir.nodes.find((n) => n.id === id);
@@ -407,8 +487,10 @@ describe("built-in workflows", () => {
     const plan = steps.find((s) => s.name === "Plan");
     expect(plan?.skillName).toBe("compound-engineering:ce-plan");
     expect(plan?.toolMode).toBe("coding");
-    const codeReview = steps.find((s) => s.skillName === "compound-engineering:ce-code-review");
-    expect(codeReview?.toolMode).toBe("coding");
+    const codeReviewSteps = steps.filter((s) => s.skillName === "compound-engineering:ce-code-review");
+    expect(codeReviewSteps).toHaveLength(1);
+    expect(codeReviewSteps[0].gateMode).toBe("gate");
+    expect(codeReviewSteps[0].toolMode).toBe("coding");
     const document = steps.find((s) => s.skillName === "compound-engineering:ce-compound");
     expect(document?.toolMode).toBe("coding");
   });

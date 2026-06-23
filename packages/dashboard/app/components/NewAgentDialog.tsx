@@ -10,6 +10,13 @@ import { LoadingSpinner } from "./LoadingSpinner";
 import { ProviderIcon } from "./ProviderIcon";
 import { AgentGenerationModal } from "./AgentGenerationModal";
 import { AGENT_PRESETS, type AgentPreset } from "./agent-presets";
+import {
+  buildAgentCreatePayload,
+  mapOnboardingSummaryToAgentDraft,
+  mapPresetToAgentDraft,
+  VALID_AGENT_CAPABILITIES,
+  type ThinkingLevel,
+} from "./agent-presets/agentCreatePayload";
 import { SkillMultiselect } from "./SkillMultiselect";
 import { AgentAvatar } from "./AgentAvatar";
 import { ExperimentalAgentOnboardingModal } from "./ExperimentalAgentOnboardingModal";
@@ -26,20 +33,15 @@ export interface NewAgentDialogProps {
   onPrefillDraft?: (draft: AgentOnboardingSummary | null) => void;
 }
 
-const AGENT_ROLES: { value: AgentCapability; icon: string }[] = [
-  { value: "triage", icon: "⊕" },
-  { value: "executor", icon: "▶" },
-  { value: "reviewer", icon: "⊙" },
-  { value: "merger", icon: "⊞" },
-  { value: "scheduler", icon: "◷" },
-  { value: "engineer", icon: "⎔" },
-  { value: "custom", icon: "✦" },
+const AGENT_ROLES: { value: AgentCapability }[] = [
+  { value: "triage" },
+  { value: "executor" },
+  { value: "reviewer" },
+  { value: "merger" },
+  { value: "scheduler" },
+  { value: "engineer" },
+  { value: "custom" },
 ];
-
-type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
-
-/** Set of valid AgentCapability values for mapping generated roles */
-const VALID_CAPABILITIES = new Set<string>(["triage", "executor", "reviewer", "merger", "scheduler", "engineer", "custom"]);
 
 interface RuntimeConfig {
   model: string;
@@ -168,10 +170,15 @@ export function NewAgentDialog({
   const selectedModel = runtimeConfig.model.includes("/")
     ? runtimeConfig.model
     : "";
+  /*
+   * FNXC:AgentRoles 2026-06-23-00:19:
+   * Role selection should feel professional and model-aware, not cartoony. Use the selected model provider mark on each role card and a neutral default mark before selection; role identity stays in text labels.
+   */
+  const selectedModelProvider = selectedModel ? selectedModel.split("/")[0] : "default";
 
   const handleGenerated = useCallback((spec: AgentGenerationSpec) => {
     // Map generated role to AgentCapability, default to "custom" if unrecognized
-    const mappedRole = VALID_CAPABILITIES.has(spec.role)
+    const mappedRole = VALID_AGENT_CAPABILITIES.has(spec.role)
       ? (spec.role as AgentCapability)
       : "custom";
 
@@ -205,42 +212,42 @@ export function NewAgentDialog({
 
 
   const handlePresetSelect = useCallback((preset: AgentPreset) => {
+    const draft = mapPresetToAgentDraft(preset);
     setSelectedPresetId(preset.id);
-    setName(preset.name);
-    setIcon(preset.icon);
-    setTitle(preset.description ?? preset.title);
-    setRole(preset.role);
-    setSoul(preset.soul ?? "");
-    setInstructionsText(preset.instructionsText ?? "");
+    setName(draft.name);
+    setIcon(draft.icon ?? "");
+    setTitle(draft.title ?? "");
+    setRole(draft.role);
+    setSoul(draft.soul ?? "");
+    setInstructionsText(draft.instructionsText ?? "");
     // Advance to Step 1 so user can review model selection
     setStep(1);
   }, []);
 
   const applyDraftToForm = useCallback((draft: AgentOnboardingSummary) => {
-    const runtimeHint = draft.runtimeHint?.trim() ?? "";
-    const modelSelection = draft.model?.trim() || draft.modelHint?.trim() || "";
+    const values = mapOnboardingSummaryToAgentDraft(draft);
 
     setStep(1);
     setStepZeroTab("custom");
-    setName(draft.name ?? "");
-    setTitle(draft.title ?? "");
-    setIcon(draft.icon ?? "");
-    setRole((VALID_CAPABILITIES.has(draft.role) ? draft.role : "custom") as AgentCapability);
-    setReportsTo(draft.reportsTo ?? "");
-    setInstructionsText(draft.instructionsText ?? "");
-    setHeartbeatProcedurePath(draft.heartbeatProcedurePath ?? "");
-    setSoul(draft.soul ?? "");
-    setMemory(draft.memory ?? "");
-    setSelectedSkills(Array.isArray(draft.skills) ? draft.skills : []);
+    setName(values.name);
+    setTitle(values.title ?? "");
+    setIcon(values.icon ?? "");
+    setRole(values.role);
+    setReportsTo(values.reportsTo ?? "");
+    setInstructionsText(values.instructionsText ?? "");
+    setHeartbeatProcedurePath(values.heartbeatProcedurePath ?? "");
+    setSoul(values.soul ?? "");
+    setMemory(values.memory ?? "");
+    setSelectedSkills(values.skills ?? []);
     setRuntimeConfig((current) => ({
       ...current,
-      model: runtimeHint ? "" : modelSelection,
-      thinkingLevel: draft.thinkingLevel ?? current.thinkingLevel,
-      maxTurns: draft.maxTurns ?? current.maxTurns,
+      model: values.model ?? "",
+      thinkingLevel: values.thinkingLevel ?? current.thinkingLevel,
+      maxTurns: values.maxTurns ?? current.maxTurns,
     }));
-    if (runtimeHint) {
+    if (values.runtimeHint) {
       setRuntimeMode("runtime");
-      setSelectedRuntimeId(runtimeHint);
+      setSelectedRuntimeId(values.runtimeHint);
     } else {
       setRuntimeMode("model");
       setSelectedRuntimeId("");
@@ -283,28 +290,23 @@ export function NewAgentDialog({
     setIsSubmitting(true);
     setError(null);
     try {
-      const runtimeCfg: Record<string, unknown> = {};
-      if (runtimeMode === "runtime") {
-        if (selectedRuntimeId.trim()) runtimeCfg.runtimeHint = selectedRuntimeId.trim();
-      } else if (runtimeConfig.model.trim()) {
-        runtimeCfg.model = runtimeConfig.model.trim();
-      }
-      if (runtimeConfig.thinkingLevel !== "off") runtimeCfg.thinkingLevel = runtimeConfig.thinkingLevel;
-      if (runtimeConfig.maxTurns !== 1000) runtimeCfg.maxTurns = runtimeConfig.maxTurns;
-      await createAgent({
-        name: name.trim(),
+      await createAgent(buildAgentCreatePayload({
+        name,
         role,
-        ...(title.trim() ? { title: title.trim() } : {}),
-        ...(icon.trim() ? { icon: icon.trim() } : {}),
-        ...(reportsTo.trim() ? { reportsTo: reportsTo.trim() } : {}),
-        ...(instructionsPath.trim() ? { instructionsPath: instructionsPath.trim() } : {}),
-        ...(instructionsText.trim() ? { instructionsText: instructionsText.trim() } : {}),
-        ...(heartbeatProcedurePath.trim() ? { heartbeatProcedurePath: heartbeatProcedurePath.trim() } : {}),
-        ...(soul.trim() ? { soul: soul.trim() } : {}),
-        ...(memory.trim() ? { memory: memory.trim() } : {}),
-        ...(Object.keys(runtimeCfg).length > 0 ? { runtimeConfig: runtimeCfg } : {}),
-        ...(selectedSkills.length > 0 ? { metadata: { skills: selectedSkills } } : {}),
-      }, projectId);
+        title,
+        icon,
+        reportsTo,
+        instructionsPath,
+        instructionsText,
+        heartbeatProcedurePath,
+        soul,
+        memory,
+        model: runtimeMode === "model" ? runtimeConfig.model : "",
+        runtimeHint: runtimeMode === "runtime" ? selectedRuntimeId : "",
+        thinkingLevel: runtimeConfig.thinkingLevel,
+        maxTurns: runtimeConfig.maxTurns,
+        skills: selectedSkills,
+      }), projectId);
       handleClose();
       onCreated();
     } catch (err: unknown) {
@@ -559,7 +561,9 @@ export function NewAgentDialog({
                             className={`agent-role-option${role === r.value ? " selected" : ""}`}
                             onClick={() => setRole(r.value)}
                           >
-                            <span className="agent-role-option-icon">{r.icon}</span>
+                            <span className="agent-role-option-icon" aria-hidden="true">
+                              <ProviderIcon provider={selectedModelProvider} size="sm" />
+                            </span>
                             <span className="agent-role-option-label">{getRoleLabel(r.value)}</span>
                           </button>
                         ))}
@@ -743,7 +747,7 @@ export function NewAgentDialog({
                 </div>
                 <div className="agent-dialog-summary-row">
                   <span className="agent-dialog-summary-row-label">{t("agents.fieldRole", "Role")}</span>
-                  <span>{selectedRole?.icon} {selectedRole ? getRoleLabel(selectedRole.value) : ""}</span>
+                  <span>{selectedRole ? getRoleLabel(selectedRole.value) : ""}</span>
                 </div>
                 {selectedReportsToId && (
                   <div className="agent-dialog-summary-row">

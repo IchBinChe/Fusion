@@ -170,21 +170,24 @@ describe("createHeartbeatTools", () => {
 
     const tools = monitor.createHeartbeatTools("agent-001", mockTaskStore, "FN-001");
 
-    expect(tools).toHaveLength(14);
+    expect(tools).toHaveLength(17);
     expect(tools[0]!.name).toBe("fn_task_create");
     expect(tools[1]!.name).toBe("fn_task_log");
     expect(tools[2]!.name).toBe("fn_task_document_write");
     expect(tools[3]!.name).toBe("fn_task_document_read");
-    expect(tools[4]!.name).toBe("fn_list_agents");
-    expect(tools[5]!.name).toBe("fn_delegate_task");
-    expect(tools[6]!.name).toBe("fn_get_agent_config");
-    expect(tools[7]!.name).toBe("fn_update_agent_config");
-    expect(tools[8]!.name).toBe("fn_agent_create");
-    expect(tools[9]!.name).toBe("fn_agent_delete");
-    expect(tools[10]!.name).toBe("fn_goal_list");
-    expect(tools[11]!.name).toBe("fn_goal_show");
-    expect(tools[12]!.name).toBe("fn_read_evaluations");
-    expect(tools[13]!.name).toBe("fn_update_identity");
+    expect(tools[4]!.name).toBe("fn_artifact_register");
+    expect(tools[5]!.name).toBe("fn_artifact_list");
+    expect(tools[6]!.name).toBe("fn_artifact_view");
+    expect(tools[7]!.name).toBe("fn_list_agents");
+    expect(tools[8]!.name).toBe("fn_delegate_task");
+    expect(tools[9]!.name).toBe("fn_get_agent_config");
+    expect(tools[10]!.name).toBe("fn_update_agent_config");
+    expect(tools[11]!.name).toBe("fn_agent_create");
+    expect(tools[12]!.name).toBe("fn_agent_delete");
+    expect(tools[13]!.name).toBe("fn_goal_list");
+    expect(tools[14]!.name).toBe("fn_goal_show");
+    expect(tools[15]!.name).toBe("fn_read_evaluations");
+    expect(tools[16]!.name).toBe("fn_update_identity");
   });
 
   it("fn_task_create tool creates a task in triage via TaskStore", async () => {

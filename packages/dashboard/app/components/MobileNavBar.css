@@ -22,7 +22,11 @@
   display: none;
   align-items: stretch;
   background: var(--surface);
-  border-top: 1px solid var(--border);
+  /*
+  FNXC:FooterChrome 2026-06-22-18:00:
+  Mobile bottom navigation follows the executor footer rule: no visible divider between main content and the fixed footer/navigation surface.
+  */
+  border-top: none;
   min-height: var(--mobile-nav-height);
   /* Extend the bar's surface into the iOS home-indicator area so icons sit above
      the indicator (PWA standalone) and the bar meets the executor status bar
@@ -398,4 +402,3 @@ Wrap every tab icon in the same token-sized icon slot and keep unread/pending do
     -webkit-overflow-scrolling: touch;
   }
 }
-

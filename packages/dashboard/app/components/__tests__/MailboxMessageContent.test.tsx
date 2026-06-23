@@ -1,8 +1,18 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { render, cleanup, screen } from "@testing-library/react";
+import { render, cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FileBrowserProvider } from "../../context/FileBrowserContext";
 import { MailboxMessageContent } from "../MailboxMessageContent";
+
+// FNXC:Markdown 2026-06-23-03:15: Mock the heavy `mermaid` library so the mermaid
+// rendering tests do not pull in the real parser/renderer bundle. The component
+// lazy-imports `mermaid` (default export), so we mock the module default.
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: vi.fn(),
+    render: vi.fn().mockResolvedValue({ svg: "<svg data-testid='mock-mermaid-svg'></svg>" }),
+  },
+}));
 
 afterEach(() => {
   cleanup();
@@ -71,16 +81,62 @@ describe("MailboxMessageContent", () => {
     expect(table?.querySelectorAll("tbody td")).toHaveLength(2);
   });
 
-  it("does NOT execute raw HTML in messages", () => {
+  it("sanitizes raw <script> out of messages (no execution, no element)", () => {
     const content = "<script>window.__pwned = true;</script>Hello";
     const { container } = render(<MailboxMessageContent content={content} />);
-    // ReactMarkdown defaults disallow raw HTML — the <script> tag should be
-    // rendered as escaped text, not as a real script element.
+    // rehype-raw parses HTML, but rehype-sanitize strips <script> before render.
     expect(container.querySelector("script")).toBeNull();
     expect(
       (globalThis as unknown as { __pwned?: boolean }).__pwned,
     ).toBeUndefined();
     expect(container.textContent).toContain("Hello");
+  });
+
+  it("renders raw <details>/<summary> as a working disclosure element", () => {
+    const content =
+      "<details><summary>More info</summary>Hidden body text here.</details>";
+    const { container } = render(<MailboxMessageContent content={content} />);
+    const details = container.querySelector("details");
+    expect(details).not.toBeNull();
+    expect(details?.querySelector("summary")?.textContent).toBe("More info");
+    expect(details?.textContent).toContain("Hidden body text here.");
+  });
+
+  it("renders other safe raw HTML (kbd/sub) as real elements", () => {
+    const content = "Press <kbd>Cmd</kbd> and H<sub>2</sub>O.";
+    const { container } = render(<MailboxMessageContent content={content} />);
+    expect(container.querySelector("kbd")?.textContent).toBe("Cmd");
+    expect(container.querySelector("sub")?.textContent).toBe("2");
+  });
+
+  it("does NOT render HTML comments in the output", () => {
+    const content = "Before<!-- secret hidden note -->After";
+    const { container } = render(<MailboxMessageContent content={content} />);
+    expect(container.innerHTML).not.toContain("secret hidden note");
+    expect(container.innerHTML).not.toContain("<!--");
+    expect(container.textContent).toContain("Before");
+    expect(container.textContent).toContain("After");
+  });
+
+  it("strips javascript: URLs and event handlers from raw HTML", () => {
+    const content = '<a href="javascript:alert(1)" onclick="alert(2)">click</a>';
+    const { container } = render(<MailboxMessageContent content={content} />);
+    const link = container.querySelector("a");
+    // sanitize drops the javascript: href and the onclick handler.
+    expect(link?.getAttribute("href") ?? "").not.toContain("javascript:");
+    expect(link?.getAttribute("onclick")).toBeNull();
+  });
+
+  it("renders a ```mermaid block as the MermaidDiagram container", async () => {
+    const content = "```mermaid\ngraph TD; A-->B;\n```";
+    render(<MailboxMessageContent content={content} />);
+    const diagram = await screen.findByTestId("mailbox-mermaid-diagram");
+    expect(diagram).toBeInTheDocument();
+    expect(diagram).toHaveClass("mailbox-mermaid");
+    // The mocked mermaid.render SVG is injected into the container.
+    await waitFor(() => {
+      expect(diagram.querySelector("svg")).not.toBeNull();
+    });
   });
 
   it("forwards testId to the wrapper", () => {

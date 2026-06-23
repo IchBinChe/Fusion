@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from "react";
 import * as LucideIcons from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { PluginDashboardViewContext } from "@fusion/dashboard/app/plugins/types";
+import { ViewHeader } from "@fusion/dashboard/app/components/ViewHeader";
 import { useArtifacts } from "./hooks/useArtifacts.js";
 import { useViewportMode } from "./hooks/useViewportMode.js";
 import { useCeSession, type CeSessionSubscribe } from "./hooks/useCeSession.js";
@@ -17,6 +18,9 @@ const CE_PLUGIN_ID = "fusion-plugin-compound-engineering";
 /**
  * FNXC:CompoundEngineeringUI 2026-06-17-00:52:
  * The dashboard surface keeps CE-specific data-testid values and semantics intact while adding shared Fusion classes to panels and controls so plugin layout inherits the system button/card rhythm.
+ *
+ * FNXC:CompoundEngineeringUI 2026-06-22-09:40:
+ * The view renders the dashboard's shared ViewHeader (Sparkles icon + "Compound Engineering" title) at the top of its root container so the CE plugin surface reads with the same main-content header as native Fusion views. ViewHeader supplies the standard --space-lg top/side padding and is flex-shrink:0, so the root drops its own header padding and becomes a flex column whose content area (.ce-view-body) scrolls below the fixed header. The summary + "Start a stage" affordances move into ViewHeader's right-aligned actions slot, preserving their data-testid values (ce-summary, ce-start-action-header).
  */
 
 /** Resolve a lucide icon name (from the registry) to a component, with fallback. */
@@ -364,101 +368,106 @@ export function CompoundEngineeringView(props: CompoundEngineeringViewProps) {
   if (ceSession.session) {
     return (
       <div className="ce-view" data-testid="compound-engineering-view" data-mobile={mobile ? "true" : "false"}>
-        <div className="ce-view-header">
-          <h2>Compound Engineering</h2>
+        <ViewHeader icon={LucideIcons.Sparkles} title="Compound Engineering" />
+        <div className="ce-view-body">
+          <SessionsPanel
+            sessions={ceSessions.sessions}
+            activeSessionId={ceSession.session.id}
+            disabled={ceSession.busy || sessionActionBusy}
+            onOpen={onOpenSession}
+            onCancel={onCancelSession}
+            onDiscard={onDiscardSession}
+          />
+          <CeFlow
+            session={ceSession.session}
+            busy={ceSession.busy || sessionActionBusy}
+            error={ceSession.error}
+            onAnswer={ceSession.answer}
+            onResume={ceSession.resume}
+            onCancel={() => onCancelSession(ceSession.session!)}
+            onClose={onCloseFlow}
+          />
         </div>
-        <SessionsPanel
-          sessions={ceSessions.sessions}
-          activeSessionId={ceSession.session.id}
-          disabled={ceSession.busy || sessionActionBusy}
-          onOpen={onOpenSession}
-          onCancel={onCancelSession}
-          onDiscard={onDiscardSession}
-        />
-        <CeFlow
-          session={ceSession.session}
-          busy={ceSession.busy || sessionActionBusy}
-          error={ceSession.error}
-          onAnswer={ceSession.answer}
-          onResume={ceSession.resume}
-          onCancel={() => onCancelSession(ceSession.session!)}
-          onClose={onCloseFlow}
-        />
       </div>
     );
   }
 
   return (
     <div className="ce-view" data-testid="compound-engineering-view" data-mobile={mobile ? "true" : "false"}>
-      <div className="ce-view-header">
-        <h2>Compound Engineering</h2>
-        {hasAnything ? (
-          <span className="ce-view-summary" data-testid="ce-summary">
-            {totalArtifacts} artifact{totalArtifacts === 1 ? "" : "s"}
-            {totalErrors > 0 ? ` · ${totalErrors} unreadable` : ""}
-            {isPartial ? " · partial" : ""}
-          </span>
-        ) : null}
-        {hasAnything ? (
-          <button type="button" className="btn btn-primary ce-view-start" data-testid="ce-start-action-header" onClick={onStart}>
-            Start a stage
-          </button>
-        ) : null}
-      </div>
-
-      {launcherOpen ? (
-        <StageLauncher stages={stages} disabled={ceSession.busy} onLaunch={onLaunch} />
-      ) : null}
-
-      <SessionsPanel
-        sessions={ceSessions.sessions}
-        disabled={ceSession.busy || sessionActionBusy}
-        onOpen={onOpenSession}
-        onCancel={onCancelSession}
-        onDiscard={onDiscardSession}
+      <ViewHeader
+        icon={LucideIcons.Sparkles}
+        title="Compound Engineering"
+        actions={
+          hasAnything ? (
+            <>
+              <span className="ce-view-summary" data-testid="ce-summary">
+                {totalArtifacts} artifact{totalArtifacts === 1 ? "" : "s"}
+                {totalErrors > 0 ? ` · ${totalErrors} unreadable` : ""}
+                {isPartial ? " · partial" : ""}
+              </span>
+              <button type="button" className="btn btn-primary ce-view-start" data-testid="ce-start-action-header" onClick={onStart}>
+                Start a stage
+              </button>
+            </>
+          ) : null
+        }
       />
 
-      {ceSessions.error ? (
-        <div className="ce-view-error card" role="alert" data-testid="ce-sessions-error">
-          Failed to load sessions: {ceSessions.error}
-        </div>
-      ) : null}
+      <div className="ce-view-body">
+        {launcherOpen ? (
+          <StageLauncher stages={stages} disabled={ceSession.busy} onLaunch={onLaunch} />
+        ) : null}
 
-      {ceSession.error && !ceSession.session ? (
-        <div className="ce-view-error card" role="alert" data-testid="ce-session-error">
-          Failed to start session: {ceSession.error}
-        </div>
-      ) : null}
+        <SessionsPanel
+          sessions={ceSessions.sessions}
+          disabled={ceSession.busy || sessionActionBusy}
+          onOpen={onOpenSession}
+          onCancel={onCancelSession}
+          onDiscard={onDiscardSession}
+        />
 
-      {error ? (
-        <div className="ce-view-error card" role="alert" data-testid="ce-fetch-error">
-          Failed to load artifacts: {error}
-        </div>
-      ) : null}
+        {ceSessions.error ? (
+          <div className="ce-view-error card" role="alert" data-testid="ce-sessions-error">
+            Failed to load sessions: {ceSessions.error}
+          </div>
+        ) : null}
 
-      {loading && !result ? (
-        <div className="ce-loading" data-testid="ce-loading">
-          Discovering artifacts…
-        </div>
-      ) : null}
+        {ceSession.error && !ceSession.session ? (
+          <div className="ce-view-error card" role="alert" data-testid="ce-session-error">
+            Failed to start session: {ceSession.error}
+          </div>
+        ) : null}
 
-      {result && !hasAnything ? (
-        <EmptyState onStart={onStart} />
-      ) : null}
+        {error ? (
+          <div className="ce-view-error card" role="alert" data-testid="ce-fetch-error">
+            Failed to load artifacts: {error}
+          </div>
+        ) : null}
 
-      {result && hasAnything ? (
-        <div className="ce-groups" data-partial={isPartial ? "true" : "false"}>
-          {result.groups.map((group) => (
-            <StageGroup
-              key={group.stage}
-              group={group}
-              onSelect={setSelectedId}
-              selectedId={selectedId}
-              openFile={openFile}
-            />
-          ))}
-        </div>
-      ) : null}
+        {loading && !result ? (
+          <div className="ce-loading" data-testid="ce-loading">
+            Discovering artifacts…
+          </div>
+        ) : null}
+
+        {result && !hasAnything ? (
+          <EmptyState onStart={onStart} />
+        ) : null}
+
+        {result && hasAnything ? (
+          <div className="ce-groups" data-partial={isPartial ? "true" : "false"}>
+            {result.groups.map((group) => (
+              <StageGroup
+                key={group.stage}
+                group={group}
+                onSelect={setSelectedId}
+                selectedId={selectedId}
+                openFile={openFile}
+              />
+            ))}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }

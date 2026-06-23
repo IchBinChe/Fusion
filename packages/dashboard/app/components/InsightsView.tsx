@@ -27,6 +27,7 @@ import {
   Activity,
 } from "lucide-react";
 import { CustomModelDropdown } from "./CustomModelDropdown";
+import { ViewHeader } from "./ViewHeader";
 import { fetchModels, updateGlobalSettings, type ModelInfo } from "../api";
 import { useInsights, type InsightSection } from "../hooks/useInsights";
 import { BACKLOG_HEALTH_TITLE_PREFIXES, isBacklogHealthInsight } from "./backlog-health-filter";
@@ -480,16 +481,22 @@ export function InsightsView({ projectId, addToast, onClose, onCreateTask, model
 
   return (
     <div className="insights-view" data-testid="insights-view">
-      <div className="insights-view-header">
-        <div className="insights-view-title">
-          <h2>
-            <Sparkles size={20} />
-            {t("insights.title", "Insights")}
-          </h2>
-          <span className="insights-view-count">{totalCount} {t("common.total", "total")}</span>
-        </div>
+      {/*
+      FNXC:Insights 2026-06-22-01:00:
+      Migrated to the shared ViewHeader for consistency with other main-content views. The insight count and action buttons live in the actions slot; ViewHeader already provides the --space-lg side/top padding and --space-md bottom gap, so the view body must not repeat the top padding.
 
-        <div className="insights-view-actions">
+      FNXC:Insights 2026-06-23-19:20:
+      The refresh action must be icon-only in the Insights header. Keeping the visible label out of this button preserves room for the title and neighboring controls while aria-label/title retain the accessible command name.
+
+      FNXC:Insights 2026-06-23-00:23:
+      Insights header filter chips need compact visible labels. Keep the descriptive accessibility copy, but show Backlog instead of Backlog Health and Archived instead of Show Archived/Hide Archived.
+      */}
+      <ViewHeader
+        icon={Sparkles}
+        title={t("insights.title", "Insights")}
+        actions={(
+          <>
+            <span className="insights-view-count">{totalCount} {t("common.total", "total")}</span>
           {backlogHealthCount > 0 && (
             <button
               className={`btn btn-sm insights-backlog-health-toggle${backlogHealthOnly ? " btn-icon--active" : ""}`}
@@ -500,7 +507,7 @@ export function InsightsView({ projectId, addToast, onClose, onCreateTask, model
               title={BACKLOG_HEALTH_TITLE_PREFIXES.join(", ")}
             >
               <Activity size={14} />
-              {backlogHealthOnly ? t("insights.allInsights", "All Insights") : t("insights.backlogHealth", "Backlog Health")} <span>({backlogHealthCount})</span>
+              {backlogHealthOnly ? t("insights.allInsights", "All Insights") : t("insights.backlogHealth", "Backlog")} <span>({backlogHealthCount})</span>
             </button>
           )}
           {onClose && (
@@ -521,18 +528,18 @@ export function InsightsView({ projectId, addToast, onClose, onCreateTask, model
               data-testid="toggle-archived-insights"
             >
               <Archive size={14} />
-              {showArchived ? t("insights.hideArchivedLabel", "Hide Archived") : t("insights.showArchivedLabel", "Show Archived ({{count}})", { count: archivedCount })}
+              {showArchived ? t("insights.hideArchivedLabel", "Archived") : t("insights.showArchivedLabel", "Archived ({{count}})", { count: archivedCount })}
             </button>
           )}
           <button
-            className="btn btn-sm"
+            className="btn btn-icon btn-sm insights-refresh-btn"
             onClick={() => void refresh()}
             disabled={loading}
             aria-label={t("actions.refreshInsights", "Refresh insights")}
+            title={t("actions.refreshInsights", "Refresh insights")}
             data-testid="refresh-insights"
           >
             <RefreshCw size={14} className={loading ? "spin" : ""} />
-            {t("actions.refresh", "Refresh")}
           </button>
           <button
             className="btn btn-sm insights-model-toggle"
@@ -564,8 +571,9 @@ export function InsightsView({ projectId, addToast, onClose, onCreateTask, model
               </>
             )}
           </button>
-        </div>
-      </div>
+          </>
+        )}
+      />
 
       {showModelConfig && (
         <div className="insights-model-config" data-testid="model-config">

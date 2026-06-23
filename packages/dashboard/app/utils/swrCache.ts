@@ -17,6 +17,7 @@ export const SWR_CACHE_KEYS = {
   AGENTS: "kb-dashboard-agents-cache",
   AGENT_STATS: "kb-dashboard-agent-stats-cache",
   DOCUMENTS_PREFIX: "kb-dashboard-documents-cache:",
+  ARTIFACTS_PREFIX: "kb-dashboard-artifacts-cache:",
   TODO_LISTS_PREFIX: "kb-dashboard-todo-lists-cache:",
   CHAT_ROOMS: "kb-dashboard-chat-rooms-cache",
   CHAT_SESSIONS_PREFIX: "kb-dashboard-chat-sessions-cache:",

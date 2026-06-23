@@ -3,10 +3,14 @@ import type { ComponentProps } from "react";
 import { render, screen, fireEvent, waitFor, within, act, cleanup } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { EditorView } from "@codemirror/view";
+import fs from "fs";
+import path from "path";
 import { SettingsModal } from "../SettingsModal";
 import { __test_clearCache as clearPluginUiSlotsCache } from "../../hooks/usePluginUiSlots";
 import type { PluginUiContributionEntry, SettingsExportData, UpdateCheckResponse } from "../../api";
 import { ApiRequestError } from "../../api";
+
+const settingsModalCss = fs.readFileSync(path.resolve(__dirname, "../SettingsModal.css"), "utf8");
 
 // --- API mocks ---
 const mockFetchSettings = vi.fn();
@@ -355,6 +359,50 @@ describe("SettingsModal", () => {
 
     expect(screen.getByRole("button", { name: /^Authentication$/ })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Authentication" })).toBeInTheDocument();
+  });
+
+  // FNXC:EmbeddedPresentation 2026-06-22-12:00:
+  // presentation="embedded" (SettingsView) was a zero-coverage branch. Assert the embedded contract via
+  // useEmbeddedPresentation: embedded root class present, region role (not dialog), no fixed .modal-overlay
+  // backdrop / modal close button, and Escape does NOT dismiss (navigated away via the left sidebar instead).
+  describe("embedded presentation", () => {
+    it("renders the embedded root class with region role and no modal overlay or close button", async () => {
+      const { container } = renderModal({ presentation: "embedded" });
+      await waitForSettingsModalReady();
+
+      expect(container.querySelector(".settings-embedded")).not.toBeNull();
+      expect(container.querySelector(".settings-modal--embedded")).not.toBeNull();
+      expect(screen.getByRole("region", { name: "Settings" })).toBeInTheDocument();
+      // No fixed full-screen overlay backdrop and no dialog role in embedded mode.
+      expect(container.querySelector(".settings-modal-overlay")).toBeNull();
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+
+    it("removes the embedded page outer inset and keeps content padding inside each settings screen", () => {
+      expect(settingsModalCss).toMatch(/\.settings-embedded\.right-dock-embedded-view\s*\{[^}]*padding:\s*0;/);
+      expect(settingsModalCss).toMatch(/\.settings-content\s*\{[^}]*padding:\s*var\(--space-md\) var\(--space-xl\) var\(--space-lg\);/);
+      expect(settingsModalCss).toMatch(/\.settings-section-heading\s*\{[^}]*padding:\s*var\(--space-lg\) 0 var\(--space-md\);/);
+    });
+
+    it("does not dismiss on Escape in embedded mode", async () => {
+      const onClose = vi.fn();
+      renderModal({ presentation: "embedded", onClose });
+      await waitForSettingsModalReady();
+
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it("keeps the overlay and Escape-to-close in modal mode", async () => {
+      const onClose = vi.fn();
+      const { container } = renderModal({ onClose });
+      await waitForSettingsModalReady();
+
+      expect(container.querySelector(".settings-modal-overlay")).not.toBeNull();
+      expect(container.querySelector(".settings-modal--embedded")).toBeNull();
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onClose).toHaveBeenCalled();
+    });
   });
 
   it("maps the legacy pi-extensions initialSection alias to Plugins", async () => {
@@ -805,6 +853,18 @@ describe("SettingsModal", () => {
       });
     });
 
+    it("disables concurrency inputs until their actual values load", async () => {
+      mockFetchGlobalConcurrency.mockReturnValue(new Promise(() => {}));
+      renderModal();
+      await waitForSettingsModalReady();
+
+      await userEvent.click(screen.getByRole("button", { name: /Scheduling/ }));
+
+      expect(screen.getByLabelText("Global Max Concurrent")).toBeDisabled();
+      expect(screen.getByLabelText("Max Concurrent Tasks")).toBeDisabled();
+      expect(screen.getByLabelText("Max Triage Concurrent")).toBeDisabled();
+    });
+
     it("enables memory backend status hook only when Memory section is active", async () => {
       renderModal();
       await waitForSettingsModalReady();
@@ -1000,6 +1060,16 @@ describe("SettingsModal", () => {
       expect(select.value).toBe("off");
       expect(screen.getByRole("option", { name: "Require changeset (.changeset/*.md)" })).toBeInTheDocument();
       expect(screen.getByRole("option", { name: "Require changelog update (existing changelog)" })).toBeInTheDocument();
+    });
+
+    it("reports Quick Chat launcher changes immediately before save", async () => {
+      const onQuickChatButtonModeChange = vi.fn();
+      renderModal({ initialSection: "general", onQuickChatButtonModeChange });
+      await waitForSettingsModalReady();
+
+      await userEvent.selectOptions(screen.getByLabelText("Quick Chat launcher"), "footer");
+
+      expect(onQuickChatButtonModeChange).toHaveBeenCalledWith("footer");
     });
 
     it.each<PersistSettingInput>([
@@ -2940,6 +3010,7 @@ describe("SettingsModal", () => {
 
       const input = screen.getByLabelText("Max Concurrent Tasks") as HTMLInputElement;
       expect(input).toBeDefined();
+      await waitFor(() => expect(input).not.toBeDisabled());
 
       // Clear the input - the input should be empty, not show "0"
       await userEvent.clear(input);
@@ -2955,6 +3026,7 @@ describe("SettingsModal", () => {
 
       const input = screen.getByLabelText("Global Max Concurrent") as HTMLInputElement;
       expect(input).toBeDefined();
+      await waitFor(() => expect(input).not.toBeDisabled());
 
       // Clear the input - the input should be empty, not show "0"
       await userEvent.clear(input);
@@ -3770,22 +3842,37 @@ describe("SettingsModal", () => {
       renderModal();
       await openExperimentalFeaturesSection();
 
-      // Known features are always shown even with no custom features configured.
-      expect(screen.getByText("Insights")).toBeInTheDocument();
-      expect(screen.getByText("Roadmaps")).toBeInTheDocument();
+      // Known features that remain experimental are shown even with no custom features configured.
+      expect(screen.queryByText("Insights")).not.toBeInTheDocument();
+      // FNXC:SettingsExperimental 2026-06-22-18:50: Roadmaps was removed from Experimental and must not render as a known or stale toggle.
+      expect(screen.queryByText("Roadmaps")).not.toBeInTheDocument();
 
       for (const featureLabel of [
         "Research View",
         "Evals View",
-        "Chat Rooms",
+        "Subtask Breakdown",
         "Sandbox (command isolation)",
         "Planning-style Agent Onboarding",
       ]) {
         expect(screen.getByLabelText(featureLabel)).toBeInTheDocument();
       }
 
+      expect(screen.queryByLabelText("Right Dock Panel")).not.toBeInTheDocument();
+
       // Dev Server has a single canonical toggle (no legacy duplicate).
       expect(screen.getAllByLabelText("Dev Server")).toHaveLength(1);
+    });
+
+    it("shows the Subtask Breakdown toggle as off when the setting is missing", async () => {
+      mockFetchSettings.mockResolvedValue({
+        ...defaultSettings,
+        experimentalFeatures: {},
+      });
+
+      renderModal();
+      await openExperimentalFeaturesSection();
+
+      expect(screen.getByLabelText("Subtask Breakdown")).not.toBeChecked();
     });
 
     it("does not render duplicate Dev Server rows when legacy and canonical keys are both present", async () => {
@@ -3959,12 +4046,13 @@ describe("SettingsModal", () => {
     it("does not emit legacy alias null deletes when canonical key is absent", async () => {
       mockFetchSettings.mockResolvedValue({
         ...defaultSettings,
-        experimentalFeatures: { insights: true },
+        experimentalFeatures: { "my-feature": false },
       });
 
       renderModal();
 
       await openExperimentalFeaturesSection();
+      await userEvent.click(screen.getByLabelText("my-feature"));
 
       await userEvent.click(screen.getByText("Save"));
 
@@ -3973,8 +4061,89 @@ describe("SettingsModal", () => {
       });
 
       const payload = mockUpdateGlobalSettings.mock.calls[0][0];
-      expect(payload.experimentalFeatures).toEqual({ insights: true });
+      expect(payload.experimentalFeatures).toEqual({ "my-feature": true });
       expect(payload.experimentalFeatures.devServer).toBeUndefined();
+    });
+
+    it("hides graduated workflow flags while preserving stale persisted values on save", async () => {
+      mockFetchSettings.mockResolvedValue({
+        ...defaultSettings,
+        experimentalFeatures: {
+          workflowColumns: false,
+          workflowGraphExecutor: false,
+          workflowInterpreterDualObserve: true,
+          insights: true,
+          "my-feature": false,
+        },
+      });
+
+      renderModal();
+
+      await openExperimentalFeaturesSection();
+
+      expect(screen.queryByText("workflowColumns")).not.toBeInTheDocument();
+      expect(screen.queryByText("workflowGraphExecutor")).not.toBeInTheDocument();
+      expect(screen.queryByText(/dual-observe parity/i)).not.toBeInTheDocument();
+      expect(screen.queryByText("Insights")).not.toBeInTheDocument();
+
+      await userEvent.click(screen.getByLabelText("my-feature"));
+
+      await userEvent.click(screen.getByText("Save"));
+
+      await waitFor(() => {
+        expect(mockUpdateGlobalSettings).toHaveBeenCalledTimes(1);
+      });
+
+      /*
+      FNXC:SettingsExperimental 2026-06-23-21:20:
+      Workflow runtime flags are hidden because the graph engine and workflow columns are default runtime paths. Saving unrelated Settings changes must preserve stale persisted keys instead of rewriting or resurrecting them as UI-controlled toggles; runtime helpers ignore those stale values.
+      */
+      expect(mockUpdateGlobalSettings.mock.calls[0][0].experimentalFeatures).toEqual({
+        workflowColumns: false,
+        workflowGraphExecutor: false,
+        workflowInterpreterDualObserve: true,
+        insights: true,
+        "my-feature": true,
+      });
+    });
+
+    it("checks Left Sidebar Navigation by default when its flag is unset", async () => {
+      mockFetchSettings.mockResolvedValue({
+        ...defaultSettings,
+        experimentalFeatures: {},
+      });
+
+      renderModal();
+
+      await openExperimentalFeaturesSection();
+
+      expect(screen.getByLabelText("Left Sidebar Navigation")).toBeChecked();
+    });
+
+    it("persists an explicit leftSidebarNav=false opt-out when disabling the default-on toggle", async () => {
+      mockFetchSettings.mockResolvedValue({
+        ...defaultSettings,
+        experimentalFeatures: {},
+      });
+
+      renderModal();
+
+      await openExperimentalFeaturesSection();
+
+      const leftSidebarToggle = screen.getByLabelText("Left Sidebar Navigation") as HTMLInputElement;
+      expect(leftSidebarToggle).toBeChecked();
+
+      await userEvent.click(leftSidebarToggle);
+      expect(leftSidebarToggle).not.toBeChecked();
+
+      await userEvent.click(screen.getByText("Save"));
+
+      await waitFor(() => {
+        expect(mockUpdateGlobalSettings).toHaveBeenCalledTimes(1);
+      });
+
+      const payload = mockUpdateGlobalSettings.mock.calls[0][0];
+      expect(payload.experimentalFeatures).toEqual({ leftSidebarNav: false });
     });
 
     it("shows feature flags when experimentalFeatures is set", async () => {
@@ -4081,9 +4250,10 @@ describe("SettingsModal", () => {
 
       await openExperimentalFeaturesSection();
 
-      // Known features should always be shown regardless of settings
-      expect(screen.getByText("Insights")).toBeInTheDocument();
-      expect(screen.getByText("Roadmaps")).toBeInTheDocument();
+      // Known features that remain experimental should always be shown regardless of settings.
+      expect(screen.getByText("Dev Server")).toBeInTheDocument();
+      expect(screen.queryByText("Insights")).not.toBeInTheDocument();
+      expect(screen.queryByText("Roadmaps")).not.toBeInTheDocument();
     });
 
     it("saves experimentalFeatures with multiple toggled flags", async () => {

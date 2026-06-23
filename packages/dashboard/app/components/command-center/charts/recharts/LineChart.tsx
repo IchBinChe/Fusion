@@ -3,11 +3,11 @@ import {
   Legend,
   Line,
   LineChart as RechartsLineChart,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
+import { useLayoutEffect, useRef, useState } from "react";
 import { getCommandCenterChartColor, getCommandCenterChartTheme } from "./theme";
 import "../charts.css";
 
@@ -38,6 +38,11 @@ interface SanitizedLineChartSeries {
 
 type LineChartPoint = { index: number } & Record<string, number>;
 type ResponsiveDimension = number | `${number}%`;
+type ChartDimensions = { width: number; height: number };
+
+const FALLBACK_CHART_DIMENSIONS: ChartDimensions = { width: 360, height: 220 };
+const MIN_USABLE_CHART_WIDTH = 120;
+const MIN_USABLE_CHART_HEIGHT = 120;
 
 function prefersReducedMotion(): boolean {
   return (
@@ -98,6 +103,74 @@ function responsiveDimension(value: number | string | undefined): ResponsiveDime
   return typeof value === "string" && /^\d+(?:\.\d+)?%$/.test(value) ? (value as `${number}%`) : "100%";
 }
 
+function finiteDimension(value: number, min: number): number | null {
+  return Number.isFinite(value) && value >= min ? value : null;
+}
+
+function resolvedDimensions(
+  measured: ChartDimensions,
+  width?: number | string,
+  height?: number | string,
+): ChartDimensions {
+  return {
+    width: typeof width === "number" && width > 0 ? width : measured.width,
+    height: typeof height === "number" && height > 0 ? height : measured.height,
+  };
+}
+
+function dimensionsMatch(left: ChartDimensions, right: ChartDimensions): boolean {
+  return Math.abs(left.width - right.width) < 0.5 && Math.abs(left.height - right.height) < 0.5;
+}
+
+function dimensionsFromElement(element: HTMLElement): ChartDimensions | null {
+  const rect = element.getBoundingClientRect();
+  const width = finiteDimension(rect.width, MIN_USABLE_CHART_WIDTH);
+  const height = finiteDimension(rect.height, MIN_USABLE_CHART_HEIGHT);
+  if (width === null || height === null) {
+    return null;
+  }
+  return { width, height };
+}
+
+function useMeasuredChartDimensions() {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [dimensions, setDimensions] = useState<ChartDimensions>(FALLBACK_CHART_DIMENSIONS);
+
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) {
+      return undefined;
+    }
+
+    const applyDimensions = (next: ChartDimensions | null) => {
+      if (!next) {
+        return;
+      }
+      setDimensions((current) => (dimensionsMatch(current, next) ? current : next));
+    };
+
+    applyDimensions(dimensionsFromElement(element));
+
+    if (typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) {
+        return;
+      }
+      const width = finiteDimension(entry.contentRect.width, MIN_USABLE_CHART_WIDTH);
+      const height = finiteDimension(entry.contentRect.height, MIN_USABLE_CHART_HEIGHT);
+      applyDimensions(width === null || height === null ? null : { width, height });
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  return { ref, dimensions };
+}
+
 /**
  * FNXC:CommandCenterCharts 2026-06-18-21:52:
  * User requested real graphical pie + line charts on every Command Center surface using a proper chart library (recharts); this shared line wrapper preserves the existing series shape while coercing zero/NaN/Infinity inputs into safe responsive, token-themed, reduced-motion-aware recharts data.
@@ -107,9 +180,14 @@ function responsiveDimension(value: number | string | undefined): ResponsiveDime
  *
  * FNXC:CommandCenterCharts 2026-06-19-07:58:
  * FN-6723 found the Activity trend still looked broken after the height/clipping fix because mixed-unit series shared one absolute axis; normalize only callers that opt into `scaleMode="series"` so low-count agent lines stay legible without changing comparable-unit charts elsewhere.
+ *
+ * FNXC:CommandCenterCharts 2026-06-23-08:47:
+ * Daily activity line and token/model line graphs must load even when Recharts cannot resolve a percentage `ResponsiveContainer` during the card's first layout pass. Measure the chart wrapper directly and pass concrete usable dimensions into Recharts, with a first-paint fallback that is replaced by ResizeObserver only after the observed box is large enough to draw a legible chart.
  */
 export function LineChart({ series, ariaLabel, width, height, emptyLabel = "No chart data", scaleMode = "shared" }: LineChartProps) {
   const theme = getCommandCenterChartTheme();
+  const { ref, dimensions } = useMeasuredChartDimensions();
+  const chartDimensions = resolvedDimensions(dimensions, width, height);
   const chartSeries = sanitizeSeries(series, scaleMode);
   const chartData = lineChartData(chartSeries);
 
@@ -122,39 +200,46 @@ export function LineChart({ series, ariaLabel, width, height, emptyLabel = "No c
   }
 
   return (
-    <div className="cc-recharts-chart" role="img" aria-label={ariaLabel} style={containerStyle(width, height)} data-scale-mode={scaleMode}>
-      <ResponsiveContainer width={responsiveDimension(width)} height={responsiveDimension(height)}>
-        <RechartsLineChart data={chartData}>
-          <CartesianGrid stroke={theme.grid} />
-          <XAxis dataKey="index" stroke={theme.tick} tick={{ fill: theme.tick }} />
-          <YAxis
-            stroke={theme.tick}
-            tick={{ fill: theme.tick }}
-            domain={scaleMode === "series" ? [0, 100] : undefined}
-            tickFormatter={scaleMode === "series" ? (value) => `${value}%` : undefined}
+    <div
+      ref={ref}
+      className="cc-recharts-chart"
+      role="img"
+      aria-label={ariaLabel}
+      style={containerStyle(width, height)}
+      data-scale-mode={scaleMode}
+      data-responsive-width={responsiveDimension(width)}
+      data-responsive-height={responsiveDimension(height)}
+    >
+      <RechartsLineChart width={chartDimensions.width} height={chartDimensions.height} data={chartData}>
+        <CartesianGrid stroke={theme.grid} />
+        <XAxis dataKey="index" stroke={theme.tick} tick={{ fill: theme.tick }} />
+        <YAxis
+          stroke={theme.tick}
+          tick={{ fill: theme.tick }}
+          domain={scaleMode === "series" ? [0, 100] : undefined}
+          tickFormatter={scaleMode === "series" ? (value) => `${value}%` : undefined}
+        />
+        <Tooltip
+          contentStyle={{
+            background: theme.tooltipBackground,
+            borderColor: theme.tooltipBorder,
+            color: theme.tooltipText,
+          }}
+          itemStyle={{ color: theme.tooltipText }}
+          labelStyle={{ color: theme.tooltipText }}
+        />
+        <Legend wrapperStyle={{ color: theme.legendText }} />
+        {chartSeries.map((entry, index) => (
+          <Line
+            key={entry.dataKey}
+            type="monotone"
+            dataKey={entry.plotKey}
+            name={entry.label}
+            stroke={getCommandCenterChartColor(index, theme)}
+            isAnimationActive={!prefersReducedMotion()}
           />
-          <Tooltip
-            contentStyle={{
-              background: theme.tooltipBackground,
-              borderColor: theme.tooltipBorder,
-              color: theme.tooltipText,
-            }}
-            itemStyle={{ color: theme.tooltipText }}
-            labelStyle={{ color: theme.tooltipText }}
-          />
-          <Legend wrapperStyle={{ color: theme.legendText }} />
-          {chartSeries.map((entry, index) => (
-            <Line
-              key={entry.dataKey}
-              type="monotone"
-              dataKey={entry.plotKey}
-              name={entry.label}
-              stroke={getCommandCenterChartColor(index, theme)}
-              isAnimationActive={!prefersReducedMotion()}
-            />
-          ))}
-        </RechartsLineChart>
-      </ResponsiveContainer>
+        ))}
+      </RechartsLineChart>
     </div>
   );
 }

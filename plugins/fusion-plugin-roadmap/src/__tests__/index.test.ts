@@ -34,7 +34,9 @@ describe("fusion-plugin-roadmap package surface", () => {
 
     expect(plugin.manifest.id).toBe(manifest.id);
     expect(plugin.manifest.version).toBe(manifest.version);
-    expect(plugin.dashboardViews?.[0]?.viewId).toBe(manifest.dashboardViews?.[0]?.viewId);
+    // FNXC:RoadmapsNavigation 2026-06-22-18:50: The roadmap plugin no longer exposes an app dashboard view.
+    expect(plugin.dashboardViews).toBeUndefined();
+    expect(manifest.dashboardViews).toBeUndefined();
   });
 
   it("declares expected package exports", () => {
@@ -44,7 +46,7 @@ describe("fusion-plugin-roadmap package surface", () => {
 
     expect(pkg.exports).toHaveProperty(".");
     expect(pkg.exports).toHaveProperty("./server");
-    expect(pkg.exports).toHaveProperty("./dashboard-view");
+    expect(pkg.exports).not.toHaveProperty("./dashboard-view");
   });
 
   it("exports plugin manifest with roadmap id", () => {

@@ -68,6 +68,54 @@ describe("Workflow Steps Execution", () => {
     }) as any);
   }
 
+  it("exposes read-only artifact discovery tools even without an assigned agent", async () => {
+    const store = createMockStore();
+    const task = {
+      id: "FN-ART-1",
+      title: "Artifact discovery",
+      description: "Test artifact discovery tools",
+      column: "in-progress",
+      dependencies: [],
+      steps: [{ name: "Preflight", status: "in-progress" }],
+      currentStep: 0,
+      log: [],
+      prompt: "# test\n## Steps\n### Step 0: Preflight\n- [ ] check",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    store.getTask.mockResolvedValue(task as any);
+
+    let toolNames: string[] = [];
+    mockedCreateFnAgent.mockImplementation((async (opts: any) => {
+      const customTools = opts.customTools || [];
+      toolNames = customTools.map((tool: any) => tool.name);
+      return {
+        session: {
+          prompt: vi.fn().mockImplementation(async () => {
+            const taskDoneTool = customTools.find((tool: any) => tool.name === "fn_task_done");
+            if (taskDoneTool) await taskDoneTool.execute("tool-1", {});
+          }),
+          dispose: vi.fn(),
+          subscribe: vi.fn(),
+          on: vi.fn(),
+          sessionManager: { getLeafId: vi.fn().mockReturnValue("leaf-1") },
+          state: {},
+        },
+      };
+    }) as any);
+
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+    await executor.execute(task as any);
+
+    /*
+    FNXC:ArtifactRegistry 2026-06-21-07:04:
+    Read-only artifact list/view tools are cross-agent discovery surfaces, so legacy or unassigned executor sessions still receive them; only fn_artifact_register requires an assigned author id.
+    */
+    expect(toolNames).toContain("fn_artifact_list");
+    expect(toolNames).toContain("fn_artifact_view");
+    expect(toolNames).not.toContain("fn_artifact_register");
+  });
+
   it("requeues to todo after 3 retries when the agent exits without calling fn_task_done", async () => {
     const store = createMockStore();
     store.getTask.mockResolvedValue({

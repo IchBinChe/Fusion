@@ -90,21 +90,15 @@ describe("MissionManager mobile styles", () => {
     expect(section).toContain("display: block;");
   });
 
-  it("keeps the mobile top mission CTA full-width and token-driven", () => {
+  it("keeps the mobile bottom mission CTA full-width and primary-styled", () => {
     const css = loadAllAppCss();
 
-    const topActionRule = css.match(/\.mission-list__top-action\s*\{[^}]*\}/)?.[0];
-    expect(topActionRule).toContain("display: flex;");
+    expect(css).not.toContain(".mission-list__top-action");
 
     const topCtaRule = css.match(/\.mission-list__primary-cta\s*\{[^}]*\}/)?.[0];
     expect(topCtaRule).toContain("width: 100%;");
     expect(topCtaRule).toContain("justify-content: center;");
     expect(topCtaRule).toContain("gap: var(--space-sm);");
-
-    const taskCreateRule = css.match(/\.btn-task-create\s*\{[^}]*\}/)?.[0];
-    expect(taskCreateRule).toContain("background: var(--cta-bg);");
-    expect(taskCreateRule).toContain("border-color: var(--cta-border);");
-    expect(taskCreateRule).toContain("color: var(--cta-text);");
   });
 
   it("hides back button on desktop and restores it on mobile", () => {

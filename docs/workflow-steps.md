@@ -15,6 +15,12 @@ The built-in catalog now includes a business lead-generation workflow with custo
 
 FNXC:WorkflowRouting 2026-06-21-04:25:
 Triage and planning agents must preserve the project default workflow unless the user explicitly requests a different workflow. No-commit markers describe expected artifact behavior only; they no longer imply automatic Quick fix workflow selection.
+
+FNXC:WorkflowRouting 2026-06-22-12:00:
+Agents may select or change a workflow only when the user explicitly requested that workflow or the agent created that specific task. Executor agents must not reroute the task they are executing unless the user asked, but they may set workflows on follow-up tasks they create.
+
+FNXC:Docs 2026-06-21-12:00:
+FN-6906 makes non-coding built-in prompts artifact-oriented: marketing drafts, lead enrichment/outreach, and design previews are persisted with fn_task_document_write, while fn_artifact_register remains conditional until the artifact tool is available.
 -->
 
 Fusion workflows define the task lifecycle policy that moves work from an idea to delivery. The default coding path is **Plan/Triage → Execute → Workflow steps → Review → Merge**, but that path is now represented as a workflow selection rather than only as fixed engine behavior. A task with no explicit workflow resolves to `builtin:coding`; an explicit missing/corrupt custom workflow fails closed instead of silently falling back.
@@ -27,7 +33,9 @@ Operators can select workflows in the dashboard wherever the task or board workf
 - `fn_workflow_select` — assign a workflow to the current or named task.
 - `workflow_id` on `fn_task_create` / delegation tools — create a task with a workflow already selected.
 
-Decision-only or investigation tasks can also declare `noCommitsExpected` / `**No commits expected:** true`; that marker does not change workflow selection by itself. Tasks without an explicit workflow request stay on the project default (`builtin:coding`).
+Agent-initiated workflow assignment is intentionally narrow: an agent may select or change a task's workflow only when the user explicitly requested that workflow, or when the agent created that task itself (for example by passing `workflow_id` to `fn_task_create` / delegation tools). Executors should not call `fn_workflow_select` to reroute the task they are currently executing unless that task's instructions or a user steering comment explicitly asks for the workflow change.
+
+Decision-only or investigation tasks can also declare `noCommitsExpected` / `**No commits expected:** true`; that marker does not change workflow selection by itself. Tasks without an explicit workflow request or creator-owned workflow selection stay on the project default (`builtin:coding`).
 
 ### Built-in workflow catalog
 
@@ -36,16 +44,34 @@ Decision-only or investigation tasks can also declare `noCommitsExpected` / `**N
 | Coding | `builtin:coding` | Default coding lifecycle and fallback for tasks without an explicit selection. |
 | Quick fix | `builtin:quick-fix` | Short path for trivial or no-commit/decision work; omits the standard review stage. |
 | Review-heavy | `builtin:review-heavy` | Standard execute/review/merge path with an additional gated security review. |
-| Marketing | `builtin:marketing` | Content pipeline with custom Ideation, Backlog, Drafting, Editorial review, Published, and Archived columns plus marketing brief/draft/editorial prompts; it reuses the standard lifecycle traits and merge-primitive region. |
+| Marketing | `builtin:marketing` | Content pipeline with custom Ideation, Backlog, Drafting, Editorial review, Published, and Archived columns plus structured marketing brief/draft/editorial prompts; drafts are persisted as task documents for review while the workflow reuses standard lifecycle traits and merge primitives. |
 | Compound engineering | `builtin:compound-engineering` | Plugin-gated workflow that invokes Compound Engineering skills for planning, work, review, PR/feedback, and learnings capture. |
 | Stepwise coding | `builtin:stepwise-coding` | Graph-executor workflow that models per-step parse/execute/review/rework explicitly. |
-| Design | `builtin:design` | UI-heavy work path that implements, runs a gated design/UX review, then performs the standard review and merge. |
+| Design | `builtin:design` | UI-heavy work path that implements, persists a user-facing design preview task document, runs a gated design/UX review, then performs the standard review and merge. |
 | PR lifecycle | `builtin:pr-workflow` | Reusable PR lifecycle graph fragment (create PR → await review → respond → gate → merge); it is a fragment, not directly selectable as a task workflow. |
-| Lead generation | `builtin:lead-generation` | Selectable business workflow for sourcing, qualifying, enriching, and contacting leads with custom lead fields and stage columns; requires the workflow graph executor for custom board columns. |
+| Lead generation | `builtin:lead-generation` | Selectable business workflow for sourcing, qualifying, enriching, and contacting leads with custom lead fields, stage columns, and reviewable enrichment/outreach task documents; requires the workflow graph executor for custom board columns. |
 
 ### Custom workflow authoring
 
-Use the dashboard [Workflow Editor](./workflow-editor.md) to inspect read-only built-ins, duplicate them, or author custom workflows. Custom workflows can declare graph nodes and edges, columns/traits, task fields, typed workflow settings, model lanes, optional workflow-step templates, and author-time validation. Use this page for runtime semantics; use the editor guide for the visual authoring surface.
+Use the dashboard [Workflow Editor](./workflow-editor.md) to inspect built-ins, tune built-in prompts, duplicate workflows, or author custom workflows. Custom workflows can declare graph nodes and edges, columns/traits, task fields, typed workflow settings, model lanes, optional workflow-step templates, and author-time validation. Use this page for runtime semantics; use the editor guide for the visual authoring surface.
+
+### Overriding built-in workflow prompts
+
+<!--
+FNXC:Docs 2026-06-21-21:22:
+Built-in workflows stay structurally read-only while prompt/gate node text is project-tunable, so operators need a resettable prompt-override model without implying graph topology edits are allowed.
+-->
+
+Built-in workflow graph structure is still shipped and read-only: nodes, edges, columns, traits, executor configuration, and workflow setting declarations cannot be edited in place. Prompt-bearing nodes are the exception. In the workflow editor, select any `prompt` or `gate` node in a built-in workflow and edit its **Prompt** field to create a project-scoped override.
+
+Prompt overrides are stored per `(workflowId, nodeId, projectId)`. At runtime Fusion resolves the effective prompt as:
+
+1. the stored override for that workflow/node/project, when present and non-empty; otherwise
+2. the shipped prompt text from the built-in workflow IR.
+
+This same overlay is used by the dashboard preview, seam prompt resolution during live task runs, synchronous workflow IR resolution used by lifecycle movement, and workflow-step materialization for non-seam prompt/gate nodes. Empty or whitespace-only prompt edits are treated as reset/delete operations, never as blank prompts.
+
+Use **Reset to default** on an overridden prompt to delete the stored override and return to the shipped built-in prompt. Duplicating a built-in remains the path when you need to change topology, columns, traits, settings declarations, or non-prompt configuration.
 
 ## Workflow IR (v1)
 
@@ -83,9 +109,9 @@ The default built-in catalog entry `builtin:coding` is backed by the canonical `
 
 `builtin:stepwise-coding` is a separate graph variant backed by `BUILTIN_STEPWISE_CODING_WORKFLOW_IR`; it keeps the same lifecycle columns/traits while modeling per-step parse/execute/review/rework as authored graph structure.
 
-`builtin:marketing` is a non-coding content workflow with marketing-specific columns (`ideation`, `backlog`, `drafting`, `editorial-review`, `published`, `archived`) and prompt seams for content brief, draft, and editorial review. It uses the same lifecycle traits (`intake`, `hold`, `wip`, `merge-blocker`, `human-review`, `complete`, `archived`) and the same merge-gate/branch-group/merge-attempt primitive region as coding workflows, so scheduler, capacity, review blocking, and merge orchestration behavior remain standard.
+`builtin:marketing` is a non-coding content workflow with marketing-specific columns (`ideation`, `backlog`, `drafting`, `editorial-review`, `published`, `archived`) and prompt seams for content brief, draft, and editorial review. Its draft stage saves the primary content deliverable as a task document for human review, while the workflow uses the same lifecycle traits (`intake`, `hold`, `wip`, `merge-blocker`, `human-review`, `complete`, `archived`) and the same merge-gate/branch-group/merge-attempt primitive region as coding workflows, so scheduler, capacity, review blocking, and merge orchestration behavior remain standard.
 
-During triage/planning sessions, agents can call `fn_workflow_list` to discover available built-in and custom workflows and read their descriptions before routing work. They can call `fn_workflow_select` to select a workflow for the task being specified, or pass `workflow_id` when creating child tasks with `fn_task_create`; decision-only or investigation tasks can also set `noCommitsExpected` / `**No commits expected:** true` when no code changes are expected. The built-in triage thresholds, decision-only verb list, and default routing IDs are workflow-native typed settings resolved from the selected workflow.
+During triage/planning sessions, agents can call `fn_workflow_list` to discover available built-in and custom workflows and read their descriptions before routing work. They can call `fn_workflow_select` only when the user explicitly requested a workflow or when selecting a workflow for a task they created, and they can pass `workflow_id` when creating child tasks with `fn_task_create`; decision-only or investigation tasks can also set `noCommitsExpected` / `**No commits expected:** true` when no code changes are expected. The built-in triage thresholds, decision-only verb list, and default routing IDs are workflow-native typed settings resolved from the selected workflow.
 
 #### Runtime invariant criterion
 
@@ -325,7 +351,7 @@ A prompt-mode workflow step can set its own model with:
 - `modelProvider`
 - `modelId`
 
-If both are set, step execution uses that model; otherwise it falls back to default model selection.
+If both are set, step execution uses that model; otherwise it falls back to default model selection. Dashboard node summaries show that unpinned prompt-step state as **Default model**.
 
 ## Default-On Behavior for New Tasks
 

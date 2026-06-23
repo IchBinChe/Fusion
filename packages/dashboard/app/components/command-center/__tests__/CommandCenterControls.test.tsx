@@ -113,6 +113,25 @@ describe("CommandCenterControls", () => {
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
   });
 
+  it("persists concurrency slider changes at the default maximum of 50", async () => {
+    renderControls("project-a");
+
+    await flushPromises();
+    const section = screen.getByTestId("cc-controls-concurrency");
+    const slider = within(section).getByLabelText(/max concurrent tasks/i);
+    fireEvent.change(slider, { target: { value: "50" } });
+
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+    });
+
+    expect(mocks.updateSettings).toHaveBeenCalledWith(
+      { maxConcurrent: 50, maxTriageConcurrent: 2, maxWorktrees: 4 },
+      "project-a",
+    );
+  });
+
   it("persists concurrency slider changes without a project id", async () => {
     renderControls(undefined);
 
@@ -151,8 +170,40 @@ describe("CommandCenterControls", () => {
     expect(maxWorktrees.closest("label")).toHaveTextContent("Max worktrees9");
   });
 
+  it("sets all concurrency slider maximums to 50 for default and in-range settings", async () => {
+    const defaultRender = renderControls("project-a");
+
+    await flushPromises();
+    const section = screen.getByTestId("cc-controls-concurrency");
+    const sliders = [
+      within(section).getByLabelText(/max concurrent tasks/i),
+      within(section).getByLabelText(/max triage concurrent/i),
+      within(section).getByLabelText(/max worktrees/i),
+    ] as HTMLInputElement[];
+
+    for (const slider of sliders) {
+      expect(slider.max).toBe("50");
+    }
+
+    defaultRender.unmount();
+    mocks.fetchSettings.mockResolvedValueOnce({ maxConcurrent: 50, maxTriageConcurrent: 49, maxWorktrees: 48 });
+    renderControls("project-b");
+
+    await flushPromises();
+    const inRangeSection = screen.getByTestId("cc-controls-concurrency");
+    const inRangeSliders = [
+      within(inRangeSection).getByLabelText(/max concurrent tasks/i),
+      within(inRangeSection).getByLabelText(/max triage concurrent/i),
+      within(inRangeSection).getByLabelText(/max worktrees/i),
+    ] as HTMLInputElement[];
+
+    for (const slider of inRangeSliders) {
+      expect(slider.max).toBe("50");
+    }
+  });
+
   it("keeps out-of-range persisted concurrency values visible instead of silently clamping", async () => {
-    mocks.fetchSettings.mockResolvedValueOnce({ maxConcurrent: 12, maxTriageConcurrent: 13, maxWorktrees: 24 });
+    mocks.fetchSettings.mockResolvedValueOnce({ maxConcurrent: 60, maxTriageConcurrent: 70, maxWorktrees: 80 });
 
     renderControls("project-a");
 
@@ -162,15 +213,15 @@ describe("CommandCenterControls", () => {
     const maxTriageConcurrent = within(section).getByLabelText(/max triage concurrent/i) as HTMLInputElement;
     const maxWorktrees = within(section).getByLabelText(/max worktrees/i) as HTMLInputElement;
 
-    expect(maxConcurrent.value).toBe("12");
-    expect(maxConcurrent.max).toBe("12");
-    expect(maxConcurrent.closest("label")).toHaveTextContent("Max concurrent tasks12");
-    expect(maxTriageConcurrent.value).toBe("13");
-    expect(maxTriageConcurrent.max).toBe("13");
-    expect(maxTriageConcurrent.closest("label")).toHaveTextContent("Max triage concurrent13");
-    expect(maxWorktrees.value).toBe("24");
-    expect(maxWorktrees.max).toBe("24");
-    expect(maxWorktrees.closest("label")).toHaveTextContent("Max worktrees24");
+    expect(maxConcurrent.value).toBe("60");
+    expect(maxConcurrent.max).toBe("60");
+    expect(maxConcurrent.closest("label")).toHaveTextContent("Max concurrent tasks60");
+    expect(maxTriageConcurrent.value).toBe("70");
+    expect(maxTriageConcurrent.max).toBe("70");
+    expect(maxTriageConcurrent.closest("label")).toHaveTextContent("Max triage concurrent70");
+    expect(maxWorktrees.value).toBe("80");
+    expect(maxWorktrees.max).toBe("80");
+    expect(maxWorktrees.closest("label")).toHaveTextContent("Max worktrees80");
   });
 
   it("marks concurrency sliders with the mobile touch-drag affordance contract", async () => {

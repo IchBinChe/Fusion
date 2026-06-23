@@ -1,15 +1,17 @@
 import "./NewTaskModal.css";
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { DEFAULT_TASK_PRIORITY, type Task, type TaskCreateInput, type TaskPriority } from "@fusion/core";
+import { DEFAULT_TASK_PRIORITY, type Task, type TaskPriority } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
-import { uploadAttachment } from "../api";
+import { checkDuplicateTasks, uploadAttachment, type CreateTaskInput, type DuplicateMatch } from "../api";
 import { Bot } from "lucide-react";
 import { useSetupReadiness } from "../hooks/useSetupReadiness";
 import { SetupWarningBanner } from "./SetupWarningBanner";
 import { LoadingSpinner } from "./LoadingSpinner";
 import { TaskForm, type BranchSelectionMode, type PendingImage } from "./TaskForm";
+import { DuplicateWarningModal } from "./DuplicateWarningModal";
 import { REPO_OVERRIDE_RE } from "./githubTracking";
 import { useConfirm } from "../hooks/useConfirm";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
@@ -17,18 +19,120 @@ import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { useNodes } from "../hooks/useNodes";
 import { useViewportMode } from "../hooks/useViewportMode";
 import { useAgentsMapCache } from "../hooks/useAgentsMapCache";
+import { nextFloatingZ, currentFloatingZ } from "./floatingWindowStack";
+
+type NewTaskCreateInput = Omit<CreateTaskInput, "branchSelection"> & {
+  branchSelection?: {
+    mode: BranchSelectionMode;
+    branchName?: string;
+    baseBranch?: string;
+  };
+};
 
 interface NewTaskModalProps {
   isOpen: boolean;
   onClose: () => void;
   projectId?: string;
   tasks: Task[]; // for dependency selection
-  onCreateTask: (input: TaskCreateInput) => Promise<Task>;
+  onCreateTask: (input: NewTaskCreateInput) => Promise<Task>;
   addToast: (message: string, type?: ToastType) => void;
   initialDescription?: string;
+  onPlanningMode?: (initialPlan: string, workflowId?: string | null) => void;
+  onSubtaskBreakdown?: (description: string, workflowId?: string | null) => void;
 }
 
-export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, addToast, initialDescription = "" }: NewTaskModalProps) {
+/*
+FNXC:NewTask 2026-06-22-20:30:
+The New Task dialog is a FLOATING, DRAGGABLE, RESIZABLE, NON-BLOCKING window matching the right-dock pop-out (RightDockExpandModal). The overlay is transparent and `pointer-events: none` so the app behind stays usable and behind-clicks pass through — there is therefore NO overlay click-to-dismiss; the header close (X) and Cancel button are the only dismissals (plus Escape). The panel is `position: fixed; pointer-events: auto`, dragged by its header and resized from corner/edge handles, with rAF-batched position/size state and a single teardown ref invoked on pointerup/pointercancel AND on unmount so no document/element listeners or pending rAF leak. Size/position persist to localStorage. On mobile we keep the full-screen sheet behavior (no floating) so the keyboard-aware layout still works.
+*/
+const NEW_TASK_MODAL_SIZE_STORAGE_KEY = "fusion:new-task-modal-size";
+const NEW_TASK_MODAL_POSITION_STORAGE_KEY = "fusion:new-task-modal-position";
+
+const NEW_TASK_DEFAULT_WIDTH = 720;
+const NEW_TASK_DEFAULT_HEIGHT = 640;
+const NEW_TASK_MIN_WIDTH = 420;
+const NEW_TASK_MIN_HEIGHT = 360;
+const NEW_TASK_VIEWPORT_PADDING = 16;
+
+interface FloatSize {
+  width: number;
+  height: number;
+}
+
+interface FloatPosition {
+  x: number;
+  y: number;
+}
+
+function clampFloatSize(size: FloatSize): FloatSize {
+  if (typeof window === "undefined") return size;
+  return {
+    width: Math.min(Math.max(size.width, NEW_TASK_MIN_WIDTH), Math.max(NEW_TASK_MIN_WIDTH, window.innerWidth - NEW_TASK_VIEWPORT_PADDING * 2)),
+    height: Math.min(Math.max(size.height, NEW_TASK_MIN_HEIGHT), Math.max(NEW_TASK_MIN_HEIGHT, window.innerHeight - NEW_TASK_VIEWPORT_PADDING * 2)),
+  };
+}
+
+function clampFloatPosition(position: FloatPosition, size: FloatSize): FloatPosition {
+  if (typeof window === "undefined") return position;
+  return {
+    x: Math.min(Math.max(position.x, NEW_TASK_VIEWPORT_PADDING), Math.max(NEW_TASK_VIEWPORT_PADDING, window.innerWidth - size.width - NEW_TASK_VIEWPORT_PADDING)),
+    y: Math.min(Math.max(position.y, NEW_TASK_VIEWPORT_PADDING), Math.max(NEW_TASK_VIEWPORT_PADDING, window.innerHeight - size.height - NEW_TASK_VIEWPORT_PADDING)),
+  };
+}
+
+function readFloatSize(): FloatSize {
+  if (typeof window === "undefined") return { width: NEW_TASK_DEFAULT_WIDTH, height: NEW_TASK_DEFAULT_HEIGHT };
+  try {
+    const raw = window.localStorage.getItem(NEW_TASK_MODAL_SIZE_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<FloatSize>;
+      if (typeof parsed.width === "number" && typeof parsed.height === "number") {
+        return clampFloatSize({ width: parsed.width, height: parsed.height });
+      }
+    }
+  } catch {
+    // ignore corrupted persisted size
+  }
+  return clampFloatSize({ width: NEW_TASK_DEFAULT_WIDTH, height: NEW_TASK_DEFAULT_HEIGHT });
+}
+
+function writeFloatSize(size: FloatSize): FloatSize {
+  const clamped = clampFloatSize(size);
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(NEW_TASK_MODAL_SIZE_STORAGE_KEY, JSON.stringify(clamped));
+  }
+  return clamped;
+}
+
+function readFloatPosition(size: FloatSize): FloatPosition {
+  if (typeof window === "undefined") return { x: NEW_TASK_VIEWPORT_PADDING, y: NEW_TASK_VIEWPORT_PADDING };
+  try {
+    const raw = window.localStorage.getItem(NEW_TASK_MODAL_POSITION_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<FloatPosition>;
+      if (typeof parsed.x === "number" && typeof parsed.y === "number") {
+        return clampFloatPosition({ x: parsed.x, y: parsed.y }, size);
+      }
+    }
+  } catch {
+    // ignore corrupted persisted position
+  }
+  // Default: roughly centered.
+  return clampFloatPosition({ x: (window.innerWidth - size.width) / 2, y: (window.innerHeight - size.height) / 2 }, size);
+}
+
+function writeFloatPosition(position: FloatPosition, size: FloatSize): FloatPosition {
+  const clamped = clampFloatPosition(position, size);
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(NEW_TASK_MODAL_POSITION_STORAGE_KEY, JSON.stringify(clamped));
+  }
+  return clamped;
+}
+
+type FloatResizeDirection = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
+const NEW_TASK_RESIZE_DIRECTIONS: FloatResizeDirection[] = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
+
+export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, addToast, initialDescription = "", onPlanningMode, onSubtaskBreakdown }: NewTaskModalProps) {
   const { t } = useTranslation("app");
   const { confirm } = useConfirm();
   const viewportMode = useViewportMode();
@@ -45,12 +149,157 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
     : {};
   const [description, setDescription] = useState("");
   const wasOpenRef = useRef(false);
+
+  /*
+  FNXC:NewTask 2026-06-22-20:30:
+  Floating window position/size state (desktop only). Mobile keeps the full-screen sheet, so we only apply the floating panel style and drag/resize handlers when not mobile. A single active-drag teardown (drag OR resize) lives in dragTeardownRef; pointerup/pointercancel AND the unmount effect run it so an interrupted drag never leaks element pointer listeners or a pending rAF.
+  */
+  const isFloating = viewportMode !== "mobile";
+  const [size, setSizeState] = useState<FloatSize>(() => readFloatSize());
+  const [position, setPositionState] = useState<FloatPosition>(() => readFloatPosition(readFloatSize()));
+  const dragTeardownRef = useRef<(() => void) | null>(null);
+  // FNXC:FloatingWindow 2026-06-22-21:30: Floating (desktop) New Task dialog shares the SINGLE cross-type floating z-index stack (floatingWindowStack). Mounting claims the front; tapping the panel (pointerdown/focus capture) raises it above every other floating modal regardless of type. Mobile keeps the full-screen sheet so this z-index is harmless there.
+  const [zIndex, setZIndex] = useState<number>(() => nextFloatingZ());
+  const bringToFront = useCallback(() => {
+    setZIndex((current) => (current >= currentFloatingZ() ? current : nextFloatingZ()));
+  }, []);
+
+  const persistSize = useCallback((next: FloatSize) => {
+    setSizeState(writeFloatSize(next));
+  }, []);
+
+  const persistPosition = useCallback((next: FloatPosition, withSize: FloatSize) => {
+    setPositionState(writeFloatPosition(next, withSize));
+  }, []);
+
+  // FNXC:NewTask 2026-06-22-20:30: Header drag. setPointerCapture redirects the pointer stream to the captured header element, so element-scoped pointermove/up listeners receive the full drag even off the header; moves are rAF-batched; the panel is clamped on-screen. Close button clicks are excluded so dragging never swallows close.
+  const handleFloatingDragPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest("button")) return;
+    event.preventDefault();
+    const captureTarget = event.currentTarget;
+    const pointerId = event.pointerId;
+    captureTarget.setPointerCapture?.(pointerId);
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startPosition = position;
+    const currentSize = size;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
+
+    let latest = startPosition;
+    let frame = 0;
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) return;
+      latest = { x: startPosition.x + moveEvent.clientX - startX, y: startPosition.y + moveEvent.clientY - startY };
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        setPositionState(clampFloatPosition(latest, currentSize));
+      });
+    };
+    const detachListeners = () => {
+      captureTarget.releasePointerCapture?.(pointerId);
+      captureTarget.removeEventListener("pointermove", handlePointerMove);
+      captureTarget.removeEventListener("pointerup", handlePointerUp);
+      captureTarget.removeEventListener("pointercancel", handlePointerUp);
+    };
+    function handlePointerUp() {
+      if (frame) cancelAnimationFrame(frame);
+      persistPosition(latest, currentSize);
+      document.body.style.userSelect = previousUserSelect;
+      detachListeners();
+      dragTeardownRef.current = null;
+    }
+
+    dragTeardownRef.current = () => {
+      if (frame) cancelAnimationFrame(frame);
+      document.body.style.userSelect = previousUserSelect;
+      detachListeners();
+      dragTeardownRef.current = null;
+    };
+
+    captureTarget.addEventListener("pointermove", handlePointerMove);
+    captureTarget.addEventListener("pointerup", handlePointerUp);
+    captureTarget.addEventListener("pointercancel", handlePointerUp);
+  }, [persistPosition, position, size]);
+
+  // FNXC:NewTask 2026-06-22-20:30: Corner/edge resize, rAF-batched. West/north handles also shift the panel origin so the opposite edge stays pinned. Same teardown discipline as the drag.
+  const handleFloatingResizePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>, direction: FloatResizeDirection) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const captureTarget = event.currentTarget;
+    const pointerId = event.pointerId;
+    captureTarget.setPointerCapture?.(pointerId);
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startSize = size;
+    const startPosition = position;
+    const previousUserSelect = document.body.style.userSelect;
+    document.body.style.userSelect = "none";
+
+    let latestSize = startSize;
+    let latestPosition = startPosition;
+    let frame = 0;
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      if (moveEvent.pointerId !== pointerId) return;
+      const dx = moveEvent.clientX - startX;
+      const dy = moveEvent.clientY - startY;
+      const nextSize = clampFloatSize({
+        width: startSize.width + (direction.includes("e") ? dx : direction.includes("w") ? -dx : 0),
+        height: startSize.height + (direction.includes("s") ? dy : direction.includes("n") ? -dy : 0),
+      });
+      const nextPosition = {
+        x: startPosition.x + (direction.includes("w") ? startSize.width - nextSize.width : 0),
+        y: startPosition.y + (direction.includes("n") ? startSize.height - nextSize.height : 0),
+      };
+      latestSize = nextSize;
+      latestPosition = nextPosition;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        setSizeState(latestSize);
+        setPositionState(clampFloatPosition(latestPosition, latestSize));
+      });
+    };
+    const detachListeners = () => {
+      captureTarget.releasePointerCapture?.(pointerId);
+      captureTarget.removeEventListener("pointermove", handlePointerMove);
+      captureTarget.removeEventListener("pointerup", handlePointerUp);
+      captureTarget.removeEventListener("pointercancel", handlePointerUp);
+    };
+    function handlePointerUp() {
+      if (frame) cancelAnimationFrame(frame);
+      persistSize(latestSize);
+      persistPosition(latestPosition, latestSize);
+      document.body.style.userSelect = previousUserSelect;
+      detachListeners();
+      dragTeardownRef.current = null;
+    }
+
+    dragTeardownRef.current = () => {
+      if (frame) cancelAnimationFrame(frame);
+      document.body.style.userSelect = previousUserSelect;
+      detachListeners();
+      dragTeardownRef.current = null;
+    };
+
+    captureTarget.addEventListener("pointermove", handlePointerMove);
+    captureTarget.addEventListener("pointerup", handlePointerUp);
+    captureTarget.addEventListener("pointercancel", handlePointerUp);
+  }, [persistPosition, persistSize, position, size]);
+
+  // FNXC:NewTask 2026-06-22-20:30: Run any active drag/resize teardown on unmount so element pointer listeners + a pending rAF never outlive the modal.
+  useEffect(() => () => dragTeardownRef.current?.(), []);
+
   const [dependencies, setDependencies] = useState<string[]>([]);
   const [branchMode, setBranchMode] = useState<BranchSelectionMode>("project-default");
   const [branch, setBranch] = useState("");
   const [baseBranch, setBaseBranch] = useState("");
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [duplicateMatches, setDuplicateMatches] = useState<DuplicateMatch[] | null>(null);
   const [executorModel, setExecutorModel] = useState("");
   const [validatorModel, setValidatorModel] = useState("");
   const [planningModel, setPlanningModel] = useState("");
@@ -69,6 +318,14 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
   const [autoMerge, setAutoMerge] = useState<boolean | undefined>(undefined);
   const [priority, setPriority] = useState<TaskPriority>(DEFAULT_TASK_PRIORITY);
   const [nodeId, setNodeId] = useState<string | undefined>(undefined);
+  /**
+   * FNXC:NewTaskDialogAffordances 2026-06-21-18:35:
+   * The New Task dialog must expose the same Fast/standard execution-mode affordance as QuickEntryBox's `quick-entry-fast-toggle`. Reuse TaskForm's `task-form-execution-mode-select` and forward only Fast into `TaskCreateInput.executionMode` so Standard keeps the store default.
+   *
+   * FNXC:NewTaskDialogAffordances 2026-06-22-02:14:
+   * Full-dialog task creation must run the same duplicate preflight as QuickEntryBox before creating. Keep acknowledged duplicate IDs in the create payload so the API receives an explicit user confirmation when the user chooses Create anyway.
+   */
+  const [executionMode, setExecutionMode] = useState<"standard" | "fast">("standard");
   const [githubTrackingEnabled, setGithubTrackingEnabled] = useState(false);
   const [githubRepoOverride, setGithubRepoOverride] = useState("");
 
@@ -178,23 +435,16 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       autoMerge !== undefined ||
       priority !== DEFAULT_TASK_PRIORITY ||
       nodeId !== undefined ||
+      executionMode === "fast" ||
       branchMode !== "project-default" ||
       branch !== "" ||
       baseBranch !== "" ||
       githubTrackingEnabled ||
       githubRepoOverrideTrimmed !== "";
     setHasDirtyState(isDirty);
-  }, [description, dependencies, pendingImages, selectedWorkflowId, enabledWorkflowSteps, executorModel, validatorModel, planningModel, thinkingLevel, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, branchMode, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed]);
+  }, [description, dependencies, pendingImages, selectedWorkflowId, enabledWorkflowSteps, executorModel, validatorModel, planningModel, thinkingLevel, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, executionMode, branchMode, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed]);
 
-  const handleClose = useCallback(async () => {
-    if (hasDirtyState) {
-      const shouldDiscard = await confirm({
-        title: t("newTaskModal.discardChanges", "Discard Changes"),
-        message: t("newTaskModal.unsavedChanges", "You have unsaved changes. Discard them?"),
-        danger: true,
-      });
-      if (!shouldDiscard) return;
-    }
+  const resetForm = useCallback(() => {
     // Clean up object URLs
     pendingImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
     // Reset form
@@ -215,123 +465,172 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
     setAutoMerge(undefined);
     setPriority(DEFAULT_TASK_PRIORITY);
     setNodeId(undefined);
+    setExecutionMode("standard");
     setBranchMode("project-default");
     setBranch("");
     setBaseBranch("");
     setHasDirtyState(false);
     setGithubTrackingEnabled(false);
     setGithubRepoOverride("");
+    setDuplicateMatches(null);
+  }, [pendingImages]);
+
+  const handleClose = useCallback(async () => {
+    if (hasDirtyState) {
+      const shouldDiscard = await confirm({
+        title: t("newTaskModal.discardChanges", "Discard Changes"),
+        message: t("newTaskModal.unsavedChanges", "You have unsaved changes. Discard them?"),
+        danger: true,
+      });
+      if (!shouldDiscard) return;
+    }
+    resetForm();
     onClose();
-  }, [hasDirtyState, onClose, pendingImages, confirm, t]);
+  }, [hasDirtyState, onClose, confirm, t, resetForm]);
+
+  /**
+   * FNXC:NewTaskDialogAffordances 2026-06-21-17:50:
+   * The New Task dialog must expose the same Plan and Subtask quick-add handoff affordances as QuickEntryBox. Close without the dirty-state discard confirmation because the typed description is intentionally handed off to the planning/subtask modal instead of discarded.
+   */
+  const handleAiAssistClose = useCallback(() => {
+    resetForm();
+    onClose();
+  }, [onClose, resetForm]);
+
+  const performCreate = useCallback(async (trimmedDesc: string, acknowledgedDuplicates?: string[]) => {
+    const executorSlashIdx = executorModel.indexOf("/");
+    const validatorSlashIdx = validatorModel.indexOf("/");
+    const planningSlashIdx = planningModel.indexOf("/");
+
+    const createInput: NewTaskCreateInput = {
+      title: undefined,
+      description: trimmedDesc,
+      column: "triage",
+      dependencies: dependencies.length ? dependencies : undefined,
+      // U6/R3: forward the workflow selection only when the user changed it.
+      //  - undefined → omit (store inherits the project default, today's behavior)
+      //  - null      → explicit "No workflow" (store skips default materialization)
+      //  - string    → that workflow, materialized atomically at create time.
+      ...(selectedWorkflowId !== undefined ? { workflowId: selectedWorkflowId } : {}),
+      // Optional steps the user toggled on (omit when none so the store keeps its
+      // default materialization behavior).
+      ...(enabledWorkflowSteps.length ? { enabledWorkflowSteps } : {}),
+      ...(selectedAgentId ? { assignedAgentId: selectedAgentId } : {}),
+      modelPresetId: presetMode === "preset" ? selectedPresetId || undefined : undefined,
+      modelProvider: executorModel && executorSlashIdx !== -1 ? executorModel.slice(0, executorSlashIdx) : undefined,
+      modelId: executorModel && executorSlashIdx !== -1 ? executorModel.slice(executorSlashIdx + 1) : undefined,
+      validatorModelProvider: validatorModel && validatorSlashIdx !== -1 ? validatorModel.slice(0, validatorSlashIdx) : undefined,
+      validatorModelId: validatorModel && validatorSlashIdx !== -1 ? validatorModel.slice(validatorSlashIdx + 1) : undefined,
+      planningModelProvider: planningModel && planningSlashIdx !== -1 ? planningModel.slice(0, planningSlashIdx) : undefined,
+      planningModelId: planningModel && planningSlashIdx !== -1 ? planningModel.slice(planningSlashIdx + 1) : undefined,
+      thinkingLevel: thinkingLevel !== "" ? thinkingLevel as "minimal" | "low" | "medium" | "high" | "xhigh" : undefined,
+      reviewLevel,
+      ...(autoMerge !== undefined ? { autoMerge } : {}),
+      priority,
+      nodeId,
+      ...(executionMode === "fast" ? { executionMode: "fast" } : {}),
+      branchSelection: {
+        mode: branchMode,
+        ...(isBranchNameRequired && branch.trim() ? { branchName: branch.trim() } : {}),
+        ...(baseBranch.trim() ? { baseBranch: baseBranch.trim() } : {}),
+      },
+      ...(acknowledgedDuplicates?.length ? { acknowledgedDuplicates } : {}),
+      ...(githubTrackingEnabled || githubRepoOverrideTrimmed !== ""
+        ? {
+            githubTracking: {
+              enabled: githubTrackingEnabled,
+              ...(githubRepoOverrideTrimmed !== "" ? { repoOverride: githubRepoOverrideTrimmed } : {}),
+            },
+          }
+        : {}),
+    };
+
+    // U6/R3: the workflow is now materialized atomically inside createTask via
+    // the `workflowId` parameter — no post-create selectTaskWorkflow call, so
+    // the executor can never observe the task with the wrong step set.
+    const task = await onCreateTask(createInput);
+
+    // Upload pending images as attachments
+    if (pendingImages.length > 0) {
+      const failures: string[] = [];
+      for (const img of pendingImages) {
+        try {
+          await uploadAttachment(task.id, img.file, projectId);
+        } catch {
+          failures.push(img.file.name);
+        }
+      }
+      if (failures.length > 0) {
+        addToast(t("newTaskModal.failedToUpload", "Failed to upload: {{files}}", { files: failures.join(", ") }), "error");
+      }
+    }
+
+    resetForm();
+    addToast(t("newTaskModal.taskCreated", "Created {{taskId}}", { taskId: task.id }), "success");
+    onClose();
+  }, [executorModel, validatorModel, planningModel, thinkingLevel, dependencies, selectedWorkflowId, enabledWorkflowSteps, selectedAgentId, presetMode, selectedPresetId, reviewLevel, autoMerge, priority, nodeId, executionMode, branchMode, isBranchNameRequired, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed, onCreateTask, pendingImages, resetForm, addToast, t, onClose, projectId]);
 
   const handleSubmit = useCallback(async () => {
     const trimmedDesc = description.trim();
     if (!trimmedDesc || isSubmitting || githubRepoOverrideInvalid || hasInvalidBranchSelection) return;
 
     setIsSubmitting(true);
+    let keepSubmittingForDuplicateChoice = false;
     try {
-      const executorSlashIdx = executorModel.indexOf("/");
-      const validatorSlashIdx = validatorModel.indexOf("/");
-      const planningSlashIdx = planningModel.indexOf("/");
-
-      const createInput: TaskCreateInput & {
-        branchSelection?: {
-          mode: BranchSelectionMode;
-          branchName?: string;
-          baseBranch?: string;
-        };
-      } = {
-        title: undefined,
-        description: trimmedDesc,
-        column: "triage",
-        dependencies: dependencies.length ? dependencies : undefined,
-        // U6/R3: forward the workflow selection only when the user changed it.
-        //  - undefined → omit (store inherits the project default, today's behavior)
-        //  - null      → explicit "No workflow" (store skips default materialization)
-        //  - string    → that workflow, materialized atomically at create time.
-        ...(selectedWorkflowId !== undefined ? { workflowId: selectedWorkflowId } : {}),
-        // Optional steps the user toggled on (omit when none so the store keeps its
-        // default materialization behavior).
-        ...(enabledWorkflowSteps.length ? { enabledWorkflowSteps } : {}),
-        ...(selectedAgentId ? { assignedAgentId: selectedAgentId } : {}),
-        modelPresetId: presetMode === "preset" ? selectedPresetId || undefined : undefined,
-        modelProvider: executorModel && executorSlashIdx !== -1 ? executorModel.slice(0, executorSlashIdx) : undefined,
-        modelId: executorModel && executorSlashIdx !== -1 ? executorModel.slice(executorSlashIdx + 1) : undefined,
-        validatorModelProvider: validatorModel && validatorSlashIdx !== -1 ? validatorModel.slice(0, validatorSlashIdx) : undefined,
-        validatorModelId: validatorModel && validatorSlashIdx !== -1 ? validatorModel.slice(validatorSlashIdx + 1) : undefined,
-        planningModelProvider: planningModel && planningSlashIdx !== -1 ? planningModel.slice(0, planningSlashIdx) : undefined,
-        planningModelId: planningModel && planningSlashIdx !== -1 ? planningModel.slice(planningSlashIdx + 1) : undefined,
-        thinkingLevel: thinkingLevel !== "" ? thinkingLevel as "minimal" | "low" | "medium" | "high" | "xhigh" : undefined,
-        reviewLevel,
-        ...(autoMerge !== undefined ? { autoMerge } : {}),
-        priority,
-        nodeId,
-        branchSelection: {
-          mode: branchMode,
-          ...(isBranchNameRequired && branch.trim() ? { branchName: branch.trim() } : {}),
-          ...(baseBranch.trim() ? { baseBranch: baseBranch.trim() } : {}),
-        },
-        ...(githubTrackingEnabled || githubRepoOverrideTrimmed !== ""
-          ? {
-              githubTracking: {
-                enabled: githubTrackingEnabled,
-                ...(githubRepoOverrideTrimmed !== "" ? { repoOverride: githubRepoOverrideTrimmed } : {}),
-              },
-            }
-          : {}),
-      };
-
-      // U6/R3: the workflow is now materialized atomically inside createTask via
-      // the `workflowId` parameter — no post-create selectTaskWorkflow call, so
-      // the executor can never observe the task with the wrong step set.
-      const task = await onCreateTask(createInput);
-
-      // Upload pending images as attachments
-      if (pendingImages.length > 0) {
-        const failures: string[] = [];
-        for (const img of pendingImages) {
-          try {
-            await uploadAttachment(task.id, img.file, projectId);
-          } catch {
-            failures.push(img.file.name);
-          }
-        }
-        if (failures.length > 0) {
-          addToast(t("newTaskModal.failedToUpload", "Failed to upload: {{files}}", { files: failures.join(", ") }), "error");
-        }
+      const matches = await checkDuplicateTasks({ description: trimmedDesc }, projectId);
+      if (matches.length > 0) {
+        setDuplicateMatches(matches);
+        keepSubmittingForDuplicateChoice = true;
+        return;
       }
+    } catch (_error) {
+      addToast(t("tasks.duplicateCheckFailed", "Duplicate check failed; creating task anyway."), "error");
+    }
 
-      // Clean up
-      pendingImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
-      setPendingImages([]);
-      setDescription("");
-      setDependencies([]);
-      setExecutorModel("");
-      setValidatorModel("");
-      setPlanningModel("");
-      setThinkingLevel("");
-      setSelectedPresetId("");
-      setPresetMode("default");
-      setSelectedWorkflowId(undefined);
-      setEnabledWorkflowSteps([]);
-      setSelectedAgentId(null);
-      setShowAgentPicker(false);
-      setReviewLevel(undefined);
-      setAutoMerge(undefined);
-      setPriority(DEFAULT_TASK_PRIORITY);
-      setNodeId(undefined);
-      setBranchMode("project-default");
-      setBranch("");
-      setBaseBranch("");
+    try {
+      await performCreate(trimmedDesc);
+    } catch (err) {
+      addToast(getErrorMessage(err) || t("newTaskModal.failedToCreate", "Failed to create task"), "error");
+    } finally {
+      if (!keepSubmittingForDuplicateChoice) {
+        setIsSubmitting(false);
+      }
+    }
+  }, [description, isSubmitting, githubRepoOverrideInvalid, hasInvalidBranchSelection, projectId, addToast, t, performCreate]);
 
-      addToast(t("newTaskModal.taskCreated", "Created {{taskId}}", { taskId: task.id }), "success");
-      onClose();
+  const handleDuplicateOpen = useCallback((taskId: string) => {
+    setDuplicateMatches(null);
+    if (typeof window !== "undefined") {
+      window.location.hash = `#/tasks/${taskId}`;
+    }
+    resetForm();
+    onClose();
+  }, [onClose, resetForm]);
+
+  const handleDuplicateProceed = useCallback(async () => {
+    const trimmedDesc = description.trim();
+    const matches = duplicateMatches;
+    if (!trimmedDesc || !matches || matches.length === 0) {
+      setDuplicateMatches(null);
+      setIsSubmitting(false);
+      return;
+    }
+
+    setDuplicateMatches(null);
+    setIsSubmitting(true);
+    try {
+      await performCreate(trimmedDesc, matches.map((match) => match.id));
     } catch (err) {
       addToast(getErrorMessage(err) || t("newTaskModal.failedToCreate", "Failed to create task"), "error");
     } finally {
       setIsSubmitting(false);
     }
-  }, [description, dependencies, pendingImages, executorModel, validatorModel, planningModel, thinkingLevel, isSubmitting, githubRepoOverrideInvalid, hasInvalidBranchSelection, onCreateTask, addToast, onClose, projectId, presetMode, selectedPresetId, selectedWorkflowId, enabledWorkflowSteps, selectedAgentId, reviewLevel, autoMerge, priority, nodeId, branchMode, isBranchNameRequired, branch, baseBranch, githubTrackingEnabled, githubRepoOverrideTrimmed, t]);
+  }, [description, duplicateMatches, performCreate, addToast, t]);
+
+  const handleDuplicateCancel = useCallback(() => {
+    setDuplicateMatches(null);
+    setIsSubmitting(false);
+  }, []);
 
   // Handle keyboard shortcuts
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -481,14 +780,45 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
 
   if (!isOpen) return null;
 
-  return (
-    <div className="modal-overlay open" onClick={handleClose} onKeyDown={handleKeyDown} role="dialog" aria-modal="true">
+  // FNXC:NewTask 2026-06-22-20:30: Desktop = floating fixed panel positioned by state-driven left/top/width/height. Mobile keeps the keyboard-aware full-screen sheet (no floating). The transparent click-through overlay never dismisses on click; the header X / Cancel / Escape are the only dismissals.
+  const panelStyle: CSSProperties = isFloating
+    ? { left: `${position.x}px`, top: `${position.y}px`, width: `${size.width}px`, height: `${size.height}px`, zIndex }
+    : keyboardStyle;
+
+  // FNXC:FloatingWindow 2026-06-22-22:30: Portaled to document.body so the floating New Task dialog shares the ONE root stacking context with the other floating modals; the shared cross-type z stack only orders correctly at the document root. Mobile sheet is position:fixed, unaffected.
+  return createPortal(
+    <>
       <div
-        className="modal modal-lg new-task-modal"
-        onClick={(e) => e.stopPropagation()}
-        style={keyboardStyle}
+        className="modal-overlay open new-task-modal-overlay"
+        onKeyDown={handleKeyDown}
+        role="dialog"
+        aria-modal="false"
+        aria-label={t("newTaskModal.title", "New Task")}
+        data-testid="new-task-modal-overlay"
+        /* FNXC:FloatingWindow 2026-06-22-23:00: In floating mode the z-index lives on the fixed overlay (it owns the stacking context); a panel z is trapped and loses to page stacking contexts like the right dock. Mobile keeps its CSS z. */
+        style={isFloating ? { zIndex } : undefined}
       >
-        <div className="modal-header">
+        <div
+          className={`modal modal-lg new-task-modal${isFloating ? " new-task-modal--floating" : ""}`}
+          style={panelStyle}
+          onPointerDownCapture={isFloating ? bringToFront : undefined}
+          onFocusCapture={isFloating ? bringToFront : undefined}
+        >
+          {isFloating && NEW_TASK_RESIZE_DIRECTIONS.map((direction) => (
+            <div
+              key={direction}
+              className={`new-task-resize-handle new-task-resize-handle--${direction}`}
+              data-testid={`new-task-resize-${direction}`}
+              role="separator"
+              aria-label={t("newTaskModal.resize", "Resize new task window")}
+              onPointerDown={(event) => handleFloatingResizePointerDown(event, direction)}
+            />
+          ))}
+          <div
+            className={`modal-header${isFloating ? " new-task-modal__header--draggable" : ""}`}
+            data-testid="new-task-drag-handle"
+            onPointerDown={isFloating ? handleFloatingDragPointerDown : undefined}
+          >
           <h3>{t("newTaskModal.title", "New Task")}</h3>
           <button className="modal-close" onClick={handleClose} disabled={isSubmitting} aria-label={t("actions.close", "Close")}>
             &times;
@@ -528,7 +858,9 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
             disabled={isSubmitting}
             addToast={addToast}
             isActive={isOpen}
-            onClose={handleClose}
+            onClose={handleAiAssistClose}
+            onPlanningMode={onPlanningMode}
+            onSubtaskBreakdown={onSubtaskBreakdown}
             planningModel={planningModel}
             onPlanningModelChange={setPlanningModel}
             thinkingLevel={thinkingLevel}
@@ -548,6 +880,8 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
             nodeId={nodeId}
             onNodeIdChange={setNodeId}
             nodeOptions={nodes}
+            executionMode={executionMode}
+            onExecutionModeChange={setExecutionMode}
             githubTrackingEnabled={githubTrackingEnabled}
             onGithubTrackingEnabledChange={setGithubTrackingEnabled}
             githubRepoOverride={githubRepoOverride}
@@ -563,19 +897,29 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
           <div className="form-error new-task-branch-error">{t("newTaskModal.branchRequired", "Branch name is required for this branch strategy.")}</div>
         )}
 
-        <div className="modal-actions">
-          <button className="btn btn-sm" onClick={handleClose} disabled={isSubmitting}>
-            {t("actions.cancel", "Cancel")}
-          </button>
-          <button
-            className="btn btn-primary btn-sm"
-            onClick={handleSubmit}
-            disabled={!description.trim() || isSubmitting || githubRepoOverrideInvalid || hasInvalidBranchSelection}
-          >
-            {isSubmitting ? t("newTaskModal.creating", "Creating...") : t("newTaskModal.createTask", "Create Task")}
-          </button>
+          <div className="modal-actions">
+            <button className="btn btn-sm" onClick={handleClose} disabled={isSubmitting}>
+              {t("actions.cancel", "Cancel")}
+            </button>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={handleSubmit}
+              disabled={!description.trim() || isSubmitting || githubRepoOverrideInvalid || hasInvalidBranchSelection}
+            >
+              {isSubmitting ? t("newTaskModal.creating", "Creating...") : t("newTaskModal.createTask", "Create Task")}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+      {duplicateMatches && (
+        <DuplicateWarningModal
+          matches={duplicateMatches}
+          onOpen={handleDuplicateOpen}
+          onProceed={handleDuplicateProceed}
+          onCancel={handleDuplicateCancel}
+        />
+      )}
+    </>,
+    document.body,
   );
 }

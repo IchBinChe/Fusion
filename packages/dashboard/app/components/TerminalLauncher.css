@@ -1,0 +1,208 @@
+:root {
+  --terminal-launcher-menu-min-width: calc(var(--space-xl) * 5);
+  --terminal-launcher-menu-width: calc(var(--space-xl) * 8.125);
+  --terminal-launcher-menu-height: calc(var(--space-xl) * 8.75);
+}
+
+.terminal-launcher {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+}
+
+.terminal-launcher--footer {
+  background: transparent;
+  border-color: transparent;
+}
+
+/*
+FNXC:Terminal 2026-06-22-00:00:
+In the footer status bar the Terminal launcher must read as plain clickable text, matching the executor "running" state-trigger: no border, no card background, no chunky button padding. The label underlines on hover like the state trigger. The scripts chevron is flattened to match and the split divider is hidden so the footer affordance is text-first. Only the footer variant is flattened; the header variant keeps its grouped split-button chrome.
+*/
+.terminal-launcher--footer .terminal-launcher__main,
+.terminal-launcher--footer .terminal-launcher__chevron {
+  padding: 0;
+  min-height: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  border-radius: var(--radius-sm);
+}
+
+.terminal-launcher--footer .terminal-launcher__chevron {
+  width: auto;
+  padding-left: var(--space-xxs);
+}
+
+.terminal-launcher--footer .terminal-launcher__divider {
+  display: none;
+}
+
+.terminal-launcher--footer .terminal-launcher__main:hover .terminal-launcher__label {
+  text-decoration: underline;
+  text-underline-offset: calc(var(--space-xs) / 2);
+}
+
+.terminal-launcher__main {
+  min-height: var(--control-height-sm);
+  gap: var(--space-xs);
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  color: var(--text-muted);
+}
+
+.terminal-launcher__main:hover,
+.terminal-launcher__chevron:hover {
+  color: var(--text);
+}
+
+.terminal-launcher__label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+}
+
+.terminal-launcher__chevron {
+  min-height: var(--control-height-sm);
+  width: var(--control-height-sm);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  color: var(--text-muted);
+}
+
+.terminal-launcher__divider {
+  width: var(--border-width, 1px);
+  height: var(--space-md);
+  background: var(--border);
+}
+
+.quick-scripts-dropdown__trigger-chevron {
+  color: currentColor;
+  transition: transform var(--transition-fast);
+}
+
+.quick-scripts-dropdown__trigger-chevron.rotate {
+  transform: rotate(180deg);
+}
+
+.quick-scripts-dropdown__menu {
+  position: absolute;
+  top: calc(100% + var(--space-xs));
+  right: 0;
+  min-width: var(--terminal-launcher-menu-width);
+  max-height: min(70vh, calc(var(--space-xl) * 11.25));
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  z-index: var(--z-popover);
+  padding: var(--space-sm);
+}
+
+.quick-scripts-dropdown__loading,
+.quick-scripts-dropdown__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-lg);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.quick-scripts-dropdown__empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.quick-scripts-dropdown__empty p {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--font-size-sm);
+}
+
+.quick-scripts-dropdown__empty-action {
+  min-height: var(--control-height-sm);
+}
+
+.quick-scripts-dropdown__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.quick-scripts-dropdown__item,
+.quick-scripts-dropdown__manage {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-sm);
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.quick-scripts-dropdown__item:hover,
+.quick-scripts-dropdown__item.highlighted,
+.quick-scripts-dropdown__manage:hover,
+.quick-scripts-dropdown__manage.highlighted {
+  background: var(--card);
+}
+
+.quick-scripts-dropdown__item-icon,
+.quick-scripts-dropdown__manage svg {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.quick-scripts-dropdown__item-info {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xxs);
+  min-width: 0;
+}
+
+.quick-scripts-dropdown__item-name {
+  color: var(--text);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+}
+
+.quick-scripts-dropdown__item-command {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quick-scripts-dropdown__footer {
+  padding-top: var(--space-xs);
+  margin-top: var(--space-xs);
+  border-top: 1px solid var(--border);
+}
+
+.quick-scripts-dropdown__manage {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.quick-scripts-dropdown__manage span {
+  flex: 1;
+}
+
+@media (max-width: 768px) {
+  .terminal-launcher {
+    display: none;
+  }
+}

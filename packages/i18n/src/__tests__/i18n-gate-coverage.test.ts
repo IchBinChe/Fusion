@@ -42,6 +42,16 @@ function readCatalogs(locale: Locale): NamespaceCatalogs {
   return Object.fromEntries(namespaces.all.map((namespace) => [namespace, readCatalog(locale, namespace)]));
 }
 
+function getStringAtPath(catalog: CatalogObject, path: string): string | undefined {
+  const value = path.split(".").reduce<unknown>((current, part) => {
+    if (current && typeof current === "object" && part in current) {
+      return (current as Record<string, unknown>)[part];
+    }
+    return undefined;
+  }, catalog);
+  return typeof value === "string" ? value : undefined;
+}
+
 describe("i18n gate regression coverage", () => {
   it("keeps dashboard source files under the hardcoded-string lint gate", () => {
     expect(config.lint?.ignore).toEqual(expectedNonShippingLintIgnores);
@@ -60,6 +70,20 @@ describe("i18n gate regression coverage", () => {
     const enCatalogs = readCatalogs("en");
     for (const locale of SUPPORTED_LOCALES.filter((locale) => locale !== "en")) {
       expect(findParityViolations(enCatalogs, readCatalogs(locale), { locale })).toEqual([]);
+    }
+  });
+
+  it("keeps the top-level documents destination renamed to Artifacts while preserving keys", () => {
+    const enApp = readCatalog("en", "app");
+    expect(getStringAtPath(enApp, "nav.documents")).toBe("Artifacts");
+    expect(getStringAtPath(enApp, "documents.title")).toBe("Artifacts");
+    expect(getStringAtPath(enApp, "header.documentsView")).toBe("Artifacts view");
+
+    for (const locale of SUPPORTED_LOCALES) {
+      const app = readCatalog(locale, "app");
+      for (const keyPath of ["nav.documents", "documents.title", "header.documentsView"]) {
+        expect(getStringAtPath(app, keyPath), `${locale} app.${keyPath}`).toBeTruthy();
+      }
     }
   });
 });

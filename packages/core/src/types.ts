@@ -1,4 +1,5 @@
 import type { InReviewStallSignal } from "./in-review-stall.js";
+import type { ModelPricing } from "./model-pricing.js";
 import type { InReviewStalledSignal } from "./in-review-stalled.js";
 import type { StalePausedReviewSignal } from "./stale-paused-review.js";
 import type { StalePausedTodoSignal } from "./stale-paused-todo.js";
@@ -22,29 +23,26 @@ export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhig
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
 /**
- * The legacy default-workflow column set. Under
- * `experimentalFeatures.workflowColumns` a task's valid columns are resolved
- * from its workflow definition (the default workflow's column IDs are
- * byte-identical to these — KTD-1). New flag-aware code should prefer the
+ * The legacy default-workflow column set. Workflow-aware task movement resolves
+ * valid columns from each task's workflow definition (the default workflow's
+ * column IDs are byte-identical to these — KTD-1). New code should prefer the
  * workflow-resolved path (`resolveAllowedColumns` / `workflowHasColumn` in
- * `workflow-transitions.ts`) and trait-flag predicates over string equality;
- * this enum remains the canonical id set for the built-in default workflow.
+ * `workflow-transitions.ts`) and trait predicates over string equality; this
+ * enum remains the canonical id set for the built-in default workflow.
  */
 export const COLUMNS = ["triage", "todo", "in-progress", "in-review", "done", "archived"] as const;
 /**
  * The closed legacy column union — still the correct type for default-workflow
- * column ids and the flag-OFF path. Movement entry points accept the wider
- * {@link ColumnId}; flag-ON code validates ids against the task's resolved
- * workflow at runtime.
+ * column ids. Movement entry points accept the wider {@link ColumnId}; runtime
+ * code validates ids against the task's resolved workflow.
  */
 export type Column = (typeof COLUMNS)[number];
 
 /**
  * Column identifier accepted at task-movement entry points (KTD-1).
  * Equals the legacy `Column` union for autocomplete purposes, but admits
- * workflow-defined custom column ids; flag-ON paths validate the id against
- * the task's resolved workflow at runtime, flag-OFF paths reject non-legacy
- * ids exactly as before.
+ * workflow-defined custom column ids; runtime paths validate the id against the
+ * task's resolved workflow.
  */
 export type ColumnId = Column | (string & {});
 
@@ -330,7 +328,11 @@ export const COLOR_THEMES = [
   "neon-bloom",
   "sepia",
   "shadcn",
-  // FNXC:DashboardTheming 2026-06-19-16:07: FN-6756 extends the published color-theme union with shadcn-family accent variants; keep dashboard theme options, bootstrap validation, swatches, and theme-data token blocks in lockstep with this ordered list. FNXC:DashboardTheming 2026-06-20-00:00: FN-6814 adds Shadcn Gray as the fully-neutral zinc accent variant; keep it distinct from Shadcn Mono's red accent and Shadcn Black's black/white CTA while preserving the shadcn-family lockstep ordering.
+  // FNXC:DashboardTheming 2026-06-20-18:20: FN-6816 adds the user-customizable shadcn variant; keep this union in lockstep with dashboard theme options, swatches, theme-data base blocks, and the shadcn custom color token list.
+  "shadcn-custom",
+  // FNXC:DashboardTheming 2026-06-19-16:07: FN-6756 extends the published color-theme union with shadcn-family accent variants; keep dashboard theme options, bootstrap validation, swatches, and theme-data token blocks in lockstep with this ordered list.
+  // FNXC:DashboardTheming 2026-06-20-00:00: FN-6813 renames the grayscale-base mono theme to shadcn-mono-red and adds the remaining mono accent variants; keep Shadcn Gray adjacent to Shadcn Black so the color-family order stays stable with FN-6814.
+  // FNXC:DashboardTheming 2026-06-21-00:00: FN-6815 adds shadcn-gray-blue as the slate-neutral blue-gray sibling; keep it adjacent to Shadcn Gray so the published union mirrors dashboard option order.
   "shadcn-blue",
   "shadcn-green",
   "shadcn-red",
@@ -338,8 +340,16 @@ export const COLOR_THEMES = [
   "shadcn-pink",
   "shadcn-orange",
   "shadcn-yellow",
-  "shadcn-mono",
-  "shadcn-black", "shadcn-gray",
+  "shadcn-mono-red",
+  "shadcn-mono-blue",
+  "shadcn-mono-green",
+  "shadcn-mono-purple",
+  "shadcn-mono-pink",
+  "shadcn-mono-orange",
+  "shadcn-mono-yellow",
+  "shadcn-black",
+  "shadcn-gray",
+  "shadcn-gray-blue",
 ] as const;
 export type ColorTheme = (typeof COLOR_THEMES)[number];
 
@@ -3014,8 +3024,10 @@ export interface WorktrunkSettings {
 export interface GlobalSettings {
   /** Theme mode preference: dark, light, or system (follows OS). Default: "dark". */
   themeMode?: ThemeMode;
-  /** Color theme preference for accent colors and styling. Default: "default". */
+  /** Color theme preference for accent colors and styling. Default: "ocean"; "default" is the legacy Fusion theme id. */
   colorTheme?: ColorTheme;
+  /** Token→hex override map for the customizable shadcn theme. Applied only when `colorTheme === "shadcn-custom"`; dashboard sanitizes keys and values before writing CSS custom properties. */
+  shadcnCustomColors?: Record<string, string>;
   /** Dashboard font size scale percentage. Bounded to 85-125. Default: 100. */
   dashboardFontScalePct?: number;
   /** Active UI locale (e.g. `"en"`, `"zh-CN"`, `"fr"`). One of `SUPPORTED_LOCALES`.
@@ -3034,6 +3046,17 @@ export interface GlobalSettings {
    *  of per-task or per-lane overrides. No network calls, zero token cost.
    *  Project `testMode` takes precedence over the global value. */
   testMode?: boolean;
+  /**
+   * User-edited or one-click-fetched pricing entries keyed by lowercased `provider:model`.
+   *
+   * FNXC:CommandCenter 2026-06-22-00:00:
+   * Global pricing overrides let Command Center cost estimates reflect user-maintained or LiteLLM-refreshed rates while preserving the built-in MODEL_PRICING fallback for unedited models.
+   */
+  modelPricingOverrides?: Record<string, ModelPricing>;
+  /** ISO timestamp for the last successful pricing refresh from the configured source. */
+  modelPricingFetchedAt?: string;
+  /** Source label or URL for the current global pricing override set. */
+  modelPricingSource?: string;
   /** Fusion Model Router opt-in (U17/KTD9). When true, a conservative selection
    *  layer may down-route an allowlist of mechanical steps (dependabot bumps,
    *  lint-only fixes) to a cheap model tier before a session starts; everything
@@ -3406,9 +3429,10 @@ export interface GlobalSettings {
    *    "another-experiment": false
    *  }
    *
-   *  Default: workflow columns, graph executor, dual-observe, authoritative
-   *  interpreter, and `claudeCliAcp` flags enabled; operators may explicitly set
-   *  individual flags false while rollout controls remain available.
+   *  Default: only dual-observe is emitted and remains disabled because it runs
+   *  diagnostic shadow parity observation. Workflow columns and graph execution
+   *  have graduated from this map; stale persisted values are ignored by their
+   *  runtime helpers.
    *
    *  `claudeCliAcp` (default ON): routes the Claude CLI provider through the
    *  `claude-code-cli-acp` ACP bridge instead of `claude -p`. Effective only when
@@ -4375,9 +4399,9 @@ export interface ProjectSettings {
    *  - "always": Always handoff after completion (not implemented, reserved for future)
    */
   reviewHandoffPolicy?: "disabled" | "comment-triggered" | "always";
-  /** When true, show the quick-chat floating action button (FAB) in the dashboard.
-   *  When false, the FAB is hidden but chat remains accessible via the More menu.
-   *  Default: false. */
+  /** Quick Chat launcher placement. "floating" shows the draggable FAB, "footer" shows a footer button, "off" hides both. */
+  quickChatButtonMode?: "floating" | "footer" | "off";
+  /** Legacy Quick Chat FAB toggle. Prefer quickChatButtonMode for new callers. */
   showQuickChatFAB?: boolean;
   /** Number of days of chat inactivity before old chat sessions/rooms are auto-cleaned.
    *  Allowed values: 0 (off, default), 7, 14, 30, 60, 90. Uses updatedAt inactivity age. */
@@ -4595,6 +4619,15 @@ export interface TaskCommitAssociation {
   updatedAt: string;
 }
 
+export interface CommitAssociationDiffBackfillReport {
+  scannedRows: number;
+  distinctCommits: number;
+  updatedRows: number;
+  skippedUnavailableCommits: number;
+  skippedInvalidShas: number;
+  dryRun: boolean;
+}
+
 export const COLUMN_LABELS: Record<Column, string> = {
   triage: "Planning",
   todo: "Todo",
@@ -4615,12 +4648,10 @@ export const COLUMN_DESCRIPTIONS: Record<Column, string> = {
 
 /**
  * @deprecated (workflowColumns, U12) The hardcoded legacy transition graph.
- * Under `experimentalFeatures.workflowColumns`, transition validity is resolved
- * from the task's workflow column graph (`resolveAllowedColumns` in
- * `workflow-transitions.ts`) plus trait guards in `moveTaskInternal` — this
- * constant is now only the flag-OFF authority and the parity oracle the default
- * workflow is machine-checked against (transition-parity suite). Retained while
- * the flag exists; do NOT remove until graduation + legacy-path deletion.
+ * Transition validity is resolved from the task's workflow column graph
+ * (`resolveAllowedColumns` in `workflow-transitions.ts`) plus trait guards in
+ * `moveTaskInternal` — this constant remains the default-workflow parity oracle
+ * while legacy call sites are retired.
  */
 export const VALID_TRANSITIONS: Record<Column, Column[]> = {
   // FN-4892: intake-side heuristics may cold-archive tasks before execution starts.

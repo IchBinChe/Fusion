@@ -140,7 +140,8 @@ describe("SecretsView mobile layout contracts", () => {
     expect(mobileCss).not.toMatch(/\.modal-close/);
   });
 
-  it.each([".secrets-header", ".secrets-row", ".secrets-sync-header"])(
+  // FNXC:ViewHeader 2026-06-23-03:45: The bespoke .secrets-header was replaced by the shared canonical ViewHeader, which owns its own responsive layout; only the body rows still stack via SecretsView's mobile rules.
+  it.each([".secrets-row", ".secrets-sync-header"])(
     "mobile media rules stack %s as a column",
     (selector) => {
       const mobileCss = extractMobileMediaBlocks(secretsViewCss);

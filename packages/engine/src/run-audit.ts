@@ -448,6 +448,10 @@ export type DatabaseMutationType =
   | "mergeQueue:auto-cleanup-stale-row"
   | "task:auto-recover-already-merged"
   | "task:auto-recover-finalize-already-on-main"
+  /** Metadata: { taskId, previousColumn, targetColumn, commitSha, status, blockedBy, overlapBlockedBy, reason } */
+  | "task:auto-merge-finalize-column-mismatch-reconciled"
+  /** Metadata: { taskId, previousColumn, targetColumn, commitSha, status, blockedBy, overlapBlockedBy, reason } */
+  | "task:auto-merge-finalize-column-mismatch-no-action"
   | "task:auto-merge-skipped-already-done"
   /** Metadata: { taskId, commitSha, failedCommand, exitCode, errorTail } */
   | "task:post-finalize-verification-no-op"
@@ -516,6 +520,11 @@ export type DatabaseMutationType =
   | "task:resume-limbo-escalated"
   /** Metadata: { taskId, executionAgeMs, graceMs, staleBindingAgeFloorMs, checkedOutBy, agentPresent, lastActivityMs, hasRecentRunAudit, worktree, branch, worktreeExists, signalReason } */
   | "task:reclaim-phantom-executor-binding"
+  /**
+   * FNXC:AgentTaskStateDrift 2026-06-23-08:50:
+   * Self-healing must leave file-scope lease queues intact while recording when stale durable Agent.taskId/state drift is cleared. Metadata: { agentId, taskId, taskColumn, agentState, status, blockedBy, overlapBlockedBy, hadFreshRun, hadActiveExecution, reason }.
+   */
+  | "task:reconcile-stale-agent-assignment"
   /** Metadata: { taskId, branch, worktree, checkedOutBy, executionStartedAt, executionAgeMs, graceMs, liveWorktreeBoundBranch, reason } */
   | "task:reclaim-self-owned-branch-conflict-no-action"
   | "task:orphan-detected-no-action"

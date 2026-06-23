@@ -1,5 +1,8 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { collectSystemMetrics } from "../system-metrics.js";
+
+type ProcessWithAvailableMemory = NodeJS.Process & { availableMemory?: () => number };
+const originalAvailableMemory = (process as ProcessWithAvailableMemory).availableMemory;
 
 const { checkDiskSpaceMock, cpusMock, totalmemMock, freememMock, uptimeMock } = vi.hoisted(() => ({
   checkDiskSpaceMock: vi.fn(),
@@ -23,6 +26,7 @@ vi.mock("node:os", () => ({
 describe("collectSystemMetrics", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    (process as ProcessWithAvailableMemory).availableMemory = vi.fn(() => 6_000);
     cpusMock.mockReturnValue([
       {
         times: {
@@ -42,6 +46,14 @@ describe("collectSystemMetrics", () => {
       free: 250_000,
       size: 1_000_000,
     });
+  });
+
+  afterEach(() => {
+    if (originalAvailableMemory) {
+      (process as ProcessWithAvailableMemory).availableMemory = originalAvailableMemory;
+    } else {
+      Reflect.deleteProperty(process as ProcessWithAvailableMemory, "availableMemory");
+    }
   });
 
   it("returns a valid SystemMetrics object", async () => {
@@ -84,6 +96,28 @@ describe("collectSystemMetrics", () => {
   it("returns a valid ISO timestamp in reportedAt", async () => {
     const metrics = await collectSystemMetrics();
     expect(new Date(metrics.reportedAt).toISOString()).toBe(metrics.reportedAt);
+  });
+
+  it("uses process.availableMemory instead of macOS-shaped freemem for memoryUsed", async () => {
+    totalmemMock.mockReturnValue(16_000_000_000);
+    freememMock.mockReturnValue(200_000_000);
+    (process as ProcessWithAvailableMemory).availableMemory = vi.fn(() => 10_000_000_000);
+
+    const metrics = await collectSystemMetrics();
+
+    expect(metrics.memoryTotal).toBe(16_000_000_000);
+    expect(metrics.memoryUsed).toBe(6_000_000_000);
+    expect(metrics.memoryUsed).not.toBe(15_800_000_000);
+  });
+
+  it("falls back to freemem for memoryUsed when process.availableMemory is absent", async () => {
+    totalmemMock.mockReturnValue(16_000);
+    freememMock.mockReturnValue(6_000);
+    Reflect.deleteProperty(process as ProcessWithAvailableMemory, "availableMemory");
+
+    const metrics = await collectSystemMetrics();
+
+    expect(metrics.memoryUsed).toBe(10_000);
   });
 
   it("passes dbPath through to check-disk-space", async () => {

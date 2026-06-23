@@ -4,14 +4,18 @@ import { useTranslation } from "react-i18next";
 import { Sun, Moon, Monitor } from "lucide-react";
 import type { ThemeMode, ColorTheme } from "@fusion/core";
 import { COLOR_THEMES, THEME_MODES } from "./themeOptions";
+import { ShadcnColorPicker } from "./ShadcnColorPicker";
 
 interface ThemeSelectorProps {
   themeMode: ThemeMode;
   colorTheme: ColorTheme;
   dashboardFontScalePct?: number;
+  shadcnCustomColors?: Record<string, string>;
+  resolvedThemeMode?: "dark" | "light";
   onThemeModeChange: (mode: ThemeMode) => void;
   onColorThemeChange: (theme: ColorTheme) => void;
   onDashboardFontScaleChange?: (scalePct: number) => void;
+  onShadcnCustomColorsChange?: (colors: Record<string, string>) => void;
 }
 
 const FONT_SCALE_OPTIONS = [
@@ -28,16 +32,20 @@ export function ThemeSelector({
   themeMode,
   colorTheme,
   dashboardFontScalePct = 100,
+  shadcnCustomColors = {},
+  resolvedThemeMode = themeMode === "light" ? "light" : "dark",
   onThemeModeChange,
   onColorThemeChange,
   onDashboardFontScaleChange = () => {},
+  onShadcnCustomColorsChange = () => {},
 }: ThemeSelectorProps) {
   const { t } = useTranslation("app");
   const handleReset = useCallback(() => {
     onThemeModeChange("dark");
-    onColorThemeChange("default");
+    onColorThemeChange("ocean");
     onDashboardFontScaleChange(100);
-  }, [onThemeModeChange, onColorThemeChange, onDashboardFontScaleChange]);
+    onShadcnCustomColorsChange({});
+  }, [onThemeModeChange, onColorThemeChange, onDashboardFontScaleChange, onShadcnCustomColorsChange]);
 
   return (
     <div className="theme-selector">
@@ -115,6 +123,15 @@ export function ThemeSelector({
           </button>
         ))}
       </div>
+
+      {/* FNXC:Theme 2026-06-20-19:00: The custom color picker must be visible only for shadcn-custom on every theme-selector surface; ThemeSelector and ThemeDropdown share COLOR_THEMES and the same picker component so their affordances stay synchronized. */}
+      {colorTheme === "shadcn-custom" ? (
+        <ShadcnColorPicker
+          value={shadcnCustomColors}
+          onChange={onShadcnCustomColorsChange}
+          resolvedThemeMode={resolvedThemeMode}
+        />
+      ) : null}
 
       {/* Reset Button */}
       <button

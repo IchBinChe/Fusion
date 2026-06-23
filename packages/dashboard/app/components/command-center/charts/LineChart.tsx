@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState } from "react";
 import "./charts.css";
 
 export interface LineChartSeries {
@@ -14,35 +15,53 @@ export interface LineChartProps {
   max?: number;
 }
 
-const VIEWBOX_SIZE = 100;
-const SINGLE_POINT_X = VIEWBOX_SIZE / 2;
+const FALLBACK_VIEWBOX_WIDTH = 250;
+const FALLBACK_VIEWBOX_HEIGHT = 100;
 const POINT_RADIUS = 1.8;
 const PLOT_PADDING = 3;
-const PLOT_SIZE = VIEWBOX_SIZE - PLOT_PADDING * 2;
+
+interface ChartGeometry {
+  width: number;
+  height: number;
+}
+
+const FALLBACK_GEOMETRY: ChartGeometry = { width: FALLBACK_VIEWBOX_WIDTH, height: FALLBACK_VIEWBOX_HEIGHT };
 
 function safeHeightPercent(value: number, max: number): number {
   if (!Number.isFinite(value) || value <= 0) {
     return 0;
   }
   const denom = Number.isFinite(max) && max > 0 ? max : 1;
-  return Math.max(0, Math.min(VIEWBOX_SIZE, (value / denom) * VIEWBOX_SIZE));
+  return Math.max(0, Math.min(100, (value / denom) * 100));
 }
 
 function safeCoord(value: number): number {
   return Number.isFinite(value) ? value : 0;
 }
 
-function pointFor(value: number, index: number, count: number, max: number): { x: number; y: number } {
-  const x = count <= 1 ? SINGLE_POINT_X : PLOT_PADDING + (index / (count - 1)) * PLOT_SIZE;
-  const height = safeHeightPercent(value, max);
+function boundedGeometry(width: number, height: number): ChartGeometry | null {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null;
+  }
   return {
-    x: safeCoord(x),
-    y: safeCoord(PLOT_PADDING + PLOT_SIZE * (1 - height / VIEWBOX_SIZE)),
+    width: Math.max(width, PLOT_PADDING * 2 + POINT_RADIUS * 2),
+    height: Math.max(height, PLOT_PADDING * 2 + POINT_RADIUS * 2),
   };
 }
 
-function pointsFor(values: number[], max: number): { x: number; y: number }[] {
-  return values.map((value, index) => pointFor(value, index, values.length, max));
+function pointFor(value: number, index: number, count: number, max: number, geometry: ChartGeometry): { x: number; y: number } {
+  const plotWidth = Math.max(0, geometry.width - PLOT_PADDING * 2);
+  const plotHeight = Math.max(0, geometry.height - PLOT_PADDING * 2);
+  const x = count <= 1 ? geometry.width / 2 : PLOT_PADDING + (index / (count - 1)) * plotWidth;
+  const height = safeHeightPercent(value, max);
+  return {
+    x: safeCoord(x),
+    y: safeCoord(PLOT_PADDING + plotHeight * (1 - height / 100)),
+  };
+}
+
+function pointsFor(values: number[], max: number, geometry: ChartGeometry): { x: number; y: number }[] {
+  return values.map((value, index) => pointFor(value, index, values.length, max, geometry));
 }
 
 function pointsAttribute(points: { x: number; y: number }[]): string {
@@ -62,6 +81,14 @@ function computedMaxFor(series: LineChartSeries[], max?: number): number {
   }, 0);
 }
 
+function geometryFromRect(rect: Pick<DOMRectReadOnly, "width" | "height">): ChartGeometry | null {
+  return boundedGeometry(rect.width, rect.height);
+}
+
+function geometriesMatch(left: ChartGeometry, right: ChartGeometry): boolean {
+  return Math.abs(left.width - right.width) < 0.5 && Math.abs(left.height - right.height) < 0.5;
+}
+
 /**
  * FNXC:CommandCenterCharts 2026-06-18-14:29:
  * Command Center needed a true, zero/NaN-safe, reduced-motion-aware animated line chart for time-series metrics; reuse the Bar/Sparkline safe-height convention so malformed analytics values never leak NaN or Infinity into SVG geometry.
@@ -69,22 +96,54 @@ function computedMaxFor(series: LineChartSeries[], max?: number): number {
  * FNXC:CommandCenterCharts 2026-06-19-05:24:
  * Activity line charts were clipping max/min points because the data domain mapped to the full SVG viewBox edge. Reserve plot padding equal to the rendered point/stroke margin so populated, single-point, zero, and max-value series stay inside the viewBox on desktop and mobile.
  *
- * FNXC:CommandCenterCharts 2026-06-20-22:59:
- * FN-6818 requires Activity markers to render as true circles independent of the chart container's aspect ratio. `preserveAspectRatio="none"` on the square viewBox stretched circle coordinates into ovals on narrow/mobile layouts; `vectorEffect="non-scaling-stroke"` only protects stroke width, not coordinate geometry, so the SVG must use uniform scaling.
+ * FNXC:CommandCenterCharts 2026-06-21-17:10:
+ * FN-6883 restores the dual invariant FN-6818 could not satisfy with a square `xMidYMid meet` viewBox: Activity line charts must fill the wide desktop/mobile CSS box without centered blank margins, and markers must remain true circles. Track the rendered SVG box with ResizeObserver and use that measured coordinate system with `preserveAspectRatio="none"`; the fallback matches the desktop 5:2 CSS ratio so first paint and jsdom tests do not reintroduce square letterboxing.
  */
 export function LineChart({ series, ariaLabel, max }: LineChartProps) {
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [geometry, setGeometry] = useState<ChartGeometry>(FALLBACK_GEOMETRY);
   const computedMax = computedMaxFor(series, max);
+
+  useLayoutEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) {
+      return undefined;
+    }
+
+    const updateGeometry = (next: ChartGeometry | null) => {
+      if (!next) {
+        return;
+      }
+      setGeometry((current) => (geometriesMatch(current, next) ? current : next));
+    };
+
+    updateGeometry(geometryFromRect(svg.getBoundingClientRect()));
+
+    if (typeof ResizeObserver === "undefined") {
+      return undefined;
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) {
+        updateGeometry(geometryFromRect(entry.contentRect));
+      }
+    });
+    observer.observe(svg);
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <svg
+      ref={svgRef}
       className="cc-line-chart"
       role="img"
       aria-label={ariaLabel}
-      viewBox={`0 0 ${VIEWBOX_SIZE} ${VIEWBOX_SIZE}`}
-      preserveAspectRatio="xMidYMid meet"
+      viewBox={`0 0 ${geometry.width} ${geometry.height}`}
+      preserveAspectRatio="none"
     >
       {series.map((entry, seriesIndex) => {
-        const points = pointsFor(entry.values, computedMax);
+        const points = pointsFor(entry.values, computedMax, geometry);
         const pointString = pointsAttribute(points);
         return (
           <g key={seriesIndex} className="cc-line-chart-series" aria-label={entry.label}>
@@ -92,7 +151,7 @@ export function LineChart({ series, ariaLabel, max }: LineChartProps) {
               <polyline
                 className="cc-line-chart-path"
                 points={pointString}
-                pathLength={VIEWBOX_SIZE}
+                pathLength={geometry.width}
                 vectorEffect="non-scaling-stroke"
                 aria-hidden="true"
               />

@@ -112,9 +112,9 @@ Create tasks from the board or CLI.
 2. Press Enter.
 3. Task appears in **Planning** and the planning agent generates `PROMPT.md`.
 
-### Option B: Plan Mode (Board)
+### Option B: Planning
 
-Use the 💡 button to open AI planning mode:
+Open **Planning** from the left sidebar on desktop/tablet, or use the board/New Task **Plan** action to send your draft into AI planning mode:
 
 - Fusion asks clarifying questions
 - Produces a structured summary

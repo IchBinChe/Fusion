@@ -1,6 +1,6 @@
 {
   "name": "@fusion/dashboard",
-  "version": "0.44.0",
+  "version": "0.46.0",
   "license": "MIT",
   "description": "Fusion dashboard: React UI and HTTP API server for monitoring and controlling the Fusion AI coding agent.",
   "homepage": "https://github.com/Runfusion/Fusion#readme",
@@ -26,6 +26,10 @@
     "./app/components/TaskCard": {
       "types": "./app/components/TaskCard.tsx",
       "import": "./app/components/TaskCard.tsx"
+    },
+    "./app/components/ViewHeader": {
+      "types": "./app/components/ViewHeader.tsx",
+      "import": "./app/components/ViewHeader.tsx"
     },
     "./app/utils/taskStuck": {
       "types": "./app/utils/taskStuck.ts",
@@ -98,7 +102,7 @@
     "@codemirror/state": "^6.5.2",
     "@codemirror/theme-one-dark": "^6.1.2",
     "@codemirror/view": "^6.36.4",
-    "@earendil-works/pi-coding-agent": "^0.79.1",
+    "@earendil-works/pi-coding-agent": "^0.79.9",
     "@fusion-plugin-examples/cli-printing-press": "workspace:*",
     "@fusion-plugin-examples/compound-engineering": "workspace:*",
     "@fusion-plugin-examples/cursor-runtime": "workspace:*",
@@ -126,15 +130,19 @@
     "i18next-resources-to-backend": "^1.2.1",
     "ioredis": "^5.6.0",
     "lucide-react": "^1.7.0",
+    "mermaid": "^11.4.0",
     "multer": "^2.1.1",
     "node-pty": "npm:@homebridge/node-pty-prebuilt-multiarch@^0.13.1",
     "qrcode": "^1.5.4",
     "react": "^19.0.0",
-    "recharts": "^3.8.1",
     "react-dom": "^19.0.0",
     "react-i18next": "^17.0.8",
     "react-markdown": "^10.1.0",
+    "recharts": "^3.8.1",
+    "rehype-raw": "^7.0.0",
+    "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
+    "unified": "^11.0.5",
     "ws": "^8.18.0",
     "zod": "^3.25.76"
   },

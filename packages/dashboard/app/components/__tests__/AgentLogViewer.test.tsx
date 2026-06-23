@@ -795,6 +795,20 @@ describe("AgentLogViewer", () => {
       expect(timestamp.style.opacity).toBe("");
     });
 
+    it("renders the agent badge as a sticky overlay on a full-width text block", () => {
+      const entries = [makeEntry({ text: "long executor output", type: "text", agent: "executor" })];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const block = container.querySelector(".agent-log-text") as HTMLElement;
+      const badgeRow = container.querySelector(".agent-log-badge-row") as HTMLElement;
+
+      expect(block).toBeTruthy();
+      expect(badgeRow).toBeTruthy();
+      expect(getComputedStyle(block).width).toBe("100%");
+      expect(getComputedStyle(badgeRow).position).toBe("sticky");
+      expect(getComputedStyle(badgeRow).left).not.toBe("");
+      expect(getComputedStyle(badgeRow).pointerEvents).toBe("none");
+    });
+
     it("includes timestamp in the badge container for tool entries", () => {
       const entries = [makeEntry({ text: "Bash", type: "tool", agent: "executor" })];
       const { container } = render(<AgentLogViewer entries={entries} loading={false} />);

@@ -1,10 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { GitHubImportModal } from "../GitHubImportModal";
 import {
   apiFetchGitHubIssues,
   apiImportGitHubIssue,
   apiFetchGitHubPulls,
+  apiFetchGitHubPullDetail,
+  apiFetchGitHubIssueDetail,
+  apiCloseGitHubIssue,
   apiImportGitHubPull,
   fetchGitRemotes,
 } from "../../api";
@@ -21,6 +24,9 @@ vi.mock("../../api", async (importOriginal) => {
     apiFetchGitHubIssues: vi.fn(),
     apiImportGitHubIssue: vi.fn(),
     apiFetchGitHubPulls: vi.fn(),
+    apiFetchGitHubPullDetail: vi.fn(),
+    apiFetchGitHubIssueDetail: vi.fn(),
+    apiCloseGitHubIssue: vi.fn(),
     apiImportGitHubPull: vi.fn(),
     fetchGitRemotes: vi.fn(),
   };
@@ -89,16 +95,37 @@ describe("GitHubImportModal", () => {
     expect(source).toContain(".github-import-preview-pane.mobile.active .github-import-pane-content {\n    flex: 1;\n    min-height: 0;\n    overflow-y: auto;\n    overscroll-behavior: contain;");
   });
 
+  it("styles import type tabs like the Artifacts button bar", () => {
+    const source = readFileSync(resolve(__dirname, "../GitHubImportModal.css"), "utf8");
+    const tabsRule = source.match(/\.github-import-tabs\s*\{[^}]*\}/)?.[0] ?? "";
+    const tabRule = source.match(/\.github-import-tab\s*\{[^}]*\}/)?.[0] ?? "";
+    const activeRule = source.match(/\.github-import-tab\.active\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(tabsRule).toContain("background: transparent;");
+    expect(tabsRule).toContain("border-bottom: none;");
+    expect(tabRule).toContain("border: 1px solid var(--border);");
+    expect(tabRule).toContain("background: var(--surface);");
+    expect(activeRule).toContain("color: var(--todo);");
+    expect(activeRule).toContain("border-color: var(--todo);");
+    expect(activeRule).toContain("background: color-mix(in srgb, var(--todo) 12%, transparent);");
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(fetchGitRemotes).mockReset();
     vi.mocked(apiFetchGitHubIssues).mockReset();
     vi.mocked(apiImportGitHubIssue).mockReset();
     vi.mocked(apiFetchGitHubPulls).mockReset();
+    vi.mocked(apiFetchGitHubPullDetail).mockReset();
+    vi.mocked(apiFetchGitHubIssueDetail).mockReset();
+    vi.mocked(apiCloseGitHubIssue).mockReset();
     vi.mocked(apiImportGitHubPull).mockReset();
     // Set default mock for apiFetchGitHubIssues to return empty array (prevents undefined issues state)
     vi.mocked(apiFetchGitHubIssues).mockResolvedValue([]);
     vi.mocked(apiFetchGitHubPulls).mockResolvedValue([]);
+    vi.mocked(apiFetchGitHubPullDetail).mockResolvedValue({ comments: [], checks: [] });
+    vi.mocked(apiFetchGitHubIssueDetail).mockResolvedValue({ comments: [] });
+    vi.mocked(apiCloseGitHubIssue).mockResolvedValue(undefined);
     onClose.mockReset();
     onImport.mockReset();
   });
@@ -115,6 +142,87 @@ describe("GitHubImportModal", () => {
   it("does not render when isOpen is false", () => {
     render(<GitHubImportModal isOpen={false} onClose={onClose} onImport={onImport} tasks={[]} />);
     expect(screen.queryByText("Import from GitHub")).toBeNull();
+  });
+
+  // FNXC:EmbeddedPresentation 2026-06-22-12:00:
+  // presentation="embedded" was a zero-coverage branch. Assert the embedded contract via useEmbeddedPresentation:
+  // embedded root class present, no fixed .modal-overlay backdrop, no close button, and Escape does NOT dismiss.
+  describe("embedded presentation", () => {
+    it("renders the embedded root class with no modal overlay or close button", async () => {
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce([]);
+      const { container } = render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} presentation="embedded" />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Import Tasks")).toBeTruthy();
+      });
+      expect(container.querySelector(".github-import-embedded")).not.toBeNull();
+      expect(container.querySelector(".github-import-modal--embedded")).not.toBeNull();
+      // No fixed full-screen overlay backdrop, and no modal-header / close button in embedded mode.
+      expect(container.querySelector(".modal-overlay")).toBeNull();
+      expect(screen.queryByText("Import from GitHub")).toBeNull();
+      expect(container.querySelector(".github-import-modal__header")).toBeNull();
+    });
+
+    it("does not dismiss on Escape in embedded mode", async () => {
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce([]);
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} presentation="embedded" />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Import Tasks")).toBeTruthy();
+      });
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    // FNXC:GitHubImport 2026-06-23-02:00: embedded sidebar drops the bottom Cancel+Import bar (no modal to cancel)
+    // and surfaces the import action at the TOP of the preview pane via github-import-action-top. The non-embedded
+    // modal keeps its bottom Cancel+Import bar.
+    it("removes the bottom action bar in embedded mode but keeps the top import button", async () => {
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce([]);
+      const { container } = render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} presentation="embedded" />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Import Tasks")).toBeTruthy();
+      });
+      // No bottom Cancel+Import bar in embedded mode.
+      expect(container.querySelector(".github-import-modal__actions")).toBeNull();
+      expect(screen.queryByRole("button", { name: /Cancel/i })).toBeNull();
+      // Top import action present.
+      expect(screen.getByTestId("github-import-action-top")).toBeTruthy();
+    });
+
+    it("keeps the bottom action bar with Cancel in modal mode plus the top import button", async () => {
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce([]);
+      const { container } = render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Import from GitHub")).toBeTruthy();
+      });
+      expect(container.querySelector(".github-import-modal__actions")).not.toBeNull();
+      expect(screen.getByRole("button", { name: /Cancel/i })).toBeTruthy();
+      expect(screen.getByTestId("github-import-action-top")).toBeTruthy();
+    });
+
+    it("keeps the modal overlay and Escape-to-close in modal mode", async () => {
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce([]);
+      const { container } = render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Import from GitHub")).toBeTruthy();
+      });
+      expect(container.querySelector(".modal-overlay")).not.toBeNull();
+      expect(container.querySelector(".github-import-modal--embedded")).toBeNull();
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(onClose).toHaveBeenCalled();
+    });
   });
 
   it("renders compact toolbar and two-pane layout", async () => {
@@ -246,6 +354,64 @@ describe("GitHubImportModal", () => {
   });
 
   describe("with single remote", () => {
+    it("loads remotes using the active project id", async () => {
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} projectId="project-1" />);
+
+      await waitFor(() => {
+        expect(fetchGitRemotes).toHaveBeenCalledWith("project-1");
+      });
+    });
+
+    it("ignores stale remote responses after the active project changes", async () => {
+      const projectARemote: GitRemote[] = [
+        { name: "origin", owner: "project-a", repo: "old-repo", url: "https://github.com/project-a/old-repo.git" },
+      ];
+      const projectBRemote: GitRemote[] = [
+        { name: "origin", owner: "project-b", repo: "new-repo", url: "https://github.com/project-b/new-repo.git" },
+      ];
+      let resolveProjectA!: (value: GitRemote[]) => void;
+      let resolveProjectB!: (value: GitRemote[]) => void;
+      vi.mocked(fetchGitRemotes)
+        .mockImplementationOnce(() => new Promise((resolve) => {
+          resolveProjectA = resolve;
+        }))
+        .mockImplementationOnce(() => new Promise((resolve) => {
+          resolveProjectB = resolve;
+        }));
+
+      const { rerender } = render(
+        <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} projectId="project-a" />,
+      );
+
+      await waitFor(() => {
+        expect(fetchGitRemotes).toHaveBeenCalledWith("project-a");
+      });
+
+      rerender(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} projectId="project-b" />);
+
+      await waitFor(() => {
+        expect(fetchGitRemotes).toHaveBeenCalledWith("project-b");
+      });
+
+      await act(async () => {
+        resolveProjectB(projectBRemote);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("project-b/new-repo")).toBeTruthy();
+      });
+
+      await act(async () => {
+        resolveProjectA(projectARemote);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("project-b/new-repo")).toBeTruthy();
+        expect(screen.queryByText("project-a/old-repo")).toBeNull();
+      });
+    });
+
     it("auto-selects the remote and shows compact pill", async () => {
       vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
       render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
@@ -411,7 +577,7 @@ describe("GitHubImportModal", () => {
         expect(screen.getByText("First Issue")).toBeTruthy();
       });
 
-      const importButton = screen.getByRole("button", { name: /Import$/i }) as HTMLButtonElement;
+      const importButton = screen.getByTestId("github-import-action-top") as HTMLButtonElement;
       expect(importButton.disabled).toBe(true);
     });
 
@@ -429,7 +595,7 @@ describe("GitHubImportModal", () => {
       });
 
       fireEvent.click(screen.getByRole("radio", { name: /Select issue #1/i }));
-      fireEvent.click(screen.getByRole("button", { name: /Import$/i }));
+      fireEvent.click(screen.getByTestId("github-import-action-top"));
 
       await waitFor(() => {
         expect(apiImportGitHubIssue).toHaveBeenCalledWith("dustinbyrne", "kb", 1, "project-1");
@@ -455,7 +621,7 @@ describe("GitHubImportModal", () => {
         expect(screen.getByText("First Issue")).toBeTruthy();
       });
 
-      const importButton = screen.getByRole("button", { name: /Import$/i }) as HTMLButtonElement;
+      const importButton = screen.getByTestId("github-import-action-top") as HTMLButtonElement;
       fireEvent.click(screen.getByRole("radio", { name: /Select issue #1/i }));
       expect(importButton.disabled).toBe(false);
 
@@ -467,7 +633,7 @@ describe("GitHubImportModal", () => {
       });
 
       await waitFor(() => {
-        expect((screen.getByRole("button", { name: /Import$/i }) as HTMLButtonElement).disabled).toBe(true);
+        expect((screen.getByTestId("github-import-action-top") as HTMLButtonElement).disabled).toBe(true);
       });
 
       rerender(
@@ -762,7 +928,274 @@ describe("GitHubImportModal", () => {
       expect(previewCard.textContent).not.toContain(`${"P".repeat(200)}…`);
     });
 
-    it("truncates long selected issue body on desktop", async () => {
+    // FNXC:GitHubImport 2026-06-23-01:00: Selecting a PR fetches its detail and renders the full comment thread + per-check status below the body, scoped to PRs (issues unchanged).
+    it("renders the selected PR's checks and comments from the detail fetch", async () => {
+      Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 1200 });
+
+      const pulls = [
+        { number: 7, title: "Detail PR", body: "PR body text", html_url: "https://github.com/owner/repo/pull/7", headBranch: "feature", baseBranch: "main" },
+      ];
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+      vi.mocked(apiFetchGitHubPulls).mockResolvedValueOnce(pulls);
+      vi.mocked(apiFetchGitHubPullDetail).mockResolvedValueOnce({
+        comments: [
+          { author: "alice", body: "First comment from alice", createdAt: "2024-01-01T00:00:00Z", authorIsBot: false, authorAvatarUrl: "https://github.com/alice.png?size=40" },
+          { author: "github-actions[bot]", body: "Second comment from bot", createdAt: "2024-01-02T00:00:00Z", authorIsBot: true },
+        ],
+        checks: [
+          { name: "build", status: "completed", conclusion: "success" },
+          { name: "lint", status: "completed", conclusion: "failure" },
+        ],
+      });
+
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
+
+      fireEvent.click(await screen.findByRole("tab", { name: /Pull Requests/i }));
+      await waitFor(() => {
+        expect(screen.getByText("Detail PR")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("radio", { name: /Select pull request #7/i }));
+
+      // Detail fetch is scoped to the selected PR by "owner/repo" + number.
+      await waitFor(() => {
+        expect(vi.mocked(apiFetchGitHubPullDetail)).toHaveBeenCalledWith("dustinbyrne/kb", 7);
+      });
+
+      const checks = await screen.findByTestId("github-import-pr-checks");
+      const comments = await screen.findByTestId("github-import-pr-comments");
+
+      // Body still renders immediately, independent of detail.
+      expect(screen.getByTestId("github-import-preview-body").textContent).toContain("PR body text");
+
+      // Per-check status surfaces both name and conclusion.
+      await waitFor(() => {
+        expect(checks.textContent).toContain("build");
+        expect(checks.textContent).toContain("success");
+        expect(checks.textContent).toContain("lint");
+        expect(checks.textContent).toContain("failure");
+      });
+      // Failed check gets the failure pill variant.
+      expect(checks.querySelector(".github-import-pr-check-pill--failure")).toBeTruthy();
+      expect(checks.querySelector(".github-import-pr-check-pill--success")).toBeTruthy();
+
+      // Full comment thread renders, chronological, with authors + bodies.
+      await waitFor(() => {
+        expect(comments.textContent).toContain("alice");
+        expect(comments.textContent).toContain("First comment from alice");
+        expect(comments.textContent).toContain("github-actions[bot]");
+        expect(comments.textContent).toContain("Second comment from bot");
+      });
+
+      // FNXC:GitHubImport 2026-06-23-03:30: per-comment testid + human/bot indicator via data-comment-author-type.
+      const commentEls = within(comments).getAllByTestId("github-import-comment");
+      expect(commentEls).toHaveLength(2);
+      expect(commentEls[0].getAttribute("data-comment-author-type")).toBe("human");
+      expect(commentEls[1].getAttribute("data-comment-author-type")).toBe("bot");
+      // Human/bot badge labels render.
+      expect(commentEls[0].textContent).toContain("Human");
+      expect(commentEls[1].textContent).toContain("Bot");
+      // Avatar image renders for the human author (with the provided avatar URL).
+      const avatarImg = commentEls[0].querySelector("img.github-import-comment__avatar-img") as HTMLImageElement | null;
+      expect(avatarImg?.getAttribute("src")).toBe("https://github.com/alice.png?size=40");
+      // Readable timestamp renders with the full ISO as the title/datetime.
+      const timeEl = commentEls[0].querySelector("time");
+      expect(timeEl?.getAttribute("title")).toBe("2024-01-01T00:00:00Z");
+      expect(timeEl?.textContent?.length).toBeGreaterThan(0);
+    });
+
+    // FNXC:GitHubImport 2026-06-23-03:30: The Human filter hides bot comments; All (default) shows both.
+    it("filters bot comments out when the comments filter is set to Human", async () => {
+      Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 1200 });
+
+      const pulls = [
+        { number: 11, title: "Filter PR", body: "PR body", html_url: "https://github.com/owner/repo/pull/11", headBranch: "feature", baseBranch: "main" },
+      ];
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+      vi.mocked(apiFetchGitHubPulls).mockResolvedValueOnce(pulls);
+      vi.mocked(apiFetchGitHubPullDetail).mockResolvedValueOnce({
+        comments: [
+          { author: "alice", body: "human comment text", createdAt: "2024-01-01T00:00:00Z", authorIsBot: false },
+          { author: "dependabot[bot]", body: "bot comment text", createdAt: "2024-01-02T00:00:00Z", authorIsBot: true },
+        ],
+        checks: [],
+      });
+
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
+
+      fireEvent.click(await screen.findByRole("tab", { name: /Pull Requests/i }));
+      await waitFor(() => {
+        expect(screen.getByText("Filter PR")).toBeTruthy();
+      });
+      fireEvent.click(screen.getByRole("radio", { name: /Select pull request #11/i }));
+
+      const comments = await screen.findByTestId("github-import-pr-comments");
+      // Default (All): both comments show.
+      await waitFor(() => {
+        expect(within(comments).getAllByTestId("github-import-comment")).toHaveLength(2);
+      });
+
+      // Switch to Human: bot comment is hidden.
+      const filter = within(comments).getByTestId("github-import-comments-filter");
+      fireEvent.click(within(filter).getByText("Human"));
+      await waitFor(() => {
+        const remaining = within(comments).getAllByTestId("github-import-comment");
+        expect(remaining).toHaveLength(1);
+        expect(remaining[0].getAttribute("data-comment-author-type")).toBe("human");
+      });
+      expect(comments.textContent).not.toContain("bot comment text");
+    });
+
+    // FNXC:GitHubImport 2026-06-23-03:30: Prev/Next nav advances the active comment index across the thread.
+    it("advances the active comment with the prev/next navigation", async () => {
+      Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 1200 });
+
+      const pulls = [
+        { number: 13, title: "Nav PR", body: "PR body", html_url: "https://github.com/owner/repo/pull/13", headBranch: "feature", baseBranch: "main" },
+      ];
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+      vi.mocked(apiFetchGitHubPulls).mockResolvedValueOnce(pulls);
+      vi.mocked(apiFetchGitHubPullDetail).mockResolvedValueOnce({
+        comments: [
+          { author: "alice", body: "comment one", createdAt: "2024-01-01T00:00:00Z", authorIsBot: false },
+          { author: "bob", body: "comment two", createdAt: "2024-01-02T00:00:00Z", authorIsBot: false },
+        ],
+        checks: [],
+      });
+
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
+
+      fireEvent.click(await screen.findByRole("tab", { name: /Pull Requests/i }));
+      await waitFor(() => {
+        expect(screen.getByText("Nav PR")).toBeTruthy();
+      });
+      fireEvent.click(screen.getByRole("radio", { name: /Select pull request #13/i }));
+
+      const comments = await screen.findByTestId("github-import-pr-comments");
+      const prev = await within(comments).findByTestId("github-import-comment-prev");
+      const next = within(comments).getByTestId("github-import-comment-next");
+
+      // At the first comment: prev disabled, next enabled.
+      expect((prev as HTMLButtonElement).disabled).toBe(true);
+      expect((next as HTMLButtonElement).disabled).toBe(false);
+
+      // Advance to the last comment: next becomes disabled, prev enabled.
+      fireEvent.click(next);
+      await waitFor(() => {
+        expect((next as HTMLButtonElement).disabled).toBe(true);
+        expect((prev as HTMLButtonElement).disabled).toBe(false);
+      });
+    });
+
+    // FNXC:GitHubImport 2026-06-23-01:00: Empty detail shows the "No checks"/"No comments" empty states.
+    it("shows empty states when the selected PR has no checks or comments", async () => {
+      Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 1200 });
+
+      const pulls = [
+        { number: 9, title: "Bare PR", body: "Bare body", html_url: "https://github.com/owner/repo/pull/9", headBranch: "feature", baseBranch: "main" },
+      ];
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+      vi.mocked(apiFetchGitHubPulls).mockResolvedValueOnce(pulls);
+      vi.mocked(apiFetchGitHubPullDetail).mockResolvedValueOnce({ comments: [], checks: [] });
+
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
+
+      fireEvent.click(await screen.findByRole("tab", { name: /Pull Requests/i }));
+      await waitFor(() => {
+        expect(screen.getByText("Bare PR")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("radio", { name: /Select pull request #9/i }));
+
+      expect(await screen.findByTestId("github-import-pr-checks-empty")).toBeTruthy();
+      expect(await screen.findByTestId("github-import-pr-comments-empty")).toBeTruthy();
+    });
+
+    // FNXC:GitHubImport 2026-06-23-03:15: Selecting an issue fetches its detail and renders the full comment thread below the body (mirrors the PR tab; issues have no checks).
+    it("renders the selected issue's comments from the detail fetch", async () => {
+      Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 1200 });
+
+      const issues = [
+        { number: 7, title: "Detail Issue", body: "Issue body text", html_url: "https://github.com/owner/repo/issues/7", labels: [], state: "open" as const, author: "carol" },
+      ];
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+      vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce(issues);
+      vi.mocked(apiFetchGitHubIssueDetail).mockResolvedValueOnce({
+        comments: [
+          { author: "alice", body: "First issue comment", createdAt: "2024-01-01T00:00:00Z", authorIsBot: false },
+          { author: "bob", body: "Second issue comment", createdAt: "2024-01-02T00:00:00Z", authorIsBot: false },
+        ],
+      });
+
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Detail Issue")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("radio", { name: /Select issue #7/i }));
+
+      // Detail fetch is scoped to the selected issue by "owner/repo" + number.
+      await waitFor(() => {
+        expect(vi.mocked(apiFetchGitHubIssueDetail)).toHaveBeenCalledWith("dustinbyrne/kb", 7);
+      });
+
+      const comments = await screen.findByTestId("github-import-issue-comments");
+
+      // Body still renders immediately, independent of detail.
+      expect(screen.getByTestId("github-import-preview-body").textContent).toContain("Issue body text");
+
+      // Full comment thread renders, chronological, with authors + bodies.
+      await waitFor(() => {
+        expect(comments.textContent).toContain("alice");
+        expect(comments.textContent).toContain("First issue comment");
+        expect(comments.textContent).toContain("bob");
+        expect(comments.textContent).toContain("Second issue comment");
+      });
+    });
+
+    // FNXC:GitHubImport 2026-06-23-03:15: The Close issue button calls the close API and reflects the closed state locally without dismissing the preview.
+    it("closes the selected issue via the close API and reflects the closed state", async () => {
+      Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 1200 });
+
+      const issues = [
+        { number: 5, title: "Closable Issue", body: "Body", html_url: "https://github.com/owner/repo/issues/5", labels: [], state: "open" as const, author: "dave" },
+      ];
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+      vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce(issues);
+
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Closable Issue")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("radio", { name: /Select issue #5/i }));
+
+      const closeButton = await screen.findByTestId("github-import-issue-close");
+      fireEvent.click(closeButton);
+
+      // Calls the close API scoped to "owner/repo" + number.
+      await waitFor(() => {
+        expect(vi.mocked(apiCloseGitHubIssue)).toHaveBeenCalledWith("dustinbyrne/kb", 5);
+      });
+
+      // Success toast surfaces without dismissing the preview.
+      expect(await screen.findByTestId("github-import-issue-close-toast")).toBeTruthy();
+
+      // Closed state reflects locally: badge flips to "closed" and the Close button is gone (only OPEN issues show it).
+      await waitFor(() => {
+        const previewCard = screen.getByTestId("github-import-preview-card");
+        expect(within(previewCard).getByText("closed")).toBeTruthy();
+        expect(screen.queryByTestId("github-import-issue-close")).toBeNull();
+      });
+
+      // Preview is NOT dismissed.
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    // FNXC:GitHubImport 2026-06-22-18:30: Desktop preview must show the FULL issue/PR body (no 200-char clamp). The list response already carries the complete body, so no detail fetch is needed.
+    it("renders long selected issue body in full on desktop without a truncation ellipsis", async () => {
       Object.defineProperty(window, "innerWidth", {
         writable: true,
         configurable: true,
@@ -786,12 +1219,14 @@ describe("GitHubImportModal", () => {
       fireEvent.click(screen.getByRole("radio", { name: /Select issue #1/i }));
 
       const previewCard = await screen.findByTestId("github-import-preview-card");
-      expect(previewCard.textContent).toContain(`${"I".repeat(200)}…`);
-      expect(previewCard.textContent).not.toContain(beyondDesktopCutoff);
-      expect(previewCard.textContent).not.toContain(longBody);
+      expect(previewCard.textContent).toContain(longBody);
+      expect(previewCard.textContent).toContain(beyondDesktopCutoff);
+      expect(previewCard.textContent).not.toContain(`${"I".repeat(200)}…`);
+      // Body renders as markdown via the shared MailboxMessageContent surface.
+      expect(screen.getByTestId("github-import-preview-body")).toBeTruthy();
     });
 
-    it("truncates long selected pull request body on desktop", async () => {
+    it("renders long selected pull request body in full on desktop without a truncation ellipsis", async () => {
       Object.defineProperty(window, "innerWidth", {
         writable: true,
         configurable: true,
@@ -817,9 +1252,52 @@ describe("GitHubImportModal", () => {
       fireEvent.click(screen.getByRole("radio", { name: /Select pull request #1/i }));
 
       const previewCard = await screen.findByTestId("github-import-preview-card");
-      expect(previewCard.textContent).toContain(`${"R".repeat(200)}…`);
-      expect(previewCard.textContent).not.toContain(beyondDesktopCutoff);
-      expect(previewCard.textContent).not.toContain(longBody);
+      expect(previewCard.textContent).toContain(longBody);
+      expect(previewCard.textContent).toContain(beyondDesktopCutoff);
+      expect(previewCard.textContent).not.toContain(`${"R".repeat(200)}…`);
+      expect(screen.getByTestId("github-import-preview-body")).toBeTruthy();
+    });
+
+    // FNXC:GitHubImport 2026-06-22-18:30: Full-issue preview must surface key metadata (state, author, GitHub URL) alongside the full markdown body.
+    it("renders full issue metadata (state, author, GitHub link) in the desktop preview", async () => {
+      Object.defineProperty(window, "innerWidth", {
+        writable: true,
+        configurable: true,
+        value: 1200,
+      });
+
+      const issues = [
+        {
+          number: 7,
+          title: "Metadata Issue",
+          body: "**bold** issue body with `code`",
+          html_url: "https://github.com/owner/repo/issues/7",
+          labels: [{ name: "bug" }],
+          state: "open" as const,
+          author: "octocat",
+        },
+      ];
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+      vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce(issues);
+
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Metadata Issue")).toBeTruthy();
+      });
+
+      fireEvent.click(screen.getByRole("radio", { name: /Select issue #7/i }));
+
+      const previewCard = await screen.findByTestId("github-import-preview-card");
+      expect(within(previewCard).getByText("open")).toBeTruthy();
+      expect(within(previewCard).getByText(/octocat/)).toBeTruthy();
+      expect(within(previewCard).getByText("bug")).toBeTruthy();
+      const link = within(previewCard).getByRole("link", { name: /View on GitHub/i }) as HTMLAnchorElement;
+      expect(link.getAttribute("href")).toBe("https://github.com/owner/repo/issues/7");
+      // Markdown is rendered (bold/code become elements, not literal asterisks/backticks).
+      const body = screen.getByTestId("github-import-preview-body");
+      expect(body.querySelector("strong")).toBeTruthy();
+      expect(body.querySelector("code")).toBeTruthy();
     });
 
     it("returns to list view on mobile after successful import", async () => {
@@ -849,7 +1327,7 @@ describe("GitHubImportModal", () => {
         expect(previewPane.classList.contains("active")).toBe(true);
       });
 
-      fireEvent.click(screen.getByRole("button", { name: /Import$/i }));
+      fireEvent.click(screen.getByTestId("github-import-action-top"));
 
       await waitFor(() => {
         expect(apiImportGitHubIssue).toHaveBeenCalledWith("owner", "repo", 1, "project-1");
@@ -931,20 +1409,29 @@ describe("GitHubImportModal", () => {
       fireEvent.pointerUp(document, { pointerId: 1, clientX: endX });
     };
 
+    /*
+     * FNXC:GitHubImport 2026-06-23-00:30:
+     * The list pane defaults narrow (256px) and clamps to [160px, 480px] (the absolute cap; a 50%-of-container cap also
+     * applies once the workspace is measured, which jsdom reports as 0 so the absolute cap governs here). Width persists
+     * per-project via projectStorage under the unscoped key `kb-dashboard-github-import-list-width` (no projectId in tests).
+     * Pointer drags map absolute pointer X to the list width relative to the workspace left edge (jsdom rect is all-zeros).
+     */
+    const LIST_WIDTH_KEY = "kb-dashboard-github-import-list-width";
+
     beforeEach(() => {
-      window.localStorage.removeItem("fusion:github-import-list-pane-width");
+      window.localStorage.removeItem(LIST_WIDTH_KEY);
       setViewportWidth(1200);
     });
 
     afterEach(() => {
-      window.localStorage.removeItem("fusion:github-import-list-pane-width");
+      window.localStorage.removeItem(LIST_WIDTH_KEY);
       setViewportWidth(originalInnerWidth);
     });
 
     it("renders handle only in the side-by-side two-pane band", async () => {
       await renderWithIssues();
       expect(screen.getByTestId("github-import-resize-handle")).toBeTruthy();
-      expect(screen.getByTestId("github-import-list-pane").getAttribute("style")).toContain("flex: 0 0 360px");
+      expect(screen.getByTestId("github-import-list-pane").getAttribute("style")).toContain("flex: 0 0 256px");
 
       setViewportWidth(800);
 
@@ -966,41 +1453,54 @@ describe("GitHubImportModal", () => {
       const handle = screen.getByTestId("github-import-resize-handle");
       const listPane = screen.getByTestId("github-import-list-pane");
 
-      dragHandle(handle, 100, 160);
-      expect(handle.getAttribute("aria-valuenow")).toBe("420");
-      expect(listPane.getAttribute("style")).toContain("flex: 0 0 420px");
+      // jsdom workspace rect is all-zeros, so the pane width equals the clamped absolute pointer X.
+      dragHandle(handle, 256, 300);
+      expect(handle.getAttribute("aria-valuenow")).toBe("300");
+      expect(listPane.getAttribute("style")).toContain("flex: 0 0 300px");
 
-      dragHandle(handle, 160, 120);
-      expect(handle.getAttribute("aria-valuenow")).toBe("380");
-      expect(listPane.getAttribute("style")).toContain("flex: 0 0 380px");
+      dragHandle(handle, 300, 200);
+      expect(handle.getAttribute("aria-valuenow")).toBe("200");
+      expect(listPane.getAttribute("style")).toContain("flex: 0 0 200px");
 
-      dragHandle(handle, 120, -200);
-      expect(handle.getAttribute("aria-valuenow")).toBe("240");
-      expect(listPane.getAttribute("style")).toContain("flex: 0 0 240px");
+      // Below the 160px minimum clamps up.
+      dragHandle(handle, 200, 40);
+      expect(handle.getAttribute("aria-valuenow")).toBe("160");
+      expect(listPane.getAttribute("style")).toContain("flex: 0 0 160px");
 
-      dragHandle(handle, -200, 700);
-      expect(handle.getAttribute("aria-valuenow")).toBe("640");
-      expect(listPane.getAttribute("style")).toContain("flex: 0 0 640px");
+      // Above the 480px maximum clamps down.
+      dragHandle(handle, 40, 900);
+      expect(handle.getAttribute("aria-valuenow")).toBe("480");
+      expect(listPane.getAttribute("style")).toContain("flex: 0 0 480px");
+    });
+
+    it("exposes the resize width as an inline CSS var for the embedded container query", async () => {
+      await renderWithIssues();
+      const listPane = screen.getByTestId("github-import-list-pane");
+      expect(listPane.getAttribute("style")).toContain("--gh-import-list-width: 256px");
+
+      const handle = screen.getByTestId("github-import-resize-handle");
+      dragHandle(handle, 256, 320);
+      expect(listPane.getAttribute("style")).toContain("--gh-import-list-width: 320px");
     });
 
     it("renders the desktop handle regardless of list content or active tab", async () => {
       const mounted = await renderWithEmptyIssues();
       expect(screen.getByTestId("github-import-resize-handle")).toBeTruthy();
-      expect(screen.getByTestId("github-import-list-pane").getAttribute("style")).toContain("flex: 0 0 360px");
+      expect(screen.getByTestId("github-import-list-pane").getAttribute("style")).toContain("flex: 0 0 256px");
       mounted.unmount();
 
       vi.clearAllMocks();
-      window.localStorage.removeItem("fusion:github-import-list-pane-width");
+      window.localStorage.removeItem(LIST_WIDTH_KEY);
       setViewportWidth(1200);
 
       await renderWithPulls();
       expect(screen.getByTestId("github-import-resize-handle")).toBeTruthy();
-      expect(screen.getByTestId("github-import-list-pane").getAttribute("style")).toContain("flex: 0 0 360px");
+      expect(screen.getByTestId("github-import-list-pane").getAttribute("style")).toContain("flex: 0 0 256px");
     });
     it.each([
-      [{ key: "ArrowRight" }, 370],
-      [{ key: "ArrowLeft" }, 350],
-      [{ key: "ArrowRight", shiftKey: true }, 410],
+      [{ key: "ArrowRight" }, 272],
+      [{ key: "ArrowLeft" }, 240],
+      [{ key: "ArrowRight", shiftKey: true }, 320],
     ])("handles keyboard nudge %#", async (eventInit, expected) => {
       await renderWithIssues();
       const handle = screen.getByTestId("github-import-resize-handle");
@@ -1015,10 +1515,10 @@ describe("GitHubImportModal", () => {
       const handle = screen.getByTestId("github-import-resize-handle");
 
       fireEvent.keyDown(handle, { key: "Home" });
-      expect(handle.getAttribute("aria-valuenow")).toBe("240");
+      expect(handle.getAttribute("aria-valuenow")).toBe("160");
 
       fireEvent.keyDown(handle, { key: "End" });
-      expect(handle.getAttribute("aria-valuenow")).toBe("640");
+      expect(handle.getAttribute("aria-valuenow")).toBe("480");
     });
 
     it("clamps keyboard resizing to min and max bounds", async () => {
@@ -1028,12 +1528,12 @@ describe("GitHubImportModal", () => {
       for (let i = 0; i < 30; i += 1) {
         fireEvent.keyDown(handle, { key: "ArrowLeft" });
       }
-      expect(handle.getAttribute("aria-valuenow")).toBe("240");
+      expect(handle.getAttribute("aria-valuenow")).toBe("160");
 
       for (let i = 0; i < 60; i += 1) {
         fireEvent.keyDown(handle, { key: "ArrowRight" });
       }
-      expect(handle.getAttribute("aria-valuenow")).toBe("640");
+      expect(handle.getAttribute("aria-valuenow")).toBe("480");
     });
 
     it("persists width across remounts", async () => {
@@ -1041,20 +1541,29 @@ describe("GitHubImportModal", () => {
       let handle = screen.getByTestId("github-import-resize-handle");
 
       fireEvent.keyDown(handle, { key: "ArrowRight", shiftKey: true });
-      expect(handle.getAttribute("aria-valuenow")).toBe("410");
+      expect(handle.getAttribute("aria-valuenow")).toBe("320");
+      // Persisted under the projectStorage key (unscoped without a projectId).
+      expect(window.localStorage.getItem(LIST_WIDTH_KEY)).toBe("320");
 
       mounted.unmount();
 
       await renderWithIssues();
       handle = await screen.findByTestId("github-import-resize-handle");
-      expect(handle.getAttribute("aria-valuenow")).toBe("410");
+      expect(handle.getAttribute("aria-valuenow")).toBe("320");
+    });
+
+    it("clamps an out-of-range stored width back into bounds on mount", async () => {
+      window.localStorage.setItem(LIST_WIDTH_KEY, "9000");
+      await renderWithIssues();
+      // Stored value above the 480px max is clamped down on read.
+      expect(screen.getByTestId("github-import-resize-handle").getAttribute("aria-valuenow")).toBe("480");
     });
 
     it("falls back to default width for invalid stored values", async () => {
-      window.localStorage.setItem("fusion:github-import-list-pane-width", "not-a-number");
+      window.localStorage.setItem(LIST_WIDTH_KEY, "not-a-number");
       await renderWithIssues();
 
-      expect(screen.getByTestId("github-import-resize-handle").getAttribute("aria-valuenow")).toBe("360");
+      expect(screen.getByTestId("github-import-resize-handle").getAttribute("aria-valuenow")).toBe("256");
     });
   });
 
@@ -1226,7 +1735,7 @@ describe("GitHubImportModal", () => {
       });
 
       // Import button should be disabled
-      const importButton = screen.getByRole("button", { name: /Import$/i }) as HTMLButtonElement;
+      const importButton = screen.getByTestId("github-import-action-top") as HTMLButtonElement;
       expect(importButton.disabled).toBe(true);
     });
 
@@ -1248,7 +1757,7 @@ describe("GitHubImportModal", () => {
       fireEvent.click(screen.getByRole("radio", { name: /Select pull request #1/i }));
 
       // Click Import
-      fireEvent.click(screen.getByRole("button", { name: /Import$/i }));
+      fireEvent.click(screen.getByTestId("github-import-action-top"));
 
       await waitFor(() => {
         expect(apiImportGitHubPull).toHaveBeenCalledWith("dustinbyrne", "kb", 1, "project-1");
@@ -1273,7 +1782,7 @@ describe("GitHubImportModal", () => {
         expect(screen.getByText("Test PR")).toBeTruthy();
       });
 
-      const importButton = screen.getByRole("button", { name: /Import$/i }) as HTMLButtonElement;
+      const importButton = screen.getByTestId("github-import-action-top") as HTMLButtonElement;
       fireEvent.click(screen.getByRole("radio", { name: /Select pull request #1/i }));
       expect(importButton.disabled).toBe(false);
 
@@ -1285,7 +1794,7 @@ describe("GitHubImportModal", () => {
       });
 
       await waitFor(() => {
-        expect((screen.getByRole("button", { name: /Import$/i }) as HTMLButtonElement).disabled).toBe(true);
+        expect((screen.getByTestId("github-import-action-top") as HTMLButtonElement).disabled).toBe(true);
       });
 
       rerender(

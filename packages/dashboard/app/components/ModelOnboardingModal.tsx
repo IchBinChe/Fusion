@@ -1,6 +1,7 @@
 import "./ModelOnboardingModal.css";
-import { useState, useEffect, useCallback, useRef } from "react";
-import { X, Loader2, CheckCircle, Key, Zap, GitPullRequest, Rocket, Plus } from "lucide-react";
+import "./SetupWizardModal.css";
+import { lazy, Suspense, useState, useEffect, useCallback, useRef, useMemo, type KeyboardEvent } from "react";
+import { X, Loader2, CheckCircle, Key, Zap, GitPullRequest, Rocket, Plus, Sparkles, UserRound } from "lucide-react";
 import { getErrorMessage, type Task } from "@fusion/core";
 import type { AuthProvider, ManualOAuthCodeInfo, ModelInfo, CustomProvider, CustomProviderConfig, OAuthDeviceCodeInfo } from "../api";
 import {
@@ -15,8 +16,10 @@ import {
   fetchModels,
   updateGlobalSettings,
   createTask,
+  createAgent,
   fetchCustomProviders,
   createCustomProvider,
+  type AgentOnboardingSummary,
 } from "../api";
 import type { ToastType } from "../hooks/useToast";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
@@ -36,6 +39,19 @@ import { filterVisibleOnboardingAndSettingsProviders } from "./providerVisibilit
 import { useShellConnection } from "../hooks/useShellConnection";
 import { useConfirm } from "../hooks/useConfirm";
 import { useTranslation } from "react-i18next";
+import { AgentAvatar } from "./AgentAvatar";
+import { ErrorBoundary } from "./ErrorBoundary";
+import { AGENT_PRESETS, getPresetById } from "./agent-presets";
+import {
+  buildAgentCreatePayload,
+  mapOnboardingSummaryToAgentDraft,
+  mapPresetToAgentDraft,
+  type AgentDraftValues,
+} from "./agent-presets/agentCreatePayload";
+
+const ExperimentalAgentOnboardingModal = lazy(() =>
+  import("./ExperimentalAgentOnboardingModal").then((m) => ({ default: m.ExperimentalAgentOnboardingModal })),
+);
 
 const mapLegacyCustomProviderToConfig = (
   provider: CustomProvider | CustomProviderConfig,
@@ -527,6 +543,8 @@ export interface ModelOnboardingModalProps {
   firstCreatedTask?: Task | null;
   /** Optional callback when user wants to open the created task detail */
   onViewTask?: (task: Task) => void;
+  /** Enables the AI interview entry point while template creation and skip remain available. */
+  agentOnboardingEnabled?: boolean;
 }
 
 /** Outcome states for OAuth login attempts */
@@ -551,7 +569,8 @@ const MAX_POLL_CYCLES = 150;
  * 1. AI Setup - Provider credential setup (OAuth login or API key entry) and default model selection
  * 2. GitHub (Optional) - GitHub connection status and login
  * 3. Project Setup - Register a project directory (or clone a repository URL via setup wizard)
- * 4. First Task - CTA to create first task or import from GitHub
+ * 4. Agent - Optional persistent coordinating agent from a template or AI-generated draft
+ * 5. First Task - CTA to create first task or import from GitHub
  *
  * Dismissing the modal marks onboarding as complete to prevent repeated popups.
  */
@@ -564,9 +583,19 @@ export function ModelOnboardingModal({
   onOpenGitHubImport,
   firstCreatedTask,
   onViewTask,
+  agentOnboardingEnabled = false,
 }: ModelOnboardingModalProps) {
   const { t } = useTranslation("app");
   const { confirm } = useConfirm();
+  /*
+  FNXC:Onboarding 2026-06-22-04:16:
+  First-time provider/GitHub setup must pass through the same optional first-agent flow before first-task creation.
+  Users can create or skip a coordinating agent because Fusion can still start temporary agents to plan, code, review, and merge tasks.
+  */
+  const ceoPreset = useMemo(
+    () => getPresetById("ceo") ?? AGENT_PRESETS[0]!,
+    [],
+  );
   // Initialize from persisted state if available (allows resume from last step)
   const persistedState = getOnboardingState();
   const persistedStep = persistedState?.currentStep;
@@ -589,6 +618,11 @@ export function ModelOnboardingModal({
   const [isCreatingFirstTask, setIsCreatingFirstTask] = useState(false);
   const [taskCreationError, setTaskCreationError] = useState<string | null>(null);
   const [inlineCreatedTask, setInlineCreatedTask] = useState<Task | null>(null);
+  const [selectedAgentPresetId, setSelectedAgentPresetId] = useState(ceoPreset.id);
+  const [agentDraft, setAgentDraft] = useState<AgentDraftValues>(() => mapPresetToAgentDraft(ceoPreset));
+  const [isCreatingAgent, setIsCreatingAgent] = useState(false);
+  const [agentCreationError, setAgentCreationError] = useState<string | null>(null);
+  const [isAgentInterviewOpen, setIsAgentInterviewOpen] = useState(false);
   const [authProviders, setAuthProviders] = useState<AuthProvider[]>([]);
   const [ghCliStatus, setGhCliStatus] = useState<GhCliStatus | undefined>(undefined);
   const [authLoading, setAuthLoading] = useState(true);
@@ -617,6 +651,7 @@ export function ModelOnboardingModal({
   const onboardingContentRef = useRef<HTMLDivElement | null>(null);
   const modalRef = useRef<HTMLDivElement | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const agentErrorRef = useRef<HTMLDivElement | null>(null);
   const [loginOutcomes, setLoginOutcomes] = useState<Record<string, LoginOutcome>>({});
   const lastAutoCopiedDeviceCodesRef = useRef<Record<string, string>>({});
   const [isGithubSkipped, setIsGithubSkipped] = useState<boolean>(() => {
@@ -670,6 +705,7 @@ export function ModelOnboardingModal({
     { key: "ai-setup" as const, label: t("setup.stepAiSetup", "AI Setup") },
     { key: "github" as const, label: t("setup.stepGithub", "GitHub") },
     { key: "project-setup" as const, label: t("setup.stepProject", "Project") },
+    { key: "agent" as const, label: t("setup.stepAgent", "Agent") },
     { key: "first-task" as const, label: t("setup.stepFirstTask", "First Task") },
   ];
 
@@ -711,6 +747,12 @@ export function ModelOnboardingModal({
 
     previousCreatedTaskRef.current = firstCreatedTask;
   }, [firstCreatedTask]);
+
+  useEffect(() => {
+    if (agentCreationError) {
+      agentErrorRef.current?.focus();
+    }
+  }, [agentCreationError]);
 
   // Auto-mark unconnected providers as skipped when leaving ai-setup step
   // Only skip if NO providers are connected (if at least one is connected, others remain "Not connected")
@@ -1078,6 +1120,61 @@ export function ModelOnboardingModal({
   const handleSkipGitHubStep = useCallback(() => {
     handleSkip();
   }, [handleSkip]);
+
+  const handleAgentPresetSelect = useCallback((presetId: string) => {
+    const preset = getPresetById(presetId);
+    if (!preset) return;
+    setSelectedAgentPresetId(preset.id);
+    setAgentDraft(mapPresetToAgentDraft(preset));
+    setAgentCreationError(null);
+  }, []);
+
+  const handleAgentPresetKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>, presetId: string) => {
+    const currentIndex = AGENT_PRESETS.findIndex((preset) => preset.id === presetId);
+    if (currentIndex < 0) return;
+
+    const lastIndex = AGENT_PRESETS.length - 1;
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+      nextIndex = currentIndex === lastIndex ? 0 : currentIndex + 1;
+    } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+      nextIndex = currentIndex === 0 ? lastIndex : currentIndex - 1;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = lastIndex;
+    }
+
+    if (nextIndex === null) return;
+    event.preventDefault();
+    const nextPreset = AGENT_PRESETS[nextIndex];
+    handleAgentPresetSelect(nextPreset.id);
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLButtonElement>(`[data-model-onboarding-agent-preset-id="${nextPreset.id}"]`)?.focus();
+    });
+  }, [handleAgentPresetSelect]);
+
+  const handleApplyAgentDraft = useCallback((draft: AgentOnboardingSummary) => {
+    setSelectedAgentPresetId("");
+    setAgentDraft(mapOnboardingSummaryToAgentDraft(draft));
+    setAgentCreationError(null);
+  }, []);
+
+  const handleCreateFirstAgent = useCallback(async () => {
+    const targetProjectId = projectId?.trim();
+    if (!targetProjectId || !agentDraft.name.trim()) return;
+
+    setIsCreatingAgent(true);
+    setAgentCreationError(null);
+    try {
+      await createAgent(buildAgentCreatePayload(agentDraft), targetProjectId);
+      handleNext();
+    } catch (err) {
+      setAgentCreationError(err instanceof Error ? err.message : t("setup.firstAgentCreateError", "Failed to create agent"));
+    } finally {
+      setIsCreatingAgent(false);
+    }
+  }, [agentDraft, handleNext, projectId, t]);
 
   // OAuth login handler
   const handleLogin = useCallback(
@@ -1709,6 +1806,13 @@ export function ModelOnboardingModal({
   const connectedAiProviders = aiProviders.filter((provider) => provider.authenticated);
   const hasAiProvider = connectedAiProviders.length > 0;
   const hasProjectSelected = Boolean(projectId);
+  const selectedAgentPreset = selectedAgentPresetId ? getPresetById(selectedAgentPresetId) : undefined;
+  /*
+  FNXC:Onboarding 2026-06-22-06:03:
+  AI-generated agent drafts are custom and should not appear selected as a template, but the template radiogroup still needs one tabbable item for keyboard users.
+  */
+  const agentPresetTabStopId = selectedAgentPresetId || ceoPreset.id;
+  const isAgentActionDisabled = isCreatingAgent || !hasProjectSelected;
   // True when on GitHub step but skipped AI setup (no AI provider connected)
   const aiSetupSkipped = step === "github" && !hasAiProvider;
 
@@ -2101,6 +2205,11 @@ export function ModelOnboardingModal({
                 <Rocket size={24} /> {t("setup.titleSetUpProject", "Set Up Your Project")}
               </>
             )}
+            {step === "agent" && (
+              <>
+                <UserRound size={24} /> {t("setup.titleCreateFirstAgent", "Create Your First Agent")} <span className="onboarding-optional-badge">{t("setup.optionalBadge", "Optional")}</span>
+              </>
+            )}
             {step === "first-task" && (
               <>
                 <Rocket size={24} /> {t("setup.titleCreateFirstTask", "Create Your First Task")}
@@ -2124,7 +2233,7 @@ export function ModelOnboardingModal({
           )}
         </div>
 
-        {/* Step indicator - 4 progress steps + complete */}
+        {/* Step indicator - progress steps + complete */}
         <div className="model-onboarding-steps">
           {steps.map((s, index) => {
             // A step is done/skipped only once we have progressed beyond it.
@@ -2690,6 +2799,109 @@ export function ModelOnboardingModal({
             </div>
           )}
 
+          {step === "agent" && (
+            <div className="setup-wizard-agent-step model-onboarding-agent-step">
+              <p className="setup-wizard-agent-intro">
+                {t("setup.firstAgentIntro", "Agents are optional. Fusion can build tasks without one by starting temporary agents for planning, coding, review, and merge. Create an agent only if you want help coordinating tasks and direction.")}
+              </p>
+
+              {!hasProjectSelected && (
+                <div className="onboarding-project-prerequisite" data-testid="onboarding-agent-project-prerequisite">
+                  <p className="onboarding-helper-text">
+                    {t("setup.projectMustBeSelectedForAgent", "Set up a project before creating an agent. You can skip this and create tasks without one.")}
+                  </p>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={onOpenSetupWizard}
+                    data-testid="onboarding-agent-open-setup-wizard"
+                  >
+                    {t("setup.setUpProject", "Set Up Project")}
+                  </button>
+                </div>
+              )}
+
+              <div className="setup-wizard-agent-layout">
+                <section className="setup-wizard-agent-presets" aria-labelledby="model-onboarding-first-agent-presets-heading">
+                  <div className="setup-wizard-agent-section-heading" id="model-onboarding-first-agent-presets-heading">
+                    {t("setup.firstAgentTemplates", "Templates")}
+                  </div>
+                  <div className="setup-wizard-agent-preset-list" role="radiogroup" aria-label={t("setup.firstAgentTemplates", "Templates")}>
+                    {AGENT_PRESETS.map((preset) => {
+                      const selected = selectedAgentPresetId === preset.id;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          className={`setup-wizard-agent-preset${selected ? " selected" : ""}`}
+                          role="radio"
+                          aria-checked={selected}
+                          aria-label={selected ? t("setup.selectedAgentTemplate", "{{name}} selected", { name: preset.name }) : preset.name}
+                          tabIndex={preset.id === agentPresetTabStopId ? 0 : -1}
+                          data-model-onboarding-agent-preset-id={preset.id}
+                          disabled={isAgentActionDisabled}
+                          onClick={() => handleAgentPresetSelect(preset.id)}
+                          onKeyDown={(event) => handleAgentPresetKeyDown(event, preset.id)}
+                        >
+                          <AgentAvatar agent={{ id: preset.id, icon: preset.icon, name: preset.name }} size={28} />
+                          <span className="setup-wizard-agent-preset-copy">
+                            <span className="setup-wizard-agent-preset-name">
+                              {preset.name}
+                              {preset.id === "ceo" && <span className="wizard-option-recommended">{t("setup.recommended", "Recommended")}</span>}
+                            </span>
+                            <span className="setup-wizard-agent-preset-description">{preset.description}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </section>
+
+                <section className="setup-wizard-agent-preview" aria-labelledby="model-onboarding-first-agent-preview-heading">
+                  <div className="setup-wizard-agent-section-heading" id="model-onboarding-first-agent-preview-heading">
+                    {t("setup.firstAgentPreview", "Preview")}
+                  </div>
+                  <div className="setup-wizard-agent-preview-card">
+                    <div className="setup-wizard-agent-preview-title-row">
+                      <AgentAvatar agent={{ id: selectedAgentPresetId || "draft", icon: agentDraft.icon, name: agentDraft.name }} size={36} />
+                      <div>
+                        <h3>{agentDraft.name || t("setup.firstAgentDraftName", "Draft agent")}</h3>
+                        <p>{agentDraft.title || selectedAgentPreset?.title || t("setup.firstAgentCustomDraft", "Custom agent draft")}</p>
+                      </div>
+                    </div>
+                    <dl className="setup-wizard-agent-preview-list">
+                      <div>
+                        <dt>{t("agents.fieldRole", "Role")}</dt>
+                        <dd>{agentDraft.role}</dd>
+                      </div>
+                      <div>
+                        <dt>{t("agents.fieldInstructionsText", "Inline Instructions")}</dt>
+                        <dd>{agentDraft.instructionsText || t("setup.firstAgentNoInstructions", "No inline instructions yet")}</dd>
+                      </div>
+                    </dl>
+                    {agentOnboardingEnabled && (
+                      <button
+                        type="button"
+                        className="btn setup-wizard-agent-ai-btn"
+                        onClick={() => setIsAgentInterviewOpen(true)}
+                        disabled={isAgentActionDisabled}
+                      >
+                        <Sparkles size={16} />
+                        <span>{t("agents.aiInterview", "AI Interview")}</span>
+                      </button>
+                    )}
+                  </div>
+                </section>
+              </div>
+
+              {agentCreationError && (
+                <div className="wizard-error" role="alert" tabIndex={-1} ref={agentErrorRef}>
+                  {agentCreationError}
+                </div>
+              )}
+            </div>
+          )}
+
           {step === "first-task" && (
             <div className="model-onboarding-first-task">
               <p className="model-onboarding-description">
@@ -2791,9 +3003,10 @@ export function ModelOnboardingModal({
 
                   {hasProjectSelected && (
                     <>
+                      {/* FNXC:Onboarding 2026-06-22-04:01: The provider/GitHub onboarding flow also reaches task creation, so it must repeat that users can create tasks without creating or assigning a persistent agent; Fusion spawns temporary plan/execute/review/merge agents for task work. */}
                       <OnboardingDisclosure summary={t("setup.whatHappensWhenCreateTask", "What happens when I create a task?")}>
                         <p className="onboarding-helper-text">
-                          {t("setup.whatHappensWhenCreateTaskBody", "A task describes something you want done. Fusion's AI agents will read your description and work on implementing it. You can track progress on the board and review the results.")}
+                          {t("setup.whatHappensWhenCreateTaskBody", "Describe the work you want done. You can create tasks without an agent: Fusion starts temporary agents to plan, code, review, and merge. Track everything on the board.")}
                         </p>
                       </OnboardingDisclosure>
 
@@ -2808,7 +3021,7 @@ export function ModelOnboardingModal({
                           </div>
                           <div className="cta-content">
                             <strong>{t("setup.createNewTask", "Create a New Task")}</strong>
-                            <span>{t("setup.createNewTaskSubtitle", "Describe what you need built and AI will work on it")}</span>
+                            <span>{t("setup.createNewTaskSubtitle", "Describe what you need built; Fusion will spawn temporary task agents automatically")}</span>
                           </div>
                         </button>
 
@@ -2854,6 +3067,14 @@ export function ModelOnboardingModal({
 
         {/* Footer */}
         <div className="model-onboarding-footer">
+          <a
+            className="btn model-onboarding-help-link"
+            href="https://discord.gg/ksrfuy7WYR"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {t("setup.needHelp", "Need help?")}
+          </a>
           {step === "ai-setup" && (
             <>
               <button
@@ -2897,6 +3118,36 @@ export function ModelOnboardingModal({
             </>
           )}
 
+          {step === "agent" && (
+            <>
+              <button className="btn btn-sm" onClick={handleBack}>
+                {t("setup.back", "← Back")}
+              </button>
+              <button
+                className="btn"
+                onClick={handleSkip}
+                disabled={isCreatingAgent}
+              >
+                {t("setup.skipFirstAgent", "Skip for now")}
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => void handleCreateFirstAgent()}
+                disabled={isAgentActionDisabled || !agentDraft.name.trim()}
+                aria-busy={isCreatingAgent}
+              >
+                {isCreatingAgent ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    <span>{t("setup.creatingFirstAgent", "Creating agent...")}</span>
+                  </>
+                ) : (
+                  <span>{t("setup.createFirstAgent", "Create Agent")}</span>
+                )}
+              </button>
+            </>
+          )}
+
           {step === "first-task" && !showTaskCreated && (
             <>
               <button className="btn btn-sm" onClick={handleBack}>
@@ -2927,6 +3178,35 @@ export function ModelOnboardingModal({
           )}
         </div>
       </div>
+      {agentOnboardingEnabled && isAgentInterviewOpen && (
+        <ErrorBoundary
+          level="modal"
+          fallback={(
+            <div className="wizard-error setup-wizard-agent-interview-error" role="alert">
+              <span>{t("setup.firstAgentInterviewLoadError", "AI interview could not load. You can still create an agent from a template or skip this step.")}</span>
+              <button type="button" className="btn" onClick={() => setIsAgentInterviewOpen(false)}>
+                {t("setup.firstAgentContinueWithTemplates", "Continue with templates")}
+              </button>
+            </div>
+          )}
+        >
+          <Suspense fallback={(
+            <div className="wizard-error setup-wizard-agent-interview-error" role="status">
+              {t("setup.firstAgentInterviewLoading", "Loading AI Interview...")}
+            </div>
+          )}
+          >
+            <ExperimentalAgentOnboardingModal
+              isOpen={isAgentInterviewOpen}
+              onClose={() => setIsAgentInterviewOpen(false)}
+              onUseDraft={handleApplyAgentDraft}
+              projectId={projectId}
+              existingAgents={[]}
+              mode="create"
+            />
+          </Suspense>
+        </ErrorBoundary>
+      )}
     </div>
   );
 }

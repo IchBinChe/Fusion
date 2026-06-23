@@ -16,6 +16,13 @@ export const DEFAULT_REPORT_PATH = "docs/test-velocity-baseline.md";
 export const DEFAULT_MEASURE_TIMEOUT_MS = 10 * 60 * 1000;
 export const DELETION_CLOCK_DAYS = 14;
 
+const BUILD_PREFLIGHT_COMMAND = {
+  key: "buildPreflightMs",
+  label: "Build preflight (`pnpm build`)",
+  command: "pnpm",
+  args: ["build"],
+};
+
 const MEASURE_COMMANDS = [
   { key: "gateMs", label: "Merge gate (`pnpm test:gate`)", command: "pnpm", args: ["test:gate"] },
   { key: "bootSmokeMs", label: "Boot smoke (`pnpm smoke:boot`)", command: "pnpm", args: ["smoke:boot"] },
@@ -172,7 +179,7 @@ export function renderReport({ gateMs, bootSmokeMs, testMs, slowest = [], quaran
     ? `| Previous | ${previous.capturedAt ?? "unknown"} | ${formatDuration(previous.gateMs)} | ${formatDuration(previous.bootSmokeMs)} | ${formatDuration(previous.testMs)} | ${previous.quarantineCount ?? "n/a"} |\n| Latest | ${latest.capturedAt} | ${formatDuration(latest.gateMs)} | ${formatDuration(latest.bootSmokeMs)} | ${formatDuration(latest.testMs)} | ${latest.quarantineCount} |\n| Delta | — | ${delta(latest, previous, "gateMs")} | ${delta(latest, previous, "bootSmokeMs")} | ${delta(latest, previous, "testMs")} | ${trendCell(latest.quarantineCount, previous.quarantineCount)} |`
     : `| Previous | _(seed baseline)_ | — | — | — | — |\n| Latest | ${latest.capturedAt} | ${formatDuration(latest.gateMs)} | ${formatDuration(latest.bootSmokeMs)} | ${formatDuration(latest.testMs)} | ${latest.quarantineCount} |\n| Delta | — | n/a | n/a | n/a | n/a |`;
 
-  return `# Test velocity baseline\n\n> Weekly FN-6612 signal-per-second baseline. Measure and report feedback-loop velocity; do **not** add slow tests or wire this report into blocking PR checks. The merge gate remains the existing thin Lint, Typecheck, Build, and Gate path.\n\n## Latest baseline\n\n- Cycle: **${cycle}**\n- Captured at: **${latest.capturedAt}**\n- Timing snapshot: \`${DEFAULT_TIMINGS_PATH}\`${timingSnapshotCapturedAt ? ` captured at **${timingSnapshotCapturedAt}**` : ""}\n- Quarantine ledger: \`${DEFAULT_QUARANTINE_PATH}\`\n\n## Metrics\n\n| Metric | Current | Delta vs previous |\n|---|---:|---:|\n${renderMetricRow("Merge gate wall-time (`pnpm test:gate`)", latest, previous, "gateMs")}\n${renderMetricRow("Boot smoke wall-time (`pnpm smoke:boot`)", latest, previous, "bootSmokeMs")}\n${renderMetricRow("Changed-only test wall-time (`pnpm test`)", latest, previous, "testMs")}\n| Quarantine / flake count | ${latest.quarantineCount} | ${trendCell(latest.quarantineCount, previous?.quarantineCount)} |\n| Deletion-due quarantines | ${quarantine?.deletionDueCount ?? 0} | n/a |\n\n## Measurement failures\n\n${failures}\n\n## Slowest 20 test files\n\n| Rank | File | Package | Duration |\n|---:|---|---|---:|\n${slowRows || "| — | — | — | — |"}\n\n## Quarantine age buckets\n\n| Age bucket | Count |\n|---|---:|\n| 0-6 days | ${quarantine?.byAgeBucket?.["0-6d"] ?? 0} |\n| 7-13 days | ${quarantine?.byAgeBucket?.["7-13d"] ?? 0} |\n| deletion due (>=14 days) | ${quarantine?.byAgeBucket?.deletionDue ?? 0} |\n| unknown/future | ${quarantine?.byAgeBucket?.unknown ?? 0} |\n\n### Deletion-due entries\n\n| File | Quarantined at | Age (days) |\n|---|---:|---:|\n${dueRows || "| — | — | — |"}\n\n## Before / after trend\n\n| Row | Captured at | Gate | Boot smoke | \`pnpm test\` | Quarantine count |\n|---|---|---:|---:|---:|---:|\n${previousRows}\n\n_Future weekly rows append to \`${DEFAULT_HISTORY_PATH}\`; compare the latest row against the previous row before posting to #leads._\n\n## Post to #leads\n\n\`\`\`text\nFN-6612 weekly test velocity: gate ${formatDuration(latest.gateMs)} (${delta(latest, previous, "gateMs")}), boot smoke ${formatDuration(latest.bootSmokeMs)} (${delta(latest, previous, "bootSmokeMs")}), pnpm test ${formatDuration(latest.testMs)} (${delta(latest, previous, "testMs")}), quarantine ledger ${latest.quarantineCount} (${trendCell(latest.quarantineCount, previous?.quarantineCount)}). Slowest file: ${slowest[0]?.file ?? "none"} at ${formatDuration(slowest[0]?.ms)}. Deletion-due quarantines: ${quarantine?.deletionDueCount ?? 0}.\n\`\`\`\n\n## How to refresh\n\n\`\`\`bash\npnpm test:velocity -- --measure --write-report\n\`\`\`\n\nReport-only regeneration is cheap and does not run any suite:\n\n\`\`\`bash\npnpm test:velocity\n\`\`\`\n`;
+  return `# Test velocity baseline\n\n> Weekly FN-6612 signal-per-second baseline. Measure and report feedback-loop velocity; do **not** add slow tests or wire this report into blocking PR checks. The merge gate remains the existing thin Lint, Typecheck, Build, and Gate path.\n\n## Latest baseline\n\n- Cycle: **${cycle}**\n- Captured at: **${latest.capturedAt}**\n- Timing snapshot: \`${DEFAULT_TIMINGS_PATH}\`${timingSnapshotCapturedAt ? ` captured at **${timingSnapshotCapturedAt}**` : ""}\n- Quarantine ledger: \`${DEFAULT_QUARANTINE_PATH}\`\n\n## Metrics\n\n| Metric | Current | Delta vs previous |\n|---|---:|---:|\n${renderMetricRow("Merge gate wall-time (`pnpm test:gate`)", latest, previous, "gateMs")}\n${renderMetricRow("Boot smoke wall-time (`pnpm smoke:boot`)", latest, previous, "bootSmokeMs")}\n${renderMetricRow("Changed-only test wall-time (`pnpm test`)", latest, previous, "testMs")}\n| Quarantine / flake count | ${latest.quarantineCount} | ${trendCell(latest.quarantineCount, previous?.quarantineCount)} |\n| Deletion-due quarantines | ${quarantine?.deletionDueCount ?? 0} | n/a |\n\n## Measurement failures\n\n${failures}\n\n## Slowest 20 test files\n\n| Rank | File | Package | Duration |\n|---:|---|---|---:|\n${slowRows || "| — | — | — | — |"}\n\n## Quarantine age buckets\n\n| Age bucket | Count |\n|---|---:|\n| 0-6 days | ${quarantine?.byAgeBucket?.["0-6d"] ?? 0} |\n| 7-13 days | ${quarantine?.byAgeBucket?.["7-13d"] ?? 0} |\n| deletion due (>=14 days) | ${quarantine?.byAgeBucket?.deletionDue ?? 0} |\n| unknown/future | ${quarantine?.byAgeBucket?.unknown ?? 0} |\n\n### Deletion-due entries\n\n| File | Quarantined at | Age (days) |\n|---|---:|---:|\n${dueRows || "| — | — | — |"}\n\n## Before / after trend\n\n| Row | Captured at | Gate | Boot smoke | \`pnpm test\` | Quarantine count |\n|---|---|---:|---:|---:|---:|\n${previousRows}\n\n_Future weekly rows append to \`${DEFAULT_HISTORY_PATH}\`; compare the latest row against the previous row before posting to #leads._\n\n## Post to #leads\n\n\`\`\`text\nFN-6612 weekly test velocity: gate ${formatDuration(latest.gateMs)} (${delta(latest, previous, "gateMs")}), boot smoke ${formatDuration(latest.bootSmokeMs)} (${delta(latest, previous, "bootSmokeMs")}), pnpm test ${formatDuration(latest.testMs)} (${delta(latest, previous, "testMs")}), quarantine ledger ${latest.quarantineCount} (${trendCell(latest.quarantineCount, previous?.quarantineCount)}). Slowest file: ${slowest[0]?.file ?? "none"} at ${formatDuration(slowest[0]?.ms)}. Deletion-due quarantines: ${quarantine?.deletionDueCount ?? 0}.\n\`\`\`\n\n## How to refresh\n\n\`\`\`bash\npnpm test:velocity -- --measure --write-report\n\`\`\`\n\nIn measure mode, the script runs a non-measured \`pnpm build\` preflight before timing \`pnpm test:gate\`, \`pnpm smoke:boot\`, or \`pnpm test\`. The preflight time is setup only and is excluded from lane metrics; if it fails, the Measurement failures section records \`Build preflight (pnpm build)\` as the reason. Use \`--skip-build-preflight\` only when the workspace is already built by CI.\n\nReport-only regeneration is cheap and does not run any suite:\n\n\`\`\`bash\npnpm test:velocity\n\`\`\`\n`;
 }
 
 function historyEntries(history) {
@@ -195,13 +202,14 @@ function createEntry({ capturedAt = new Date().toISOString(), gateMs = null, boo
 }
 
 function parseArgs(argv) {
-  const args = { measure: false, writeReport: false, reportOnly: true, timeoutMs: DEFAULT_MEASURE_TIMEOUT_MS, help: false };
+  const args = { measure: false, writeReport: false, reportOnly: true, timeoutMs: DEFAULT_MEASURE_TIMEOUT_MS, help: false, skipBuildPreflight: false };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--") continue;
     else if (arg === "--measure") args.measure = true;
     else if (arg === "--write-report") args.writeReport = true;
     else if (arg === "--report-only") args.reportOnly = true;
+    else if (arg === "--skip-build-preflight" || arg === "--no-build-preflight") args.skipBuildPreflight = true;
     else if (arg === "--timeout-ms") args.timeoutMs = Number(argv[++index]);
     else if (arg === "--help" || arg === "-h") args.help = true;
     else throw new Error(`Unknown argument: ${arg}`);
@@ -248,11 +256,27 @@ async function timeCommand({ command, args, label, timeoutMs, cwd, stdout, stder
   });
 }
 
-async function measureCommands({ timeoutMs, cwd, stdout, stderr }) {
+/*
+FNXC:TestVelocityBaseline 2026-06-21-00:00:
+FN-6905 needs seam-based orchestration tests for command ordering and lane timing without running real builds or suites. Keep production behavior on the default `timeCommand` path while allowing tests to inject a deterministic command runner.
+
+FNXC:TestVelocityBaseline 2026-06-21-00:07:
+Clean-worktree velocity measurement must not let missing CLI dist make boot smoke look unavailable or push setup cost into `pnpm test`. Run `pnpm build` as non-measured setup before timed lanes, allow explicit opt-out for pre-built CI, and record preflight failure as the real measurement failure instead of fabricating lane timings.
+*/
+export async function measureCommands({ timeoutMs, cwd, stdout, stderr, commandRunner = timeCommand, skipBuildPreflight = false }) {
   const results = {};
   const failures = [];
+
+  if (!skipBuildPreflight) {
+    const preflight = await commandRunner({ ...BUILD_PREFLIGHT_COMMAND, timeoutMs, cwd, stdout, stderr });
+    if (preflight.failure) {
+      failures.push(preflight.failure);
+      return { ...results, measurementFailures: failures };
+    }
+  }
+
   for (const measurement of MEASURE_COMMANDS) {
-    const result = await timeCommand({ ...measurement, timeoutMs, cwd, stdout, stderr });
+    const result = await commandRunner({ ...measurement, timeoutMs, cwd, stdout, stderr });
     results[measurement.key] = result.ms;
     if (result.failure) failures.push(result.failure);
   }
@@ -273,7 +297,7 @@ function renderFromEntry(entry, previous, quarantine) {
   });
 }
 
-export async function main(argv = process.argv.slice(2), { rootDir = repoRoot, stdout = process.stdout, stderr = process.stderr, now = new Date() } = {}) {
+export async function main(argv = process.argv.slice(2), { rootDir = repoRoot, stdout = process.stdout, stderr = process.stderr, now = new Date(), commandRunner = timeCommand } = {}) {
   let args;
   try {
     args = parseArgs(argv);
@@ -283,7 +307,7 @@ export async function main(argv = process.argv.slice(2), { rootDir = repoRoot, s
   }
 
   if (args.help) {
-    stdout.write("Usage: node scripts/test-velocity-baseline.mjs [--measure] [--write-report] [--report-only] [--timeout-ms <ms>]\n");
+    stdout.write("Usage: node scripts/test-velocity-baseline.mjs [--measure] [--write-report] [--report-only] [--skip-build-preflight] [--timeout-ms <ms>]\n");
     return 0;
   }
 
@@ -295,7 +319,7 @@ export async function main(argv = process.argv.slice(2), { rootDir = repoRoot, s
   const slowest = topSlowestFiles(timings, 20);
 
   if (args.measure) {
-    const measured = await measureCommands({ timeoutMs: args.timeoutMs, cwd: rootDir, stdout, stderr });
+    const measured = await measureCommands({ timeoutMs: args.timeoutMs, cwd: rootDir, stdout, stderr, commandRunner, skipBuildPreflight: args.skipBuildPreflight });
     const entry = createEntry({
       capturedAt: now.toISOString(),
       gateMs: measured.gateMs,

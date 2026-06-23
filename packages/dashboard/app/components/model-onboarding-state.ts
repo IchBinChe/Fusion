@@ -5,7 +5,7 @@
  * from where they left off if they dismiss the modal without completing.
  */
 
-export type OnboardingStep = "ai-setup" | "github" | "project-setup" | "first-task" | "complete";
+export type OnboardingStep = "ai-setup" | "github" | "project-setup" | "agent" | "first-task" | "complete";
 
 interface OnboardingState {
   currentStep: OnboardingStep | string; // string allows for future unknown steps
@@ -42,7 +42,7 @@ const DEFAULT_POST_ONBOARDING_DISMISSED_AT: string | undefined = undefined;
  * Ordered onboarding flow steps before completion.
  * Keep this list in sync with ModelOnboardingModal's stepper rendering and navigation.
  */
-export const ONBOARDING_FLOW_STEPS = ["ai-setup", "github", "project-setup", "first-task"] as const;
+export const ONBOARDING_FLOW_STEPS = ["ai-setup", "github", "project-setup", "agent", "first-task"] as const;
 
 /**
  * Step labels for display in the resume card.
@@ -52,6 +52,7 @@ export const ONBOARDING_STEP_LABELS: Record<OnboardingStep, string> = {
   "ai-setup": "AI Setup",
   github: "GitHub",
   "project-setup": "Project",
+  agent: "Agent",
   "first-task": "First Task",
   complete: "Complete",
 };

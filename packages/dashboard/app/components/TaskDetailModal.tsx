@@ -1,7 +1,7 @@
 import "./TaskDetailModal.css";
 import React, { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Pencil, Bot, X, ChevronDown, ChevronRight, GitBranch, ArrowLeft, Zap, Loader2, AlertTriangle, Sparkles } from "lucide-react";
+import { Pencil, Bot, X, ChevronDown, ChevronRight, GitBranch, ArrowLeft, Zap, Loader2, AlertTriangle, Sparkles, Maximize2 } from "lucide-react";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
@@ -9,6 +9,7 @@ import { useColumnLabel } from "../i18n/labels";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { sharedRehypePlugins, createMermaidCodeComponent } from "./markdownPipeline";
 import type { Task, TaskDetail, TaskAttachment, Column, ColumnId, MergeResult, Settings, GlobalSettings, AgentLogEntry, Agent, TaskPriority, TaskSourceIssue, WorkflowStepResult, GithubIssueAction } from "@fusion/core";
 import {
   DEFAULT_TASK_PRIORITY,
@@ -80,17 +81,30 @@ function isStringValue(value: unknown): value is string {
   return Object.prototype.toString.call(value) === STRING_OBJECT_TAG;
 }
 
+/*
+FNXC:Markdown 2026-06-23-03:30:
+The task DESCRIPTION (spec/prompt) + SUMMARY render via these components plus the
+shared rehype chain (sharedRehypePlugins) so they gain sanitized raw HTML
+(`<details>`/tables/`<kbd>`), drop HTML comments, and render ```mermaid diagrams —
+matching the shared markdown renderer. They KEEP their `.markdown-body` styling
+(NOT the `.mailbox-markdown` wrapper), so the look is unchanged for normal markdown.
+The file-path linkify `code` renderer is preserved as the fallback for non-mermaid
+code, so links AND html AND mermaid all work together.
+*/
+const markdownLinkifyCodeComponent: NonNullable<Components["code"]> = ({ children, ...props }) => {
+  const text = React.Children.toArray(children).join(EMPTY_MARKDOWN_CHILD_SEPARATOR);
+  const linkedChildren = linkifyFilePaths(text);
+  if (linkedChildren.length === 1 && linkedChildren[0]?.constructor === String) {
+    return <code {...props}>{children}</code>;
+  }
+  return <code {...props}>{linkedChildren}</code>;
+};
+
 const markdownLinkifyComponents: Components = {
   p: ({ children, ...props }) => <p {...props}>{linkifyReactChildren(children)}</p>,
   li: ({ children, ...props }) => <li {...props}>{linkifyReactChildren(children)}</li>,
-  code: ({ children, ...props }) => {
-    const text = React.Children.toArray(children).join(EMPTY_MARKDOWN_CHILD_SEPARATOR);
-    const linkedChildren = linkifyFilePaths(text);
-    if (linkedChildren.length === 1 && linkedChildren[0]?.constructor === String) {
-      return <code {...props}>{children}</code>;
-    }
-    return <code {...props}>{linkedChildren}</code>;
-  },
+  // Mermaid fences render as diagrams; all other code falls through to file-path linkify.
+  code: createMermaidCodeComponent("task-detail-mermaid-diagram", markdownLinkifyCodeComponent),
 };
 
 /**
@@ -248,6 +262,11 @@ function resolveEffectivePlanning(
     return fromLog;
   }
   return resolveTaskPlanningModel(task, settings);
+}
+
+function toTaskChatModelInfo(model: ModelSelection): { provider: string; modelId?: string } | null {
+  if (!model.provider) return null;
+  return model.modelId ? { provider: model.provider, modelId: model.modelId } : { provider: model.provider };
 }
 
 function getStepStatusColor(status: string): string {
@@ -409,7 +428,21 @@ export interface TaskDetailModalProps {
 
 export type TaskDetailContentProps = Omit<TaskDetailModalProps, "onClose"> & {
   embedded?: boolean;
+  /*
+  FNXC:TaskDetail 2026-06-22-12:20:
+  Embedded task detail can be hosted by a movable FloatingWindow. In that surface the task header is the only visible header, so onRequestClose must render a close icon beside edit instead of relying on separate window chrome.
+  */
   onRequestClose?: () => void;
+  /*
+  FNXC:TaskDetail 2026-06-22-18:40:
+  onBackToBoard powers the board-card full-panel "Back to board" affordance rendered in the gray header (far right). It is only honored when embedded is also true, so ListView split-pane and modal usages never show it.
+  */
+  onBackToBoard?: () => void;
+  /*
+  FNXC:FloatingWindow 2026-06-22-20:45:
+  onPopOut, when supplied, renders a Maximize2 "Pop out" button in the gray header. List/Board wire it to push this task into App's floating task-detail window array, opening the same embedded TaskDetailContent inside a movable, resizable, non-blocking FloatingWindow. It is independent of embedded/onBackToBoard so List split-pane and the board full-panel can both expose it.
+  */
+  onPopOut?: (task: Task) => void;
 };
 
 function truncate(s: string, max: number): string {
@@ -584,6 +617,8 @@ export function TaskDetailContent({
   mobileHeaderMode = "close",
   embedded = false,
   onRequestClose,
+  onBackToBoard,
+  onPopOut,
   workflowFieldDefs: workflowFieldDefsProp,
 }: TaskDetailContentProps) {
   const { t } = useTranslation("app");
@@ -2745,6 +2780,46 @@ export function TaskDetailContent({
                 <Pencil size={14} />
               </button>
             )}
+            {/*
+            FNXC:FloatingWindow 2026-06-22-20:45 (updated 2026-06-22-18:32):
+            "Pop out" affordance opens this task detail in a movable, resizable, non-blocking FloatingWindow. Header action order is edit, then expand/pop-out, then Back to board pinned far right so board-card detail controls read as edit/resize/navigation.
+            */}
+            {onPopOut && (
+              <button
+                type="button"
+                className="modal-edit-btn"
+                onClick={() => onPopOut(task)}
+                title={t("taskDetail.header.popOut", "Pop out")}
+                aria-label="Pop out"
+                data-testid="task-detail-pop-out"
+              >
+                <Maximize2 size={14} />
+              </button>
+            )}
+            {/*
+            FNXC:TaskDetail 2026-06-22-18:40 (updated 2026-06-22-18:32):
+            Board-card full-panel "Back to board" must be the far-right header action, after edit and expand/pop-out. margin-left:auto pushes it away from the utility controls while keeping it in the same gray header row. Only rendered when embedded AND onBackToBoard are supplied (board-card detail), never in ListView split-pane or modal usages.
+            */}
+            {embedded && onBackToBoard && (
+              <button
+                type="button"
+                className="task-detail-header-back-btn"
+                onClick={onBackToBoard}
+              >
+                <ArrowLeft size={14} aria-hidden="true" />
+                <span>{t("app.taskDetail.backToBoard", "Back to board")}</span>
+              </button>
+            )}
+            {embedded && onRequestClose && !onBackToBoard && (
+              <button
+                className="modal-close task-detail-floating-close"
+                onClick={requestClose}
+                aria-label={t("common.close", "Close")}
+                type="button"
+              >
+                <X size={16} aria-hidden="true" />
+              </button>
+            )}
             {!embedded && mobileHeaderMode === "back" && (
               <button
                 className="modal-close task-detail-mobile-back"
@@ -2858,6 +2933,10 @@ export function TaskDetailContent({
           ) : (
             <>
               <>
+                {/*
+                FNXC:TaskDetail 2026-06-22-20:00:
+                Summarize-as-title renders inline with the title inside .detail-heading-row and is positioned (CSS) to the far bottom-right as an in-field affordance, not a separate full-width row. Markup order is preserved; only layout changed.
+                */}
                 <div className="detail-heading-row">
                   <h2
                     ref={titleRef}
@@ -3146,7 +3225,8 @@ export function TaskDetailContent({
               className={`detail-tab${activeTab === "documents" ? " detail-tab-active" : ""}`}
               onClick={() => setActiveTab("documents")}
             >
-              {t("taskDetail.tabs.documents", "Documents")}
+              {/* FNXC:ArtifactRegistry 2026-06-21-21:56: Keep the internal "documents" tab id stable for persisted task-modal state while presenting the expanded user-facing tab as Artifacts. */}
+              {t("taskDetail.tabs.documents", "Artifacts")}
             </button>
             <button
               className={`detail-tab${activeTab === "model" ? " detail-tab-active" : ""}`}
@@ -3234,6 +3314,12 @@ export function TaskDetailContent({
                 onTaskUpdated={handleChatTaskUpdated}
                 expanded={chatExpanded}
                 onToggleExpanded={() => setChatExpanded((value) => !value)}
+                effectiveModels={{
+                  triage: toTaskChatModelInfo(resolveEffectivePlanning(workingTask, agentLogEntries, settings)),
+                  executor: toTaskChatModelInfo(resolveEffectiveExecutor(workingTask, agentLogEntries, assignedAgent, settings)),
+                  reviewer: toTaskChatModelInfo(resolveEffectiveValidator(workingTask, agentLogEntries, assignedAgent, settings)),
+                  merger: toTaskChatModelInfo(resolveEffectiveValidator(workingTask, agentLogEntries, assignedAgent, settings)),
+                }}
               />
             </div>
           ) : activeTab === "logs" ? (
@@ -3523,7 +3609,7 @@ export function TaskDetailContent({
             <div className="detail-section detail-summary">
               <h4>{t("taskDetail.summary.heading", "Summary")}</h4>
               <div className="markdown-body">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownLinkifyComponents}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={sharedRehypePlugins} components={markdownLinkifyComponents}>
                   {task.summary}
                 </ReactMarkdown>
               </div>
@@ -3791,7 +3877,7 @@ export function TaskDetailContent({
               <div className="spec-loading"><LoadingSpinner label={t("taskDetail.spec.loading", "Loading specification…")} /></div>
             ) : workingTask.prompt ? (
               <div className="markdown-body">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownLinkifyComponents}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={sharedRehypePlugins} components={markdownLinkifyComponents}>
                   {workingTask.prompt.replace(/^#\s+[^\n]*\n+/, "")}
                 </ReactMarkdown>
               </div>
@@ -4286,7 +4372,13 @@ export function TaskDetailContent({
               )}
 
               {/* Actions dropdown — less common operations */}
-              {(task.column !== "triage" || task.status === "awaiting-approval" || canRetryTask || isTaskPaused) && (
+              {(
+                task.column !== "triage"
+                || task.status === "awaiting-approval"
+                || canRetryTask
+                || isTaskPaused
+                || Boolean(task.assignedAgentId)
+              ) && (
                 <div className="detail-actions-dropdown" ref={actionsMenuRef}>
                   <button
                     className="btn btn-sm"
@@ -4364,8 +4456,11 @@ export function TaskDetailContent({
                         </button>
                       )}
 
-                      {/* Pause/Unpause */}
-                      {task.column !== "done" && !task.assignedAgentId && (
+                      {/*
+                      FNXC:TaskPauseControls 2026-06-21-00:00:
+                      Users may pause or unpause agent-assigned and agent-paused tasks at any time from the detail Actions menu. The Paused by agent note remains informational context, not a substitute for the actionable unpause control.
+                      */}
+                      {task.column !== "done" && task.column !== "archived" && (
                         <button
                           className="detail-actions-menu-item"
                           role="menuitem"
@@ -4374,7 +4469,7 @@ export function TaskDetailContent({
                           {isTaskPaused ? t("taskDetail.pause.unpauseBtn", "Unpause") : t("taskDetail.pause.pauseBtn", "Pause")}
                         </button>
                       )}
-                      {task.column !== "done" && task.paused && task.pausedByAgentId && (
+                      {task.column !== "done" && task.column !== "archived" && task.paused && task.pausedByAgentId && (
                         <span
                           className="detail-actions-menu-item detail-actions-menu-note"
                           role="note"

@@ -62,21 +62,26 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
 
 /* ── Scheduled Tasks ──────────────────────────────────────────────── */
 
-/* Scheduling toolbar below modal header */
+/*
+FNXC:Automations 2026-06-22-16:05:
+The Automations toolbar should match Artifacts' controls row: a plain body row with standalone controls on the dashboard background, not a tinted sub-header strip with its own divider.
+*/
 .scheduling-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-md);
-  padding: var(--space-sm) var(--modal-padding, var(--space-lg));
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--text) 10%, transparent);
+  flex-wrap: wrap;
+  padding: var(--space-lg) var(--modal-padding, var(--space-lg));
+  border-bottom: none;
+  background: transparent;
 }
 
 .scheduling-toolbar-left {
   display: flex;
   align-items: center;
   gap: var(--space-md);
+  flex-wrap: wrap;
   min-width: 0;
 }
 
@@ -84,6 +89,7 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
   display: flex;
   align-items: center;
   gap: var(--space-sm);
+  margin-left: auto;
 }
 
 .scheduling-count {
@@ -114,27 +120,30 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
   min-height: 0;
 }
 
-/* Scheduling scope selector */
+/*
+FNXC:Automations 2026-06-22-12:45:
+The Automations sub-header scope button bar should match the Artifacts tab bar style: each scope is a standalone bordered surface button with the same todo-accent active state, not a segmented control inside a filled capsule.
+*/
 .scheduling-scope-selector {
   display: flex;
   align-items: center;
-  gap: var(--space-xs);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: var(--space-xs);
+  gap: var(--space-sm);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
 }
 
 .scope-btn {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-xs);
+  gap: var(--space-sm);
   padding: var(--space-xs) var(--space-md);
   font-size: 0.75rem;
   font-weight: 500;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
   color: var(--text-muted);
   cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast);
@@ -146,8 +155,9 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
 }
 
 .scope-btn.active {
-  background: var(--todo);
-  color: var(--cta-text);
+  color: var(--todo);
+  border-color: var(--todo);
+  background: color-mix(in srgb, var(--todo) 12%, transparent);
 }
 
 .scope-btn:focus-visible {
@@ -1193,6 +1203,181 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
   overflow: hidden;
 }
 
+/*
+FNXC:RightDockEmbedded 2026-06-22-12:00:
+The activity-log embedded (.activity-log-embedded / .activity-log-modal--embedded) rules and their @container block were moved to ActivityLogModal.css, next to the component. The base .activity-log-* modal rules remain here pending a full extraction.
+*/
+
+/*
+FNXC:AutomationsEmbedded 2026-06-22-00:00:
+Automations can render inline in the main content area (presentation="embedded") instead of as a fixed modal overlay.
+The embedded root fills its host and sheds all modal chrome — no overlay, no card/shadow/border/radius — so the view
+blends into the main panel like Command Center. The view container carries --space-lg padding and a plain .cc-header
+title row (reused from Command Center). The body is a responsive two-pane layout (list + detail) via container query
+when supported, falling back to a min-width media breakpoint, that collapses to a single column below ~900px.
+*/
+.automations-embedded.right-dock-embedded-view {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  background: none;
+  box-shadow: none;
+  border: none;
+  border-radius: 0;
+}
+
+.automations-embedded-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-lg);
+  min-height: 0;
+  inline-size: 100%;
+  /* Enable container-query-driven two-pane breakpoint scoped to the view's own width, not the viewport. */
+  container-type: inline-size;
+  overflow-y: auto;
+}
+
+/*
+FNXC:ViewHeader 2026-06-23-04:15:
+Bring the embedded Automations header to the canonical ViewHeader treatment: edge-to-edge --surface bg without a bottom divider, --space-lg/--space-xl padding, and the shared --view-header-min-height (≈61px border-box) so it matches Agents/Mailbox/Missions exactly. The body rows below carry the horizontal --space-xl inset + a bottom inset (the view itself drops its uniform padding so the header can span edge-to-edge).
+*/
+.automations-embedded-header.cc-header {
+  box-sizing: border-box;
+  min-height: var(--view-header-min-height);
+  padding: var(--space-lg) var(--space-xl);
+  background: var(--surface);
+  border-bottom: none;
+}
+
+/* Canonical --todo leading-icon tint (override Command Center's icon-triage brown) at size 20. */
+.automations-embedded-header .cc-title svg {
+  color: var(--todo);
+}
+
+/* Body rows keep the --space-xl horizontal inset + bottom inset that the now-edge-to-edge header no longer supplies. */
+.automations-embedded-view > :not(.automations-embedded-header) {
+  margin-inline: var(--space-xl);
+}
+
+/*
+FNXC:Automations 2026-06-23-04:45:
+With the header now edge-to-edge and dividerless, the first body row still needs breathing room below the title area instead of reading flush against it. Scoped to the first body row only (the flex gap handles spacing between subsequent rows).
+*/
+.automations-embedded-header + :not(.automations-embedded-header) {
+  margin-top: var(--space-sm);
+}
+
+.automations-embedded-view > :last-child:not(.automations-embedded-header) {
+  margin-bottom: var(--space-lg);
+}
+
+.automations-embedded-view > .scheduling-toolbar {
+  padding-right: 0;
+  padding-left: 0;
+}
+
+/* Two-pane body: single column by default (narrow); two columns when the container is wide enough. */
+.automations-two-pane {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-lg);
+  min-height: 0;
+  flex: 1;
+}
+
+.automations-single-pane {
+  min-height: 0;
+  flex: 1;
+}
+
+/* Left list rail */
+.automations-list-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.automation-list-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  font-size: 0.875rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.automation-list-row:hover {
+  border-color: var(--accent);
+}
+
+/*
+FNXC:Automations 2026-06-22-12:00:
+Selected automation row uses the theme accent token. --accent-subtle is not a defined token; fall back to a
+theme-derived subtle accent tint (color-mix house style) so the active state follows the active theme (incl. light)
+instead of resolving to a flat --card with no accent emphasis.
+*/
+.automation-list-row.active {
+  border-color: var(--accent);
+  background: var(--accent-subtle, color-mix(in srgb, var(--accent) 10%, transparent));
+}
+
+.automation-list-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.automation-list-row-badge {
+  flex-shrink: 0;
+  padding: 0 var(--space-sm);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+}
+
+/* Right detail pane */
+.automations-detail-pane {
+  min-width: 0;
+  min-height: 0;
+}
+
+.automations-detail-empty {
+  height: 100%;
+}
+
+/* Two columns once the embedded container is wide enough (~900px). */
+@container (min-width: 900px) {
+  .automations-two-pane {
+    grid-template-columns: minmax(0, 18rem) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+/*
+Fallback for browsers without container-query support: use a viewport media query. Harmless where container
+queries already apply (the container-query rule above also fires and produces the same two-column layout).
+*/
+@media (min-width: 900px) {
+  .automations-two-pane {
+    grid-template-columns: minmax(0, 18rem) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
 .activity-log-header {
   /* Extends shared .modal-header with activity-log-specific overrides */
   gap: var(--space-sm);
@@ -1777,6 +1962,20 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
    ══════════════════════════════════════════════════════════════════ */
 
 /* Modal size override - flex layout for sidebar + content */
+/*
+FNXC:GitManager 2026-06-23-23:52:
+Sidebar-launched floating modals should not dim, blur, or block the app behind them. Match the Files/RightDock floating-window model: the overlay is transparent and click-through, while the Git Manager panel remains interactive. Dismissal stays on Escape/close button instead of backdrop click.
+
+FNXC:GitManager 2026-06-23-21:28:
+Theme-level modal backdrop rules can load after component CSS and reapply dim/blur, especially in glass themes. Use a higher-specificity modal overlay selector and clear both standard and WebKit backdrop filters so Git Manager never darkens the app behind it.
+*/
+.modal-overlay.git-manager-modal-overlay.git-manager-modal-overlay {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  pointer-events: none;
+}
+
 .modal.gm-modal {
   width: min(95vw, 1400px);
   max-width: 95vw;
@@ -1788,6 +1987,293 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
   flex-direction: column;
   overflow: hidden;
   resize: both;
+  pointer-events: auto;
+}
+
+/*
+FNXC:RightDockEmbedding 2026-06-22-00:00:
+Right-dock redesign renders dock items inline (GitManager presentation="embedded") instead of as fixed popup modals.
+The embedded host fills its right-dock container; the inner shell drops overlay-only chrome (fixed sizing, box-shadow, resize handle, rounded corners) so it reads as an inline panel, not a floating modal.
+*/
+.git-manager-embedded {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.gm-modal.gm-modal--embedded {
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  min-width: 0;
+  max-height: none;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: none;
+  border-radius: 0;
+  resize: none;
+  position: static;
+  /* Drive the dock-vs-expand layout off the embedded host's own width, not the viewport. */
+  container-type: inline-size;
+  container-name: gm-embedded;
+}
+
+/*
+FNXC:GitManager 2026-06-22-17:30:
+The embedded Git Manager adapts to its CONTAINER width, not the viewport, so the SAME embedded render works in both the narrow right dock and the wide pop-out (expand) modal:
+- Wide container (expand modal, > 560px): inherits the default desktop layout — vertical section sidebar + content (two-pane, like before). Those default rules live OUTSIDE this container query and are untouched.
+- Narrow container (dock, <= 560px): MIRRORS the phone-width (@media max-width:768px) gm layout exactly. Section tabs become a horizontal strip with ICON + TEXT LABEL per tab (the mobile .gm-nav-item: column, icon over label, comfortable padding), and every section (status grid, create form, branches, stashes, changes/files split, and the REMOTES view) collapses to its mobile single-column form. The remotes view is CSS-only (no JS width gating in GitManagerModal.tsx), so mirroring the @media remotes rules here gives the dock the mobile remotes selector strip + stacked detail.
+The previous bespoke rules here hid the tab labels (icon-only) and used a cramped strip; the user wants labeled tabs, more spacing, and the mobile remotes layout, so we now mirror the @media gm INTERNAL rules verbatim under the .gm-modal--embedded prefix. Only the viewport-takeover (.modal.gm-modal 100vw/100dvh) rules are NOT mirrored — they are scoped to :not(.gm-modal--embedded) and must never apply to the embedded pane.
+*/
+@container gm-embedded (max-width: 560px) {
+  .gm-modal--embedded .gm-changes-split {
+    grid-template-columns: 1fr;
+  }
+
+  .gm-modal--embedded .gm-changes-lists {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .gm-modal--embedded .gm-file-section {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .gm-modal--embedded .gm-file-section-header {
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+
+  .gm-modal--embedded .gm-file-section-header h5 {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .gm-modal--embedded .gm-file-section-actions {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    min-width: 0;
+    justify-content: flex-start;
+  }
+
+  .gm-modal--embedded .gm-file-section-actions .btn {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .gm-modal--embedded .gm-file-item {
+    min-width: 0;
+    flex-wrap: wrap;
+    row-gap: var(--space-xs);
+  }
+
+  .gm-modal--embedded .gm-file-checkbox,
+  .gm-modal--embedded .gm-file-icon,
+  .gm-modal--embedded .gm-file-badge,
+  .gm-modal--embedded .gm-file-item .gm-icon-btn {
+    flex: 0 0 auto;
+  }
+
+  .gm-modal--embedded .gm-file-name {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  /* ── Section tabs: mobile horizontal strip with icon + TEXT LABEL ── */
+  .gm-modal--embedded .gm-layout {
+    flex-direction: column;
+  }
+
+  /*
+  FNXC:GitManager 2026-06-22-19:20:
+  The dock tab strip is ONE ROW that scrolls left-right when needed, showing as many section icons as fit. Tabs are compact ICON-ONLY (labels are sr-only; the button title gives a tooltip) so the maximum number of sections is visible before horizontal scroll kicks in. width:auto overrides the base .gm-nav-item width:100% that otherwise made each tab fill the row (one per swipe).
+  */
+  .gm-modal--embedded .gm-sidebar {
+    flex: 0 0 auto;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    width: 100%;
+    min-width: 0;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    touch-action: pan-x;
+    padding: var(--space-xs) var(--space-sm);
+    gap: var(--space-xs);
+  }
+
+  .gm-modal--embedded .gm-nav-item {
+    flex: 0 0 auto;
+    width: auto;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    padding: var(--space-xs);
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    min-width: calc(var(--space-xl) + var(--space-xs));
+  }
+
+  /* Icon-only: hide the section label (kept for screen readers); the button title is the tooltip. */
+  .gm-modal--embedded .gm-nav-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .gm-modal--embedded .gm-nav-item.active {
+    border-left-color: transparent;
+    border-bottom-color: var(--todo);
+  }
+
+  /*
+  FNXC:GitManager 2026-06-22-19:20:
+  In the one-row scrolling strip the refresh is a compact icon button matching .gm-nav-item, pinned as the last item. Drop the desktop margin-top:auto so it stays inline.
+  */
+  .gm-modal--embedded .gm-nav-refresh {
+    flex: 0 0 auto;
+    width: auto;
+    margin-top: 0;
+    align-items: center;
+    justify-content: center;
+    padding: var(--space-xs);
+    border-left: none;
+    min-width: calc(var(--space-xl) + var(--space-xs));
+  }
+
+  .gm-modal--embedded .gm-content {
+    min-height: 200px;
+    padding: var(--space-md);
+  }
+
+  .gm-modal--embedded .gm-search-box input {
+    font-size: 16px;
+  }
+
+  .gm-modal--embedded .gm-status-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .gm-modal--embedded .gm-create-form {
+    flex-wrap: wrap;
+  }
+
+  .gm-modal--embedded .gm-create-form input,
+  .gm-modal--embedded .gm-create-form select {
+    flex: 1 1 100%;
+    font-size: 16px;
+  }
+
+  .gm-modal--embedded .gm-branch-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-sm);
+  }
+
+  .gm-modal--embedded .gm-stash-header {
+    flex-direction: column;
+    gap: var(--space-sm);
+  }
+
+  .gm-modal--embedded .gm-stash-actions {
+    width: 100%;
+  }
+
+  .gm-modal--embedded .gm-remote-actions {
+    flex-wrap: wrap;
+  }
+
+  .gm-modal--embedded .gm-pull-split {
+    flex: 1 1 100%;
+  }
+
+  .gm-modal--embedded .gm-pull-split-toggle {
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  .gm-modal--embedded .gm-pull-menu {
+    left: 0;
+    right: auto;
+    min-width: 100%;
+  }
+
+  /* ── Remotes view: mobile single-column (selector strip + stacked detail) ── */
+  .gm-modal--embedded .gm-remotes-layout {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .gm-modal--embedded .gm-remote-selector {
+    width: 100%;
+    min-width: 0;
+    border-right: 1px solid var(--border);
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: var(--space-sm);
+  }
+
+  .gm-modal--embedded .gm-remote-selector-header {
+    flex-direction: column;
+    gap: var(--space-xs);
+    padding: 0 var(--space-xs) 0 0;
+  }
+
+  .gm-modal--embedded .gm-remote-selector-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-xs);
+    min-width: 120px;
+    flex-shrink: 0;
+  }
+
+  .gm-modal--embedded .gm-remote-selector-name {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .gm-modal--embedded .gm-remote-detail {
+    min-height: 200px;
+    padding-right: 0;
+  }
+
+  .gm-modal--embedded .gm-remote-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .gm-modal--embedded .gm-remote-form .gm-input,
+  .gm-modal--embedded .gm-remote-form .gm-input-url {
+    width: 100%;
+    min-width: unset;
+  }
+
+  .gm-modal--embedded .gm-remote-detail-url-row {
+    flex-wrap: wrap;
+  }
+
+  .gm-modal--embedded .gm-remote-inline-actions {
+    margin-left: auto;
+  }
+
+  .gm-modal--embedded .gm-commit-form .gm-commit-actions {
+    flex-direction: column;
+  }
 }
 
 /* Main layout: sidebar + content */
@@ -1837,6 +2323,37 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
   background: color-mix(in srgb, var(--todo) 8%, transparent);
   border-left-color: var(--todo);
   font-weight: 500;
+}
+
+/*
+FNXC:GitManager 2026-06-22-19:00:
+Refresh button pinned at the end of the section nav strip (replaces the removed duplicate internal gray .modal-header refresh). In the desktop vertical sidebar margin-top:auto pins it to the bottom; in the dock wrapping/mobile horizontal strip it sits as the last tab. Shares the .gm-nav-item visual language; theme tokens only.
+*/
+.gm-nav-refresh {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-lg);
+  margin-top: auto;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  text-align: left;
+  width: 100%;
+  border-left: 3px solid transparent;
+}
+
+.gm-nav-refresh:hover:not(:disabled) {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.gm-nav-refresh:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 /* ── Header Actions ── */
@@ -3696,15 +4213,21 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
 
 @media (max-width: 768px) {
   /* Full-screen sheet on mobile — drop overlay padding so the modal
-     actually fills the viewport instead of being pushed below it. */
+     actually fills the viewport instead of being pushed below it.
+     FNXC:GitManager 2026-06-22-16:00: scope the viewport-takeover to the
+     NON-embedded (dialog) presentation via :not(.gm-modal--embedded). The
+     embedded Git Manager renders inside the main-content pane; without the
+     guard its base .gm-modal class matched these 100vw/100dvh rules and hid
+     the app Header + MobileNavBar. The embedded panel keeps its 100%-of-pane
+     sizing from the embedded block above. */
   .modal-overlay.git-manager-modal-overlay,
-  .modal-overlay:has(.gm-modal) {
+  .modal-overlay:has(.gm-modal:not(.gm-modal--embedded)) {
     padding-top: 0;
     align-items: stretch;
     justify-content: stretch;
   }
 
-  .modal.gm-modal {
+  .modal.gm-modal:not(.gm-modal--embedded) {
     width: 100vw;
     min-width: 0;
     max-width: 100vw;
@@ -3718,7 +4241,7 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
     flex: 1 1 auto;
   }
 
-  .modal.gm-modal[style*="--keyboard-overlap"] {
+  .modal.gm-modal:not(.gm-modal--embedded)[style*="--keyboard-overlap"] {
     height: var(--vv-height, 100dvh);
     min-height: var(--vv-height, 100dvh);
     max-height: var(--vv-height, 100dvh);
@@ -3727,14 +4250,21 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
   }
 
   /* Same treatment for the Automations modal — same min-width: 480px would
-     otherwise force it wider than narrow viewports. */
-  .modal-overlay:has(.automation-modal) {
+     otherwise force it wider than narrow viewports.
+     FNXC:Automations 2026-06-22-16:00: scope the viewport-takeover to the
+     dialog presentation only. The embedded Automations view uses the distinct
+     .automations-embedded / .automations-embedded-view classes (it does NOT
+     carry .automation-modal), so it is unaffected here — but the guard keeps
+     this rule from ever leaking onto an embedded variant should the markup
+     share the base class later. The embedded view fills its pane and scrolls
+     via .automations-embedded-view (inline-size:100% + overflow-y:auto). */
+  .modal-overlay:has(.automation-modal:not(.automation-modal--embedded)) {
     padding-top: 0;
     align-items: stretch;
     justify-content: stretch;
   }
 
-  .modal.automation-modal {
+  .modal.automation-modal:not(.automation-modal--embedded) {
     width: 100vw;
     min-width: 0;
     max-width: 100vw;
@@ -3751,32 +4281,81 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
     flex-direction: column;
   }
 
+  /*
+  FNXC:GitManager 2026-06-21-11:27:
+  The mobile global `* { touch-action: pan-y; }` lock from FN-6365 blocks horizontal swipes unless the actual overflowing scroller opts back into pan-x.
+  The Git Manager section toolbar must keep all fixed section tabs reachable on touch viewports, so mirror the FN-6450 tab-strip treatment and prevent tab compression (FN-6857).
+
+  FNXC:GitManager 2026-06-21-18:00:
+  FN-6900 requires the Git Manager section tabs to remain visible and switchable on touch viewports. In the mobile column layout, the content pane is the flexible sibling, so the tab strip must be `flex: 0 0 auto` with a token-sized minimum height instead of shrinking to a zero-height row.
+  */
   .gm-sidebar {
+    flex: 0 0 auto;
     flex-direction: row;
     width: 100%;
-    min-width: unset;
+    min-width: 0;
+    min-height: calc(var(--space-2xl) + var(--space-md));
     border-right: none;
     border-bottom: 1px solid var(--border);
     overflow-x: auto;
+    overflow-y: hidden;
+    touch-action: pan-x pan-y;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
     padding: var(--space-xs) var(--space-sm);
     gap: var(--space-xs);
   }
 
+  /*
+  FNXC:GitManager 2026-06-22-19:35:
+  Mobile (<=768px) nav strip: ICON-ONLY compact tabs in one horizontally-scrolling row so multiple sections are visible at once. width:auto overrides the base .gm-nav-item width:100% that otherwise made each tab fill the row (one tab, swipe-only). Labels are sr-only (button title is the tooltip).
+  */
   .gm-nav-item {
-    flex-direction: column;
-    gap: calc(var(--space-xs) / 2);
-    padding: var(--space-xs) var(--space-sm);
+    flex: 0 0 auto;
+    width: auto;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    padding: var(--space-xs);
     border-left: none;
     border-bottom: 2px solid transparent;
-    font-size: 10px;
-    min-width: 56px;
-    text-align: center;
-    justify-content: center;
+    min-width: calc(var(--space-xl) + var(--space-xs));
+  }
+
+  .gm-nav-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
 
   .gm-nav-item.active {
     border-left-color: transparent;
     border-bottom-color: var(--todo);
+  }
+
+  /*
+  FNXC:GitManager 2026-06-22-19:00:
+  Mobile standalone modal horizontal nav strip: refresh mirrors the mobile .gm-nav-item (column, intrinsic width) as the last tab; drop desktop margin-top:auto.
+  */
+  .gm-nav-refresh {
+    flex: 0 0 auto;
+    width: auto;
+    margin-top: 0;
+    flex-direction: column;
+    gap: calc(var(--space-xs) / 2);
+    padding: var(--space-xs) var(--space-sm);
+    border-left: none;
+    font-size: var(--font-size-xs);
+    min-width: calc(var(--space-2xl) + var(--space-xl));
+    min-height: calc(var(--space-xl) + var(--space-sm));
+    text-align: center;
+    justify-content: center;
   }
 
   .gm-content {
@@ -3896,6 +4475,11 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
 }
 
 [data-theme="light"] .gm-nav-item:hover {
+  background: var(--surface-hover);
+}
+
+/* FNXC:GitManager 2026-06-22-19:00: relocated refresh hover matches nav-item in light theme. */
+[data-theme="light"] .gm-nav-refresh:hover:not(:disabled) {
   background: var(--surface-hover);
 }
 
@@ -4197,44 +4781,9 @@ Non-Command-Center dashboard CSS must use the canonical --text token. The legacy
 }
 
 @media (max-width: 768px) {
-  /* Git manager: align breakpoint behavior with global 768px mobile modal rules */
-  .gm-layout {
-    flex-direction: column;
-  }
-
-  .gm-sidebar {
-    flex-direction: row;
-    width: 100%;
-    min-width: unset;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    padding: var(--space-xs) var(--space-sm);
-    gap: var(--space-xs);
-  }
-
-  .gm-nav-item {
-    border-left: none;
-    border-bottom: 2px solid transparent;
-    text-align: center;
-    justify-content: center;
-    min-height: 36px;
-  }
-
-  .gm-nav-item.active {
-    border-left-color: transparent;
-    border-bottom-color: var(--todo);
-  }
-
+  /* Git manager: extend the canonical mobile rules above with safe-area and panel scroll behavior only. */
   .gm-content {
-    min-height: 200px;
-    padding: var(--space-md);
     padding-bottom: max(var(--space-md), env(safe-area-inset-bottom, 0px));
-  }
-
-  .gm-status-grid {
-    grid-template-columns: 1fr;
   }
 
   .gm-panel {

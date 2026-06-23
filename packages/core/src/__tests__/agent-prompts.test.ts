@@ -141,6 +141,21 @@ describe("resolveAgentPrompt", () => {
     expect(result).not.toContain("Resolve ALL lint failures and test failures");
   });
 
+  it("executor prompt variants block workflow moves unless asked or created", () => {
+    const defaultExecutor = resolveAgentPrompt("executor");
+    const seniorEngineer = resolveAgentPrompt("executor", {
+      roleAssignments: {
+        executor: "senior-engineer",
+      },
+    });
+
+    for (const result of [defaultExecutor, seniorEngineer]) {
+      expect(result).toContain("Do not call `fn_workflow_select` to change the workflow of the task you are executing");
+      expect(result).toContain("The only exception is when the user explicitly requested a specific workflow for this task");
+      expect(result).toContain("You may still set the workflow on tasks you create via `fn_task_create` or `fn_delegate_task`");
+    }
+  });
+
   it("senior-engineer prompt limits fixes to impacted failures and follow-ups unrelated broad-suite failures", () => {
     const config: AgentPromptsConfig = {
       roleAssignments: {

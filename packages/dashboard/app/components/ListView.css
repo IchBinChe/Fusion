@@ -17,19 +17,67 @@
   background: var(--surface);
 }
 
+/* FNXC:ListView 2026-06-23-23:42: No divider between the controls and quick-add. The controls row now carries action groups only; the aggregate top task count was removed while contextual section counts remain lower in the list.
+FNXC:ListView 2026-06-23-23:55: Bulk Edit, View, and New Task are one no-wrap action cluster so the primary list actions stay visually together instead of splitting across opposite edges or separate wrapped lines.
+FNXC:ListView 2026-06-23-00:25: The primary action cluster must stay on one physical row even when the list pane narrows; preserve max-content width and let the cluster scroll horizontally instead of wrapping individual actions onto separate lines.
+FNXC:ListView 2026-06-23-21:42: Center the Bulk Edit, View, and New Task cluster in both desktop sidebar controls and the mobile list toolbar so the primary actions read as a single balanced control group. */
 .list-sidebar-controls {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
-  padding: var(--space-md) var(--space-xl);
-  border-bottom: 1px solid var(--border);
+  padding: var(--space-md) var(--space-xl) 0;
   background: var(--surface);
+  border-bottom: 0;
 }
 
+.list-sidebar-controls__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.list-action-cluster,
 .list-sidebar-controls__actions {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
+  align-items: center;
+  justify-content: center;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  gap: var(--space-xs);
+  inline-size: max-content;
+  min-width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+
+.list-action-cluster::-webkit-scrollbar,
+.list-sidebar-controls__actions::-webkit-scrollbar {
+  display: none;
+}
+
+.list-action-cluster > .btn,
+.list-sidebar-controls__actions > .btn {
+  flex: 0 0 auto;
+}
+
+.list-sidebar-controls__actions--end {
+  justify-content: flex-end;
+}
+
+/*
+FNXC:ListView 2026-06-22-23:30:
+View options was oversized (full-width stacked button). Render it as a compact icon+label btn-sm consistent with its row-mates.
+*/
+.list-sidebar-controls__actions .list-view-options-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  white-space: nowrap;
 }
 
 .list-workflow-control {
@@ -39,12 +87,15 @@
   min-width: 0;
 }
 
-.list-sidebar-controls__actions .list-new-task-action {
-  margin-left: auto;
-}
+/* FNXC:ListView 2026-06-23-20:15: New Task owns the right action group; do not apply the old toolbar auto-margin behavior in the sidebar controls. */
 
 .list-toolbar .list-new-task-action {
   margin-left: auto;
+}
+
+.list-action-cluster .list-new-task-action,
+.list-sidebar-controls__actions .list-new-task-action {
+  margin-left: 0;
 }
 
 .list-sidebar-summary-chips {
@@ -85,11 +136,6 @@
   gap: var(--space-xs);
 }
 
-.list-stats {
-  font-size: calc(var(--space-sm) + var(--space-xs) * 0.75);
-  color: var(--text-muted);
-}
-
 /* Section expand/collapse controls */
 .list-section-controls {
   display: flex;
@@ -99,11 +145,6 @@
 
 .list-section-controls .btn {
   white-space: nowrap;
-}
-
-.list-stats-hidden {
-  color: var(--text-dim);
-  font-style: italic;
 }
 
 .list-clear-column-filter-btn {
@@ -222,7 +263,6 @@
   width: 100%;
   padding: var(--space-md) var(--space-xl);
   background: var(--surface);
-  border-bottom: 1px solid var(--border);
 }
 
 .list-create-area .quick-entry-box {
@@ -230,12 +270,13 @@
   margin: 0 auto;
 }
 
-/* New class for QuickEntryBox positioned above the table in list view */
+/* New class for QuickEntryBox positioned above the table in list view.
+   FNXC:ListView 2026-06-23-20:15: Remove the divider above quick-add by eliminating top padding; the controls and quick-add share the same surface without a visible seam. */
 .list-quick-entry-above-table {
   width: 100%;
-  padding: var(--space-md) var(--space-xl);
+  padding: 0 var(--space-xl) var(--space-md);
   background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  border-top: 0;
 }
 
 .list-quick-entry-above-table .quick-entry-box {
@@ -382,39 +423,74 @@
   padding: 0;
 }
 
+/*
+FNXC:ListView 2026-06-22-00:40:
+Widen the split resize column so the task-list sidebar is easy to grab and drag (the 4px --space-xs target was hard to hit). The handle shows a centered grip line that brightens on hover/focus.
+
+FNXC:ListView 2026-06-22-18:00:
+List view should not show a wide divider gutter. Collapse the grid handle column to zero width and let the transparent resize handle overlap the single 1px sidebar border, preserving a comfortable touch target without making the visible divider wider.
+*/
 .list-split-layout {
   display: grid;
-  grid-template-columns: auto var(--space-xs) minmax(0, 1fr);
+  grid-template-columns: auto 0 minmax(0, 1fr);
   height: 100%;
   min-height: 0;
 }
 
+/*
+FNXC:SidebarDivider 2026-06-22-18:00:
+The static 1px divider line lives on the sidebar pane's right border while the resize handle column has no visible width. This keeps one normal divider line between the task list and detail pane without a large gutter.
+*/
 .list-split-sidebar {
   min-width: 0;
   min-height: 0;
   overflow: auto;
+  border-right: 1px solid var(--border);
 }
 
+/*
+FNXC:SidebarDivider 2026-06-22-18:00:
+The List split resize control is a transparent var(--space-sm)-wide drag hit-area that overlaps the single pane border. It tints a narrow centered band only on hover/active/focus, matching the left sidebar handle's "large target, slim visual" behavior without widening the visible divider.
+*/
 .list-split-resize-handle {
+  position: relative;
+  left: calc(var(--space-sm) / -2);
+  width: var(--space-sm);
   cursor: col-resize;
-  background: color-mix(in srgb, var(--border) 70%, transparent);
+  background: transparent;
+  touch-action: none;
+  z-index: 2;
   transition: background var(--transition-fast);
 }
 
-.list-split-resize-handle:hover,
-.list-split-resize-handle:focus-visible {
-  background: color-mix(in srgb, var(--todo) 35%, transparent);
+.list-split-resize-handle::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: var(--space-xs);
+  transform: translateX(-50%);
+}
+
+.list-split-resize-handle:hover::before,
+.list-split-resize-handle:active::before,
+.list-split-resize-handle:focus-visible::before {
+  background: color-mix(in srgb, var(--todo) 30%, transparent);
 }
 
 .list-split-resize-handle:focus-visible {
-  box-shadow: var(--focus-ring-strong);
   outline: none;
+  box-shadow: var(--focus-ring-strong);
 }
 
+/*
+FNXC:SidebarDivider 2026-06-22-18:00:
+No border-left on the detail pane. Keeping a border-left here would produce a second faint line after the overlapping resize handle, so the list/detail split renders as one divider only.
+*/
 .list-split-detail {
   min-width: 0;
   min-height: 0;
-  border-left: 1px solid var(--border);
   overflow: hidden;
   background: var(--card);
 }
@@ -554,6 +630,15 @@ FN-6529 requires list-view agent-active tasks to use a simple static highlight i
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/*
+FNXC:ListView 2026-06-22-00:00:
+In the split sidebar the title cell must allow the title to wrap to two lines (handled by .list-title-text clamp) instead of being capped/truncated to one line, so the left panel can be dragged much narrower while titles stay legible.
+*/
+.list-split-sidebar .list-cell-title {
+  max-width: none;
+  white-space: normal;
 }
 
 .list-title-content {
@@ -861,14 +946,11 @@ FN-6529 requires list-view agent-active tasks to use a simple static highlight i
   .list-toolbar {
     padding: var(--space-md);
     flex-wrap: wrap;
+    justify-content: center;
   }
 
   .list-create-area {
     padding: var(--space-sm) var(--space-md);
-  }
-
-  .list-stats {
-    order: 1;
   }
 
   .list-column-toggle {
@@ -1073,14 +1155,11 @@ FN-6529 requires list-view agent-active tasks to use a simple static highlight i
     padding: var(--space-sm) var(--space-md);
     flex-wrap: wrap;
     gap: var(--space-sm);
+    justify-content: center;
   }
 
-  .list-stats {
-    width: 100%;
-    order: 10;
-    text-align: center;
-    margin-left: 0;
-    font-size: 11px;
+  .list-toolbar .list-action-cluster {
+    justify-content: center;
   }
 
   .list-selection-stats {

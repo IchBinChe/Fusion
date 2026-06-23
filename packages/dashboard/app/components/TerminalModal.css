@@ -23,6 +23,49 @@ FN-6811 recurrence #6 tightened ownership of this scoped symbols face: every ter
   padding-bottom: 0;
 }
 
+/*
+FNXC:Terminal 2026-06-21-22:32:
+FN-6887 turns desktop/tablet terminal into a bottom-docked panel above the footer. Keep mobile on the fullscreen modal path through the max-width media override below.
+
+FNXC:Terminal 2026-06-22-00:00:
+The docked/floating terminal must not blur or dim the page behind it, and the page must stay interactive. The base .modal-overlay applies backdrop-filter: blur(4px); override it to none here. background is already transparent and pointer-events:none lets clicks pass through to the page behind (the terminal panel itself re-enables pointer-events).
+*/
+/*
+FNXC:Terminal 2026-06-22-00:45:
+The override MUST out-specify the base `.modal-overlay` (which sets a dimmed background + blur). Both are single-class selectors, so if styles.css loads after this file the dim/blur wins and the page still fades. Qualify with `.modal-overlay` (two classes) so the docked/floating terminal reliably keeps a transparent, non-blurring, click-through backdrop regardless of stylesheet order.
+*/
+/*
+FNXC:Terminal 2026-06-23-04:30:
+The terminal must NEVER dim or blur the page behind it, in ANY mode. The base .modal-overlay applies a dimmed background + blur; the docked/floating overrides killed it, but a terminal that is NEITHER (the mobile/default sheet) still fell back to the dim. This base terminal-overlay rule removes the dim+blur for every terminal state.
+
+FNXC:Terminal 2026-06-23-21:28:
+Theme-level modal backdrop rules can load after component CSS and reapply dim/blur, especially in glass themes. Use a higher-specificity terminal overlay selector and clear both standard and WebKit backdrop filters so docked and modal terminal surfaces never darken the app behind them.
+*/
+.modal-overlay.terminal-modal-overlay.terminal-modal-overlay {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.modal-overlay.terminal-modal-overlay--docked.terminal-modal-overlay--docked,
+.modal-overlay.terminal-modal-overlay--floating.terminal-modal-overlay--floating {
+  align-items: stretch;
+  justify-content: flex-end;
+  padding: 0;
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  pointer-events: none;
+}
+
+/*
+FNXC:FloatingWindow 2026-06-22-21:30:
+Only the FLOATING terminal joins the shared cross-type floating stack. Reset the base `.modal-overlay` z-index:100 to auto so this click-through overlay does NOT establish a stacking context; the floating panel's inline z-index (from floatingWindowStack, 4000+) then interleaves at the root with the right-dock pop-out, the floating New Task dialog, and FloatingWindow. Docked mode keeps the base overlay stacking (full-width bottom panel) and is intentionally excluded.
+*/
+.modal-overlay.terminal-modal-overlay--floating {
+  z-index: auto;
+}
+
 .modal.terminal-modal {
   /* Initial dimensions are applied only when no persisted size has been
      restored — see :not([style*=...]) selectors below. */
@@ -43,6 +86,127 @@ FN-6811 recurrence #6 tightened ownership of this scoped symbols face: every ter
 .modal.terminal-modal:not([style*="height"]) {
   height: min(85vh, calc(100dvh - 40px));
 }
+
+.modal.terminal-modal.terminal-modal--docked {
+  --floating-window-shadow: var(--shadow-lg);
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--icb-bottom-offset, 0px) + var(--executor-footer-height, calc(var(--space-xl) + var(--space-md))));
+  width: 100vw;
+  min-width: 0;
+  height: var(--terminal-docked-height);
+  min-height: calc(var(--space-xl) * 10);
+  max-width: none;
+  max-height: calc(100dvh - (var(--space-xl) * 4));
+  resize: none;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  pointer-events: auto;
+  box-shadow: var(--floating-window-shadow, var(--shadow-lg));
+}
+
+/*
+FNXC:Terminal 2026-06-22-01:30:
+Larger grab target for the docked terminal top resize handle: it straddles the panel's top edge (extends above it) and is taller, so it is easy to grab on desktop and touch. touch-action:none keeps the drag from being hijacked by scroll/gestures so the resize stays smooth.
+*/
+.terminal-docked-resize-handle {
+  position: absolute;
+  top: calc(var(--space-sm) * -1);
+  left: 0;
+  right: 0;
+  height: calc(var(--space-md) + var(--space-sm));
+  cursor: ns-resize;
+  touch-action: none;
+  z-index: 2;
+}
+
+.terminal-docked-resize-handle::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: calc(var(--space-xs) / 2);
+  width: calc(var(--space-xl) * 2);
+  height: calc(var(--space-xs) / 2);
+  transform: translateX(-50%);
+  border-radius: var(--radius-full);
+  background: var(--border);
+}
+
+.modal.terminal-modal.terminal-modal--floating {
+  --floating-window-shadow: var(--shadow-lg);
+  position: fixed;
+  left: var(--terminal-float-x);
+  top: var(--terminal-float-y);
+  width: var(--terminal-float-width);
+  height: var(--terminal-float-height);
+  min-width: calc(var(--space-xl) * 20);
+  min-height: calc(var(--space-xl) * 13.333);
+  max-width: calc(100vw - (var(--space-lg) * 2));
+  max-height: calc(100dvh - (var(--space-lg) * 2));
+  resize: none;
+  pointer-events: auto;
+  /*
+  FNXC:FloatingWindow 2026-06-23-23:32:
+  Floating modals share a gentle theme-controlled elevation token. Use the app shadow fallback instead of undefined --shadow-xl so themes can opt out or tune shadow strength consistently across Terminal, New Task, Right Dock, and shared FloatingWindow panels.
+  */
+  box-shadow: var(--floating-window-shadow, var(--shadow-lg));
+}
+
+/*
+FNXC:Terminal 2026-06-22-19:50:
+The floating-mode header is the move grip. `touch-action: none` is required so a touch-drag on it is delivered as a continuous pointermove stream (paired with setPointerCapture on the captured element) instead of being hijacked by the browser into page scroll/pan. Without it the floating drag stutters on touch — same fix the right-dock pop-out drag handle uses. cursor: grab/grabbing signals the move affordance on desktop.
+*/
+.terminal-header--draggable {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  min-height: 48px;
+}
+
+.terminal-header--draggable:active {
+  cursor: grabbing;
+}
+
+.terminal-floating-resize-handle {
+  position: absolute;
+  z-index: 2;
+  touch-action: none;
+}
+
+.terminal-floating-resize-handle--n,
+.terminal-floating-resize-handle--s {
+  left: var(--space-sm);
+  right: var(--space-sm);
+  height: var(--space-sm);
+  cursor: ns-resize;
+}
+
+.terminal-floating-resize-handle--n { top: 0; }
+.terminal-floating-resize-handle--s { bottom: 0; }
+
+.terminal-floating-resize-handle--e,
+.terminal-floating-resize-handle--w {
+  top: var(--space-sm);
+  bottom: var(--space-sm);
+  width: var(--space-sm);
+  cursor: ew-resize;
+}
+
+.terminal-floating-resize-handle--e { right: 0; }
+.terminal-floating-resize-handle--w { left: 0; }
+
+.terminal-floating-resize-handle--ne,
+.terminal-floating-resize-handle--nw,
+.terminal-floating-resize-handle--se,
+.terminal-floating-resize-handle--sw {
+  width: var(--space-lg);
+  height: var(--space-lg);
+}
+
+.terminal-floating-resize-handle--ne { top: 0; right: 0; cursor: nesw-resize; }
+.terminal-floating-resize-handle--nw { top: 0; left: 0; cursor: nwse-resize; }
+.terminal-floating-resize-handle--se { bottom: 0; right: 0; cursor: nwse-resize; }
+.terminal-floating-resize-handle--sw { bottom: 0; left: 0; cursor: nesw-resize; }
 
 .terminal-header {
   display: flex;
@@ -198,6 +362,22 @@ FN-6811 recurrence #6 tightened ownership of this scoped symbols face: every ter
   background: var(--card-hover);
 }
 
+/*
+FNXC:Terminal 2026-06-23-22:12:
+The terminal header pop-out/dock affordance is an icon-only utility control. It should not carry button background or border chrome; keep hover/focus feedback only through color/focus ring so it reads like the surrounding header utility icons.
+*/
+.terminal-clear-btn.terminal-clear-btn--icon[data-testid="terminal-popout-toggle"] {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.terminal-clear-btn.terminal-clear-btn--icon[data-testid="terminal-popout-toggle"]:hover {
+  background: transparent;
+  border: none;
+  color: var(--text);
+}
+
 .terminal-content {
   flex: 1;
   display: flex;
@@ -289,6 +469,12 @@ FN-6811 recurrence #6 tightened ownership of this scoped symbols face: every ter
 
 .terminal-clear-btn--shortcut {
   margin-left: var(--space-xs);
+}
+
+/* FNXC:Terminal 2026-06-23-00:15: Icon-only pop-out/dock toggle — no visible text label, so render as a square icon button while keeping the same hover/border treatment as the other header controls. */
+.terminal-clear-btn--icon {
+  padding: 6px;
+  justify-content: center;
 }
 
 .terminal-log-container {
@@ -677,15 +863,26 @@ FN-6659 keeps the loaded symbols @font-face out of xterm's measured font option 
   }
 }
 
+/*
+FNXC:Terminal 2026-06-22-17:15:
+The shortcut bar (modifier keys + arrow keys) must sit on ONE line, not stack into separate rows. The panel no longer wraps; the modifier-row and arrow-row are inline (intrinsic width, no 100% / margin-bottom), and the panel scrolls horizontally if the buttons exceed the width.
+*/
 .terminal-shortcut-panel {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: var(--space-xs);
   padding: var(--space-xs) var(--space-sm);
   background: var(--surface);
   border-top: 1px solid var(--border);
-  max-height: calc(var(--space-2xl) + var(--space-xl) + var(--space-lg));
-  overflow-y: auto;
+  overflow-x: auto;
+  /*
+  FNXC:Terminal 2026-06-22-22:00:
+  On a narrow folded phone the modifier/arrow/letter keys exceed the viewport width, so the bar MUST scroll horizontally to keep every button reachable. touch-action: pan-x lets a horizontal swipe scroll the row (instead of the browser hijacking it as a page gesture), overscroll-behavior-x: contain stops the swipe from bleeding into page/back-navigation at the ends, and -webkit-overflow-scrolling: touch gives momentum scroll on iOS.
+  */
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .terminal-shortcut-modifier-row,
@@ -693,18 +890,18 @@ FN-6659 keeps the loaded symbols @font-face out of xterm's measured font option 
   display: flex;
   align-items: center;
   gap: var(--space-xs);
-  width: 100%;
-  margin-bottom: var(--space-xs);
-}
-
-.terminal-shortcut-arrow-row {
-  justify-content: center;
+  flex: 0 0 auto;
 }
 
 .terminal-shortcut-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /*
+  FNXC:Terminal 2026-06-22-22:00:
+  Keys keep their intrinsic width and never shrink/grow, so the row's total width exceeds a narrow viewport and the panel's overflow-x: auto produces a real horizontal scroll reaching the rightmost buttons. flex:1 / width:100% here would collapse every key to fit the viewport and defeat the scroll.
+  */
+  flex: 0 0 auto;
   min-width: calc(var(--space-xl) + var(--space-xs));
   min-height: calc(var(--space-xl) + var(--space-xs));
   padding: 0 var(--space-xs);
@@ -776,10 +973,15 @@ FN-6659 keeps the loaded symbols @font-face out of xterm's measured font option 
   justify-self: start;
 }
 
+/*
+FNXC:Terminal 2026-06-23-00:15:
+Footer reads left-to-right: text-size control, then the relocated Clear/Shortcuts/Preferences action cluster, then connection status / exit code / zoom-hint pushed to the right edge (margin-left:auto on the connection status). flex-wrap keeps the action cluster from clipping when the docked/floating panel is narrow; gap replaces the old space-between distribution.
+*/
 .terminal-status-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
   padding: var(--space-sm) var(--space-lg);
   background: var(--surface);
   border-top: 1px solid var(--border);
@@ -787,8 +989,19 @@ FN-6659 keeps the loaded symbols @font-face out of xterm's measured font option 
   color: var(--text-muted);
 }
 
+/* FNXC:Terminal 2026-06-23-00:15: Grouped cluster of the relocated Clear/Shortcuts/Preferences buttons; scrolls horizontally as a unit on very narrow footers so the buttons stay reachable instead of clipping. */
+.terminal-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/* FNXC:Terminal 2026-06-23-00:15: Connection status starts the right-aligned trailing group (status + exit code + zoom hint) so the left edge holds the text-size and action controls. */
 .terminal-connection-status {
   font-weight: 500;
+  margin-left: auto;
 }
 
 .terminal-connection-status.connected {
@@ -1134,4 +1347,3 @@ FN-6659 keeps the loaded symbols @font-face out of xterm's measured font option 
     min-height: 36px;
   }
 }
-

@@ -54,17 +54,29 @@
 }
 
 /* ── Header ── */
+/*
+FNXC:MissionManager 2026-06-23-03:00:
+Missions previously relied on the header's own border-bottom as the only divider. FNXC:MissionManager 2026-06-22-18:12 updates the main-content embedded view to remove the extra line below the header entirely; internal sidebar/detail pane borders remain, but the area directly under the top header is seamless.
+
+FNXC:MissionManager 2026-06-22-18:00:
+Mission headers define the shared header color: var(--surface), with no bottom divider. Other headers should match this background instead of drawing a separate line after the title row.
+*/
+/*
+FNXC:ViewHeader 2026-06-23-04:15:
+Pin the canonical --view-header-min-height (≈61px border-box) + box-sizing so the Missions header matches the shared ViewHeader height exactly whether or not its right-side controls are present.
+*/
 .mission-manager__header {
+  box-sizing: border-box;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-height: var(--view-header-min-height);
   padding: var(--space-md) var(--space-lg);
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg) 10%, transparent);
+  background: var(--surface);
 }
 
-/* Inline mode header - matches agents-view-header styling */
+/* Inline mode header - matches agents-view-header styling (canonical ViewHeader padding). */
 .mission-manager__header--inline {
   background: var(--surface);
   padding: var(--space-lg) var(--space-xl);
@@ -82,8 +94,12 @@
   gap: var(--space-sm);
 }
 
+/*
+FNXC:Navigation 2026-06-22-01:10:
+Title metric matches the shared ViewHeader (1.125rem) so the Missions header reads consistently with Command Center and the other normalized main-content views.
+*/
 .mission-manager__title {
-  font-size: var(--space-lg);
+  font-size: 1.125rem;
   font-weight: 600;
   margin: 0;
   color: var(--text);
@@ -135,13 +151,14 @@
 }
 
 /* ── Body ── */
+/* FNXC:MissionManager 2026-06-22-01:00: The aligned .mission-manager__header supplies the top padding, so the scroll body drops its top inset to avoid doubling the gap under the header (keeps horizontal + bottom padding). */
 .mission-manager__body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior: contain;
-  padding: var(--space-lg);
+  padding: 0 var(--space-lg) var(--space-lg);
   -webkit-overflow-scrolling: touch;
 }
 
@@ -516,10 +533,10 @@
   width: auto;
 }
 
-.mission-list__top-action {
-  display: flex;
-}
-
+/*
+FNXC:MissionsMobile 2026-06-22-18:00:
+Narrow/mobile Missions puts Plan New Mission at the bottom of the list, using the same compact primary button proportions as Chat's New Chat action instead of a large top CTA.
+*/
 .mission-list__primary-cta {
   width: 100%;
   justify-content: center;

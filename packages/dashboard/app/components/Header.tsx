@@ -1,13 +1,12 @@
-import { useState, useEffect, useRef, useCallback, useMemo, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Settings, Play, LayoutGrid, List, Terminal, Lightbulb, Search, X, Activity, MoreHorizontal, Clock, Folder, History, GitBranch, Monitor, Workflow, Bot, Target, ChevronRight, FileCode, Loader2, Grid3X3, Mail, MessageSquare, ChevronDown, Check, Zap, Sparkles, FileText, Brain, CheckSquare, Lock, Gauge } from "lucide-react";
+import { Settings, LayoutGrid, List, Search, X, Activity, MoreHorizontal, Clock, Folder, History, GitBranch, Monitor, Workflow, Bot, Target, Grid3X3, Mail, MessageSquare, Check, Zap, Sparkles, FileText, Brain, CheckSquare, Lock, Gauge, ChevronDown, ChevronRight, PanelRight } from "lucide-react";
 import "./Header.css";
 // ProjectSelector styles used by the imported standalone component.
 import "./ProjectSelector.css";
 import { ProjectSelector as StandaloneProjectSelector } from "./ProjectSelector";
 import type { ProjectInfo } from "../api";
 import type { NodeConfig, ProjectStatus } from "@fusion/core";
-import { fetchScripts } from "../api";
 import { NodeStatusIndicator } from "./NodeStatusIndicator";
 import { NodeHealthDot } from "./NodeHealthDot";
 import { PluginSlot } from "./PluginSlot";
@@ -49,20 +48,10 @@ function GitHubLogo({ size = 16 }: { size?: number }) {
   );
 }
 
-interface DropdownPosition {
-  top: number;
-  left: number;
-  width: number;
-}
 
 export interface HeaderProps {
   onOpenSettings?: () => void;
   onOpenGitHubImport?: () => void;
-  onOpenPlanning?: () => void;
-  /** Resume an in-flight planning session. Takes priority over onOpenPlanning when activePlanningSessionCount > 0 */
-  onResumePlanning?: () => void;
-  /** Number of active planning sessions. When > 0, shows a badge on the Planning button. */
-  activePlanningSessionCount?: number;
   onOpenUsage?: (anchorRect?: DOMRect | null) => void;
   onOpenActivityLog?: () => void;
   /** Opens the mailbox view */
@@ -78,14 +67,9 @@ export interface HeaderProps {
   onOpenSchedules?: () => void;
   onOpenGitManager?: () => void;
   onOpenWorkflowEditor?: () => void;
-  onOpenScripts?: () => void;
-  onRunScript?: (name: string, command: string) => void;
-  onToggleTerminal?: () => void;
   /** Opens the top-level workspace-aware file browser modal. */
   onOpenFiles?: () => void;
   filesOpen?: boolean;
-  onOpenTodos?: () => void;
-  todosOpen?: boolean;
   todosEnabled?: boolean;
   view?: TaskView;
   onChangeView?: (view: TaskView) => void;
@@ -112,6 +96,16 @@ export interface HeaderProps {
   mobileNavEnabled?: boolean;
   /** When true on non-mobile screens, persistent left sidebar owns primary view navigation. */
   leftSidebarNavActive?: boolean;
+  /*
+  FNXC:Navigation 2026-06-22-00:00:
+  The right dock is no longer a persistent rail. On non-mobile surfaces the Header owns a single show/hide toggle (replacing the tablet three-dots overflow) that opens/closes the right sidebar; mobile keeps its existing overflow menu untouched.
+  */
+  /** Whether the right dock is available on this surface (non-mobile + enabled). */
+  rightDockAvailable?: boolean;
+  /** Current open state of the right dock. */
+  rightDockOpen?: boolean;
+  /** Toggle the right dock open/closed. */
+  onToggleRightDock?: () => void;
   /** Available nodes for the node selector */
   availableNodes?: NodeConfig[];
   /** Currently selected node (null for local) */
@@ -121,7 +115,7 @@ export interface HeaderProps {
   /** Whether the current view is a remote node */
   isRemote?: boolean;
   /** Experimental feature flags controlling visibility of nav items. */
-  experimentalFeatures?: { insights?: boolean; memoryView?: boolean; devServer?: boolean; devServerView?: boolean; researchView?: boolean; evalsView?: boolean; goalsView?: boolean; leftSidebarNav?: boolean };
+  experimentalFeatures?: { insights?: boolean; memoryView?: boolean; devServer?: boolean; devServerView?: boolean; researchView?: boolean; evalsView?: boolean; goalsView?: boolean; leftSidebarNav?: boolean; rightDock?: boolean };
   pluginDashboardViews?: PluginDashboardViewEntry[];
   shellConnectionControl?: ReactNode;
 }
@@ -129,9 +123,6 @@ export interface HeaderProps {
 export function Header({
   onOpenSettings,
   onOpenGitHubImport,
-  onOpenPlanning,
-  onResumePlanning,
-  activePlanningSessionCount = 0,
   onOpenUsage,
   onOpenActivityLog,
   onOpenMailbox,
@@ -142,13 +133,7 @@ export function Header({
   onOpenSchedules,
   onOpenGitManager,
   onOpenWorkflowEditor,
-  onOpenScripts,
-  onRunScript,
-  onToggleTerminal,
   onOpenFiles,
-  filesOpen,
-  onOpenTodos,
-  todosOpen,
   todosEnabled,
   view = "board",
   onChangeView,
@@ -170,6 +155,9 @@ export function Header({
   shellHost = { kind: "browser" },
   mobileNavEnabled,
   leftSidebarNavActive = false,
+  rightDockAvailable = false,
+  rightDockOpen = false,
+  onToggleRightDock,
   availableNodes = [],
   currentNode,
   onSelectNode,
@@ -190,40 +178,31 @@ export function Header({
 
   FNXC:WorkflowControls 2026-06-20-00:00:
   The hidden Header view-toggle location becomes the workflow-control portal slot only when left sidebar navigation is active on tablet/desktop. Mobile and flag-off paths keep workflow controls inline so the board/list chrome remains byte-identical.
+
+  FNXC:WorkflowControls 2026-06-22-18:00:
+  Mobile also renders the workflow portal in the top header next to the logo/project switch. The board/list workflow selector stays single-sourced through this slot, while CSS hides the "Workflow" label and compacts the trigger so it fits the mobile header.
   */
   const hideHeaderViewNav = leftSidebarNavActive && !isMobile;
+  /*
+  FNXC:Navigation 2026-06-21-23:40:
+  The right dock is persistent and owns its own collapse control, so Header must not render a duplicate right-dock toggle or repurpose the More views overflow trigger on tablet/desktop.
+  */
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [isNonMobileSearchOpen, setIsNonMobileSearchOpen] = useState(false);
   // Track when user has explicitly closed the search (used for toggle visibility)
   const [isNonMobileSearchExplicitlyClosed, setIsNonMobileSearchExplicitlyClosed] = useState(false);
   const [isOverflowMenuOpen, setIsOverflowMenuOpen] = useState(false);
-  const [isTerminalSubmenuOpen, setIsTerminalSubmenuOpen] = useState(false);
   const [isNodeSelectorOpen, setIsNodeSelectorOpen] = useState(false);
   const [isMobileProjectSwitchOpen, setIsMobileProjectSwitchOpen] = useState(false);
   const [isViewOverflowOpen, setIsViewOverflowOpen] = useState(false);
-  const [isDesktopOverflowOpen, setIsDesktopOverflowOpen] = useState(false);
-  const [isScriptsOpen, setIsScriptsOpen] = useState(false);
-  const [scripts, setScripts] = useState<Record<string, string>>({});
-  const [scriptsLoading, setScriptsLoading] = useState(false);
-  const [highlightedScriptIndex, setHighlightedScriptIndex] = useState(-1);
-  const [scriptsDropdownPosition, setScriptsDropdownPosition] = useState<DropdownPosition | null>(null);
-  const [overflowScripts, setOverflowScripts] = useState<Record<string, string>>({});
-  const [overflowScriptsLoading, setOverflowScriptsLoading] = useState(false);
   const overflowButtonRef = useRef<HTMLButtonElement>(null);
   const overflowMenuRef = useRef<HTMLDivElement>(null);
-  const desktopOverflowTriggerRef = useRef<HTMLButtonElement>(null);
-  const desktopOverflowRef = useRef<HTMLDivElement>(null);
   const mobileSearchRef = useRef<HTMLDivElement>(null);
   const mobileSearchInputRef = useRef<HTMLInputElement>(null);
-  const terminalSubmenuOpenRef = useRef(false);
   const nodeSelectorRef = useRef<HTMLDivElement>(null);
   const mobileProjectSwitchRef = useRef<HTMLDivElement>(null);
   const viewOverflowRef = useRef<HTMLDivElement>(null);
   const viewOverflowTriggerRef = useRef<HTMLButtonElement>(null);
-  const scriptsSplitButtonRef = useRef<HTMLDivElement>(null);
-  const scriptsChevronButtonRef = useRef<HTMLButtonElement>(null);
-  const scriptsMenuRef = useRef<HTMLDivElement>(null);
-  const scriptsOpenRef = useRef(false);
   
   // Get remote nodes only (exclude local node type)
   const remoteNodes = useMemo(() => 
@@ -231,19 +210,6 @@ export function Header({
     [availableNodes]
   );
   const showNodeSelector = remoteNodes.length > 0;
-
-  // Script entries sorted alphabetically for desktop scripts dropdown
-  const scriptEntries = useMemo(() => {
-    return Object.entries(scripts).sort(([a], [b]) => a.localeCompare(b));
-  }, [scripts]);
-
-  const showScriptsFooter = scriptEntries.length > 0;
-  const totalScriptItems = scriptEntries.length + (showScriptsFooter ? 1 : 0);
-
-  // Script entries sorted alphabetically for overflow submenu
-  const overflowScriptEntries = useMemo(() => {
-    return Object.entries(overflowScripts).sort(([a], [b]) => a.localeCompare(b));
-  }, [overflowScripts]);
 
   const hasViewOverflowItems = useMemo(() => {
     return !!(
@@ -260,283 +226,6 @@ export function Header({
       pluginDashboardViews.some((entry) => entry.view.placement !== "primary")
     );
   }, [onChangeView, experimentalFeatures, todosEnabled, showSkillsTab, hideFullNav, isTablet, pluginDashboardViews]);
-
-  const getEffectiveViewport = useCallback(() => {
-    const vv = window.visualViewport;
-    if (vv && vv.width > 0 && vv.height > 0) {
-      return {
-        width: vv.width,
-        height: vv.height,
-        offsetTop: vv.offsetTop,
-        offsetLeft: vv.offsetLeft,
-      };
-    }
-
-    return {
-      width: window.innerWidth,
-      height: window.innerHeight,
-      offsetTop: 0,
-      offsetLeft: 0,
-    };
-  }, []);
-
-  const updateScriptsDropdownPosition = useCallback(() => {
-    const trigger = scriptsChevronButtonRef.current;
-    if (!trigger) return;
-
-    const rect = trigger.getBoundingClientRect();
-    const menu = scriptsMenuRef.current;
-    const { width: viewportWidth, height: viewportHeight, offsetTop, offsetLeft } = getEffectiveViewport();
-    const horizontalPadding = 16;
-    const verticalPadding = 16;
-    const gap = 6;
-
-    const measuredWidth = menu?.offsetWidth || Math.max(rect.width, 260);
-    const width = Math.min(
-      measuredWidth,
-      Math.max(viewportWidth - horizontalPadding * 2, 160),
-    );
-
-    const measuredHeight = menu?.offsetHeight || 280;
-    const constrainedHeight = Math.min(
-      measuredHeight,
-      Math.max(viewportHeight - verticalPadding * 2, 160),
-    );
-
-    const triggerTop = rect.top - offsetTop;
-    const triggerBottom = rect.bottom - offsetTop;
-    const triggerRight = rect.right - offsetLeft;
-
-    const spaceBelow = viewportHeight - triggerBottom;
-    const spaceAbove = triggerTop;
-
-    const openUpward = spaceBelow < constrainedHeight && spaceAbove > spaceBelow;
-
-    const left = Math.min(
-      Math.max(triggerRight - width, horizontalPadding),
-      viewportWidth - horizontalPadding - width,
-    ) + offsetLeft;
-
-    const top = openUpward
-      ? Math.max(verticalPadding + offsetTop, triggerTop - constrainedHeight - gap + offsetTop)
-      : Math.min(
-          triggerBottom + gap + offsetTop,
-          viewportHeight + offsetTop - verticalPadding - constrainedHeight,
-        );
-
-    setScriptsDropdownPosition({ top, left, width });
-  }, [getEffectiveViewport]);
-
-  const handleRunQuickScript = useCallback(
-    (name: string, command: string) => {
-      onRunScript?.(name, command);
-      setIsScriptsOpen(false);
-      setHighlightedScriptIndex(-1);
-    },
-    [onRunScript],
-  );
-
-  const handleManageScripts = useCallback(() => {
-    onOpenScripts?.();
-    setIsScriptsOpen(false);
-    setHighlightedScriptIndex(-1);
-  }, [onOpenScripts]);
-
-  const handleScriptsDropdownKeyDown = useCallback(
-    (e: ReactKeyboardEvent<HTMLDivElement>) => {
-      switch (e.key) {
-        case "ArrowDown":
-          e.preventDefault();
-          if (totalScriptItems > 0) {
-            setHighlightedScriptIndex((prev) => (prev < totalScriptItems - 1 ? prev + 1 : 0));
-          }
-          break;
-        case "ArrowUp":
-          e.preventDefault();
-          if (totalScriptItems > 0) {
-            setHighlightedScriptIndex((prev) => (prev > 0 ? prev - 1 : totalScriptItems - 1));
-          }
-          break;
-        case "Enter":
-          e.preventDefault();
-          if (highlightedScriptIndex >= 0) {
-            if (highlightedScriptIndex < scriptEntries.length) {
-              const [name, command] = scriptEntries[highlightedScriptIndex];
-              handleRunQuickScript(name, command);
-            } else if (showScriptsFooter && highlightedScriptIndex === scriptEntries.length) {
-              handleManageScripts();
-            }
-          }
-          break;
-        case "Home":
-          e.preventDefault();
-          if (totalScriptItems > 0) {
-            setHighlightedScriptIndex(0);
-          }
-          break;
-        case "End":
-          e.preventDefault();
-          if (totalScriptItems > 0) {
-            setHighlightedScriptIndex(totalScriptItems - 1);
-          }
-          break;
-      }
-    },
-    [handleManageScripts, handleRunQuickScript, highlightedScriptIndex, scriptEntries, showScriptsFooter, totalScriptItems],
-  );
-
-  // Keep ref in sync with state
-  useEffect(() => {
-    terminalSubmenuOpenRef.current = isTerminalSubmenuOpen;
-  }, [isTerminalSubmenuOpen]);
-
-  useEffect(() => {
-    scriptsOpenRef.current = isScriptsOpen;
-  }, [isScriptsOpen]);
-
-  // Fetch scripts when terminal submenu opens in compact mode
-  useEffect(() => {
-    if (!isTerminalSubmenuOpen || !isCompact) return;
-
-    let cancelled = false;
-    setOverflowScriptsLoading(true);
-
-    fetchScripts(projectId)
-      .then((data) => {
-        if (!cancelled) {
-          setOverflowScripts(data);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setOverflowScripts({});
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setOverflowScriptsLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isTerminalSubmenuOpen, isCompact, projectId]);
-
-  // Fetch scripts when desktop scripts dropdown opens
-  useEffect(() => {
-    if (!isScriptsOpen || isCompact) return;
-
-    let cancelled = false;
-    setScriptsLoading(true);
-
-    fetchScripts(projectId)
-      .then((data) => {
-        if (!cancelled) {
-          setScripts(data);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setScripts({});
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setScriptsLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isScriptsOpen, isCompact, projectId]);
-
-  // Close desktop scripts dropdown on outside click
-  useEffect(() => {
-    if (!isScriptsOpen) return;
-
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        scriptsSplitButtonRef.current &&
-        !scriptsSplitButtonRef.current.contains(e.target as Node)
-      ) {
-        setIsScriptsOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isScriptsOpen]);
-
-  // Close desktop scripts dropdown on Escape
-  useEffect(() => {
-    if (!isScriptsOpen) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setIsScriptsOpen(false);
-        scriptsChevronButtonRef.current?.focus();
-      }
-    };
-
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isScriptsOpen]);
-
-  // Reset highlight and focus menu when dropdown opens
-  useEffect(() => {
-    if (isScriptsOpen) {
-      setHighlightedScriptIndex(-1);
-      const timeoutId = window.setTimeout(() => scriptsMenuRef.current?.focus(), 0);
-      return () => window.clearTimeout(timeoutId);
-    }
-
-    setScriptsDropdownPosition(null);
-  }, [isScriptsOpen]);
-
-  // Position scripts dropdown when opening and content changes
-  useEffect(() => {
-    if (!isScriptsOpen) return;
-
-    const rafId = requestAnimationFrame(() => {
-      updateScriptsDropdownPosition();
-    });
-
-    return () => cancelAnimationFrame(rafId);
-  }, [isScriptsOpen, scriptsLoading, scriptEntries.length, showScriptsFooter, updateScriptsDropdownPosition]);
-
-  // Keep scripts dropdown anchored on viewport changes
-  useEffect(() => {
-    if (!isScriptsOpen) return;
-
-    const handleReposition = () => updateScriptsDropdownPosition();
-
-    window.addEventListener("resize", handleReposition);
-    window.addEventListener("scroll", handleReposition, true);
-
-    const vv = window.visualViewport;
-    if (vv) {
-      vv.addEventListener("resize", handleReposition);
-      vv.addEventListener("scroll", handleReposition);
-    }
-
-    return () => {
-      window.removeEventListener("resize", handleReposition);
-      window.removeEventListener("scroll", handleReposition, true);
-      if (vv) {
-        vv.removeEventListener("resize", handleReposition);
-        vv.removeEventListener("scroll", handleReposition);
-      }
-    };
-  }, [isScriptsOpen, updateScriptsDropdownPosition]);
-
-  useEffect(() => {
-    if (isCompact) {
-      setIsScriptsOpen(false);
-      setHighlightedScriptIndex(-1);
-    }
-  }, [isCompact]);
 
   // Keep mobile search open if there's an active search query
   const shouldShowMobileSearch = isMobileSearchOpen || searchQuery.length > 0;
@@ -574,25 +263,6 @@ export function Header({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOverflowMenuOpen]);
 
-  // Close desktop overflow menu on outside click
-  useEffect(() => {
-    if (!isDesktopOverflowOpen) return;
-
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        desktopOverflowRef.current &&
-        !desktopOverflowRef.current.contains(e.target as Node) &&
-        desktopOverflowTriggerRef.current &&
-        !desktopOverflowTriggerRef.current.contains(e.target as Node)
-      ) {
-        setIsDesktopOverflowOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isDesktopOverflowOpen]);
-
   // Close node selector on outside click
   useEffect(() => {
     if (!isNodeSelectorOpen) return;
@@ -615,16 +285,6 @@ export function Header({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setIsViewOverflowOpen(false);
-        setIsDesktopOverflowOpen(false);
-        if (terminalSubmenuOpenRef.current) {
-          setIsTerminalSubmenuOpen(false);
-          return;
-        }
-        if (scriptsOpenRef.current) {
-          setIsScriptsOpen(false);
-          scriptsChevronButtonRef.current?.focus();
-          return;
-        }
         setIsOverflowMenuOpen(false);
         setIsMobileSearchOpen(false);
         setIsNodeSelectorOpen(false);
@@ -694,7 +354,6 @@ export function Header({
   const handleOverflowAction = useCallback((callback?: () => void) => {
     if (callback) callback();
     setIsOverflowMenuOpen(false);
-    setIsTerminalSubmenuOpen(false);
   }, []);
 
   const handleMobileSearchClose = useCallback(() => {
@@ -802,6 +461,14 @@ export function Header({
               </div>
             )}
           </div>
+        )}
+
+        {hideFullNav && (
+          <div
+            id="header-workflow-slot"
+            className="header-workflow-slot header-workflow-slot--mobile"
+            data-testid="header-workflow-slot"
+          />
         )}
 
         {/* Project Selector - Back button when project selected, dropdown when 2+ projects (tablet + desktop) */}
@@ -932,19 +599,6 @@ export function Header({
           </button>
         )}
 
-        {/* Desktop/Tablet Search Toggle - show icon when search is available but hidden */}
-        {canShowNonMobileSearchToggle && (
-          <button
-            className="btn-icon"
-            onClick={handleNonMobileSearchToggle}
-            title={t("header.openSearch", "Open search")}
-            aria-label={t("header.openSearch", "Open search")}
-            data-testid="desktop-header-search-btn"
-          >
-            <Search size={16} />
-          </button>
-        )}
-
         {/* Usage button on mobile when mobile bottom nav is active */}
         {isMobile && hideFullNav && onOpenUsage && (
           <button
@@ -963,6 +617,22 @@ export function Header({
             className="header-workflow-slot"
             data-testid="header-workflow-slot"
           />
+        )}
+
+        {/**
+         * FNXC:Header 2026-06-21-00:00:
+         * Desktop and tablet header search must render after the workflow portal slot so a populated WorkflowSwitcher appears left of the search icon while preserving the mobile search trigger's existing position and behavior.
+         */}
+        {canShowNonMobileSearchToggle && (
+          <button
+            className="btn-icon"
+            onClick={handleNonMobileSearchToggle}
+            title={t("header.openSearch", "Open search")}
+            aria-label={t("header.openSearch", "Open search")}
+            data-testid="desktop-header-search-btn"
+          >
+            <Search size={16} />
+          </button>
         )}
 
         {/* View Toggle - always inline, even on mobile */}
@@ -1005,8 +675,8 @@ export function Header({
             <button
               className={`view-toggle-btn${view === "command-center" ? " active" : ""}`}
               onClick={() => onChangeView("command-center")}
-              title={t("header.commandCenterView", "Command Center")}
-              aria-label={t("header.commandCenterView", "Command Center")}
+              title={t("header.commandCenterView", "Dashboard")}
+              aria-label={t("header.commandCenterView", "Dashboard")}
               aria-pressed={view === "command-center"}
               data-testid="view-toggle-command-center"
             >
@@ -1035,11 +705,15 @@ export function Header({
               )}
             </button>
             {!isTablet && (
+              /*
+              FNXC:Navigation 2026-06-21-18:25:
+              The top-level documents destination now displays as Artifacts (FN-6890), but the documents route id remains stable for navigation and tests.
+              */
               <button
                 className={`view-toggle-btn${view === "documents" ? " active" : ""}`}
                 onClick={() => onChangeView("documents")}
-                title={t("header.documentsView", "Documents view")}
-                aria-label={t("header.documentsView", "Documents view")}
+                title={t("header.documentsView", "Artifacts view")}
+                aria-label={t("header.documentsView", "Artifacts view")}
                 aria-pressed={view === "documents"}
               >
                 <FileText size={16} />
@@ -1047,7 +721,7 @@ export function Header({
             )}
             <button
               className={`view-toggle-btn${view === "mailbox" ? " active" : ""}`}
-              onClick={() => onChangeView("mailbox")}
+              onClick={() => (onOpenMailbox ? onOpenMailbox() : onChangeView("mailbox"))}
               title={t("header.mailboxView", "Mailbox view")}
               aria-label={t("header.mailboxView", "Mailbox view")}
               aria-pressed={view === "mailbox"}
@@ -1086,8 +760,10 @@ export function Header({
               <>
                 <button
                   ref={viewOverflowTriggerRef}
-                  className={`view-toggle-btn${["research", "skills", "insights", "memory", "secrets", "dev-server", "devserver", "graph", "stash-recovery"].includes(view) || (isTablet && view === "documents") || (experimentalFeatures?.evalsView && view === "evals") || (experimentalFeatures?.goalsView && view === "goalsView") || (todosEnabled && todosOpen) || isPluginViewId(view) ? " active" : ""}`}
-                  onClick={() => setIsViewOverflowOpen((prev) => !prev)}
+                  className={`view-toggle-btn${(["research", "skills", "insights", "memory", "secrets", "dev-server", "devserver", "graph", "todos"].includes(view) || (isTablet && view === "documents") || (experimentalFeatures?.evalsView && view === "evals") || (experimentalFeatures?.goalsView && view === "goalsView") || isPluginViewId(view)) ? " active" : ""}`}
+                  onClick={() => {
+                    setIsViewOverflowOpen((prev) => !prev);
+                  }}
                   title={t("header.moreViews", "More views")}
                   aria-label={t("header.moreViews", "More views")}
                   aria-haspopup="menu"
@@ -1131,20 +807,6 @@ export function Header({
                         <span>{t("header.goalsView", "Goals")}</span>
                       </button>
                     )}
-                    <button
-                      className={`view-toggle-overflow-item${view === "stash-recovery" ? " active" : ""}`}
-                      onClick={() => {
-                        onChangeView("stash-recovery");
-                        setIsViewOverflowOpen(false);
-                      }}
-                      role="menuitem"
-                      data-testid="view-overflow-stash-recovery"
-                    >
-                      <History size={14} />
-                      <span>{t("header.stashRecoveryView", "Stash Recovery")}</span>
-                      {stashOrphanCount > 0 ? <span className="btn-badge">{stashOrphanCount}</span> : null}
-                    </button>
-
                     {experimentalFeatures?.researchView && (
                       <button
                         className={`view-toggle-overflow-item${view === "research" ? " active" : ""}`}
@@ -1225,7 +887,7 @@ export function Header({
                         data-testid="view-overflow-documents"
                       >
                         <FileText size={14} />
-                        <span>{t("header.documentsView", "Documents view")}</span>
+                        <span>{t("header.documentsView", "Artifacts view")}</span>
                       </button>
                     )}
                     {experimentalFeatures?.devServerView && (
@@ -1243,11 +905,11 @@ export function Header({
                         <span className="visually-hidden" data-testid="view-toggle-dev-server" />
                       </button>
                     )}
-                    {todosEnabled && onOpenTodos && (
+                    {todosEnabled && onChangeView && (
                       <button
-                        className={`view-toggle-overflow-item${todosOpen ? " active" : ""}`}
+                        className={`view-toggle-overflow-item${view === "todos" ? " active" : ""}`}
                         onClick={() => {
-                          onOpenTodos();
+                          onChangeView("todos");
                           setIsViewOverflowOpen(false);
                         }}
                         role="menuitem"
@@ -1286,190 +948,19 @@ export function Header({
           </div>
         )}
 
-        {/* Usage button - desktop only (moved to overflow on mobile/tablet) */}
-        {!isCompact && onOpenUsage && (
-          <button
-            className="btn-icon"
-            onClick={(event) => onOpenUsage(event.currentTarget.getBoundingClientRect())}
-            title={t("header.viewUsage", "View usage")}
-            data-testid="desktop-header-usage-btn"
-          >
-            <Activity size={16} />
-          </button>
-        )}
+        {/*
+        FNXC:Navigation 2026-06-21-20:20:
+        FN-6882 moves desktop tool actions (Activity, Activity Log, GitHub Import, Git Manager, Files, Automation) out of the Header toolbar into the right-dock tools rail while compact overflow keeps those tools for mobile/tablet.
 
-        {/* Activity Log button - desktop only (moved to overflow on mobile/tablet) */}
-        {!isCompact && onOpenActivityLog && (
-          <button className="btn-icon" onClick={onOpenActivityLog} title={t("header.viewActivityLog", "View Activity Log")}>
-            <History size={16} />
-          </button>
-        )}
+        FNXC:Navigation 2026-06-21-00:00:
+        FN-6886 removes the header Lightbulb affordances because Planning Mode is now a primary left-sidebar destination after Command Center and a single canonical MobileNavBar More item on compact breakpoints.
+        */}
 
-        {/* Desktop actions */}
-        {!isCompact && !isDesktopShell && (
-          <button className="btn-icon" onClick={onOpenGitHubImport} title={t("header.importFromGitHub", "Import from GitHub")}>
-            <GitHubLogo size={16} />
-          </button>
-        )}
-
-        {!isCompact && (
-          <button
-            className={`btn-icon${activePlanningSessionCount > 0 ? " btn-icon--has-indicator" : ""}`}
-            onClick={activePlanningSessionCount > 0 && onResumePlanning ? onResumePlanning : onOpenPlanning}
-            title={activePlanningSessionCount > 0 ? t("header.resumePlanningSession", "Resume planning session") : t("header.createTaskWithPlanning", "Create a task with AI planning")}
-            data-testid="planning-btn"
-            style={{ position: "relative" }}
-          >
-            <Lightbulb size={16} />
-            {activePlanningSessionCount > 0 && (
-              <span
-                className="header-badge header-badge--pulse"
-                data-testid="planning-badge"
-                aria-label={t("header.activePlanningSessions", { count: activePlanningSessionCount, defaultValue_one: "{{count}} active planning session", defaultValue_other: "{{count}} active planning sessions" })}
-              >
-                {activePlanningSessionCount}
-              </span>
-            )}
-          </button>
-        )}
-
-        {/* Terminal split button - desktop only (moved to overflow on mobile/tablet) */}
-        {!isCompact && (
-          <div className="terminal-split-btn" ref={scriptsSplitButtonRef}>
-            <button
-              className="btn-icon btn-icon--terminal terminal-split-btn__main"
-              onClick={onToggleTerminal}
-              title={t("header.openTerminal", "Open Terminal")}
-              data-testid="terminal-toggle-btn"
-            >
-              <Terminal size={16} />
-            </button>
-            {onOpenScripts && onRunScript && (
-              <>
-                <span className="terminal-split-btn__divider" />
-                <button
-                  ref={scriptsChevronButtonRef}
-                  className={`btn-icon terminal-split-btn__chevron${isScriptsOpen ? " btn-icon--active" : ""}`}
-                  onClick={() => setIsScriptsOpen((prev) => !prev)}
-                  title={t("header.scripts", "Scripts")}
-                  aria-haspopup="listbox"
-                  aria-expanded={isScriptsOpen}
-                  aria-label={t("header.quickScripts", "Quick scripts")}
-                  data-testid="scripts-btn"
-                >
-                  <ChevronDown size={12} className={`quick-scripts-dropdown__trigger-chevron${isScriptsOpen ? " rotate" : ""}`} />
-                </button>
-                {isScriptsOpen && (
-                  <div
-                    ref={scriptsMenuRef}
-                    tabIndex={-1}
-                    className="quick-scripts-dropdown__menu"
-                    role="listbox"
-                    aria-label={t("header.scripts", "Scripts")}
-                    onKeyDown={handleScriptsDropdownKeyDown}
-                    data-testid="quick-scripts-dropdown"
-                    style={
-                      scriptsDropdownPosition
-                        ? {
-                            position: "fixed",
-                            top: `${scriptsDropdownPosition.top}px`,
-                            left: `${scriptsDropdownPosition.left}px`,
-                            width: `${scriptsDropdownPosition.width}px`,
-                            right: "auto",
-                          }
-                        : undefined
-                    }
-                  >
-                    {scriptsLoading ? (
-                      <div className="quick-scripts-dropdown__loading" data-testid="quick-scripts-loading">
-                        <Loader2 size={16} className="animate-spin" />
-                        <span>{t("header.loadingScripts", "Loading scripts...")}</span>
-                      </div>
-                    ) : scriptEntries.length === 0 ? (
-                      <div className="quick-scripts-dropdown__empty" data-testid="quick-scripts-empty">
-                        <div className="quick-scripts-dropdown__empty-icon">
-                          <Terminal size={16} />
-                        </div>
-                        <p>{t("header.noScriptsConfigured", "No scripts configured")}</p>
-                        <button
-                          className="quick-scripts-dropdown__empty-action btn"
-                          onClick={handleManageScripts}
-                        >
-                          {t("header.addFirstScript", "Add your first script")}
-                        </button>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="quick-scripts-dropdown__list">
-                          {scriptEntries.map(([name, command], index) => (
-                            <button
-                              key={name}
-                              className={`quick-scripts-dropdown__item ${
-                                highlightedScriptIndex === index ? "highlighted" : ""
-                              }`}
-                              onClick={() => handleRunQuickScript(name, command)}
-                              role="option"
-                              aria-selected={highlightedScriptIndex === index}
-                              data-testid={`quick-script-item-${name}`}
-                            >
-                              <Play size={14} className="quick-scripts-dropdown__item-icon" />
-                              <div className="quick-scripts-dropdown__item-info">
-                                <span className="quick-scripts-dropdown__item-name">{name}</span>
-                                <span className="quick-scripts-dropdown__item-command" title={command}>
-                                  {command.length > 50 ? `${command.slice(0, 50)}...` : command}
-                                </span>
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-
-                        <div className="quick-scripts-dropdown__footer">
-                          <button
-                            className={`quick-scripts-dropdown__manage ${
-                              showScriptsFooter && highlightedScriptIndex === scriptEntries.length ? "highlighted" : ""
-                            }`}
-                            onClick={handleManageScripts}
-                            data-testid="quick-scripts-manage"
-                          >
-                            <Settings size={14} />
-                            <span>{t("header.manageScripts", "Manage Scripts...")}</span>
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
-        {/* Files button - desktop only (moved to overflow on mobile/tablet) */}
-        {!isCompact && onOpenFiles && (
-          <button
-            className={`btn-icon${filesOpen ? " btn-icon--active" : ""}`}
-            onClick={() => onOpenFiles()}
-            title={t("header.browseFiles", "Browse files")}
-            data-testid="files-toggle-btn"
-          >
-            <Folder size={16} />
-          </button>
-        )}
-
-        {/* Git Manager button - desktop only (moved to overflow on mobile/tablet) */}
-        {!isCompact && onOpenGitManager && (
-          <button
-            className="btn-icon"
-            onClick={onOpenGitManager}
-            title={t("header.gitManager", "Git Manager")}
-            data-testid="git-manager-btn"
-          >
-            <GitBranch size={16} />
-          </button>
-        )}
-
-        {/* Workflows - desktop only (moved to overflow on mobile/tablet) */}
-        {!isCompact && onOpenWorkflowEditor && (
+        {/*
+        FNXC:Navigation 2026-06-22-00:00:
+        When the left sidebar is active it owns Workflows as a main-content destination, so the Header drops its duplicate desktop Workflow button. The flag-off desktop layout keeps the Header button; mobile/tablet keep the overflow entry.
+        */}
+        {!isCompact && !leftSidebarNavActive && onOpenWorkflowEditor && (
           <button
             className="btn-icon"
             onClick={onOpenWorkflowEditor}
@@ -1480,48 +971,14 @@ export function Header({
           </button>
         )}
 
-        {/* Desktop overflow menu for Nodes and Schedules */}
-        {!isCompact && (
-          <div style={{ position: "relative" }}>
-            <button
-              ref={desktopOverflowTriggerRef}
-              className="btn-icon"
-              onClick={() => setIsDesktopOverflowOpen((prev) => !prev)}
-              title={t("header.moreActions", "More actions")}
-              aria-label={t("header.moreActions", "More actions")}
-              aria-expanded={isDesktopOverflowOpen}
-              aria-haspopup="menu"
-              data-testid="desktop-overflow-trigger"
-            >
-              <MoreHorizontal size={16} />
-            </button>
-            {isDesktopOverflowOpen && (
-              <div
-                ref={desktopOverflowRef}
-                className="desktop-overflow-menu"
-                role="menu"
-                aria-label={t("header.moreActions", "More actions")}
-              >
-                <button
-                  className="view-toggle-overflow-item"
-                  onClick={() => {
-                    handleOverflowAction(onOpenSchedules);
-                    setIsDesktopOverflowOpen(false);
-                  }}
-                  role="menuitem"
-                  data-testid="desktop-overflow-schedules-btn"
-                >
-                  <Clock size={14} />
-                  <span>{t("header.automation", "Automation")}</span>
-                </button>
-              </div>
-            )}
-          </div>
-        )}
 
-        {/* Settings - always inline on desktop; engine controls now live in the footer status bar. */}
-        {!isCompact && (
-          <button className="btn-icon" onClick={onOpenSettings} title={t("header.settings", "Settings")}>
+        {/*
+        FNXC:Navigation 2026-06-21-13:48:
+        Left sidebar navigation owns desktop Settings when active, so Header hides its duplicate icon to preserve a single titled Settings control for users and navigation-history tests.
+        */}
+        {!isCompact && !leftSidebarNavActive && (
+          // FNXC:Navigation 2026-06-22-12:00: Wrap so React's MouseEvent is not forwarded as onOpenSettings' settingsInitialSection arg.
+          <button className="btn-icon" onClick={() => onOpenSettings?.()} title={t("header.settings", "Settings")}>
             <Settings size={16} />
           </button>
         )}
@@ -1529,8 +986,42 @@ export function Header({
         {/* Plugin UI slot for header actions */}
         <PluginSlot slotId="header-action" projectId={projectId} />
 
-        {/* Compact overflow menu trigger (mobile + tablet) */}
-        {isCompact && !hideFullNav && (
+        {/*
+        FNXC:Navigation 2026-06-22-00:50:
+        Usage (Activity) lives in the top header to the left of the right-sidebar toggle and opens the UsageIndicator as a header-anchored modal (not inline in the dock). Non-mobile only; mobile keeps its own usage button in the bottom-nav layout.
+        */}
+        {!isMobile && onOpenUsage && (
+          <button
+            className="btn-icon"
+            onClick={(event) => onOpenUsage(event.currentTarget.getBoundingClientRect())}
+            title={t("header.viewUsage", "View usage")}
+            aria-label={t("header.viewUsage", "View usage")}
+            data-testid="header-usage-btn"
+          >
+            <Activity size={16} />
+          </button>
+        )}
+
+        {/*
+        FNXC:Navigation 2026-06-22-00:00:
+        Non-mobile surfaces (desktop + tablet) get a single right-sidebar show/hide toggle that owns the right dock visibility. It replaces the tablet three-dots overflow; the dock is fully hidden when closed and reopened from here. Mobile is intentionally excluded — it keeps its existing overflow menu untouched and has no right dock.
+        */}
+        {!isMobile && rightDockAvailable && onToggleRightDock && (
+          <button
+            className={`btn-icon${rightDockOpen ? " btn-icon--active" : ""}`}
+            onClick={onToggleRightDock}
+            title={rightDockOpen ? t("header.hideRightSidebar", "Hide right sidebar") : t("header.showRightSidebar", "Show right sidebar")}
+            aria-label={rightDockOpen ? t("header.hideRightSidebar", "Hide right sidebar") : t("header.showRightSidebar", "Show right sidebar")}
+            aria-expanded={rightDockOpen}
+            aria-pressed={rightDockOpen}
+            data-testid="header-right-dock-toggle"
+          >
+            <PanelRight size={16} />
+          </button>
+        )}
+
+        {/* Compact overflow menu trigger (mobile only — tablet uses the right-sidebar toggle above) */}
+        {isMobile && !hideFullNav && (
           <button
             ref={overflowButtonRef}
             className="btn-icon compact-overflow-trigger"
@@ -1544,8 +1035,8 @@ export function Header({
           </button>
         )}
 
-        {/* Compact overflow menu (mobile + tablet) */}
-        {isCompact && !hideFullNav && isOverflowMenuOpen && (
+        {/* Compact overflow menu (mobile only) */}
+        {isMobile && !hideFullNav && isOverflowMenuOpen && (
           <div
             ref={overflowMenuRef}
             className="mobile-overflow-menu"
@@ -1576,32 +1067,17 @@ export function Header({
                 <span>{t("header.browseFiles", "Browse Files")}</span>
               </button>
             )}
-            <button
-              className={`mobile-overflow-item${activePlanningSessionCount > 0 ? " mobile-overflow-item--has-indicator" : ""}`}
-              onClick={() => handleOverflowAction(activePlanningSessionCount > 0 && onResumePlanning ? onResumePlanning : onOpenPlanning)}
-              role="menuitem"
-              data-testid="overflow-planning-btn"
-            >
-              <span className="mobile-overflow-icon-wrapper">
-                <Lightbulb size={16} />
-                {activePlanningSessionCount > 0 && (
-                  <span className="header-badge header-badge--pulse" data-testid="overflow-planning-badge">
-                    {activePlanningSessionCount}
-                  </span>
-                )}
-              </span>
-              <span>{activePlanningSessionCount > 0 ? t("header.resumePlanningSessionCount", "Resume planning session ({{count}})", { count: activePlanningSessionCount }) : t("header.createTaskWithPlanning", "Create a task with AI planning")}</span>
-            </button>
             {/* Git Manager - in overflow on mobile */}
             {onOpenGitManager && (
               <button
-                className="mobile-overflow-item"
+                className="mobile-overflow-item mobile-overflow-item--with-badge"
                 onClick={() => handleOverflowAction(onOpenGitManager)}
                 role="menuitem"
                 data-testid="overflow-git-btn"
               >
                 <GitBranch size={16} />
                 <span>{t("header.gitManager", "Git Manager")}</span>
+                {stashOrphanCount > 0 ? <span className="btn-badge">{stashOrphanCount}</span> : null}
               </button>
             )}
             {!isDesktopShell && (
@@ -1614,98 +1090,17 @@ export function Header({
                 <span>{t("header.importFromGitHub", "Import from GitHub")}</span>
               </button>
             )}
-            <div
-              className="mobile-overflow-group"
-              data-testid="overflow-terminal-group"
-            >
-              <div className="mobile-overflow-split-row">
-                <button
-                  className="mobile-overflow-item mobile-overflow-split-primary"
-                  onClick={() => handleOverflowAction(onToggleTerminal)}
-                  role="menuitem"
-                  data-testid="overflow-terminal-primary-btn"
-                >
-                  <Terminal size={16} />
-                  <span>{t("header.terminal", "Terminal")}</span>
-                </button>
-                <button
-                  className="mobile-overflow-split-toggle"
-                  onClick={() => setIsTerminalSubmenuOpen((prev) => !prev)}
-                  role="menuitem"
-                  aria-expanded={isTerminalSubmenuOpen}
-                  aria-haspopup="menu"
-                  aria-label={t("header.showScripts", "Show scripts")}
-                  data-testid="overflow-terminal-submenu-toggle"
-                >
-                  <ChevronRight
-                    size={14}
-                    className={`mobile-overflow-chevron${isTerminalSubmenuOpen ? " mobile-overflow-chevron--open" : ""}`}
-                  />
-                </button>
-              </div>
-              {isTerminalSubmenuOpen && (
-                <div className="mobile-overflow-submenu" role="menu" aria-label={t("header.scriptsSubmenu", "Scripts submenu")}>
-                  {overflowScriptsLoading ? (
-                    <div className="mobile-overflow-submenu-loading" data-testid="overflow-scripts-loading">
-                      <Loader2 size={14} className="animate-spin" />
-                      <span>{t("header.loadingScripts", "Loading scripts...")}</span>
-                    </div>
-                  ) : overflowScriptEntries.length > 0 ? (
-                    <>
-                      {overflowScriptEntries.map(([name, command]) => (
-                        <button
-                          key={name}
-                          className="mobile-overflow-item mobile-overflow-subitem"
-                          onClick={() => {
-                            if (onRunScript) onRunScript(name, command);
-                            setIsOverflowMenuOpen(false);
-                            setIsTerminalSubmenuOpen(false);
-                          }}
-                          role="menuitem"
-                          data-testid={`overflow-script-item-${name}`}
-                        >
-                          <Play size={14} />
-                          <span>{name}</span>
-                        </button>
-                      ))}
-                      {onOpenScripts && (
-                        <button
-                          className="mobile-overflow-item mobile-overflow-subitem mobile-overflow-subitem--manage"
-                          onClick={() => handleOverflowAction(onOpenScripts)}
-                          role="menuitem"
-                          data-testid="overflow-scripts-manage"
-                        >
-                          <FileCode size={14} />
-                          <span>{t("header.manageScripts", "Manage Scripts...")}</span>
-                        </button>
-                      )}
-                    </>
-                  ) : (
-                    onOpenScripts && (
-                      <button
-                        className="mobile-overflow-item mobile-overflow-subitem"
-                        onClick={() => handleOverflowAction(onOpenScripts)}
-                        role="menuitem"
-                        data-testid="overflow-scripts-manage"
-                      >
-                        <FileCode size={14} />
-                        <span>{t("header.noScriptsAddOne", "No scripts — add one…")}</span>
-                      </button>
-                    )
-                  )}
-                </div>
-              )}
-            </div>
-            <button
-              className="mobile-overflow-item"
-              onClick={() => handleOverflowAction(onOpenSchedules)}
-              role="menuitem"
-              data-testid="overflow-schedules-btn"
-            >
-              <Clock size={16} />
-              <span>{t("header.automation", "Automation")}</span>
-            </button>
-            {/* Activity Log - in overflow on mobile */}
+            {onOpenSchedules && (
+              <button
+                className="mobile-overflow-item"
+                onClick={() => handleOverflowAction(onOpenSchedules)}
+                role="menuitem"
+                data-testid="overflow-schedules-btn"
+              >
+                <Clock size={16} />
+                <span>{t("header.automation", "Automation")}</span>
+              </button>
+            )}
             {onOpenActivityLog && (
               <button
                 className="mobile-overflow-item"
@@ -1717,7 +1112,6 @@ export function Header({
                 <span>{t("header.viewActivityLog", "View Activity Log")}</span>
               </button>
             )}
-            {/* Mailbox - in overflow on mobile */}
             {onOpenMailbox && (
               <button
                 className="mobile-overflow-item"
@@ -1732,7 +1126,6 @@ export function Header({
                 )}
               </button>
             )}
-            {/* Usage - in overflow on mobile */}
             {onOpenUsage && (
               <button
                 className="mobile-overflow-item"
@@ -1746,7 +1139,6 @@ export function Header({
                 <span>{t("header.viewUsage", "View Usage")}</span>
               </button>
             )}
-            {/* Workflows - in overflow on mobile */}
             {onOpenWorkflowEditor && (
               <button
                 className="mobile-overflow-item"

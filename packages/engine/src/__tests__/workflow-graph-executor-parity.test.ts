@@ -54,12 +54,12 @@ function runLegacy(seams: WorkflowLegacySeams) {
 }
 
 describe("WorkflowGraphExecutor interpreter-parity", () => {
-  it("is a strict no-op when workflowGraphExecutor flag is disabled", async () => {
+  it("runs when workflowGraphExecutor is absent from experimental flags", async () => {
     const prompt = vi.fn(async () => ({ outcome: "success" as const }));
     const executor = new WorkflowGraphExecutor({ handlers: { prompt, script: prompt, gate: prompt } });
     const result = await executor.run(task, { experimentalFeatures: {} });
-    expect(result.executed).toBe(false);
-    expect(prompt).not.toHaveBeenCalled();
+    expect(result.executed).toBe(true);
+    expect(prompt).toHaveBeenCalled();
   });
 
   it("matches default planning-execute-review-merge success path", async () => {

@@ -82,6 +82,7 @@ describe("WorkflowColumnPanel", () => {
     expect(within(triageRow).getByRole("button", { name: /Remove column/i })).toHaveClass("wf-column-remove");
     expect(screen.getByTestId("wf-column-agent-select-triage")).toHaveClass("wf-column-agent-select");
     expect(screen.getByTestId("wf-column-agent-badge-triage")).toHaveClass("wf-column-agent-badge");
+    expect(within(triageRow).getByRole("textbox", { name: /Column name/i })).toHaveClass("wf-column-name");
     expect(container.querySelector(".wf-column-traits")).toBeTruthy();
     expect(container.querySelector(".wf-column-agent-mode-option")).toBeTruthy();
 
@@ -116,6 +117,7 @@ describe("WorkflowColumnPanel", () => {
       ".wf-column-remove",
       ".wf-column-panel-empty",
       ".wf-column-panel-errors",
+      ".wf-column-name",
       ".wf-column-traits",
       ".wf-column-agent",
       ".wf-column-agent-label",

@@ -4,6 +4,15 @@ FN-6532 made Chat the default TaskDetailModal tab. Tests that assert Definition-
 */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
+
+// FNXC:Markdown 2026-06-23-03:30: Mock the heavy `mermaid` library so the shared
+// markdown pipeline's MermaidDiagram resolves without loading the real renderer.
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: vi.fn(),
+    render: vi.fn().mockResolvedValue({ svg: "<svg data-testid='mock-mermaid-svg'></svg>" }),
+  },
+}));
 import userEvent from "@testing-library/user-event";
 import {
   makeTask,
@@ -55,6 +64,61 @@ describe("TaskDetailModal", () => {
 
     await userEvent.click(fileLinks[0]!);
     expect(openFile).toHaveBeenCalledWith("packages/dashboard/app/App.tsx", { line: 12, col: undefined });
+  });
+
+  /*
+  FNXC:Markdown 2026-06-23-03:30:
+  The task DESCRIPTION (spec/prompt) + SUMMARY now share the markdown pipeline's
+  rehype-raw -> rehype-sanitize chain, so embedded raw HTML renders as real
+  elements (not literal text), HTML comments drop, <script> is stripped, and
+  ```mermaid fences render diagrams — while keeping `.markdown-body` styling.
+  */
+  it("renders raw HTML and mermaid in the description while stripping unsafe content", async () => {
+    const prompt = [
+      "# Prompt",
+      "",
+      "<details><summary>Disclosure title</summary>Hidden detail body.</details>",
+      "",
+      "<!-- secret comment -->",
+      "",
+      "<script>window.__pwned = true;</script>",
+      "",
+      "```mermaid",
+      "graph TD; A-->B;",
+      "```",
+    ].join("\n");
+
+    const { container } = render(
+      <FileBrowserProvider openFile={vi.fn()}>
+        <TaskDetailModal
+          initialTab="definition"
+          task={makeTask({ prompt })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />
+      </FileBrowserProvider>,
+    );
+
+    // Raw <details>/<summary> renders as a real disclosure element.
+    const details = container.querySelector(".markdown-body details");
+    expect(details).not.toBeNull();
+    expect(details?.querySelector("summary")?.textContent).toBe("Disclosure title");
+    expect(details?.textContent).toContain("Hidden detail body.");
+
+    // HTML comment is dropped, never shown as literal text.
+    expect(container.textContent).not.toContain("secret comment");
+
+    // <script> is stripped by sanitize: not rendered and never executed.
+    expect(container.querySelector("script")).toBeNull();
+    expect((window as unknown as { __pwned?: boolean }).__pwned).toBeUndefined();
+
+    // ```mermaid fence renders the diagram container (lazy MermaidDiagram).
+    const diagram = await screen.findByTestId("task-detail-mermaid-diagram");
+    expect(diagram).not.toBeNull();
   });
 
   describe("provenance display", () => {
@@ -641,6 +705,27 @@ describe("TaskDetailModal", () => {
     expect(container.querySelector(".task-detail-content--embedded")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
     expect(screen.getByRole("button", { name: "Definition" })).toBeInTheDocument();
+  });
+
+  it("renders header close control for embedded floating task details", () => {
+    const onRequestClose = vi.fn();
+    render(
+      <TaskDetailContent
+        task={makeTask()}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+        embedded
+        onRequestClose={onRequestClose}
+      />,
+    );
+
+    const closeButton = screen.getByRole("button", { name: "Close" });
+    expect(closeButton).toHaveClass("task-detail-floating-close");
+    fireEvent.click(closeButton);
+    expect(onRequestClose).toHaveBeenCalledTimes(1);
   });
 
   it("styles detail-body scrollbar rules", () => {

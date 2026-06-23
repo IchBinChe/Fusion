@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { Task, TaskDetail } from "@fusion/core";
 import { useModalManager } from "../useModalManager";
+import { scopedKey } from "../../utils/projectStorage";
 
 function createTaskDetail(id: string): TaskDetail {
   return {
@@ -47,6 +48,7 @@ function createTask(id: string): Task {
 describe("useModalManager", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   it("manages open/close state for basic modals", () => {
@@ -101,9 +103,14 @@ describe("useModalManager", () => {
     expect(result.current.newTaskInitialDescription).toBeNull();
   });
 
-  it("handles planning open, resume, and close lifecycle", () => {
+  it("handles planning open, resume, and close lifecycle without clearing quick-add drafts", () => {
+    const projectId = "proj_1";
+    const quickEntryKey = scopedKey("kb-quick-entry-text", projectId);
+    const inlineCreateKey = scopedKey("kb-inline-create-text", projectId);
+    localStorage.setItem(quickEntryKey, "quick draft");
+    localStorage.setItem(inlineCreateKey, "inline draft");
     const { result } = renderHook(() =>
-      useModalManager({ projectId: "proj_1", planningSessions: [{ id: "plan-1" }] }),
+      useModalManager({ projectId, planningSessions: [{ id: "plan-1" }] }),
     );
 
     act(() => {
@@ -120,6 +127,8 @@ describe("useModalManager", () => {
     expect(result.current.isPlanningOpen).toBe(false);
     expect(result.current.planningInitialPlan).toBeNull();
     expect(result.current.planningResumeSessionId).toBeUndefined();
+    expect(localStorage.getItem(quickEntryKey)).toBe("quick draft");
+    expect(localStorage.getItem(inlineCreateKey)).toBe("inline draft");
 
     act(() => {
       result.current.resumePlanning();
@@ -127,6 +136,46 @@ describe("useModalManager", () => {
 
     expect(result.current.isPlanningOpen).toBe(true);
     expect(result.current.planningResumeSessionId).toBe("plan-1");
+  });
+
+  it("clears scoped quick-add drafts after single-task planning completion", () => {
+    const projectId = "proj_1";
+    const quickEntryKey = scopedKey("kb-quick-entry-text", projectId);
+    const inlineCreateKey = scopedKey("kb-inline-create-text", projectId);
+    localStorage.setItem(quickEntryKey, "quick draft");
+    localStorage.setItem(inlineCreateKey, "inline draft");
+    const addToast = vi.fn();
+    const { result } = renderHook(() =>
+      useModalManager({ projectId, planningSessions: [] }),
+    );
+
+    act(() => {
+      result.current.onPlanningTaskCreated(createTask("FN-101"), addToast);
+    });
+
+    expect(addToast).toHaveBeenCalledWith(expect.any(String), "success");
+    expect(localStorage.getItem(quickEntryKey)).toBeNull();
+    expect(localStorage.getItem(inlineCreateKey)).toBeNull();
+  });
+
+  it("clears scoped quick-add drafts after multi-task planning completion", () => {
+    const projectId = "proj_1";
+    const quickEntryKey = scopedKey("kb-quick-entry-text", projectId);
+    const inlineCreateKey = scopedKey("kb-inline-create-text", projectId);
+    localStorage.setItem(quickEntryKey, "quick draft");
+    localStorage.setItem(inlineCreateKey, "inline draft");
+    const addToast = vi.fn();
+    const { result } = renderHook(() =>
+      useModalManager({ projectId, planningSessions: [] }),
+    );
+
+    act(() => {
+      result.current.onPlanningTasksCreated([createTask("FN-201"), createTask("FN-202")], addToast);
+    });
+
+    expect(addToast).toHaveBeenCalledWith(expect.any(String), "success");
+    expect(localStorage.getItem(quickEntryKey)).toBeNull();
+    expect(localStorage.getItem(inlineCreateKey)).toBeNull();
   });
 
   it("runScript sets terminalInitialCommand and opens the terminal modal", async () => {

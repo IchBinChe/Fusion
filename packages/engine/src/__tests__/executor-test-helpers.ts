@@ -313,6 +313,23 @@ export const mockedInstallTaskWorktreeIdentityGuard = vi.mocked(installTaskWorkt
 
 export type EventListener = (...args: unknown[]) => void;
 
+const withLegacyWorkflowFeatureDefaults = (settings: Record<string, unknown>) => ({
+  ...settings,
+  experimentalFeatures: {
+    workflowColumns: false,
+    workflowGraphExecutor: false,
+    ...((settings.experimentalFeatures as Record<string, unknown> | undefined) ?? {}),
+  },
+});
+
+const createLegacySettingsMock = (initialSettings: Record<string, unknown>) => {
+  const mock = vi.fn().mockResolvedValue(withLegacyWorkflowFeatureDefaults(initialSettings));
+  const mockResolvedValue = mock.mockResolvedValue.bind(mock);
+  mock.mockResolvedValue = ((settings: Record<string, unknown>) =>
+    mockResolvedValue(withLegacyWorkflowFeatureDefaults(settings))) as typeof mock.mockResolvedValue;
+  return mock;
+};
+
 export function createMockStore() {
   const listeners = new Map<string, EventListener[]>();
   const store = {
@@ -370,7 +387,7 @@ export function createMockStore() {
     parseStepsFromPrompt: vi.fn().mockResolvedValue([]),
     parseFileScopeFromPrompt: vi.fn().mockResolvedValue([]),
     updateSettings: vi.fn().mockResolvedValue({}),
-    getSettings: vi.fn().mockResolvedValue({
+    getSettings: createLegacySettingsMock({
       maxConcurrent: 2,
       maxWorktrees: 4,
       pollIntervalMs: 15000,

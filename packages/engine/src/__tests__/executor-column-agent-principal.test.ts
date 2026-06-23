@@ -292,10 +292,9 @@ describe("column-agent principal alignment (plan U5)", () => {
       expect(executeSpy).not.toHaveBeenCalled();
     });
 
-    it("kill-switch: workflowColumns off → pass 2 is inert even with a live override binding (R10)", async () => {
-      // The documented rollback is disabling workflowColumns alone; pass 2
-      // resolves the IR directly (not via the per-run resolver map), so it
-      // carries its own flag guard (PR #1432 review).
+    it("ignores stale workflowColumns=false for pass 2 column-agent matching", async () => {
+      // Workflow columns graduated from Experimental. Persisted false values are
+      // tolerated but do not disable the IR-resolved column-agent dispatch pass.
       const task = singleSessionTask({ assignedAgentId: "agent-Y" });
       const store = resumeStore(task, irWithExecuteSeamColumn(OVERRIDE_COL));
       store.getSettings.mockResolvedValue({
@@ -304,7 +303,7 @@ describe("column-agent principal alignment (plan U5)", () => {
         experimentalFeatures: { workflowGraphExecutor: true, workflowColumns: false },
       } as any);
       const { executor } = makeExecutor(store, { "agent-X": makeColumnAgent() });
-      await expect((executor as any).taskEffectiveAgentMatches(task, "agent-X")).resolves.toBe(false);
+      await expect((executor as any).taskEffectiveAgentMatches(task, "agent-X")).resolves.toBe(true);
     });
 
     it("step-execute template node binding governs → pass 2 matches a foreach-template-bound column agent (walks template subgraphs)", async () => {

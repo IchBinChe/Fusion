@@ -32,6 +32,26 @@
   min-height: 80px;
 }
 
+/*
+FNXC:QuickEntry 2026-06-22-19:25:
+List view renders quick-add as a COMPACT single-line input so the box isn't tall.
+Clamp the textarea to exactly one line (min-height == max-height == one line), forbid auto-grow/manual resize, and scroll overflow instead of growing.
+Tighten container vertical padding so the overall box is just the one-line input height.
+Board/columns omit `.quick-entry--single-line`, keeping the tall 80px + auto-grow behavior.
+*/
+.quick-entry--single-line {
+  padding-top: var(--space-xs);
+  padding-bottom: var(--space-xs);
+}
+
+.quick-entry-box.quick-entry--single-line .quick-entry-input,
+.quick-entry-box.quick-entry--single-line .quick-entry-input--expanded {
+  min-height: 36px;
+  max-height: 36px;
+  overflow-y: auto;
+  resize: none;
+}
+
 @media (max-width: 768px) {
   .quick-entry-input--expanded {
     min-height: 60px;
@@ -60,10 +80,12 @@
   width: 100%;
 }
 
-/* Override padding from .description-with-refine textarea to fill available width */
-/* The refine button is in the controls panel, not overlaid on textarea */
-.quick-entry-textarea-wrap textarea {
-  padding-right: 8px;
+/*
+FNXC:QuickEntry 2026-06-23-02:45:
+The global `.description-with-refine textarea { padding-right: 70px }` (styles.css) reserves space for a refine button overlaid at the textarea's right edge. In QuickEntryBox the refine button lives in the controls panel, NOT overlaid on the textarea, so that 70px is dead space — it left a large empty gap on the right of the quick-add input (computed padding-right: 70px). Reclaim that width down to a tight var(--space-sm). Scope to the wrapping box (.description-with-refine ancestor) so this beats the global rule on specificity, not just source order (the prior `.quick-entry-textarea-wrap textarea` override tied on specificity and lost to styles.css load order). Nothing overlays the input's right edge in this variant, so text now uses the full reclaimed width.
+*/
+.quick-entry-box .description-with-refine .quick-entry-textarea-wrap textarea {
+  padding-right: var(--space-sm);
 }
 
 /* Quick Entry Box expand button - bottom-right of textarea */

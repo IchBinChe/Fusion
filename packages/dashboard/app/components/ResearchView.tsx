@@ -8,6 +8,7 @@ import { useResearch } from "../hooks/useResearch";
 import type { ResearchProviderOption } from "../research-types";
 import { ResearchTaskActionModal } from "./ResearchTaskActionModal";
 import { LoadingSpinner } from "./LoadingSpinner";
+import { ViewHeader } from "./ViewHeader";
 import type { SectionId } from "./SettingsModal";
 import "./ResearchView.css";
 import { recordResumeEvent } from "../utils/resumeInstrumentation";
@@ -252,17 +253,20 @@ export function ResearchView({ projectId, addToast, onOpenSettings, readinessVer
 
   return (
     <section className="research-view" aria-label={t("research.viewLabel", "Research view")}>
-      <header className="research-view__header">
-        <div>
-          <h2 className="research-view__title">{t("research.title", "Research")}</h2>
-          <p className="research-view__subtitle">{t("research.subtitle", "Cited search and synthesis runs: gather sources, fetch content, and synthesize findings.")}</p>
-        </div>
-        <div className="research-view__header-actions">
+      {/*
+      FNXC:Navigation 2026-06-22-01:10:
+      Research adopts the shared ViewHeader (CC-modeled) for a consistent main-content title row; the Refresh action moves into the header actions cluster and the prior subtitle renders just below the header so the descriptive copy is preserved.
+      */}
+      <ViewHeader
+        icon={Search}
+        title={t("research.title", "Research")}
+        actions={(
           <button className="btn" type="button" onClick={() => void refresh()}>
             {t("actions.refresh", "Refresh")}
           </button>
-        </div>
-      </header>
+        )}
+      />
+      <p className="research-view__subtitle">{t("research.subtitle", "Cited search and synthesis runs: gather sources, fetch content, and synthesize findings.")}</p>
 
       {setupState ? (
         <div className="research-view__state research-view__state--error card" data-testid="research-state-unavailable">

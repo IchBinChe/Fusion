@@ -1,7 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import fs from "fs";
+import path from "path";
 import { ExecutorStatusBar } from "../ExecutorStatusBar";
+
+const viewportModeMock = vi.hoisted(() => ({ value: "desktop" as "desktop" | "tablet" | "mobile" }));
+const mockFetchScripts = vi.hoisted(() => vi.fn());
+
+vi.mock("../../hooks/useViewportMode", () => ({
+  useViewportMode: () => viewportModeMock.value,
+}));
+
+vi.mock("../../api", () => ({
+  fetchScripts: (...args: unknown[]) => mockFetchScripts(...args),
+}));
 
 // Mock the useExecutorStats hook
 vi.mock("../../hooks/useExecutorStats", () => ({
@@ -32,6 +45,13 @@ import { useExecutorStats } from "../../hooks/useExecutorStats";
 import type { ExecutorStats } from "../../api";
 
 const mockUseExecutorStats = useExecutorStats as ReturnType<typeof vi.fn>;
+const executorStatusBarCss = fs.readFileSync(path.join(__dirname, "../ExecutorStatusBar.css"), "utf-8");
+
+function getCssRuleBlock(selector: string): string {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = executorStatusBarCss.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`));
+  return match?.[1] ?? "";
+}
 
 /** Minimal empty task list used by tests that mock the hook. */
 const emptyTasks: any[] = [];
@@ -65,6 +85,8 @@ describe("ExecutorStatusBar", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    viewportModeMock.value = "desktop";
+    mockFetchScripts.mockResolvedValue({ build: "pnpm build" });
     vi.mocked(mockUseExecutorStats).mockReturnValue({
       stats: defaultStats,
       loading: false,
@@ -167,6 +189,104 @@ describe("ExecutorStatusBar", () => {
       expect(statusBar).toHaveTextContent("3");
     });
 
+    it("renders the terminal launcher in the footer on desktop and opens terminal from the preserved toggle test id", async () => {
+      const user = userEvent.setup();
+      const onToggleTerminal = vi.fn();
+      render(<ExecutorStatusBar tasks={emptyTasks} onToggleTerminal={onToggleTerminal} onOpenScripts={vi.fn()} onRunScript={vi.fn()} />);
+
+      expect(screen.getByTestId("executor-terminal-launcher-segment")).toBeInTheDocument();
+      await user.click(screen.getByTestId("terminal-toggle-btn"));
+
+      expect(onToggleTerminal).toHaveBeenCalledTimes(1);
+      await user.click(screen.getByTestId("scripts-btn"));
+
+      expect(screen.getByTestId("scripts-btn")).toBeInTheDocument();
+      expect(await screen.findByTestId("quick-scripts-dropdown")).toBeInTheDocument();
+      await waitFor(() => expect(mockFetchScripts).toHaveBeenCalledWith(undefined));
+    });
+
+    it("renders the terminal launcher in the footer on tablet", () => {
+      viewportModeMock.value = "tablet";
+
+      render(<ExecutorStatusBar tasks={emptyTasks} onToggleTerminal={vi.fn()} onOpenScripts={vi.fn()} onRunScript={vi.fn()} />);
+
+      expect(screen.getByTestId("executor-terminal-launcher-segment")).toBeInTheDocument();
+      expect(screen.getByTestId("terminal-toggle-btn")).toBeInTheDocument();
+    });
+
+    it("renders the Quick Chat footer launcher beside Terminal when footer mode is enabled", async () => {
+      const user = userEvent.setup();
+      const onOpenQuickChat = vi.fn();
+
+      render(
+        <ExecutorStatusBar
+          tasks={emptyTasks}
+          onToggleTerminal={vi.fn()}
+          onOpenScripts={vi.fn()}
+          onRunScript={vi.fn()}
+          quickChatButtonMode="footer"
+          onOpenQuickChat={onOpenQuickChat}
+        />,
+      );
+
+      expect(screen.getByTestId("executor-quick-chat-launcher-segment")).toBeInTheDocument();
+      expect(screen.getByTestId("executor-terminal-launcher-segment")).toBeInTheDocument();
+      await user.click(screen.getByTestId("executor-quick-chat-launcher"));
+
+      expect(onOpenQuickChat).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps Quick Chat and Terminal footer launchers on the same font and color tokens", () => {
+      const launcherRule = getCssRuleBlock(".executor-status-bar__footer-launcher");
+
+      expect(launcherRule).toContain("color: inherit");
+      expect(launcherRule).toContain("font-family: var(--font-primary)");
+      expect(launcherRule).toContain("font-size: inherit");
+      expect(launcherRule).toContain("font-weight: 500");
+      expect(launcherRule).not.toMatch(/#|rgb\(/i);
+    });
+
+    it("omits the Quick Chat footer launcher for floating, off, and mobile modes", () => {
+      const { rerender } = render(
+        <ExecutorStatusBar
+          tasks={emptyTasks}
+          quickChatButtonMode="floating"
+          onOpenQuickChat={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByTestId("executor-quick-chat-launcher-segment")).toBeNull();
+
+      rerender(
+        <ExecutorStatusBar
+          tasks={emptyTasks}
+          quickChatButtonMode="off"
+          onOpenQuickChat={vi.fn()}
+        />,
+      );
+      expect(screen.queryByTestId("executor-quick-chat-launcher-segment")).toBeNull();
+
+      viewportModeMock.value = "mobile";
+      rerender(
+        <ExecutorStatusBar
+          tasks={emptyTasks}
+          quickChatButtonMode="footer"
+          onOpenQuickChat={vi.fn()}
+        />,
+      );
+      expect(screen.queryByTestId("executor-quick-chat-launcher-segment")).toBeNull();
+    });
+
+    it("omits the terminal launcher from the footer on mobile", () => {
+      viewportModeMock.value = "mobile";
+
+      render(<ExecutorStatusBar tasks={emptyTasks} onToggleTerminal={vi.fn()} onOpenScripts={vi.fn()} onRunScript={vi.fn()} />);
+
+      expect(screen.queryByTestId("executor-terminal-launcher-segment")).toBeNull();
+      expect(screen.queryByTestId("terminal-toggle-btn")).toBeNull();
+      expect(screen.queryByTestId("scripts-btn")).toBeNull();
+    });
+
     it("does not show stuck tasks segment when count is 0", () => {
       render(<ExecutorStatusBar tasks={emptyTasks} />);
 
@@ -248,6 +368,33 @@ describe("ExecutorStatusBar", () => {
       expect(stateElement).toHaveTextContent("Idle");
     });
 
+    it("shows Stopped state in error color without running class on desktop and mobile", () => {
+      vi.mocked(mockUseExecutorStats).mockReturnValue({
+        stats: { ...defaultStats, executorState: "stopped", runningTaskCount: 0 },
+        loading: false,
+        error: null,
+        refresh: vi.fn(),
+      });
+
+      const { rerender } = render(<ExecutorStatusBar tasks={emptyTasks} />);
+
+      const desktopStatusBar = screen.getByRole("status");
+      const desktopStateElement = desktopStatusBar.querySelector(".executor-status-bar__state");
+      const desktopStateIcon = screen.getByTestId("executor-state-engine-control-trigger").querySelector("svg");
+      expect(desktopStateElement).toHaveTextContent("Stopped");
+      expect(desktopStateElement).toHaveStyle({ color: "var(--color-error)" });
+      expect(desktopStateIcon).toHaveStyle({ color: "var(--color-error)" });
+      expect(desktopStatusBar).not.toHaveClass("executor-status-bar--running");
+
+      viewportModeMock.value = "mobile";
+      rerender(<ExecutorStatusBar tasks={emptyTasks} />);
+
+      const mobileStatusBar = screen.getByRole("status");
+      const mobileStateElement = mobileStatusBar.querySelector(".executor-status-bar__state");
+      expect(mobileStateElement).toHaveTextContent("Stopped");
+      expect(mobileStatusBar).not.toHaveClass("executor-status-bar--running");
+    });
+
     it("applies running class when executor is running", () => {
       render(<ExecutorStatusBar tasks={emptyTasks} />);
 
@@ -295,7 +442,7 @@ describe("ExecutorStatusBar", () => {
 
       render(<ExecutorStatusBar tasks={emptyTasks} />);
 
-      const statusBar = screen.getByRole("status");
+      const statusBar = screen.getByLabelText("Executor status");
       expect(statusBar).toHaveTextContent("Loading...");
       expect(statusBar).toHaveClass("executor-status-bar--loading");
     });

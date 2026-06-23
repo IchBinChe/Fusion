@@ -1225,11 +1225,11 @@ describe("Crash scenario edge cases", () => {
 
     await executor.resumeOrphaned();
     await waitForAsyncExpectation(() => {
-      expect(onError).toHaveBeenCalledWith(task, expect.any(Error));
+      expect(onError).toHaveBeenCalledWith(expect.objectContaining({ id: task.id }), expect.any(Error));
     });
 
     // onError should have been called
-    expect(onError).toHaveBeenCalledWith(task, expect.any(Error));
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ id: task.id }), expect.any(Error));
 
     // Semaphore slot should be released
     expect(sem.activeCount).toBe(0);

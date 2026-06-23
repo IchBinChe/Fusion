@@ -18,6 +18,7 @@ export const PROJECT_STORAGE_KEYS: string[] = [
   "kb-dashboard-list-sidebar-width",
   "kb-dashboard-mailbox-sidebar-width",
   "kb-dashboard-agents-sidebar-width",
+  "kb-dashboard-github-import-list-width",
   "kb-quick-entry-text",
   "kb-inline-create-text",
   "fn-agent-view",
@@ -34,6 +35,7 @@ export const PROJECT_STORAGE_KEYS: string[] = [
   "kb-dashboard-base-branch-filter",
   "kb-capacity-risk-banner-dismissed",
   "kb-files-line-numbers",
+  "kb-dashboard-dock-files-current",
   "fusion-plugin-dependency-graph:positions",
 ];
 

@@ -5,6 +5,9 @@ import { BUILTIN_WORKFLOW_SETTINGS } from "./builtin-workflow-settings.js";
 /**
  * FNXC:WorkflowMarketing 2026-06-20-00:00:
  * Fusion needs a non-coding built-in workflow for marketing and content work. Keep the engine pipeline unchanged by reusing the standard lifecycle trait vocabulary and the canonical merge-primitive region while exposing marketing-specific columns and prompts for brief, draft, and editorial review phases.
+ *
+ * FNXC:WorkflowMarketing 2026-06-21-12:00:
+ * FN-6906 expands non-coding workflow prompts so marketing agents produce structured, high-quality artifacts instead of thin role-only responses. Deliverable-producing nodes must persist the reviewable content with fn_task_document_write as the guaranteed path and may register a previewable artifact with fn_artifact_register when that tool is available.
  */
 const RAW_BUILTIN_MARKETING_WORKFLOW_IR: WorkflowIr = {
   version: "v2",
@@ -43,7 +46,7 @@ const RAW_BUILTIN_MARKETING_WORKFLOW_IR: WorkflowIr = {
         seam: "planning",
         name: "Content brief",
         prompt:
-          "You are a marketing content strategist. Turn this task into a concrete content brief: audience, channel, key message, format, success metric, required source material, and approval constraints.",
+          "You are a marketing content strategist. Use the task description, any attached context, and prior stakeholder notes to turn the request into a concrete content brief. Structure the output with: 1) audience and customer problem, 2) channel, format, and distribution context, 3) key message and supporting proof points, 4) required source material or claims to verify, 5) success metric, CTA, and approval constraints, and 6) open questions or assumptions. A good brief is specific enough for a marketing copywriter to execute without guessing, avoids unsupported claims, calls out missing inputs, and keeps the scope aligned to the task rather than inventing a campaign.",
       },
     },
     {
@@ -54,7 +57,7 @@ const RAW_BUILTIN_MARKETING_WORKFLOW_IR: WorkflowIr = {
         seam: "execute",
         name: "Draft content",
         prompt:
-          "You are a marketing copywriter executing the approved brief. Produce the requested deliverable, following brand voice, audience intent, channel constraints, format requirements, and the brief's success metric.",
+          "You are a marketing copywriter executing the approved brief. Use the task description, the content brief, prior-node output, source material, and any brand or channel constraints to produce the requested deliverable. Structure the response with: 1) a short execution summary, 2) the finished content in the required format, 3) channel-specific variants or subject lines when useful, 4) source/claim notes and assumptions, and 5) a publication-readiness checklist tied to audience intent, brand voice, CTA clarity, format requirements, and the brief's success metric. The copy should be clear, audience-specific, factual, and ready for editorial review; avoid generic filler, unverified claims, and off-brief tangents. Persist the finished content as a task document using fn_task_document_write with key \"marketing-draft\" so the human can review it. If an artifact-registry tool (fn_artifact_register) is available, also register the deliverable as a previewable artifact.",
         maxRetries: 2,
       },
     },
@@ -66,7 +69,7 @@ const RAW_BUILTIN_MARKETING_WORKFLOW_IR: WorkflowIr = {
         seam: "review",
         name: "Editorial review",
         prompt:
-          "You are an independent editorial reviewer. Check the draft for brand voice, factual accuracy, audience fit, channel fit, CTA clarity, compliance with the brief, and substantive quality issues; block on issues that would harm publication readiness.",
+          "You are an independent editorial reviewer. Use the task description, the content brief, the marketing draft, and any persisted marketing-draft task document to assess publication readiness. Structure the review with: 1) verdict and publication recommendation, 2) brief-compliance findings, 3) brand voice, audience fit, channel fit, and CTA clarity notes, 4) factual accuracy and unsupported-claim checks, 5) required edits that block publication, and 6) non-blocking polish suggestions. Good editorial review is specific, evidence-backed, and focused on substantive quality issues; block only issues that would harm publication readiness, compliance with the brief, or customer trust, and avoid subjective nits without a clear publication impact.",
       },
     },
     { id: "merge-gate", kind: "merge-gate", column: "editorial-review", config: { gate: "auto-merge" } },

@@ -4,6 +4,11 @@
 
 Fusion uses multiple agent roles for planning, execution, review, and merge workflows.
 
+<!--
+FNXC:WorkflowRouting 2026-06-22-12:00:
+Agent-facing docs must preserve the workflow movement boundary: agents can assign workflows when the user explicitly asked or when creating a task, while executors cannot reroute the task under execution on their own initiative.
+-->
+
 ## CLI session actions
 
 The dashboard's CLI session banner uses authenticated `POST /api/cli-sessions/:id/*` routes for task-bound CLI sessions. `POST /api/cli-sessions/:id/relaunch` is project-scoped, rejects sessions that do not have a `taskId`, records a relaunch intent, and lets the engine listener clear resume linkage before moving the owning task back to `todo` for a fresh executor launch. This route backs the `resume-exhausted` banner's **Relaunch fresh** action; when a session summary has no `cliSessionId`, the client does not call the route.
@@ -27,6 +32,19 @@ fn chat <agent-id> [message…] [--once] [--non-interactive] [--poll-ms <n>]
 - Agent-acting session lanes share the same skill-injection contract as executor sessions: executor, merger, triage, reviewer, heartbeat, step-session, dashboard chat/room responders, CLI agent execution, planning, mission interview, milestone/slice interview, agent-onboarding interview, workflow design, memory dreams/insight extraction, and scheduled cron automation all request agent/fallback skills plus enabled plugin-contributed skills when a plugin runner is available. Utility-only lanes that only summarize/extract/generate JSON (title/PR summaries, memory compaction, subtask breakdown, text refinement, agent generation, PR metadata generation, evaluator/research synthesis, and similar one-shot helpers) intentionally stay exempt to avoid loading skills where no agent-style tool loop can use them.
 - In dashboard model-loop chat (main chat, QuickChat, and room responders), typing `/skill:{name}` requests that skill for the current AI session and strips the slash token from the prompt sent to the model. The requested skill is still subject to the normal enabled/disabled execution-skill filters; CLI-agent-backed PTY chat keeps raw terminal input semantics and does not interpret this command.
 - Dashboard chat and planning sessions with a scoped task store expose `fn_task_document_write` and `fn_task_document_read`; because neither lane has an ambient task, both tools require an explicit `task_id`.
+- Agent workflow-routing tools follow an intent boundary: agents may select or change a task workflow only when the user explicitly requested that workflow or when the agent created the task. Executors must not call `fn_workflow_select` to reroute the task they are executing unless the task instructions or a user steering comment explicitly asks for the workflow change.
+- Executor, heartbeat, and dashboard chat sessions expose artifact registry tools so agents can publish and inspect multi-type deliverables without relying on the dashboard gallery. Planning sessions intentionally exclude artifact tools until they can thread the existing `MessageStore` dependency.
+
+### Artifact registry tools
+
+Artifact tools operate on the shared artifact registry, so artifacts are visible across agents and tasks when the caller has the artifact ID or can discover it through filters.
+
+- `fn_artifact_register` registers a `document`, `image`, `video`, `audio`, or `other` artifact with `title`, optional `description`, optional `mimeType`, optional inline text `content`, optional `uri`/path reference, and optional `taskId`. Tool callers should provide either inline `content` or a `uri`/path reference for media stored elsewhere. Executor/heartbeat sessions infer the registering agent as `authorId`; dashboard chat uses the `dashboard-chat` author and requires `task_id` because chat has no ambient task.
+- `fn_artifact_list` lists artifacts across agents and tasks with optional `type`, `authorId`, `taskId`, `search`, `limit`, and `offset` filters. Dashboard chat's scoped variant requires `task_id` and otherwise supports `type`, `authorId`, `search`, `limit`, and `offset` for that task.
+- `fn_artifact_view` fetches one artifact by `id`, returning registry metadata plus inline `content` when present or the stored `uri`/path reference for media artifacts.
+- Successful registration emits a best-effort `system` → `user` inbox notification to `DASHBOARD_USER_ID` with `artifactId`, `artifactType`, `title`, `authorId`, and optional `taskId` metadata. Notification delivery failures are logged and must never fail or roll back the artifact registration.
+
+For the user-facing gallery and notification UX, see [Artifacts View](./dashboard-guide.md#artifacts-view) and [Mailbox View](./dashboard-guide.md#mailbox-view). For storage layout and hydration semantics, see [Artifact registry](./storage.md#artifact-registry-fn-6777).
 
 ### Flags
 
@@ -127,13 +145,13 @@ V1 runtime action categories:
 
 The engine classifies tool calls by behavior (not namespace alone):
 
-- `file_write_delete`: built-in `write` / `edit`, plus persistent write helpers like `fn_task_document_write`, `fn_memory_append`, `fn_task_attach`
+- `file_write_delete`: built-in `write` / `edit`, plus direct filesystem attach helpers like `fn_task_attach`; low-risk coordination/registration writes such as `fn_task_document_write` and `fn_artifact_register` are handled by the coordination-exempt/read-only allow-lists below rather than this category
 - `command_execution`: built-in `bash` when not classified as mutating git
 - `git_write`: mutating git shell commands run via `bash`
 - `network_api`: external/network-facing tools (for example `fn_research_run`, `fn_research_cancel`, `fn_research_retry`, `fn_web_fetch`)
 - `task_agent_mutation`: task/agent mutation tools (for example `fn_update_agent_config`, `fn_task_pause`, `fn_spawn_agent`; action-gate task-import/create tools like `fn_task_create`, `fn_delegate_task`, `fn_task_import_github`, and `fn_task_import_github_issue` use this category in action-gate evaluation)
 - Dashboard permission editors now show per-category example tools sourced from `AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES` in `@fusion/core`, plus a read-only exempt-tools panel for coordination/messaging bypass tools.
-- `none`: positively recognized read-only tools (`read`, `grep`, `find`, `ls`, list/show/get-style `fn_*` tools, plus permanent-agent coordination/task-creation helpers like `fn_task_create`, `fn_delegate_task`, `fn_task_import_github`, and `fn_task_import_github_issue`)
+- `none`: positively recognized read-only tools (`read`, `grep`, `find`, `ls`, list/show/get-style `fn_*` tools, plus permanent-agent coordination/task-creation helpers like `fn_task_create`, `fn_delegate_task`, `fn_task_import_github`, and `fn_task_import_github_issue`). Artifact tools mirror `fn_task_document_write` in the shipped allow-lists: `fn_artifact_register`, `fn_artifact_list`, and `fn_artifact_view` are present in `READONLY_FN_TOOLS` and `COORDINATION_EXEMPT_TOOLS`, so registration is treated as coordination/registry publication instead of a broad mutation approval.
 
 `bash` git-write heuristic in v1:
 
@@ -152,7 +170,7 @@ Approval pause/resume lifecycle (FN-3548):
 
 - Permanent-agent gating short-circuits `block` and `require-approval` actions before tool execution and returns structured non-success tool results.
 - For `require-approval`, the engine creates/reuses a durable approval request and pauses execution with canonical `pauseReason: "awaiting-approval"`.
-- If task-backed, the owning task is paused (`Task.paused=true`, `pausedByAgentId=<requester>`); the requesting agent is paused (`state="paused"`, `pauseReason="awaiting-approval"`).
+- If task-backed, the owning task is paused (`Task.paused=true`, `pausedByAgentId=<requester>`); the requesting agent is paused (`state="paused"`, `pauseReason="awaiting-approval"`). The task-detail **Paused by agent** indicator is context only: operators may still manually pause or unpause an agent-assigned task, and unpause clears the task pause latch.
 - Dedupe semantics by `approvalDedupeKey`: `pending` reuses the same request, `approved` allows exactly one execution and then marks request `completed`, `denied` stays blocked, `completed` requires a fresh request.
 - HTTP decision endpoint resumes best-effort: `POST /api/approvals/:id/decision` with `{ decision: "approve" | "deny", comment? }` unpauses matching task/agent when they are paused for `awaiting-approval`.
 - Approval API surface: `GET /api/approvals` (supports status/limit/offset and returns `{ requests, total, pendingCount }`), `GET /api/approvals/:id` (includes request context + audit/history), `POST /api/approvals/:id/decision`.
@@ -691,6 +709,14 @@ Before clicking **Create**, the final review step remains editable for identity/
 - Inline Instructions
 
 The final `createAgent(...)` call always uses the latest values from these step-2 controls.
+
+### First-run setup first agent
+
+After first-project registration, first-run setup asks whether to create a first persistent agent before entering the dashboard. The CEO preset is selected by default because this first agent is framed as an optional coordinator that can help create tasks and keep direction across sessions.
+
+Users can choose a preset, create the project agent, or skip it and create agents later from the Agents view. Agents are optional for task work: Fusion still starts temporary agents to plan, code, review, and merge tasks.
+
+When `experimentalFeatures.agentOnboarding` is enabled, first-run setup also offers the same draft-first **AI Interview** path used by the New Agent dialog. Applying the interview draft updates the setup preview, but persistence remains explicit through **Create Agent**.
 
 ### Experimental planning-style onboarding
 

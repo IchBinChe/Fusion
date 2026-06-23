@@ -15,8 +15,9 @@ export interface GeneralSectionProps extends SectionBaseProps {
     projectTrackingRepoOptions: TrackingRepoOption[];
     projectTrackingRepoLoading: boolean;
     projectTrackingRepoError: string | null;
+    onQuickChatButtonModeChange?: (mode: "floating" | "footer" | "off") => void;
 }
-export function GeneralSection({ scopeBanner, form, setForm, projectId, addToast, prefixError, setPrefixError, projectTrackingRepoOptions, projectTrackingRepoLoading, projectTrackingRepoError, }: GeneralSectionProps) {
+export function GeneralSection({ scopeBanner, form, setForm, projectId, addToast, prefixError, setPrefixError, projectTrackingRepoOptions, projectTrackingRepoLoading, projectTrackingRepoError, onQuickChatButtonModeChange, }: GeneralSectionProps) {
     const { t } = useTranslation("app");
     const [builtinWorkflows, setBuiltinWorkflows] = useState<WorkflowDefinition[]>([]);
     useEffect(() => {
@@ -106,9 +107,17 @@ export function GeneralSection({ scopeBanner, form, setForm, projectId, addToast
         <small>{t("settings.general.controlsHowFutureTaskSpecsHandleReleaseNote", " Controls how future task specs handle release-note artifacts at completion. Use changeset mode for repositories that follow ")}<code>.changeset</code>{t("settings.general.workflowsOrChangelogModeWhenContributorsShouldUpdate", " workflows, or changelog mode when contributors should update an existing changelog file. ")}</small>
       </div>
       <div className="form-group">
-        <label htmlFor="showQuickChatFAB" className="checkbox-label">
-          <input id="showQuickChatFAB" type="checkbox" checked={form.showQuickChatFAB === true} onChange={(e) => setForm((f) => ({ ...f, showQuickChatFAB: e.target.checked }))}/>{t("settings.general.showQuickChatButton", " Show quick chat button ")}</label>
-        <small>{t("settings.general.showTheFloatingChatButtonInTheDashboard", "Show the floating chat button in the dashboard. Chat is still accessible from the Chat tab in the mobile navigation.")}</small>
+        <label htmlFor="quickChatButtonMode">{t("settings.general.quickChatLauncher", "Quick Chat launcher")}</label>
+        <select id="quickChatButtonMode" className="select" value={form.quickChatButtonMode ?? (form.showQuickChatFAB ? "floating" : "off")} onChange={(e) => setForm((f) => {
+            const mode = e.target.value as "floating" | "footer" | "off";
+            onQuickChatButtonModeChange?.(mode);
+            return { ...f, quickChatButtonMode: mode, showQuickChatFAB: mode === "floating" };
+        })}>
+          <option value="floating">{t("settings.general.quickChatLauncherFloating", "Floating button")}</option>
+          <option value="footer">{t("settings.general.quickChatLauncherFooter", "Footer button")}</option>
+          <option value="off">{t("settings.general.off", "Off")}</option>
+        </select>
+        <small>{t("settings.general.quickChatLauncherHint", "Choose whether Quick Chat opens from the draggable floating button, a footer button beside Terminal, or stays hidden.")}</small>
       </div>
       <h4 className="settings-section-heading settings-section-heading--spaced">{t("settings.general.chatHistory", "Chat history")}</h4>
       <div className="form-group">
@@ -190,7 +199,15 @@ export function GeneralSection({ scopeBanner, form, setForm, projectId, addToast
           <option value="new-tasks">{t("settings.general.onForNewTasks", "On for new tasks")}</option>
         </select>
         <small>{t("settings.general.controlsWhetherNewlyCreatedTasksHaveGitHubIssue", " Controls whether newly created tasks have GitHub issue tracking enabled by default. Individual tasks can still override this from the task detail modal. ")}</small>
-        <small>{t("settings.general.trackingIssuesUseThisTaskAposSTitle", " Tracking issues use this task&apos;s title. If a task has no title yet, Fusion can summarize its description using the title summarization model in Project Models. ")}{!form.autoSummarizeTitles && !form.useAiMergeCommitSummary && !form.githubTrackingEnabledByDefault
+        {/*
+          FNXC:SettingsGeneral 2026-06-22-03:20:
+          Tracking-issue helper copy. The FN-6771 JSX→t() extraction left a raw HTML
+          entity ("&apos;") in this default string. As a t() argument the string is a
+          plain JS value (not JSX-decoded), so the entity rendered verbatim as the
+          literal "&apos;" instead of an apostrophe. Use a real apostrophe so the copy
+          reads correctly in both modal and embedded presentations.
+        */}
+        <small>{t("settings.general.trackingIssuesUseThisTaskAposSTitle", " Tracking issues use this task's title. If a task has no title yet, Fusion can summarize its description using the title summarization model in Project Models. ")}{!form.autoSummarizeTitles && !form.useAiMergeCommitSummary && !form.githubTrackingEnabledByDefault
             ? t("settings.general.enableSummarizationInProjectModelsToConfigureThatModel", " Enable summarization in Project Models to configure that model.")
             : ""}
         </small>

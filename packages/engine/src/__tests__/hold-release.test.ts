@@ -19,7 +19,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
-import { TaskStore, type WorkflowIr } from "@fusion/core";
+import { TaskStore, type Task, type WorkflowIr } from "@fusion/core";
 import {
   runHoldReleaseSweep,
   promoteHeldTask,
@@ -96,12 +96,90 @@ describe("hold-release sweep (U6)", () => {
     return task.id;
   }
 
-  it("flag OFF: sweep is a no-op (legacy scheduler path untouched)", async () => {
+  it("ignores stale workflowColumns=false and still releases held default-workflow cards", async () => {
     await store.updateGlobalSettings({ experimentalFeatures: { workflowColumns: false } });
     const id = await seedTodoCard();
     const result = await runHoldReleaseSweep(store, noReserveDeps);
+    expect(result.released).toEqual([id]);
+    expect((await store.getTask(id))?.column).toBe("in-progress");
+  });
+
+  it("does not let unrelated moved events disable the current task's eventless release fallback", async () => {
+    const held = {
+      id: "FN-777",
+      title: "Held",
+      description: "",
+      column: "todo",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as Task;
+    let onMoved: ((data: { task: Task; to: string }) => void) | undefined;
+    const release = vi.fn();
+    const fakeStore = {
+      getSettings: vi.fn(async () => ({
+        maxConcurrent: 4,
+        experimentalFeatures: { workflowColumns: true },
+      })),
+      listTasks: vi.fn(async () => [held]),
+      moveTask: vi.fn(async () => {
+        onMoved?.({ task: { ...held, id: "FN-OTHER" }, to: "in-progress" });
+        held.column = "in-progress";
+        return held;
+      }),
+      getTaskWorkflowSelection: vi.fn(() => null),
+      on: vi.fn((_event: string, listener: (data: { task: Task; to: string }) => void) => {
+        onMoved = listener;
+      }),
+      off: vi.fn(),
+    } as unknown as TaskStore;
+
+    const result = await runHoldReleaseSweep(fakeStore, {
+      now: () => Date.now(),
+      reserveSlot: () => ({ release }),
+    });
+
+    expect(result.released).toEqual(["FN-777"]);
+    expect(release).not.toHaveBeenCalled();
+  });
+
+  it("releases reservations when an eventless move returns no task row", async () => {
+    const held = {
+      id: "FN-778",
+      title: "Held void",
+      description: "",
+      column: "todo",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as Task;
+    const release = vi.fn();
+    const fakeStore = {
+      getSettings: vi.fn(async () => ({
+        maxConcurrent: 4,
+        experimentalFeatures: { workflowColumns: true },
+      })),
+      listTasks: vi.fn(async () => [held]),
+      moveTask: vi.fn(async () => undefined),
+      getTaskWorkflowSelection: vi.fn(() => null),
+      on: vi.fn(),
+      off: vi.fn(),
+    } as unknown as TaskStore;
+
+    const result = await runHoldReleaseSweep(fakeStore, {
+      now: () => Date.now(),
+      reserveSlot: () => ({ release }),
+    });
+
     expect(result.released).toEqual([]);
-    expect((await store.getTask(id))?.column).toBe("todo");
+    expect(result.held).toEqual([{ taskId: "FN-778", reason: "move-rejected-or-no-slot" }]);
+    expect(release).toHaveBeenCalledTimes(1);
   });
 
   it("two holds, one slot: exactly one releases; the other releases next sweep after the slot frees", async () => {

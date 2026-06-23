@@ -311,31 +311,129 @@ Team owns the Agent org chart and Heartbeat control. Org nodes must be self-styl
   gap: var(--space-xs);
 }
 
+/*
+FNXC:CommandCenter 2026-06-22-15:30:
+AI engine card (Team Heartbeat control) gains a heartbeat-speed multiplier slider. The View Board / View Agents shortcuts moved to the Command Center Overview tab (see CommandCenter.css .cc-overview-engine-nav). Item 3: the Heartbeat card spans the full Team grid width and its controls space out and wrap.
+*/
+.cc-team-ops-card--heartbeat {
+  grid-column: 1 / -1;
+}
+
+.cc-team-heartbeat-multiplier {
+  margin-block-start: var(--space-md);
+}
+
+/*
+FNXC:CommandCenter 2026-06-22-15:30:
+Within the full-width Heartbeat card, space the heartbeat controls (label, slider, value, preset) further apart and let them wrap on narrow widths; the slider grows to take the slack. Scoped under .cc-team-heartbeat-multiplier so the shared AgentsView .heartbeat-multiplier-controls layout is untouched.
+*/
+.cc-team-heartbeat-multiplier .heartbeat-multiplier-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.cc-team-heartbeat-multiplier .heartbeat-multiplier-slider {
+  flex: 1 1 calc(var(--space-2xl) * 5);
+  min-inline-size: calc(var(--space-2xl) * 4);
+}
+
+/*
+FNXC:CommandCenter 2026-06-21-00:00:
+FN-6885 adds a grab affordance to the Team org-chart scroll owner. Keep native overflow scrolling as the single pan mechanism and switch to non-selecting grabbing only while the mouse/pen drag handler is actively scrolling.
+*/
 .cc-team-org-scroll {
-  max-block-size: calc(var(--space-2xl) * 10);
+  max-block-size: calc(var(--space-2xl) * 13);
   overflow: auto;
   overscroll-behavior: contain;
+  cursor: grab;
+}
+
+.cc-team-org-scroll.is-dragging {
+  cursor: grabbing;
+  user-select: none;
 }
 
 .cc-team-org-roots,
 .cc-team-org-children {
   display: flex;
-  flex-direction: column;
   gap: var(--space-sm);
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.cc-team-org-children {
+.cc-team-org-scroll[data-layout="vertical"] .cc-team-org-roots,
+.cc-team-org-scroll[data-layout="vertical"] .cc-team-org-children {
+  flex-direction: column;
+}
+
+.cc-team-org-scroll[data-layout="vertical"] .cc-team-org-children {
   margin-block-start: var(--space-sm);
   margin-inline-start: var(--space-xl);
   padding-inline-start: var(--space-md);
   border-inline-start: thin solid var(--border-subtle);
 }
 
+/*
+FNXC:CommandCenter 2026-06-21-00:00:
+The Team tab org chart should use a horizontal top-down tree when the shared Agents-view width resolver says the container can fit it, while vertical connector/indent styles remain scoped to vertical mode so they do not leave visual shells in horizontal mode.
+
+FNXC:CommandCenter 2026-06-21-00:00:
+The Team org-chart viewport must be taller and every parent with children must draw connector lines in vertical and horizontal layouts across desktop and mobile. Attach connector pseudo-elements only to child lists/items so leaf nodes without a .cc-team-org-children list never render dangling stubs.
+*/
+.cc-team-org-scroll[data-layout="horizontal"] .cc-team-org-roots,
+.cc-team-org-scroll[data-layout="horizontal"] .cc-team-org-children {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--space-md);
+}
+
+.cc-team-org-scroll[data-layout="horizontal"] .cc-team-org-children {
+  position: relative;
+  margin-block-start: var(--space-md);
+  padding-block-start: var(--space-md);
+}
+
+.cc-team-org-scroll[data-layout="horizontal"] .cc-team-org-children::before,
+.cc-team-org-scroll[data-layout="horizontal"] .cc-team-org-children::after,
+.cc-team-org-scroll[data-layout="horizontal"] .cc-team-org-children > .cc-team-org-item::before {
+  position: absolute;
+  content: "";
+  pointer-events: none;
+}
+
+.cc-team-org-scroll[data-layout="horizontal"] .cc-team-org-children::before {
+  inset-block-start: calc(var(--space-md) * -1);
+  inset-inline-start: 50%;
+  block-size: var(--space-md);
+  border-inline-start: thin solid var(--border-subtle);
+}
+
+.cc-team-org-scroll[data-layout="horizontal"] .cc-team-org-children::after {
+  inset-block-start: calc(var(--space-md) / 2);
+  inset-inline: 0;
+  border-block-start: thin solid var(--border-subtle);
+}
+
 .cc-team-org-item {
   min-inline-size: max-content;
+}
+
+.cc-team-org-scroll[data-layout="horizontal"] .cc-team-org-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.cc-team-org-scroll[data-layout="horizontal"] .cc-team-org-children > .cc-team-org-item::before {
+  inset-block-start: calc(var(--space-md) * -1);
+  inset-inline-start: 50%;
+  block-size: var(--space-md);
+  border-inline-start: thin solid var(--border-subtle);
 }
 
 .cc-team-org-card {
@@ -478,6 +576,7 @@ Tablet Command Center areas share the FN-6679 overflow fix with the shell: area 
   }
 
   .cc-team-ops-card--org,
+  .cc-team-ops-card--heartbeat,
   .cc-team-spark-panel {
     grid-column: auto;
   }
@@ -501,6 +600,12 @@ Tablet Command Center areas share the FN-6679 overflow fix with the shell: area 
   }
 
   .cc-team-org-scroll {
-    max-block-size: calc(var(--space-2xl) * 8);
+    max-block-size: calc(var(--space-2xl) * 10);
+  }
+
+  .cc-team-org-scroll[data-layout="horizontal"] .cc-team-org-roots,
+  .cc-team-org-scroll[data-layout="horizontal"] .cc-team-org-children {
+    justify-content: flex-start;
+    gap: var(--space-sm);
   }
 }

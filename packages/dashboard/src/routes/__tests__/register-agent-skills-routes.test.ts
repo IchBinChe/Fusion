@@ -34,6 +34,7 @@ function createSkillsAdapter(overrides?: Partial<SkillsAdapter>): SkillsAdapter 
       auth: { mode: "unauthenticated", tokenPresent: false, fallbackUsed: false },
     }),
     readSkillContent: vi.fn(),
+    readSkillFileContent: vi.fn(),
     ...overrides,
   } as SkillsAdapter;
 }
@@ -140,5 +141,88 @@ describe("register-agent-skills-routes", () => {
 
     expect(res.status).toBe(502);
     expect(res.body).toEqual({ error: "installer failed", code: "install_failed" });
+  });
+
+  // FNXC:Skills 2026-06-23-04:15: per-file content endpoint backing the detail-pane file viewer.
+  it("GET /api/skills/:id/file returns a file's content", async () => {
+    const skillsAdapter = createSkillsAdapter({
+      readSkillFileContent: vi.fn().mockResolvedValue({
+        name: "reference.md",
+        relativePath: "reference.md",
+        content: "# Ref",
+        isText: true,
+      }),
+    });
+
+    const res = await request(
+      app(skillsAdapter, "/tmp/file-root"),
+      "GET",
+      "/api/skills/npm%3A%3Askills%2Ftest-skill/file?path=reference.md",
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      file: { name: "reference.md", relativePath: "reference.md", content: "# Ref", isText: true },
+    });
+    expect(skillsAdapter.readSkillFileContent).toHaveBeenCalledWith(
+      "/tmp/file-root",
+      "npm::skills/test-skill",
+      "reference.md",
+    );
+  });
+
+  it("GET /api/skills/:id/file returns 400 when path is missing", async () => {
+    const skillsAdapter = createSkillsAdapter();
+
+    const res = await request(
+      app(skillsAdapter),
+      "GET",
+      "/api/skills/npm%3A%3Askills%2Ftest-skill/file",
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: "path is required", code: "invalid_path" });
+    expect(skillsAdapter.readSkillFileContent).not.toHaveBeenCalled();
+  });
+
+  it("GET /api/skills/:id/file returns 404 when the file is missing", async () => {
+    const skillsAdapter = createSkillsAdapter({
+      readSkillFileContent: vi.fn().mockRejectedValue(new Error("Skill file not found: nope.md")),
+    });
+
+    const res = await request(
+      app(skillsAdapter),
+      "GET",
+      "/api/skills/npm%3A%3Askills%2Ftest-skill/file?path=nope.md",
+    );
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: "Skill file not found", code: "skill_file_not_found" });
+  });
+
+  it("GET /api/skills/:id/file returns 400 for a traversal path", async () => {
+    const skillsAdapter = createSkillsAdapter({
+      readSkillFileContent: vi.fn().mockRejectedValue(new Error("Invalid skill file path: ../secret")),
+    });
+
+    const res = await request(
+      app(skillsAdapter),
+      "GET",
+      "/api/skills/npm%3A%3Askills%2Ftest-skill/file?path=..%2Fsecret",
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual({ error: "Invalid skill file path: ../secret", code: "invalid_path" });
+  });
+
+  it("GET /api/skills/:id/file returns 404 without a skills adapter", async () => {
+    const res = await request(
+      app(undefined),
+      "GET",
+      "/api/skills/npm%3A%3Askills%2Ftest-skill/file?path=reference.md",
+    );
+
+    expect(res.status).toBe(404);
+    expect(res.body).toEqual({ error: "Skills adapter not configured", code: "adapter_not_configured" });
   });
 });

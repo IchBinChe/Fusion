@@ -1,10 +1,11 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { Loader2 } from "lucide-react";
+import { Brain, Loader2 } from "lucide-react";
 import "./MemoryView.css";
 import "./SettingsModal.css";
 import type { MemoryFileInfo, MemoryRetrievalTestResult } from "../api";
 import { FileEditor } from "./FileEditor";
+import { ViewHeader } from "./ViewHeader";
 import { useMemoryData } from "../hooks/useMemoryData";
 
 interface MemoryViewProps {
@@ -349,15 +350,14 @@ export function MemoryView({ projectId, addToast, onSendSelectionToTask }: Memor
 
   return (
     <div className="memory-view">
-      {/* Header */}
-      <div className="memory-view-header">
-        <div>
-          <h2>{t("memory.title", "Memory")}</h2>
-          <p className="memory-view-description">
-            {t("memory.description", "Working memory, long-term insights, and engine status")}
-          </p>
-        </div>
-      </div>
+      {/*
+      FNXC:Navigation 2026-06-22-01:10:
+      Memory adopts the shared ViewHeader (CC-modeled) for a consistent main-content title row.
+
+      FNXC:Memory 2026-06-22-12:00:
+      The Memory view header should be title-only; remove the "Working memory, long-term insights, and engine status" subtitle so the tab bar becomes the first content under the header.
+      */}
+      <ViewHeader icon={Brain} title={t("memory.title", "Memory")} />
 
       {/* Tab bar */}
       <div className="memory-view-tabs" role="tablist">

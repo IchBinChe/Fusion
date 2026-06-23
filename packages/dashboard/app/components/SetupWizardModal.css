@@ -31,7 +31,7 @@
   overscroll-behavior: contain;
 }
 
-.setup-wizard-modal {
+.modal.setup-wizard-modal {
   display: flex;
   flex-direction: column;
   max-width: 880px;
@@ -43,6 +43,11 @@
   overflow: hidden;
   /* Prevent flex parents from squeezing this below its content's needs. */
   flex-shrink: 0;
+}
+
+.modal.setup-wizard-modal--agent {
+  max-width: 1120px;
+  width: min(96vw, 1120px);
 }
 
 @keyframes slideUp {
@@ -314,6 +319,186 @@
   border-radius: var(--radius-sm);
 }
 
+.setup-wizard-agent-step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.setup-wizard-agent-intro {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.setup-wizard-agent-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 1.08fr) minmax(320px, 0.92fr);
+  gap: var(--space-lg);
+  align-items: start;
+}
+
+.setup-wizard-agent-section-heading {
+  margin-bottom: var(--space-sm);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.setup-wizard-agent-preset-list {
+  display: grid;
+  gap: var(--space-sm);
+  max-height: min(360px, 48dvh);
+  overflow-y: auto;
+  padding-right: var(--space-xs);
+}
+
+.setup-wizard-agent-preset {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
+}
+
+.setup-wizard-agent-preset:hover {
+  background: var(--card-hover);
+  border-color: var(--text-dim);
+}
+
+.setup-wizard-agent-preset:focus-visible {
+  outline: none;
+  border-color: var(--todo);
+  box-shadow: var(--focus-ring-strong);
+}
+
+.setup-wizard-agent-preset.selected {
+  background: color-mix(in srgb, var(--todo) 8%, transparent);
+  border-color: var(--todo);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--todo) 25%, transparent);
+}
+
+.setup-wizard-agent-preset:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.setup-wizard-agent-preset-copy {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--space-xs) / 2);
+  min-width: 0;
+}
+
+.setup-wizard-agent-preset-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.setup-wizard-agent-preset-description {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.setup-wizard-agent-preview-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+}
+
+.setup-wizard-agent-preview-title-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-sm);
+  align-items: center;
+}
+
+.setup-wizard-agent-preview-title-row h3,
+.setup-wizard-agent-preview-title-row p {
+  margin: 0;
+}
+
+.setup-wizard-agent-preview-title-row h3 {
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.setup-wizard-agent-preview-title-row p {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.setup-wizard-agent-preview-list {
+  display: grid;
+  gap: var(--space-sm);
+  margin: 0;
+}
+
+.setup-wizard-agent-preview-list div {
+  display: grid;
+  gap: calc(var(--space-xs) / 2);
+}
+
+.setup-wizard-agent-preview-list dt {
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.setup-wizard-agent-preview-list dd {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+  max-height: 96px;
+  overflow-y: auto;
+}
+
+.setup-wizard-agent-ai-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  width: 100%;
+  min-height: 40px;
+}
+
+.setup-wizard-agent-interview-error {
+  position: fixed;
+  left: 50%;
+  bottom: var(--space-xl);
+  z-index: var(--z-modal, 1000);
+  width: min(520px, calc(100vw - (var(--space-lg) * 2)));
+  transform: translateX(-50%);
+  align-items: flex-start;
+  flex-direction: column;
+}
+
 .setup-wizard-isolation-option {
   display: flex;
   align-items: flex-start;
@@ -465,6 +650,16 @@
     gap: var(--space-xs);
   }
 
+  .setup-wizard-agent-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .setup-wizard-agent-preset-list {
+    max-height: none;
+    overflow-y: visible;
+    padding-right: 0;
+  }
+
   .setup-wizard-isolation-option {
     padding: var(--space-sm) var(--space-md);
   }
@@ -506,4 +701,3 @@
 /* =========================================================================
    Agent Manager UI — Global CSS Classes
    ========================================================================= */
-

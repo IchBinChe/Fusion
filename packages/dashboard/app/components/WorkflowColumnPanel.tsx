@@ -17,11 +17,8 @@ interface WorkflowColumnPanelProps {
   readOnly: boolean;
   projectId?: string;
   addToast: (message: string, type?: ToastType) => void;
-  /** True only when BOTH `experimentalFeatures.workflowColumns` AND
-   *  `experimentalFeatures.workflowGraphExecutor` are on. When false, the
-   *  per-column agent picker is disabled (not hidden) with a hint naming both
-   *  flags — config is data, so bindings still round-trip, but column agents are
-   *  inert at execution time (R10). */
+  /** Always true for the graduated workflow-column runtime. Retained as a prop
+   *  while older call sites/tests converge on the always-on model. */
   columnAgentsEnabled: boolean;
 }
 
@@ -332,12 +329,7 @@ export function WorkflowColumnPanel({
                     aria-label={t("workflowColumns.agentLabel", "Column agent")}
                     value={boundAgentId ?? ""}
                     disabled={agentPickerDisabled}
-                    title={!columnAgentsEnabled
-                      ? t(
-                          "workflowColumns.agentFlagHint",
-                          "Enable both experimentalFeatures.workflowColumns and experimentalFeatures.workflowGraphExecutor to staff columns with agents",
-                        )
-                      : readOnly
+                    title={readOnly
                         ? t("workflowColumns.readOnlyHint", "Built-in workflows are read-only — duplicate to edit")
                         : undefined}
                     onChange={(e) => selectColumnAgentId(col.id, e.target.value)}

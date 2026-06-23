@@ -24,31 +24,27 @@ type StreamSimpleHandler = NonNullable<Parameters<ExtensionAPI["registerProvider
 function runCliValidationOnce(): Promise<void> {
   if (cliValidationPromise) return cliValidationPromise;
   cliValidationPromise = (async () => {
-    const presence = await validateCliPresenceAsync();
-    if (!presence.ok) {
-      console.warn(`[droid-cli] ${presence.error.message}`);
-      return;
+    try {
+      const presence = await validateCliPresenceAsync();
+      if (!presence.ok) {
+        console.warn(`[droid-cli] ${presence.error.message}`);
+        return;
+      }
+      await validateCliAuthAsync();
+    } catch (error) {
+      console.warn("[droid-cli] CLI validation failed; continuing without blocking the session", error);
     }
-    await validateCliAuthAsync();
   })();
   return cliValidationPromise;
 }
 
-async function getDiscoveredModels() {
+export async function discoverDroidProviderModels() {
   if (!discoveredModelsPromise) {
     discoveredModelsPromise = (async () => {
       try {
         const ids = Array.from(new Set(await discoverDroidModels()));
         if (ids.length === 0) return [];
-        return ids.map((id) => ({
-          id,
-          name: id,
-          reasoning: true,
-          input: ["text", "image"] as Array<"text" | "image">,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-          contextWindow: 200_000,
-          maxTokens: 8_192,
-        }));
+        return toProviderModels(ids);
       } catch (error) {
         console.warn("[droid-cli] model auto-discovery failed; registering provider with empty model list", error);
         return [];
@@ -59,6 +55,18 @@ async function getDiscoveredModels() {
 }
 
 let cachedMcpConfig: { hash: string; configPath: string } | undefined;
+
+function toProviderModels(ids: string[]): DiscoveredModel[] {
+  return ids.map((id) => ({
+    id,
+    name: id,
+    reasoning: true,
+    input: ["text", "image"] as Array<"text" | "image">,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 200_000,
+    maxTokens: 8_192,
+  }));
+}
 
 function ensureMcpConfig(
   pi: ExtensionAPI,
@@ -93,8 +101,35 @@ function ensureMcpConfig(
   }
 }
 
+function registerDroidProvider(pi: ExtensionAPI, models: DiscoveredModel[]) {
+  pi.registerProvider(PROVIDER_ID, {
+    baseUrl: "droid-cli",
+    apiKey: "unused",
+    api: "droid-cli",
+    models,
+    streamSimple: ((model, context, options) => {
+      void runCliValidationOnce();
+      const configPath = ensureMcpConfig(
+        pi,
+        (context as { tools?: ReadonlyArray<{ name: string; description: string; parameters: Record<string, unknown> }> }).tools,
+      );
+      return streamViaCli(
+        model,
+        context as never,
+        { ...(options ?? {}), mcpConfigPath: configPath } as never,
+      ) as unknown as ReturnType<StreamSimpleHandler>;
+    }) as StreamSimpleHandler,
+  });
+}
+
 export default function (pi: ExtensionAPI) {
-  void runCliValidationOnce();
+  /*
+  FNXC:CliRuntime 2026-06-21-18:43:
+  Engine and dashboard startup must not start the local Droid CLI merely because the optional extension loaded. Register the provider synchronously with an empty model list, defer validation until an actual droid stream starts, and leave model discovery to explicit picker/status callers so boot with `useDroidCli` enabled still performs zero `droid` spawns.
+
+  FNXC:CliRuntime 2026-06-21-12:00:
+  Engine and dashboard startup must not wait for local Droid CLI probes. Every surviving validation/discovery helper remains fire-and-forget, bounded, non-interactive, and resolve-only so a missing or wedged `droid` binary cannot stall extension loading or a session start.
+  */
 
   pi.on("session_start", async () => {
     const allTools = pi.getAllTools();
@@ -103,28 +138,9 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  void (async () => {
-    const models = await getDiscoveredModels();
-    try {
-      pi.registerProvider(PROVIDER_ID, {
-        baseUrl: "droid-cli",
-        apiKey: "unused",
-        api: "droid-cli",
-        models,
-        streamSimple: ((model, context, options) => {
-          const configPath = ensureMcpConfig(
-            pi,
-            (context as { tools?: ReadonlyArray<{ name: string; description: string; parameters: Record<string, unknown> }> }).tools,
-          );
-          return streamViaCli(
-            model,
-            context as never,
-            { ...(options ?? {}), mcpConfigPath: configPath } as never,
-          ) as unknown as ReturnType<StreamSimpleHandler>;
-        }) as StreamSimpleHandler,
-      });
-    } catch (err) {
-      console.error("[droid-cli] Failed to register provider:", err);
-    }
-  })();
+  try {
+    registerDroidProvider(pi, []);
+  } catch (err) {
+    console.error("[droid-cli] Failed to register provider:", err);
+  }
 }

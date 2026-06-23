@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
-import { Plus, Pencil, Trash2, Check, X, GripVertical, Sparkles, Download, Copy, Loader, ArrowLeft, ChevronUp } from "lucide-react";
+import { Plus, Pencil, Trash2, Check, X, GripVertical, Sparkles, Download, Copy, Loader, ArrowLeft, ChevronUp, Map } from "lucide-react";
 import "./RoadmapsView.css";
 import type { ToastType } from "./types.js";
 import { useRoadmaps, type FeatureSuggestion, type MilestoneSuggestion, type SuggestionDraftPatch } from "./useRoadmaps.js";
@@ -2108,6 +2108,12 @@ export function RoadmapsView({ projectId, addToast }: RoadmapsViewProps) {
   if (loading && roadmaps.length === 0) {
     return (
       <div className="roadmaps-view roadmaps-view--loading">
+        <div className="roadmaps-view__top-header">
+          <h2 className="roadmaps-view__top-title">
+            <Map size={20} />
+            <span>Roadmaps</span>
+          </h2>
+        </div>
         <div className="roadmaps-view__loading-state">Loading roadmaps...</div>
       </div>
     );
@@ -2116,6 +2122,12 @@ export function RoadmapsView({ projectId, addToast }: RoadmapsViewProps) {
   if (error && roadmaps.length === 0) {
     return (
       <div className="roadmaps-view roadmaps-view--error">
+        <div className="roadmaps-view__top-header">
+          <h2 className="roadmaps-view__top-title">
+            <Map size={20} />
+            <span>Roadmaps</span>
+          </h2>
+        </div>
         <div className="roadmaps-view__error-state">
           <p>Failed to load roadmaps</p>
           <p className="roadmaps-view__error-msg">{error.message}</p>
@@ -2126,40 +2138,51 @@ export function RoadmapsView({ projectId, addToast }: RoadmapsViewProps) {
 
   return (
     <div className="roadmaps-view">
-      {/* Mobile Roadmap List (shown when mobile and no roadmap selected) */}
-      {isMobile && !effectiveSelectedRoadmapId && (
-        <MobileRoadmapList
-          roadmaps={roadmaps}
-          selectedRoadmapId={effectiveSelectedRoadmapId}
-          onSelect={(id) => selectRoadmap(id)}
-          onCreate={() => setMobileShowCreateForm(true)}
-          onEdit={handleStartRoadmapEdit}
-          onDelete={handleDeleteRoadmap}
-          onExport={(roadmap) => handleOpenHandoffModal(roadmap.id, roadmap.title)}
-          showCreateForm={mobileShowCreateForm}
-          onCancelCreate={() => setMobileShowCreateForm(false)}
-          onSaveCreate={async (input) => {
-            await handleCreateRoadmap(input);
-            setMobileShowCreateForm(false);
-          }}
-        />
-      )}
+      {/*
+      FNXC:Roadmaps 2026-06-22-18:00:
+      Plugin Roadmaps needs the same top chrome as built-in dashboard views: full-width surface header, todo-tinted icon, canonical padding, and no divider before the scrollable body. The internal roadmap sidebar stays below this header so Roadmaps aligns with Artifacts/Skills/Missions while preserving its own list/detail workflow.
+      */}
+      <div className="roadmaps-view__top-header">
+        <h2 className="roadmaps-view__top-title">
+          <Map size={20} />
+          <span>Roadmaps</span>
+        </h2>
+      </div>
+      <div className="roadmaps-view__body">
+        {/* Mobile Roadmap List (shown when mobile and no roadmap selected) */}
+        {isMobile && !effectiveSelectedRoadmapId && (
+          <MobileRoadmapList
+            roadmaps={roadmaps}
+            selectedRoadmapId={effectiveSelectedRoadmapId}
+            onSelect={(id) => selectRoadmap(id)}
+            onCreate={() => setMobileShowCreateForm(true)}
+            onEdit={handleStartRoadmapEdit}
+            onDelete={handleDeleteRoadmap}
+            onExport={(roadmap) => handleOpenHandoffModal(roadmap.id, roadmap.title)}
+            showCreateForm={mobileShowCreateForm}
+            onCancelCreate={() => setMobileShowCreateForm(false)}
+            onSaveCreate={async (input) => {
+              await handleCreateRoadmap(input);
+              setMobileShowCreateForm(false);
+            }}
+          />
+        )}
 
-      {/* Desktop sidebar (hidden on mobile) */}
-      {!isMobile && (
-        <aside className="roadmaps-view__sidebar" aria-label="Roadmaps">
-          <div className="roadmaps-view__sidebar-header">
-            <h2 className="roadmaps-view__sidebar-title">Roadmaps</h2>
-            <button
-              className="roadmaps-view__add-btn"
-              onClick={() => setCreateForm({ type: "roadmap", title: "", description: "" })}
-              title="Create roadmap"
-              aria-label="Create roadmap"
-              data-testid="create-roadmap-btn"
-            >
-              <Plus size={16} />
-            </button>
-          </div>
+        {/* Desktop sidebar (hidden on mobile) */}
+        {!isMobile && (
+          <aside className="roadmaps-view__sidebar" aria-label="Roadmaps">
+            <div className="roadmaps-view__sidebar-header">
+              <h2 className="roadmaps-view__sidebar-title">Roadmaps</h2>
+              <button
+                className="roadmaps-view__add-btn"
+                onClick={() => setCreateForm({ type: "roadmap", title: "", description: "" })}
+                title="Create roadmap"
+                aria-label="Create roadmap"
+                data-testid="create-roadmap-btn"
+              >
+                <Plus size={16} />
+              </button>
+            </div>
 
           {createForm.type === "roadmap" && (
             <CreateRoadmapForm
@@ -2185,11 +2208,11 @@ export function RoadmapsView({ projectId, addToast }: RoadmapsViewProps) {
               ))
             )}
           </div>
-        </aside>
-      )}
+          </aside>
+        )}
 
-      {/* Main content */}
-      <main className="roadmaps-view__main" aria-label="Roadmap content">
+        {/* Main content */}
+        <main className="roadmaps-view__main" aria-label="Roadmap content">
         {/* Mobile header when roadmap is selected */}
         {isMobile && effectiveSelectedRoadmapId && (
           <MobileRoadmapHeader
@@ -2530,7 +2553,8 @@ export function RoadmapsView({ projectId, addToast }: RoadmapsViewProps) {
             </div>
           </>
         )}
-      </main>
+        </main>
+      </div>
 
       {/* Feature create form overlay */}
       {createForm.type === "feature" && createForm.parentId && (

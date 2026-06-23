@@ -51,7 +51,7 @@ describe("AgentDetailView mobile scroll regression (FN-4231)", () => {
     expect(window.getComputedStyle(footerEl).flexShrink).toBe("0");
   });
 
-  it("tabs accept horizontal touch panning on mobile (FN-6450)", async () => {
+  it("tabs accept horizontal touch panning and stay non-shrinking on mobile (FN-6450, FN-6865)", async () => {
     render(<AgentDetailView agentId="agent-001" onClose={vi.fn()} addToast={vi.fn()} />);
 
     await waitFor(() => {
@@ -59,11 +59,14 @@ describe("AgentDetailView mobile scroll regression (FN-4231)", () => {
     });
 
     const tabsEl = document.querySelector(".agent-detail-tabs") as HTMLElement;
+    const tabEl = document.querySelector(".agent-detail-tab") as HTMLElement;
     const tabsStyle = window.getComputedStyle(tabsEl);
+    const tabStyle = window.getComputedStyle(tabEl);
 
     expect(tabsStyle.touchAction).toBe("pan-x pan-y");
     expect(tabsStyle.touchAction).toContain("pan-x");
     expect(tabsStyle.overflowX).toBe("auto");
+    expect(tabStyle.flexShrink).toBe("0");
   });
 
   it("tabs are horizontally scrollable at tablet widths (FN-6209)", async () => {
@@ -83,6 +86,7 @@ describe("AgentDetailView mobile scroll regression (FN-4231)", () => {
 
     expect(window.getComputedStyle(tabsEl).overflowX).toBe("auto");
     expect(window.getComputedStyle(tabEl).whiteSpace).toBe("nowrap");
+    expect(window.getComputedStyle(tabEl).flexShrink).toBe("0");
   });
 
   it("keeps tab labels readable across tablet and mobile states (FN-6728)", async () => {

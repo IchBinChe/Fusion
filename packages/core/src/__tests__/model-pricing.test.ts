@@ -4,8 +4,10 @@ import {
   costFor,
   lookupPricing,
   MODEL_PRICING,
+  parseLiteLLMPricing,
   pricingAsOf,
   PRICING_STALE_AFTER_MS,
+  type ModelPricingOverrides,
 } from "../model-pricing.js";
 
 const ZERO = {
@@ -32,6 +34,34 @@ describe("model-pricing", () => {
     expect(result.unavailable).toBe(false);
     expect(result.usd).not.toBeNull();
     expect(result.usd).toBeCloseTo(10.0, 2);
+  });
+
+  it("prices OpenAI Codex GPT-5 models instead of reporting unavailable", () => {
+    // gpt-5-codex: input $1.25/1M, output $10/1M.
+    // 1,000,000 input + 200,000 output = 1.25 + 2.00 = 3.25
+    const result = costFor(
+      { ...ZERO, inputTokens: 1_000_000, outputTokens: 200_000 },
+      { provider: "openai-codex", model: "gpt-5-codex" },
+    );
+    expect(result.unavailable).toBe(false);
+    expect(result.usd).not.toBeNull();
+    expect(result.usd).toBeCloseTo(3.25, 2);
+  });
+
+  it("prices Codex mini latest instead of reporting unavailable", () => {
+    // codex-mini-latest: input $1.50/1M, output $6/1M, cached input $0.375/1M.
+    const result = costFor(
+      {
+        ...ZERO,
+        inputTokens: 1_000_000,
+        outputTokens: 500_000,
+        cachedTokens: 1_000_000,
+      },
+      { provider: "openai-codex", model: "codex-mini-latest" },
+    );
+    expect(result.unavailable).toBe(false);
+    expect(result.usd).not.toBeNull();
+    expect(result.usd).toBeCloseTo(4.875, 3);
   });
 
   it("returns unavailable + null usd for an unknown model (never guesses)", () => {
@@ -122,6 +152,23 @@ describe("model-pricing", () => {
   });
 
   describe("lookupPricing", () => {
+    const overrides: ModelPricingOverrides = {
+      "openai:gpt-4o": {
+        inputPer1M: 99,
+        outputPer1M: 199,
+        cacheReadPer1M: 9,
+        cacheWritePer1M: 29,
+        source: "test override",
+      },
+      "acme:unknown-chat": {
+        inputPer1M: 2,
+        outputPer1M: 4,
+        cacheReadPer1M: 1,
+        cacheWritePer1M: 3,
+        source: "test override",
+      },
+    };
+
     it("resolves by provider:model", () => {
       expect(
         lookupPricing({ provider: "openai", model: "gpt-4o" }),
@@ -132,6 +179,12 @@ describe("model-pricing", () => {
       expect(
         lookupPricing({ provider: " OpenAI ", model: " GPT-4o " }),
       ).toBe(MODEL_PRICING["openai:gpt-4o"]);
+    });
+
+    it("resolves OpenAI Codex models by explicit provider:model keys", () => {
+      expect(
+        lookupPricing({ provider: " OpenAI-Codex ", model: " GPT-5-Codex " }),
+      ).toBe(MODEL_PRICING["openai-codex:gpt-5-codex"]);
     });
 
     it("falls back to a bare model id when provider is unset", () => {
@@ -145,14 +198,97 @@ describe("model-pricing", () => {
       expect(lookupPricing({ model: "" })).toBeUndefined();
       expect(lookupPricing({ provider: "x", model: "y" })).toBeUndefined();
     });
+
+    it("prefers overrides over baseline and keeps baseline fallback", () => {
+      expect(lookupPricing({ provider: "openai", model: "gpt-4o" }, overrides)).toBe(overrides["openai:gpt-4o"]);
+      expect(lookupPricing({ provider: "anthropic", model: "claude-opus-4-8" }, overrides)).toBe(
+        MODEL_PRICING["anthropic:claude-opus-4-8"],
+      );
+    });
+
+    it("resolves overrides for otherwise unknown models", () => {
+      expect(lookupPricing({ provider: "acme", model: "unknown-chat" }, overrides)).toBe(overrides["acme:unknown-chat"]);
+      const result = costFor(
+        { ...ZERO, inputTokens: 1_000_000, outputTokens: 500_000 },
+        { provider: "acme", model: "unknown-chat" },
+        undefined,
+        overrides,
+      );
+      expect(result).toMatchObject({ unavailable: false, stale: false });
+      expect(result.usd).toBeCloseTo(4, 2);
+    });
   });
 
-  it("seeds Anthropic, OpenAI, and Google providers", () => {
+  describe("parseLiteLLMPricing", () => {
+    it("maps chat rows and cache costs from the LiteLLM schema", () => {
+      const parsed = parseLiteLLMPricing({
+        sample_spec: { mode: "chat" },
+        "gpt-test": {
+          litellm_provider: "openai",
+          mode: "chat",
+          input_cost_per_token: 0.000001,
+          output_cost_per_token: 0.000002,
+          cache_read_input_token_cost: 0.00000025,
+          cache_creation_input_token_cost: 0.00000125,
+        },
+        "claude-test": {
+          litellm_provider: "anthropic",
+          mode: "chat",
+          input_cost_per_token: 0.000003,
+          output_cost_per_token: 0.000015,
+        },
+        "gemini-test": {
+          litellm_provider: "vertex_ai-language-models",
+          mode: "chat",
+          input_cost_per_token: 0.0000005,
+          output_cost_per_token: 0.0000015,
+        },
+        "embedding-test": {
+          litellm_provider: "openai",
+          mode: "embedding",
+          input_cost_per_token: 0.000001,
+          output_cost_per_token: 0.000002,
+        },
+        "missing-output": {
+          litellm_provider: "openai",
+          mode: "chat",
+          input_cost_per_token: 0.000001,
+        },
+      });
+
+      expect(parsed.count).toBe(3);
+      expect(parsed.overrides["openai:gpt-test"]).toEqual({
+        inputPer1M: 1,
+        outputPer1M: 2,
+        cacheReadPer1M: 0.25,
+        cacheWritePer1M: 1.25,
+        source: "litellm/model_prices_and_context_window.json",
+      });
+      expect(parsed.overrides["anthropic:claude-test"]).toMatchObject({
+        inputPer1M: 3,
+        outputPer1M: 15,
+        cacheReadPer1M: 3,
+        cacheWritePer1M: 3,
+      });
+      expect(parsed.overrides["google:gemini-test"]).toMatchObject({ inputPer1M: 0.5, outputPer1M: 1.5 });
+      expect(parsed.overrides).not.toHaveProperty("openai:embedding-test");
+      expect(parsed.overrides).not.toHaveProperty("openai:missing-output");
+    });
+
+    it("returns an empty map for malformed input", () => {
+      expect(parseLiteLLMPricing(null)).toEqual({ overrides: {}, count: 0 });
+      expect(parseLiteLLMPricing([])).toEqual({ overrides: {}, count: 0 });
+      expect(parseLiteLLMPricing({ "gpt-test": "bad" })).toEqual({ overrides: {}, count: 0 });
+    });
+  });
+
+  it("seeds Anthropic, OpenAI Codex, OpenAI, and Google providers", () => {
     const providers = new Set(
       Object.keys(MODEL_PRICING).map((k) => k.split(":")[0]),
     );
     expect(providers).toContain("anthropic");
     expect(providers).toContain("openai");
+    expect(providers).toContain("openai-codex");
     expect(providers).toContain("google");
   });
 

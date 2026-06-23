@@ -258,7 +258,7 @@ vi.mock("../../components/model-onboarding-state", () => ({
   getOnboardingCompletedAt: (...args: unknown[]) => mockGetOnboardingCompletedAt(...args),
   getSkippedSteps: (...args: unknown[]) => mockGetSkippedSteps(...args),
   getStepData: (...args: unknown[]) => mockGetStepData(...args),
-  ONBOARDING_FLOW_STEPS: ["ai-setup", "github", "project-setup", "first-task"],
+  ONBOARDING_FLOW_STEPS: ["ai-setup", "github", "project-setup", "agent", "first-task"],
 }));
 
 // Mock CustomModelDropdown for onboarding modal tests
@@ -290,21 +290,28 @@ vi.mock("../../components/TaskDetailModal", () => ({
 }));
 
 vi.mock("../../components/GitHubImportModal", () => ({
-  GitHubImportModal: ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) =>
+  // Embedded presentation (sidebar "Import Tasks" destination) drops the modal
+  // overlay + Cancel button; modal presentation (mobile overflow path) keeps them.
+  GitHubImportModal: ({ isOpen, onClose, presentation = "modal" }: { isOpen: boolean; onClose: () => void; presentation?: "modal" | "embedded" }) =>
     isOpen ? (
-      <div className="modal-overlay open">
+      <div
+        className={presentation === "embedded" ? "github-import-modal github-import-modal--embedded open" : "modal-overlay open"}
+        data-testid={presentation === "embedded" ? "github-import-view" : undefined}
+      >
         <h2>Import from GitHub</h2>
-        <button type="button" onClick={onClose}>
-          Cancel
-        </button>
+        {presentation === "embedded" ? null : (
+          <button type="button" onClick={onClose}>
+            Cancel
+          </button>
+        )}
       </div>
     ) : null,
 }));
 
 vi.mock("../../components/PlanningModeModal", () => ({
-  PlanningModeModal: ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) =>
+  PlanningModeModal: ({ isOpen, onClose, presentation = "modal" }: { isOpen: boolean; onClose: () => void; presentation?: "modal" | "embedded" }) =>
     isOpen ? (
-      <div className="modal-overlay open">
+      <div className={presentation === "embedded" ? "planning-view open" : "modal-overlay open"} data-testid={presentation === "embedded" ? "planning-view" : undefined}>
         <button type="button" aria-label="Close" onClick={onClose}>
           Close
         </button>
@@ -455,7 +462,8 @@ vi.mock("../../components/SettingsModal", async () => {
     );
   }
 
-  return { SettingsModal: MockSettingsModal };
+  // FNXC:Settings 2026-06-22-12:00: Settings opens as an embedded main-content view (SettingsView) reusing the same body.
+  return { SettingsModal: MockSettingsModal, SettingsView: MockSettingsModal };
 });
 
 vi.mock("../../components/ModelOnboardingModal", async () => {
@@ -1014,7 +1022,7 @@ describe("App backend-unreachable first-run flow", () => {
         await vi.advanceTimersByTimeAsync(1000);
       });
 
-      expect(screen.getByText("Welcome to Fusion")).toBeTruthy();
+      expect(screen.getByText("Set Up AI")).toBeTruthy();
     } finally {
       vi.useRealTimers();
     }
@@ -1263,6 +1271,14 @@ describe("App chat unread response indicator", () => {
     }).events;
   };
 
+  // FNXC:Navigation 2026-06-22-09:30: With the left sidebar as primary nav, the chat
+  // unread indicator moved from the header chat button to the Chat sidebar entry's
+  // status dot (.left-sidebar-nav__dot inside the sidebar-nav-chat button).
+  const chatUnreadDot = () => {
+    const chatNav = screen.queryByTestId("sidebar-nav-chat");
+    return chatNav ? chatNav.querySelector(".left-sidebar-nav__dot.status-dot--pending") : null;
+  };
+
   it("shows unread indicator when assistant message arrives for any individual session", async () => {
     const events = await getChatEvents();
 
@@ -1275,7 +1291,7 @@ describe("App chat unread response indicator", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Unread chat response")).toBeInTheDocument();
+      expect(chatUnreadDot()).not.toBeNull();
     });
   });
 
@@ -1290,7 +1306,7 @@ describe("App chat unread response indicator", () => {
       );
     });
 
-    expect(screen.queryByLabelText("Unread chat response")).toBeNull();
+    expect(chatUnreadDot()).toBeNull();
   });
 
   it("shows unread indicator for room assistant replies", async () => {
@@ -1305,7 +1321,7 @@ describe("App chat unread response indicator", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Unread chat response")).toBeInTheDocument();
+      expect(chatUnreadDot()).not.toBeNull();
     });
   });
 
@@ -1320,7 +1336,7 @@ describe("App chat unread response indicator", () => {
       );
     });
 
-    expect(screen.queryByLabelText("Unread chat response")).toBeNull();
+    expect(chatUnreadDot()).toBeNull();
   });
 
   it("clears unread indicator when returning to chat and does not mark while in chat", async () => {
@@ -1335,13 +1351,13 @@ describe("App chat unread response indicator", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByLabelText("Unread chat response")).toBeInTheDocument();
+      expect(chatUnreadDot()).not.toBeNull();
     });
 
-    fireEvent.click(screen.getByTestId("header-chat-view-btn"));
+    fireEvent.click(screen.getByTestId("sidebar-nav-chat"));
 
     await waitFor(() => {
-      expect(screen.queryByLabelText("Unread chat response")).toBeNull();
+      expect(chatUnreadDot()).toBeNull();
     });
 
     await act(async () => {
@@ -1352,7 +1368,7 @@ describe("App chat unread response indicator", () => {
       );
     });
 
-    expect(screen.queryByLabelText("Unread chat response")).toBeNull();
+    expect(chatUnreadDot()).toBeNull();
   });
 });
 
@@ -1736,7 +1752,7 @@ describe("App mission wiring", () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByTitle("Missions view")).toBeTruthy();
+      expect(screen.getByTestId("sidebar-nav-missions")).toBeTruthy();
     });
   });
 });
@@ -1756,7 +1772,7 @@ describe("App auto-open Settings on unauthenticated", () => {
     });
 
     // Settings modal should NOT be open
-    expect(screen.queryByText("Settings")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Settings" })).toBeNull();
   });
 
   it("auto-opens Settings to Authentication tab when all providers are unauthenticated but onboarding IS complete", async () => {
@@ -1802,7 +1818,7 @@ describe("App auto-open Settings on unauthenticated", () => {
 
     // Settings modal should NOT be open
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
-    expect(screen.queryByText("Settings")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Settings" })).toBeNull();
 
     // Onboarding modal should NOT be open
     expect(screen.queryByText("Set Up AI")).toBeNull();
@@ -1825,7 +1841,7 @@ describe("App auto-open Settings on unauthenticated", () => {
     await waitFor(() => expect(fetchAuthStatus).toHaveBeenCalled());
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
 
-    expect(screen.queryByText("Settings")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Settings" })).toBeNull();
     expect(screen.queryByText("Set Up AI")).toBeNull();
   });
 
@@ -1860,7 +1876,7 @@ describe("App auto-open Settings on unauthenticated", () => {
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
 
     // Settings modal should NOT be open
-    expect(screen.queryByText("Settings")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Settings" })).toBeNull();
     // Onboarding modal should NOT be open
     expect(screen.queryByText("Set Up AI")).toBeNull();
   });
@@ -1883,7 +1899,8 @@ describe("App auto-open Settings on unauthenticated", () => {
       expect(screen.queryByText("Set Up AI")).toBeNull();
     });
 
-    // Open settings via the gear icon button
+    // Open settings via the sidebar Settings entry (header gear is hidden when the
+    // left sidebar owns desktop Settings); it navigates to the embedded SettingsView.
     const settingsButton = screen.getByTitle("Settings");
     fireEvent.click(settingsButton);
 
@@ -1891,8 +1908,11 @@ describe("App auto-open Settings on unauthenticated", () => {
     await waitFor(() => expect(fetchSettings.mock.calls.length).toBeGreaterThanOrEqual(2));
     await waitFor(() => expect(fetchAuthStatus).toHaveBeenCalled());
 
-    // Authentication section content should be visible (providers listed)
-    expect(screen.getByText("Anthropic")).toBeTruthy();
+    // Authentication section content should be visible (providers listed).
+    // The embedded SettingsView is lazy + fetches auth async, so await the provider row.
+    await waitFor(() => {
+      expect(screen.getByText("Anthropic")).toBeTruthy();
+    });
 
     // Click on General to verify General section has Task Prefix
     fireEvent.click(screen.getAllByText("General")[0]);
@@ -1963,7 +1983,9 @@ describe("OnboardingResumeCard", () => {
 });
 
 describe("App view switching", () => {
-  it("opens research view from overflow and persists view selection", async () => {
+  // FNXC:Navigation 2026-06-22-09:30: Research/Evals/Insights/Memory are now left-sidebar
+  // destinations (sidebar-nav-*), not header More-views overflow items, on desktop.
+  it("opens research view from the sidebar and persists view selection", async () => {
     localStorage.setItem("kb-dashboard-view-mode", "project");
     (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...defaultSettings,
@@ -1975,12 +1997,7 @@ describe("App view switching", () => {
 
     render(<App />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
-    fireEvent.click(await screen.findByTestId("view-overflow-research"));
+    fireEvent.click(await screen.findByTestId("sidebar-nav-research"));
 
     await waitFor(() => {
       expect(screen.getByTestId("research-view")).toBeInTheDocument();
@@ -1991,16 +2008,11 @@ describe("App view switching", () => {
     localStorage.removeItem(taskViewStorageKey());
   });
 
-  it("opens evals view from overflow and persists view selection", async () => {
+  it("opens evals view from the sidebar and persists view selection", async () => {
     localStorage.setItem("kb-dashboard-view-mode", "project");
     render(<App />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
-    fireEvent.click(await screen.findByTestId("view-overflow-evals"));
+    fireEvent.click(await screen.findByTestId("sidebar-nav-evals"));
 
     await waitFor(() => {
       expect(screen.getByTestId("evals-view")).toBeInTheDocument();
@@ -2023,12 +2035,9 @@ describe("App view switching", () => {
 
     render(<App />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
-    expect(screen.queryByTestId("view-overflow-research")).not.toBeInTheDocument();
+    // Wait for the sidebar to render, then assert Research is not a destination.
+    await screen.findByTestId("sidebar-nav-board");
+    expect(screen.queryByTestId("sidebar-nav-research")).not.toBeInTheDocument();
 
     localStorage.removeItem("kb-dashboard-view-mode");
   });
@@ -2121,11 +2130,11 @@ describe("App view switching", () => {
 
     // Wait for the header to render with view toggle
     await waitFor(() => {
-      expect(screen.getByTitle("List view")).toBeTruthy();
+      expect(screen.getByTestId("sidebar-nav-list")).toBeTruthy();
     });
 
     // Click to switch to list view
-    fireEvent.click(screen.getByTitle("List view"));
+    fireEvent.click(screen.getByTestId("sidebar-nav-list"));
 
     // List view should be rendered (it has a different structure)
     await waitFor(() => {
@@ -2144,17 +2153,17 @@ describe("App view switching", () => {
 
     // Wait for the header to render
     await waitFor(() => {
-      expect(screen.getByTitle("List view")).toBeTruthy();
+      expect(screen.getByTestId("sidebar-nav-list")).toBeTruthy();
     });
 
     // Switch to list view
-    fireEvent.click(screen.getByTitle("List view"));
+    fireEvent.click(screen.getByTestId("sidebar-nav-list"));
     await waitFor(() => {
       expect(document.querySelector(".list-view")).toBeTruthy();
     });
 
     // Switch back to board view
-    fireEvent.click(screen.getByTitle("Board view"));
+    fireEvent.click(screen.getByTestId("sidebar-nav-board"));
     await waitFor(() => {
       expect(document.querySelector(".board")).toBeTruthy();
     });
@@ -2170,10 +2179,10 @@ describe("App view switching", () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByTitle("List view")).toBeTruthy();
+      expect(screen.getByTestId("sidebar-nav-list")).toBeTruthy();
     });
 
-    fireEvent.click(screen.getByTitle("List view"));
+    fireEvent.click(screen.getByTestId("sidebar-nav-list"));
 
     await waitFor(() => {
       expect(document.querySelector(".list-view")).toBeTruthy();
@@ -2181,9 +2190,10 @@ describe("App view switching", () => {
 
     fireEvent.click(screen.getByText("+ New Task"));
 
-    // The NewTaskModal should be visible with its header and description field
+    // The NewTaskModal should be visible with its header and description field.
+    // Scope the title to the modal heading; the left sidebar also renders a "New Task" nav label.
     await waitFor(() => {
-      expect(screen.getByText("New Task")).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "New Task" })).toBeTruthy();
       expect(screen.getByPlaceholderText("What needs to be done?")).toBeTruthy();
     });
 
@@ -2200,11 +2210,11 @@ describe("App view switching", () => {
 
     // Wait for the header to render
     await waitFor(() => {
-      expect(screen.getByTitle("List view")).toBeTruthy();
+      expect(screen.getByTestId("sidebar-nav-list")).toBeTruthy();
     });
 
     // Switch to list view
-    fireEvent.click(screen.getByTitle("List view"));
+    fireEvent.click(screen.getByTestId("sidebar-nav-list"));
 
     // Should have saved to localStorage
     await waitFor(() => {
@@ -2228,7 +2238,7 @@ describe("App view switching", () => {
     });
 
     // List view should be active
-    expect(screen.getByTitle("List view").className).toContain("active");
+    expect(screen.getByTestId("sidebar-nav-list").className).toContain("active");
 
     // Cleanup
     localStorage.removeItem(taskViewStorageKey());
@@ -2274,6 +2284,36 @@ describe("App view switching", () => {
     localStorage.removeItem("kb-dashboard-view-mode");
   });
 
+  it("hides the removed Roadmaps destination even when settings and plugin API still mention it", async () => {
+    /*
+    FNXC:RoadmapsNavigation 2026-06-22-18:50:
+    Roadmaps was removed as an app view and experiment. Stale persisted flags and plugin dashboard rows must not expose the old sidebar destination.
+    */
+    mockUseViewportMode.mockReturnValue("desktop");
+    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ...defaultSettings,
+      experimentalFeatures: { ...defaultSettings.experimentalFeatures, roadmap: true },
+    });
+    (fetchPluginDashboardViews as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      {
+        pluginId: "fusion-plugin-roadmap",
+        view: {
+          viewId: "roadmaps",
+          label: "Roadmaps",
+          componentPath: "./dashboard-view",
+          icon: "Map",
+          placement: "primary",
+          order: 30,
+        },
+      },
+    ]);
+
+    render(<App />);
+
+    expect(await screen.findByTestId("sidebar-nav-missions")).toBeInTheDocument();
+    expect(screen.queryByTestId("sidebar-nav-plugin-fusion-plugin-roadmap-roadmaps")).toBeNull();
+  });
+
   it("restores board and plugin routes when persisted taskView changes across remounts", async () => {
     localStorage.setItem("kb-dashboard-view-mode", "project");
 
@@ -2294,7 +2334,7 @@ describe("App view switching", () => {
     localStorage.setItem(taskViewStorageKey(), "board");
     const second = render(<App />);
     await waitFor(() => {
-      expect(screen.getByTitle("Board view").className).toContain("active");
+      expect(screen.getByTestId("sidebar-nav-board").className).toContain("active");
     });
     second.unmount();
 
@@ -2326,14 +2366,9 @@ describe("App view switching", () => {
       },
     });
 
+    localStorage.setItem(taskViewStorageKey(), "todos");
+
     render(<App />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
-    fireEvent.click(screen.getByTestId("view-overflow-todos"));
 
     await waitFor(() => {
       expect(screen.getByTestId("todo-view")).toBeInTheDocument();
@@ -2342,6 +2377,7 @@ describe("App view switching", () => {
     fireEvent.click(screen.getByTestId("todo-planning-button"));
 
     await waitFor(() => {
+      expect(screen.getByTestId("planning-view")).toBeInTheDocument();
       expect(screen.getByText("Planning Mode")).toBeInTheDocument();
     });
 
@@ -2354,9 +2390,9 @@ describe("App view switching", () => {
 
     // Wait for the header to render with view toggle
     await waitFor(() => {
-      expect(screen.getByTitle("Board view")).toBeTruthy();
-      expect(screen.getByTitle("List view")).toBeTruthy();
-      expect(screen.getByTitle("Agents view")).toBeTruthy();
+      expect(screen.getByTestId("sidebar-nav-board")).toBeTruthy();
+      expect(screen.getByTestId("sidebar-nav-list")).toBeTruthy();
+      expect(screen.getByTestId("sidebar-nav-agents")).toBeTruthy();
     });
   });
 
@@ -2367,7 +2403,7 @@ describe("App view switching", () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.queryByTitle("Agents view")).toBeNull();
+      expect(screen.queryByTestId("sidebar-nav-agents")).toBeNull();
     });
 
     localStorage.removeItem("kb-dashboard-view-mode");
@@ -2376,7 +2412,7 @@ describe("App view switching", () => {
   it("renders AgentsView when agents view is selected", async () => {
     render(<App />);
 
-    const agentsViewButton = await screen.findByTitle("Agents view", {}, { timeout: 5000 });
+    const agentsViewButton = await screen.findByTestId("sidebar-nav-agents", {}, { timeout: 5000 });
 
     // Click to switch to agents view
     fireEvent.click(agentsViewButton);
@@ -2396,7 +2432,7 @@ describe("App view switching", () => {
 
     render(<App />);
 
-    const agentsViewButton = await screen.findByTitle("Agents view", {}, { timeout: 5000 });
+    const agentsViewButton = await screen.findByTestId("sidebar-nav-agents", {}, { timeout: 5000 });
 
     fireEvent.click(agentsViewButton);
 
@@ -2414,7 +2450,7 @@ describe("App view switching", () => {
       expect(document.querySelector(".agents-view")).toBeTruthy();
     });
 
-    expect(screen.getByTitle("Agents view").className).toContain("active");
+    expect(screen.getByTestId("sidebar-nav-agents").className).toContain("active");
 
     localStorage.removeItem(taskViewStorageKey());
   });
@@ -2429,10 +2465,10 @@ describe("App view switching", () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByTitle("Board view")).toBeTruthy();
+      expect(screen.getByTestId("sidebar-nav-board")).toBeTruthy();
     });
 
-    expect(screen.getByTitle("Agents view")).toBeTruthy();
+    expect(screen.getByTestId("sidebar-nav-agents")).toBeTruthy();
 
     // Cleanup: restore default mock
     vi.mocked(fetchSettings).mockResolvedValue({ ...defaultSettings });
@@ -2443,19 +2479,12 @@ describe("App view switching", () => {
   it("renders InsightsView when insights view is selected", async () => {
     render(<App />);
 
-    // Wait for the header to render
-    await waitFor(() => {
-      expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeTruthy();
-    });
-
-    // Open the overflow menu and click Insights
-    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
     /*
-     * FNXC:DashboardRouting 2026-06-19-09:04:
-     * The App-level Insights routing test must wait for the overflow command that users click, not only for the trigger.
-     * This preserves the lazy-view navigation invariant while avoiding a race with async settings-driven menu commits.
+     * FNXC:Navigation 2026-06-22-09:30:
+     * Insights is now a left-sidebar destination (sidebar-nav-insights), not a header
+     * More-views overflow command. Navigate via the sidebar to exercise lazy-view routing.
      */
-    fireEvent.click(await screen.findByTestId("view-overflow-insights"));
+    fireEvent.click(await screen.findByTestId("sidebar-nav-insights"));
 
     // Insights view should be rendered (it has a insights-view container)
     expect(await screen.findByTestId("insights-view")).toBeTruthy();
@@ -2511,13 +2540,7 @@ describe("App view switching", () => {
 
     render(<App />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeTruthy();
-    });
-
-    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
-    // FNXC:DashboardRouting 2026-06-19-09:15: Insights overflow commands are settings-driven, so task-flow coverage must await the committed command before clicking it.
-    fireEvent.click(await screen.findByTestId("view-overflow-insights"));
+    fireEvent.click(await screen.findByTestId("sidebar-nav-insights"));
 
     await waitFor(() => {
       expect(screen.getByTestId("create-task-INS-1")).toBeTruthy();
@@ -2546,13 +2569,7 @@ describe("App view switching", () => {
 
     render(<App />);
 
-    await waitFor(() => {
-      expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeTruthy();
-    });
-
-    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
-    // FNXC:DashboardRouting 2026-06-19-09:15: Preference persistence exercises the same async overflow command surface as direct Insights navigation.
-    fireEvent.click(await screen.findByTestId("view-overflow-insights"));
+    fireEvent.click(await screen.findByTestId("sidebar-nav-insights"));
 
     await waitFor(() => {
       expect(localStorage.getItem(taskViewStorageKey())).toBe("insights");
@@ -2568,8 +2585,8 @@ describe("App view switching", () => {
       expect(document.querySelector(".insights-view")).toBeTruthy();
     });
 
-    // Overflow trigger should be active when view is insights
-    expect(screen.getByTestId("view-toggle-overflow-trigger").className).toContain("active");
+    // Sidebar Insights entry should be active when view is insights
+    expect(screen.getByTestId("sidebar-nav-insights").className).toContain("active");
 
     localStorage.removeItem(taskViewStorageKey());
   });
@@ -2592,8 +2609,8 @@ describe("App view switching", () => {
       expect(document.querySelector(".insights-view")).toBeTruthy();
     });
 
-    // Verify overflow trigger is active
-    expect(screen.getByTestId("view-toggle-overflow-trigger").className).toContain("active");
+    // Verify the sidebar Insights entry is active
+    expect(screen.getByTestId("sidebar-nav-insights").className).toContain("active");
 
     // Cleanup
     localStorage.removeItem("kb:proj_a:kb-dashboard-task-view");
@@ -2601,7 +2618,6 @@ describe("App view switching", () => {
   });
 
   it("does not render insights view button when insights experimental feature is disabled", async () => {
-    // Keep at least one overflow item enabled so the overflow trigger still renders.
     (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ...defaultSettings,
       experimentalFeatures: { insights: false },
@@ -2609,14 +2625,13 @@ describe("App view switching", () => {
 
     render(<App />);
 
-    // Wait for the header to render
+    // Wait for the sidebar to render
     await waitFor(() => {
-      expect(screen.getByTitle("Board view")).toBeTruthy();
+      expect(screen.getByTestId("sidebar-nav-board")).toBeTruthy();
     });
 
-    // Open the overflow menu - Insights item should not be rendered
-    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
-    expect(screen.queryByTestId("view-overflow-insights")).toBeNull();
+    // Insights is not a sidebar destination when the feature is disabled
+    expect(screen.queryByTestId("sidebar-nav-insights")).toBeNull();
   });
 
   it("keeps experimental views off until settings load and falls back to board when no flag is enabled", async () => {
@@ -2633,7 +2648,7 @@ describe("App view switching", () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByTitle("Board view")).toBeTruthy();
+      expect(screen.getByTestId("sidebar-nav-board")).toBeTruthy();
     });
 
     expect(document.querySelector(".insights-view")).toBeNull();
@@ -2653,7 +2668,6 @@ describe("App view switching", () => {
   });
 
   it("does not render memory view button when memoryView experimental feature is disabled", async () => {
-    // Keep another overflow item enabled so the overflow trigger still renders.
     (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ...defaultSettings,
       experimentalFeatures: { memoryView: false, insights: true },
@@ -2661,14 +2675,13 @@ describe("App view switching", () => {
 
     render(<App />);
 
-    // Wait for the header to render
+    // Wait for the sidebar to render
     await waitFor(() => {
-      expect(screen.getByTitle("Board view")).toBeTruthy();
+      expect(screen.getByTestId("sidebar-nav-board")).toBeTruthy();
     });
 
-    // Open the overflow menu - Memory item should not be rendered
-    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
-    expect(screen.queryByTestId("view-toggle-memory")).toBeNull();
+    // Memory is not a sidebar destination when the feature is disabled
+    expect(screen.queryByTestId("sidebar-nav-memory")).toBeNull();
   });
 
   it("redirects to board when memoryView experimental feature is disabled and taskView is memory", async () => {
@@ -2733,103 +2746,84 @@ describe("App view switching", () => {
 });
 
 describe("App GitHub import", () => {
-  it("opens GitHub import modal when import button is clicked", async () => {
+  // FNXC:Navigation 2026-06-22-09:30: GitHub import is now the left-sidebar "Import Tasks"
+  // destination rendering the GitHubImportModal embedded in main content (presentation="embedded"),
+  // not a header-button modal overlay. Navigation in/out goes through the sidebar; embedded mode
+  // has no overlay or Cancel affordance (closing returns to the board view).
+  it("opens GitHub import as an embedded view from the Import Tasks sidebar destination", async () => {
     render(<App />);
 
-    // Wait for the header to render
+    const importNavItem = await screen.findByTestId("sidebar-nav-import-tasks");
+    fireEvent.click(importNavItem);
+
     await waitFor(() => {
-      expect(screen.getByTitle("Import from GitHub")).toBeTruthy();
+      expect(screen.getByTestId("github-import-view")).toBeTruthy();
+      expect(screen.getByText("Import from GitHub")).toBeTruthy();
     });
-
-    // Click the import button
-    fireEvent.click(screen.getByTitle("Import from GitHub"));
-
-    // Modal should be visible
-    expect(screen.getByText("Import from GitHub")).toBeTruthy();
   });
 
-  it("closes GitHub import modal on cancel", async () => {
+  it("closes the embedded GitHub import view back to the board", async () => {
     render(<App />);
 
+    fireEvent.click(await screen.findByTestId("sidebar-nav-import-tasks"));
+
     await waitFor(() => {
-      expect(screen.getByTitle("Import from GitHub")).toBeTruthy();
+      expect(screen.getByTestId("github-import-view")).toBeTruthy();
     });
 
-    // Open the modal
-    fireEvent.click(screen.getByTitle("Import from GitHub"));
+    // Returning to the board is the embedded close path (no overlay/Cancel button).
+    fireEvent.click(await screen.findByTestId("sidebar-nav-board"));
 
-    // Scope interactions to the GitHub import modal to avoid clicking Cancel
-    // buttons from other overlays (e.g. onboarding wizard).
-    const modalHeading = await screen.findByRole("heading", { name: "Import from GitHub" });
-    const modalOverlay = modalHeading.closest(".modal-overlay");
-    expect(modalOverlay).toBeTruthy();
-
-    const cancelButton = within(modalOverlay as HTMLElement).getByRole("button", { name: /^Cancel$/i });
-    fireEvent.click(cancelButton);
-
-    // Modal heading should be gone after cancel closes the overlay.
     await waitFor(() => {
-      expect(screen.queryByRole("heading", { name: "Import from GitHub" })).toBeNull();
+      expect(screen.queryByTestId("github-import-view")).toBeNull();
+      expect(document.querySelector(".board")).toBeTruthy();
     });
   });
 });
 
 describe("App Planning Mode", () => {
-  it("opens Planning Mode modal when plan button is clicked", async () => {
+  it("opens Planning Mode as an embedded view from the sidebar destination", async () => {
     render(<App />);
 
-    // Wait for the header to render
-    await waitFor(() => {
-      expect(screen.getByTitle("Create a task with AI planning")).toBeTruthy();
-    });
+    const planningNavItem = await screen.findByTestId("sidebar-nav-planning");
+    fireEvent.click(planningNavItem);
 
-    // Click the plan button
-    fireEvent.click(screen.getByTitle("Create a task with AI planning"));
-
-    // Planning modal should be visible
     await waitFor(() => {
+      expect(screen.getByTestId("planning-view")).toBeTruthy();
       expect(screen.getByText("Planning Mode")).toBeTruthy();
     });
+    expect(screen.queryByTestId("planning-btn")).toBeNull();
   });
 
-  it("closes Planning Mode modal on close button click", async () => {
+  it("closes Planning Mode embedded view back to the board", async () => {
     render(<App />);
 
+    fireEvent.click(await screen.findByTestId("sidebar-nav-planning"));
     await waitFor(() => {
-      expect(screen.getByTitle("Create a task with AI planning")).toBeTruthy();
+      expect(screen.getByTestId("planning-view")).toBeTruthy();
     });
 
-    // Open the modal
-    fireEvent.click(screen.getByTitle("Create a task with AI planning"));
-    await waitFor(() => {
-      expect(screen.getByText("Planning Mode")).toBeTruthy();
-    });
-
-    // Close the modal using the close button
     fireEvent.click(screen.getByLabelText("Close"));
 
-    // Modal should be closed
     await waitFor(() => {
       expect(screen.queryByText("Transform your idea into a detailed task")).toBeNull();
+      expect(screen.getByTestId("sidebar-nav-board").getAttribute("aria-current")).toBe("page");
     });
   });
 
-  it("renders planning modal with correct initial state", async () => {
+  it("renders planning embedded view with correct initial state", async () => {
+    localStorage.setItem(taskViewStorageKey(), "planning");
+
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByTitle("Create a task with AI planning")).toBeTruthy();
-    });
-
-    // Open the modal
-    fireEvent.click(screen.getByTitle("Create a task with AI planning"));
-
-    // Initial view should show
-    await waitFor(() => {
+      expect(screen.getByTestId("planning-view")).toBeTruthy();
       expect(screen.getByText("Transform your idea into a detailed task")).toBeTruthy();
       expect(screen.getByPlaceholderText(/e.g., Build a user authentication system with login/)).toBeTruthy();
       expect(screen.getByText("Start Planning")).toBeTruthy();
     });
+
+    localStorage.removeItem(taskViewStorageKey());
   });
 });
 
@@ -2874,6 +2868,10 @@ describe("Script run flow", () => {
 });
 
 describe("Script-to-terminal modal handoff", () => {
+  beforeEach(() => {
+    mockProjectsState.projects = [mockCurrentProjectState.currentProject!];
+  });
+
   it("closes ScriptsModal and opens TerminalModal when Run is clicked", async () => {
     render(<App />);
 
@@ -3593,7 +3591,7 @@ describe("App onboarding reopen", () => {
     fireEvent.click(settingsBtn);
 
     await waitFor(() => {
-      expect(screen.getByText("Settings")).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "Settings" })).toBeTruthy();
     });
 
     // Navigate to Authentication section (it should be default or click to ensure)
@@ -3650,7 +3648,7 @@ describe("App onboarding reopen", () => {
     fireEvent.click(settingsBtn);
 
     await waitFor(() => {
-      expect(screen.getByText("Settings")).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "Settings" })).toBeTruthy();
     });
 
     // Navigate to Authentication section
@@ -4110,7 +4108,7 @@ describe("App board branch filters", () => {
       expect(screen.queryByText("Beta Search")).toBeNull();
     });
 
-    fireEvent.click(screen.getByTitle("List view"));
+    fireEvent.click(screen.getByTestId("sidebar-nav-list"));
     await waitFor(() => {
       expect(screen.getByText("Alpha Search")).toBeTruthy();
       expect(screen.getByText("Beta Search")).toBeTruthy();

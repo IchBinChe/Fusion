@@ -5108,6 +5108,17 @@ export default interface Resources {
       "unavailable": "Research is unavailable for this project.",
       "viewLabel": "Research view"
     },
+    "rightDock": {
+      "closeExpandedView": "Close expanded right dock view",
+      "collapse": "Collapse right dock",
+      "expand": "Expand right dock",
+      "expandView": "Expand {{label}}",
+      "label": "Right dock",
+      "resize": "Resize right dock",
+      "resizeExpandedView": "Resize expanded right dock window",
+      "viewExpanded": "{{label}} expanded",
+      "views": "Right dock views"
+    },
     "routine": {
       "andMore_one": "…and {{count}} more",
       "andMore_other": "…and {{count}} more",

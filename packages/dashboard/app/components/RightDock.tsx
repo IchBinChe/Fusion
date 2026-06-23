@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { Maximize2 } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import {
   findOverflowViewEntry,
   getVisibleOverflowViewEntries,
@@ -89,6 +90,9 @@ FN-6882 splits right-dock entries into launcher actions and inline views. Action
 
 FNXC:Navigation 2026-06-22-09:00:
 The right dock is visible by default on tablet/desktop project screens. Show/hide is owned solely by the canonical Header right-sidebar toggle (the in-dock collapse toggle was removed); the dock takes only `open` and renders null when closed so the main content reclaims the space.
+
+FNXC:i18n 2026-06-22-00:00:
+Right-dock affordance labels are user-facing accessibility copy, so route them through the app namespace and keep English defaults colocated with the component for tests and fallback rendering.
 */
 export function RightDock({
   open,
@@ -97,6 +101,7 @@ export function RightDock({
   onExpand,
   footerVisible = false,
 }: RightDockProps) {
+  const { t } = useTranslation("app");
   const entries = useMemo(() => getVisibleOverflowViewEntries(visibilityOptions), [visibilityOptions]);
   const [selectedKey, setSelectedKey] = useState<OverflowViewKey>(() => readStoredRightDockView(visibilityOptions));
   const [width, setWidth] = useState(readStoredRightDockWidth);
@@ -198,12 +203,13 @@ export function RightDock({
 
   const SelectedIcon = selectedEntry.icon;
   const dockWidth = `${width}px`;
+  const expandSelectedViewLabel = t("rightDock.expandView", "Expand {{label}}", { label: selectedEntry.label });
 
   return (
     <aside
       className={`right-dock${open ? "" : " right-dock--collapsed"}${footerVisible ? " right-dock--with-footer" : ""}`}
       style={dockWidth ? { width: dockWidth } : undefined}
-      aria-label="Right dock"
+      aria-label={t("rightDock.label", "Right dock")}
       data-testid="right-dock"
     >
       {open ? (
@@ -214,7 +220,7 @@ export function RightDock({
           aria-valuemin={RIGHT_DOCK_MIN_WIDTH}
           aria-valuemax={RIGHT_DOCK_MAX_WIDTH}
           aria-valuenow={width}
-          aria-label="Resize right dock"
+          aria-label={t("rightDock.resize", "Resize right dock")}
           tabIndex={0}
           data-testid="right-dock-resize-handle"
           onPointerDown={handleResizeStart}
@@ -222,7 +228,7 @@ export function RightDock({
         />
       ) : null}
       <div className="right-dock__toolbar">
-        <div className="right-dock__tabs" role="tablist" aria-label="Right dock views">
+        <div className="right-dock__tabs" role="tablist" aria-label={t("rightDock.views", "Right dock views")}>
           {entries.map((entry) => {
             const Icon = entry.icon;
             const selected = Boolean(entry.render && entry.key === selectedEntry.key);
@@ -248,8 +254,8 @@ export function RightDock({
             <button
               type="button"
               className="btn-icon right-dock__expand"
-              aria-label={`Expand ${selectedEntry.label}`}
-              title={`Expand ${selectedEntry.label}`}
+              aria-label={expandSelectedViewLabel}
+              title={expandSelectedViewLabel}
               data-testid="right-dock-expand"
               onClick={() => onExpand?.(selectedEntry.key)}
             >

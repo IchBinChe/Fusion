@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Maximize2, X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { findOverflowViewEntry, type OverflowViewEntry, type OverflowViewKey, type OverflowViewRenderProps, type OverflowViewVisibilityOptions } from "./overflowViewRegistry";
 import { nextFloatingZ, currentFloatingZ } from "./floatingWindowStack";
 import "./RightDock.css";
@@ -113,6 +114,9 @@ Expanded right-dock views reuse the same overflow registry render function as th
 
 FNXC:Navigation 2026-06-21-20:16:
 FN-6882 makes most right-dock entries launcher actions. The expand modal is restricted to inline view entries so action-only tools cannot open an empty modal body.
+
+FNXC:i18n 2026-06-22-00:00:
+Expanded right-dock modal affordance labels are accessibility copy and must use the app namespace so locale catalogs and fallback tests cover the modal surface with the dock controls.
 */
 export function RightDockExpandModal({
   viewKey,
@@ -121,6 +125,7 @@ export function RightDockExpandModal({
   onClose,
   returnFocusRef,
 }: RightDockExpandModalProps) {
+  const { t } = useTranslation("app");
   const resolvedEntry = viewKey ? findOverflowViewEntry(viewKey, visibilityOptions) : undefined;
   const entry: RenderableOverflowViewEntry | undefined = resolvedEntry?.render ? { ...resolvedEntry, render: resolvedEntry.render } : undefined;
 
@@ -295,6 +300,7 @@ export function RightDockExpandModal({
   }
 
   const Icon = entry.icon;
+  const expandedViewLabel = t("rightDock.viewExpanded", "{{label}} expanded", { label: entry.label });
 
   const panelStyle = {
     left: `${position.x}px`,
@@ -306,7 +312,7 @@ export function RightDockExpandModal({
 
   // FNXC:FloatingWindow 2026-06-22-22:30: Portaled to document.body so this floating modal shares the ONE root stacking context with the other floating modals (FloatingWindow/terminal/New Task) — the shared 10100+ z stack only orders correctly across types when they all live at the document root.
   return createPortal(
-    <div className="modal-overlay open right-dock-expand-modal-overlay" role="dialog" aria-modal="false" aria-label={`${entry.label} expanded`} data-testid="right-dock-expand-modal" style={{ zIndex }}>
+    <div className="modal-overlay open right-dock-expand-modal-overlay" role="dialog" aria-modal="false" aria-label={expandedViewLabel} data-testid="right-dock-expand-modal" style={{ zIndex }}>
       <div
         className="modal right-dock-expand-modal right-dock-expand-modal--floating"
         style={panelStyle}
@@ -319,7 +325,7 @@ export function RightDockExpandModal({
             className={`right-dock-expand-resize-handle right-dock-expand-resize-handle--${direction}`}
             data-testid={`right-dock-expand-resize-${direction}`}
             role="separator"
-            aria-label="Resize expanded right dock window"
+            aria-label={t("rightDock.resizeExpandedView", "Resize expanded right dock window")}
             onPointerDown={(event) => handleFloatingResizePointerDown(event, direction)}
           />
         ))}
@@ -333,7 +339,7 @@ export function RightDockExpandModal({
             <Icon size={16} />
             <span>{entry.label}</span>
           </div>
-          <button className="modal-close" onClick={closeAndRestoreFocus} aria-label="Close expanded right dock view" data-testid="right-dock-expand-close">
+          <button className="modal-close" onClick={closeAndRestoreFocus} aria-label={t("rightDock.closeExpandedView", "Close expanded right dock view")} data-testid="right-dock-expand-close">
             <X size={20} />
           </button>
         </div>

@@ -5106,6 +5106,17 @@
     "unavailable": "此项目不支持研究功能。",
     "viewLabel": "研究视图"
   },
+  "rightDock": {
+    "closeExpandedView": "",
+    "collapse": "",
+    "expand": "",
+    "expandView": "",
+    "label": "",
+    "resize": "",
+    "viewExpanded": "",
+    "views": "",
+    "resizeExpandedView": ""
+  },
   "routine": {
     "andMore_one": "",
     "andMore_other": "",

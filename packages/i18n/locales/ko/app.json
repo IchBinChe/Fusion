@@ -5106,6 +5106,17 @@
     "unavailable": "이 프로젝트에서는 리서치를 사용할 수 없습니다.",
     "viewLabel": "리서치 보기"
   },
+  "rightDock": {
+    "closeExpandedView": "",
+    "collapse": "",
+    "expand": "",
+    "expandView": "",
+    "label": "",
+    "resize": "",
+    "viewExpanded": "",
+    "views": "",
+    "resizeExpandedView": ""
+  },
   "routine": {
     "andMore_one": "",
     "andMore_other": "",

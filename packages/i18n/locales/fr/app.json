@@ -5106,6 +5106,17 @@
     "unavailable": "La recherche est indisponible pour ce projet.",
     "viewLabel": "Affichage de la recherche"
   },
+  "rightDock": {
+    "closeExpandedView": "",
+    "collapse": "",
+    "expand": "",
+    "expandView": "",
+    "label": "",
+    "resize": "",
+    "viewExpanded": "",
+    "views": "",
+    "resizeExpandedView": ""
+  },
   "routine": {
     "andMore_one": "",
     "andMore_other": "",

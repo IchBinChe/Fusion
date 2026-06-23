@@ -99,6 +99,17 @@ describe("RightDock", () => {
     expect(screen.queryByTestId("right-dock-tab-documents")).toBeNull();
   });
 
+  it("exposes localized right-dock affordance labels without an in-dock collapse shell", () => {
+    render(<RightDock open={true} renderProps={renderProps} />);
+
+    expect(screen.getByTestId("right-dock")).toHaveAttribute("aria-label", "Right dock");
+    expect(screen.getByTestId("right-dock-resize-handle")).toHaveAttribute("aria-label", "Resize right dock");
+    expect(screen.getByRole("tablist", { name: "Right dock views" })).toBeInTheDocument();
+    expect(screen.getByTestId("right-dock-expand")).toHaveAttribute("aria-label", "Expand Files");
+    expect(screen.getByTestId("right-dock-expand")).toHaveAttribute("title", "Expand Files");
+    expect(screen.queryByTestId("right-dock-collapse-toggle")).toBeNull();
+  });
+
   it("renders exactly the current right-dock tool entries and no removed content-view tabs", () => {
     render(
       <RightDock
@@ -239,6 +250,7 @@ describe("RightDock", () => {
     );
 
     expect(screen.getByTestId("right-dock-expand-modal")).toBeInTheDocument();
+    expect(screen.getByTestId("right-dock-expand-modal")).toHaveAttribute("aria-label", "Files expanded");
     expect(screen.getByTestId("right-dock-expand-body")).toBeInTheDocument();
     /*
     FNXC:RightDock 2026-06-22-17:40:
@@ -248,7 +260,8 @@ describe("RightDock", () => {
     expect(screen.getByTestId("right-dock-expand-modal")).toHaveAttribute("aria-modal", "false");
     expect(screen.getByTestId("right-dock-expand-drag-handle")).toBeInTheDocument();
     expect(screen.getByTestId("right-dock-expand-modal").querySelector(".right-dock-expand-modal--floating")).not.toBeNull();
-    expect(screen.getByTestId("right-dock-expand-resize-se")).toBeInTheDocument();
+    expect(screen.getByTestId("right-dock-expand-resize-se")).toHaveAttribute("aria-label", "Resize expanded right dock window");
+    expect(screen.getByTestId("right-dock-expand-close")).toHaveAttribute("aria-label", "Close expanded right dock view");
     fireEvent.click(screen.getByTestId("right-dock-expand-close"));
     expect(onClose).toHaveBeenCalledTimes(1);
     await new Promise((resolve) => window.setTimeout(resolve, 0));

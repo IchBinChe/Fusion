@@ -5106,6 +5106,17 @@
     "unavailable": "La investigación no está disponible para este proyecto.",
     "viewLabel": "Vista de investigación"
   },
+  "rightDock": {
+    "closeExpandedView": "",
+    "collapse": "",
+    "expand": "",
+    "expandView": "",
+    "label": "",
+    "resize": "",
+    "viewExpanded": "",
+    "views": "",
+    "resizeExpandedView": ""
+  },
   "routine": {
     "andMore_one": "",
     "andMore_other": "",

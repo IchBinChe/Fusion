@@ -153,6 +153,49 @@ exactly when the surrounding chrome is gone.
   font-family: var(--font-mono);
 }
 
+.dev-server-task-picker {
+  width: 100%;
+  min-width: 0;
+}
+
+.dev-server-task-descriptor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  min-width: 0;
+  padding: var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 84%, var(--text));
+}
+
+.dev-server-task-descriptor-header {
+  display: flex;
+  min-width: 0;
+}
+
+.dev-server-task-description {
+  margin: 0;
+  max-height: calc(var(--space-2xl) * 4);
+  overflow-y: auto;
+  color: var(--text);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.dev-server-task-worktree {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.dev-server-task-worktree code {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
 .dev-server-section {
   display: flex;
   flex-direction: column;
@@ -651,6 +694,15 @@ exactly when the surrounding chrome is gone.
     margin-left: 0;
   }
 
+  .dev-server-task-picker,
+  .dev-server-task-descriptor {
+    width: 100%;
+  }
+
+  .dev-server-task-description {
+    max-height: calc(var(--space-2xl) * 3);
+  }
+
   .dev-server-config {
     max-height: min(48vh, calc(var(--space-2xl) * 13));
   }
@@ -851,6 +903,15 @@ vertically (.dev-server-view overflow-y:auto), so each panel just needs to be fu
 
   .dev-server-candidates {
     max-height: min(32vh, calc(var(--space-2xl) * 7));
+  }
+
+  .dev-server-task-picker,
+  .dev-server-task-descriptor {
+    width: 100%;
+  }
+
+  .dev-server-task-description {
+    max-height: calc(var(--space-2xl) * 3);
   }
 
   .dev-server-logs,

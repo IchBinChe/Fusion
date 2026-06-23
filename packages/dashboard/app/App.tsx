@@ -2054,7 +2054,7 @@ function AppInner() {
       return (
         <PageErrorBoundary>
           <Suspense fallback={null}>
-            <DevServerView addToast={addToast} projectId={currentProject?.id} />
+            <DevServerView tasks={tasks} addToast={addToast} projectId={currentProject?.id} />
           </Suspense>
         </PageErrorBoundary>
       );

@@ -862,6 +862,7 @@ Navigation:
 
 Features:
 - Detect candidate dev server commands and choose which command/session to run
+- Pick an executing task to run the dev server against that task's worktree and preview its in-progress work; the selected task's descriptor is shown so you know what you're previewing.
 - Start, stop, and restart the current server session
 - Manage preview URLs with embedded preview and **Open in new tab** fallback
 - Tail live logs, load older history, and refresh session status

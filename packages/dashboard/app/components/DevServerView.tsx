@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, ExternalLink, Eye, Loader2, Monitor, Play, RefreshCw, RotateCw, ShieldAlert, Square } from "lucide-react";
+import type { Task, TaskDetail } from "@fusion/core";
 import "./DevServerView.css";
 import type { DetectedDevServerCommand } from "../api";
 import { useDevServer } from "../hooks/useDevServer";
@@ -16,6 +17,7 @@ import { ViewHeader } from "./ViewHeader";
 interface DevServerViewProps {
   addToast: (msg: string, type?: ToastType) => void;
   projectId?: string;
+  tasks?: Array<Task | TaskDetail>;
 }
 
 type PreviewMode = "embedded" | "external";
@@ -86,7 +88,7 @@ function truncateCommand(command: string): string {
   return `${command.slice(0, maxLength)}…`;
 }
 
-export function DevServerView({ addToast, projectId }: DevServerViewProps) {
+export function DevServerView({ addToast, projectId, tasks }: DevServerViewProps) {
   const { t } = useTranslation("app");
 
   useEffect(() => {
@@ -144,7 +146,28 @@ export function DevServerView({ addToast, projectId }: DevServerViewProps) {
   const [commandInput, setCommandInput] = useState("");
   const [previewInput, setPreviewInput] = useState("");
   const [selectedScript, setSelectedScript] = useState<string | null>(null);
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [actionInFlight, setActionInFlight] = useState<"start" | "stop" | "restart" | "preview" | null>(null);
+
+  /*
+  FNXC:DevServer 2026-06-23-00:00:
+  The board and right dock pass live task data into DevServerView so the dev server can target the checked-out worktree of an executing task instead of only the integration worktree.
+  Only in-progress tasks with concrete worktree paths are targetable because a missing cwd cannot be safely passed to the start endpoint.
+  */
+  const executingTasks = useMemo(
+    () => (tasks ?? []).filter((task) => task.column === "in-progress" && typeof task.worktree === "string" && task.worktree.length > 0),
+    [tasks],
+  );
+  const selectedTask = useMemo(
+    () => executingTasks.find((task) => task.id === selectedTaskId) ?? null,
+    [executingTasks, selectedTaskId],
+  );
+
+  useEffect(() => {
+    if (selectedTaskId && !executingTasks.some((task) => task.id === selectedTaskId)) {
+      setSelectedTaskId(null);
+    }
+  }, [executingTasks, selectedTaskId]);
 
   const [previewMode, setPreviewMode] = useState<PreviewMode>("embedded");
 
@@ -316,6 +339,13 @@ export function DevServerView({ addToast, projectId }: DevServerViewProps) {
     addToast(t("devserver.toast.clearedScript", "Cleared selected dev server script."), "success");
   }, [addToast]);
 
+  const handleTaskSelectionChange = useCallback((nextTaskId: string | null) => {
+    if (isRunning && nextTaskId && nextTaskId !== selectedTaskId) {
+      addToast(t("devserver.restartToApplyTask", "Restart the dev server to apply the selected task's worktree."), "info");
+    }
+    setSelectedTaskId(nextTaskId);
+  }, [addToast, isRunning, selectedTaskId, t]);
+
   const handleStart = () => {
     const trimmedCommand = commandInput.trim();
     if (trimmedCommand.length === 0) {
@@ -324,7 +354,12 @@ export function DevServerView({ addToast, projectId }: DevServerViewProps) {
     }
 
     const fallbackCwd = normalizeSourceToCwd(selectedSource) ?? ".";
-    const cwd = selectedCandidate?.cwd ?? fallbackCwd;
+    /*
+    FNXC:DevServer 2026-06-23-00:00:
+    A selected executing task's worktree takes precedence over the detected script cwd so the preview process reflects in-progress task work instead of the integration branch.
+    */
+    const targetedCwd = selectedTask?.worktree ?? null;
+    const cwd = targetedCwd ?? selectedCandidate?.cwd ?? fallbackCwd;
 
     void runAction(
       "start",
@@ -491,6 +526,52 @@ export function DevServerView({ addToast, projectId }: DevServerViewProps) {
               })}
             </div>
           )}
+        </div>
+
+        <div className="dev-server-section dev-server-executing-task-section">
+          <h3>{t("devserver.executingTask", "Executing Task")}</h3>
+          <div className="dev-server-field-group">
+            <label htmlFor="dev-server-task-picker" className="dev-server-label">{t("devserver.executingTask", "Executing Task")}</label>
+            <select
+              id="dev-server-task-picker"
+              className="input dev-server-task-picker"
+              value={selectedTaskId ?? ""}
+              onChange={(event) => handleTaskSelectionChange(event.target.value.length > 0 ? event.target.value : null)}
+              disabled={executingTasks.length === 0}
+              aria-label={t("devserver.executingTask", "Executing Task")}
+              data-testid="dev-server-task-picker"
+            >
+              <option value="">{t("devserver.projectRootNoTask", "Project root (no task)")}</option>
+              {executingTasks.map((task) => (
+                <option key={task.id} value={task.id}>
+                  {task.title ? `${task.id} — ${task.title}` : task.id}
+                </option>
+              ))}
+            </select>
+            {executingTasks.length === 0 && (
+              <p className="dev-server-empty-state" data-testid="dev-server-no-executing-tasks">
+                {t("devserver.noExecutingTasks", "No executing tasks with a worktree available. Start a task to target its worktree.")}
+              </p>
+            )}
+            {selectedTask && (
+              <div className="dev-server-task-descriptor" data-testid="dev-server-task-descriptor">
+                {/*
+                FNXC:DevServer 2026-06-23-00:00:
+                The selected executing task descriptor is shown next to the worktree picker so users know which in-progress task the preview reflects before they start or restart the dev server.
+                */}
+                <div className="dev-server-task-descriptor-header">
+                  <span className="dev-server-candidate-name">
+                    {selectedTask.title ? `${selectedTask.id} — ${selectedTask.title}` : selectedTask.id}
+                  </span>
+                </div>
+                <p className="dev-server-task-description">{selectedTask.description}</p>
+                <div className="dev-server-task-worktree">
+                  <span className="dev-server-label">{t("devserver.targetWorktree", "Target worktree")}</span>
+                  <code>{selectedTask.worktree}</code>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="dev-server-field-group">

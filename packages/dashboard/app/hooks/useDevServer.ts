@@ -435,8 +435,15 @@ export function useDevServer(projectId?: string): UseDevServerReturn {
 
     try {
       let result: DevServerSession;
+      const hasExplicitCwd = typeof cwd === "string" && cwd.length > 0;
+      const sessionDefaultCwd = session?.config?.cwd ?? ".";
+      /*
+      FNXC:DevServer 2026-06-23-00:00:
+      The session start endpoint starts the saved session and does not accept an override cwd. When the UI targets a task worktree or any non-default cwd, use the legacy start endpoint because it forwards { command, cwd } to /dev-server/start.
+      */
+      const shouldUseLegacyStart = hasExplicitCwd && cwd !== sessionDefaultCwd;
 
-      if (subscriptionSessionId && typeof getOptionalExport(() => startDevServerById) === "function") {
+      if (!shouldUseLegacyStart && subscriptionSessionId && typeof getOptionalExport(() => startDevServerById) === "function") {
         result = await startDevServerById(subscriptionSessionId, projectId);
       } else {
         const legacyState = await legacyStart({ command, cwd }, projectId);
@@ -456,7 +463,7 @@ export function useDevServer(projectId?: string): UseDevServerReturn {
       setError(normalizeError(startError));
       throw startError;
     }
-  }, [projectId, subscriptionSessionId]);
+  }, [projectId, session?.config?.cwd, subscriptionSessionId]);
 
   const stopServer = useCallback(async () => {
     contextVersionRef.current += 1;

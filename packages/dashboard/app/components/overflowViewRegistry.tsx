@@ -195,7 +195,7 @@ export const STATIC_OVERFLOW_VIEW_ENTRIES: readonly OverflowViewEntry[] = [
     icon: Monitor,
     testId: "right-dock-tab-devserver",
     isVisible: (options) => options.experimentalFeatures?.devServerView === true,
-    render: (props) => wrapOverflowView(<DevServerView addToast={props.addToast} projectId={props.projectId} />),
+    render: (props) => wrapOverflowView(<DevServerView tasks={props.tasks} addToast={props.addToast} projectId={props.projectId} />),
   },
   {
     key: "secrets",

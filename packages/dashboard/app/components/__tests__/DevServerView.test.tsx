@@ -354,4 +354,150 @@ describe("DevServerView", () => {
 
     expect(screen.getByTestId("dev-server-selected-summary")).toBeInTheDocument();
   });
+
+  it("lists targetable executing tasks in the task picker", () => {
+    render(
+      <DevServerView
+        addToast={addToast}
+        projectId="project-a"
+        tasks={[
+          { id: "FN-100", title: "Build checkout", description: "Preview checkout", column: "in-progress", worktree: "/tmp/fn-100" },
+          { id: "FN-101", title: "Fix banner", description: "Preview banner", column: "in-progress", worktree: "/tmp/fn-101" },
+        ] as never}
+      />,
+    );
+
+    const options = Array.from(screen.getByTestId("dev-server-task-picker").querySelectorAll("option")).map((option) => option.textContent);
+    expect(options).toEqual([
+      "Project root (no task)",
+      "FN-100 — Build checkout",
+      "FN-101 — Fix banner",
+    ]);
+  });
+
+  it("disables the task picker and shows an empty state when no executing task has a worktree", () => {
+    render(
+      <DevServerView
+        addToast={addToast}
+        projectId="project-a"
+        tasks={[
+          { id: "FN-100", title: "No checkout yet", description: "Missing worktree", column: "in-progress" },
+          { id: "FN-101", title: "Done", description: "Not executing", column: "done", worktree: "/tmp/fn-101" },
+        ] as never}
+      />,
+    );
+
+    expect(screen.getByTestId("dev-server-task-picker")).toBeDisabled();
+    expect(screen.getByTestId("dev-server-no-executing-tasks")).toHaveTextContent("No executing tasks with a worktree available");
+  });
+
+  it("shows and clears the selected task descriptor", () => {
+    render(
+      <DevServerView
+        addToast={addToast}
+        projectId="project-a"
+        tasks={[
+          { id: "FN-100", title: "Build checkout", description: "Preview checkout changes", column: "in-progress", worktree: "/tmp/fn-100" },
+        ] as never}
+      />,
+    );
+
+    expect(screen.queryByTestId("dev-server-task-descriptor")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId("dev-server-task-picker"), { target: { value: "FN-100" } });
+
+    expect(screen.getByTestId("dev-server-task-descriptor")).toHaveTextContent("FN-100 — Build checkout");
+    expect(screen.getByTestId("dev-server-task-descriptor")).toHaveTextContent("Preview checkout changes");
+    expect(screen.getByTestId("dev-server-task-descriptor")).toHaveTextContent("/tmp/fn-100");
+
+    fireEvent.change(screen.getByTestId("dev-server-task-picker"), { target: { value: "" } });
+
+    expect(screen.queryByTestId("dev-server-task-descriptor")).not.toBeInTheDocument();
+  });
+
+  it("starts the dev server in the selected task worktree", async () => {
+    const start = vi.fn().mockResolvedValue(undefined);
+    mockUseDevServer.mockReturnValue(createDevServerHookState({ start }));
+
+    render(
+      <DevServerView
+        addToast={addToast}
+        projectId="project-a"
+        tasks={[
+          { id: "FN-100", title: "Build checkout", description: "Preview checkout", column: "in-progress", worktree: "/tmp/fn-100" },
+        ] as never}
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId("dev-server-task-picker"), { target: { value: "FN-100" } });
+    fireEvent.change(screen.getByTestId("dev-server-command-input"), { target: { value: "pnpm dev --host" } });
+    fireEvent.click(screen.getByTestId("dev-server-start-button"));
+
+    await waitFor(() => {
+      expect(start).toHaveBeenCalledWith("pnpm dev --host", "/tmp/fn-100");
+    });
+  });
+
+  it("starts the dev server in the project root when no task is selected", async () => {
+    const start = vi.fn().mockResolvedValue(undefined);
+    mockUseDevServer.mockReturnValue(createDevServerHookState({ start }));
+
+    render(<DevServerView addToast={addToast} projectId="project-a" />);
+
+    fireEvent.change(screen.getByTestId("dev-server-command-input"), { target: { value: "pnpm dev --host" } });
+    fireEvent.click(screen.getByTestId("dev-server-start-button"));
+
+    await waitFor(() => {
+      expect(start).toHaveBeenCalledWith("pnpm dev --host", ".");
+    });
+  });
+
+  it("clears a selected task when it leaves the executing task list", async () => {
+    const selectedTask = { id: "FN-100", title: "Build checkout", description: "Preview checkout", column: "in-progress", worktree: "/tmp/fn-100" } as never;
+    const { rerender } = render(<DevServerView addToast={addToast} projectId="project-a" tasks={[selectedTask]} />);
+
+    fireEvent.change(screen.getByTestId("dev-server-task-picker"), { target: { value: "FN-100" } });
+    expect(screen.getByTestId("dev-server-task-descriptor")).toBeInTheDocument();
+
+    rerender(<DevServerView addToast={addToast} projectId="project-a" tasks={[]} />);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("dev-server-task-descriptor")).not.toBeInTheDocument();
+    });
+    expect(screen.getByTestId("dev-server-task-picker")).toHaveValue("");
+  });
+
+  it("shows restart guidance when selecting a task while the server is running", () => {
+    mockUseDevServer.mockReturnValue(createDevServerHookState({ serverState: createState({ status: "running" }) }));
+
+    render(
+      <DevServerView
+        addToast={addToast}
+        projectId="project-a"
+        tasks={[
+          { id: "FN-100", title: "Build checkout", description: "Preview checkout", column: "in-progress", worktree: "/tmp/fn-100" },
+        ] as never}
+      />,
+    );
+
+    fireEvent.change(screen.getByTestId("dev-server-task-picker"), { target: { value: "FN-100" } });
+
+    expect(addToast).toHaveBeenCalledWith("Restart the dev server to apply the selected task's worktree.", "info");
+  });
+
+  it("excludes executing tasks without a worktree from the picker", () => {
+    render(
+      <DevServerView
+        addToast={addToast}
+        projectId="project-a"
+        tasks={[
+          { id: "FN-100", title: "No checkout", description: "Missing worktree", column: "in-progress" },
+          { id: "FN-101", title: "Has checkout", description: "Ready", column: "in-progress", worktree: "/tmp/fn-101" },
+        ] as never}
+      />,
+    );
+
+    expect(screen.queryByText("FN-100 — No checkout")).not.toBeInTheDocument();
+    expect(screen.getByText("FN-101 — Has checkout")).toBeInTheDocument();
+  });
 });

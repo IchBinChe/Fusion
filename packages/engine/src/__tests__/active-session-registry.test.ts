@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import {
   activeSessionRegistry,
   reconcileSelfOwnedActiveSessionForRemoval,
+  ActiveSessionPathHeldByForeignTaskError,
 } from "../active-session-registry.js";
 
 describe("activeSessionRegistry", () => {
@@ -28,15 +29,27 @@ describe("activeSessionRegistry", () => {
     expect(activeSessionRegistry.lookupByPath("/tmp/missing")).toBeNull();
   });
 
-  it("overwrites duplicate registration with warning", () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  // FNXC:Workspace 2026-06-22-04:10 (Phase C review A2 — taskId-aware lease across kinds):
+  // registerPath must NOT silently clobber an entry held by a DIFFERENT task (that was the
+  // cross-phase clobber bug: a merging task's land lease overwriting an executing task's
+  // acquire lease on a shared sub-repo). A foreign-task overwrite now THROWS; the existing
+  // foreign holder is preserved.
+  it("rejects a foreign-task overwrite (does not clobber the held entry)", () => {
     activeSessionRegistry.registerPath("/tmp/w1", { taskId: "FN-1", kind: "executor", ownerKey: "FN-1" });
-    activeSessionRegistry.registerPath("/tmp/w1", { taskId: "FN-2", kind: "workflow-step", ownerKey: "FN-2#workflow-step" });
+    expect(() =>
+      activeSessionRegistry.registerPath("/tmp/w1", { taskId: "FN-2", kind: "workflow-step", ownerKey: "FN-2#workflow-step" }),
+    ).toThrow(ActiveSessionPathHeldByForeignTaskError);
+    // The original holder is untouched.
+    expect(activeSessionRegistry.lookupByPath("/tmp/w1")?.taskId).toBe("FN-1");
+  });
 
-    expect(activeSessionRegistry.lookupByPath("/tmp/w1")?.taskId).toBe("FN-2");
-    expect(warnSpy).toHaveBeenCalledOnce();
-
-    warnSpy.mockRestore();
+  // Same-task re-registration stays idempotent (an executor re-claiming/refreshing its own path).
+  it("allows same-task re-registration (idempotent re-claim)", () => {
+    activeSessionRegistry.registerPath("/tmp/w1", { taskId: "FN-1", kind: "executor", ownerKey: "FN-1" });
+    expect(() =>
+      activeSessionRegistry.registerPath("/tmp/w1", { taskId: "FN-1", kind: "step-session", ownerKey: "FN-1#step-session" }),
+    ).not.toThrow();
+    expect(activeSessionRegistry.lookupByPath("/tmp/w1")?.kind).toBe("step-session");
   });
 
   it("reconcileStaleSelfOwned returns no-entry when path is unregistered", () => {

@@ -203,6 +203,23 @@ export {
 // FNXC:MergerUnification 2026-06-21-19:05: runAiMerge is the sole merge path
 // (master-plan U0); exported for the CLI callers (fn task merge + UI-only merge).
 export { runAiMerge } from "./merger-ai.js";
+// FNXC:Workspace 2026-06-21-23:40 (Phase C U1): per-repo workspace merge loop +
+// the extracted per-repo land primitive, exported for the CLI/dashboard merge doors.
+export {
+  landWorkspaceTask,
+  landOneRepo,
+  // FNXC:Workspace 2026-06-22-04:10 (Phase C review A6): canonical landed predicate,
+  // re-exported so Phase D self-healing reuses it instead of reimplementing the ancestor check.
+  isRepoLanded,
+  // FNXC:Workspace 2026-06-22-04:10 (Phase C review A4): real error classes (instanceof-able),
+  // re-exported so the engine dispatch can switch to instanceof in the separate pass.
+  WorkspaceRepoLandBusyError,
+  WorkspacePartialLandError,
+  type WorkspaceMergeResult,
+  type WorkspaceRepoLandResult,
+  type LandOneRepoResult,
+  type LandRepoContext,
+} from "./merger-ai.js";
 export {
   resolveMergePolicy,
   type ResolvedMergePolicy,

@@ -9,7 +9,6 @@ import {
   CentralCore,
   AgentStore,
   PluginLoader,
-  assertNotWorkspaceTaskMerge,
   getTaskMergeBlocker,
   getEnabledPiExtensionPaths,
   isEphemeralAgent,
@@ -18,6 +17,7 @@ import {
   resolveGlobalDir,
   DEFAULT_AGENT_HEARTBEAT_INTERVAL_MS,
   isWorkflowColumnsEnabled,
+  isWorkspaceTask,
   resolveColumnFlags,
   BUILTIN_CODING_WORKFLOW_IR,
   mergeBuiltInZaiProviderModels,
@@ -43,6 +43,7 @@ import {
 } from "@fusion/dashboard";
 import {
   runAiMerge,
+  landWorkspaceTask,
   MissionAutopilot,
   MissionExecutionLoop,
   HeartbeatMonitor,
@@ -1305,11 +1306,39 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   // aiMergeTask is soft-deprecated.
   //
   const onMergeImpl = async (taskId: string) => {
-    // FNXC:Workspace 2026-06-21-19:05: R7 merge-boundary guard (master-plan U0).
-    // Reject workspace-mode tasks before any merge work; per-repo merge lands in
-    // master-plan U6, which removes this guard.
+    // FNXC:Workspace 2026-06-21-23:40 (Phase C U1, KTD2):
+    // Dashboard merge button (UI-only mode). A workspace-mode task routes through
+    // the ENGINE per-repo merge loop `landWorkspaceTask` (each sub-repo lands on its
+    // own LOCAL integration ref, no push) instead of throwing — manual merge works in
+    // Phase C (user decision). U0's R7 throw is replaced here by routing; the engine
+    // chokepoint + store.mergeTask/aiMergeTask keep throwing as defense-in-depth.
     const mergeTask = await store.getTask(taskId).catch(() => null);
-    if (mergeTask) assertNotWorkspaceTaskMerge(mergeTask);
+    // FNXC:Workspace 2026-06-22-09:30 (Phase C review B10): use the exported `isWorkspaceTask`
+    // (the engine/CLI canonical predicate) instead of re-inlining the workspaceWorktrees check.
+    const isWorkspaceMerge = !!mergeTask && isWorkspaceTask(mergeTask);
+    if (isWorkspaceMerge) {
+      const workspaceResult = await landWorkspaceTask(store, mergeTask!, cwd, {
+        agentStore,
+      });
+      const latest = await store.getTask(taskId).catch(() => mergeTask!);
+      // FNXC:Workspace 2026-06-22-05:10 (Phase C review B3):
+      // landWorkspaceTask now finalizes the workspace task to done on allLanded (Phase C U2),
+      // so the merge door must report merged=true when the workspace fully landed — mirroring
+      // the engine dispatch's MergeResult. The first landed sub-repo's landedSha is the recorded
+      // commitSha (same convention finalizeWorkspaceTask uses). On a partial land, merged stays
+      // false and the partial-land error surfaces on the task log.
+      const landedSha = workspaceResult.repos.find((r) => r.status === "landed")?.landedSha;
+      return {
+        task: latest ?? mergeTask!,
+        branch: getTaskBranchName(taskId),
+        merged: workspaceResult.allLanded,
+        mergeConfirmed: workspaceResult.allLanded || undefined,
+        commitSha: workspaceResult.allLanded ? landedSha : undefined,
+        worktreeRemoved: false,
+        branchDeleted: false,
+        error: workspaceResult.allLanded ? undefined : "partial workspace land — see task log",
+      };
+    }
 
     const settings = await store.getSettings();
     if (getMergeStrategy(settings) === "pull-request") {

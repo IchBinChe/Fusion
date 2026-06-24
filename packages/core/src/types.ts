@@ -1855,6 +1855,17 @@ export interface MergeDetails {
    * `task.mergeRetries`, which counts in-cycle aiMergeTask retries.
    */
   transientRecoveryCount?: number;
+  /**
+   * FNXC:Workspace 2026-06-22-00:30 (Phase C U2, KTD3):
+   * Workspace-mode aggregate landed map: sub-repo relative path → the squash sha
+   * that landed on that repo's local integration ref. Set ONLY by
+   * `landWorkspaceTask`'s finalize-once after EVERY acquired repo's landed
+   * predicate holds; the task-level `commitSha` points at one representative
+   * landed sha (the first sorted landed repo) so the existing `task:merged`
+   * consumer (which reads `mergeDetails.commitSha`) is satisfied. Empty/absent
+   * for single-repo tasks.
+   */
+  workspaceLandedShas?: Record<string, string>;
 }
 
 /** Represents an agent's checkout lease on a task. */
@@ -2262,8 +2273,17 @@ export interface Task {
    * against that sub-repo's RESOLVED integration branch, local-first. It is the
    * per-repo analogue of the single-repo base-commit capture and prevents
    * cross-repo files-changed inflation when local integration is ahead of origin.
+   *
+   * FNXC:Workspace 2026-06-22-00:30 (Phase C U2, KTD3):
+   * `landedSha` is the per-repo "this repo's branch has landed on its local
+   * integration ref" marker, set by `landWorkspaceTask` after a sub-repo's squash
+   * advances that repo's ref. It is the ONLY partial-land state added (no new
+   * status type): a re-run's landed predicate skips a repo whose `landedSha` is
+   * present AND whose recorded value is an ancestor of (or equals) the repo's
+   * integration tip, so an interrupted multi-repo land retries only the un-landed
+   * repos and never re-advances an already-landed ref (idempotent retry).
    */
-  workspaceWorktrees?: Record<string, { worktreePath: string; branch: string; baseCommitSha?: string }>;
+  workspaceWorktrees?: Record<string, { worktreePath: string; branch: string; baseCommitSha?: string; landedSha?: string }>;
   steps: TaskStep[];
   currentStep: number;
   /**
@@ -2652,12 +2672,26 @@ export class WorkspaceTaskMergeError extends Error {
  * @param task the task about to enter a merge path
  */
 export function assertNotWorkspaceTaskMerge(task: Pick<Task, "id" | "workspaceWorktrees">): void {
-  const worktrees = task.workspaceWorktrees;
-  if (worktrees && Object.keys(worktrees).length > 0) {
+  if (isWorkspaceTask(task)) {
     throw new WorkspaceTaskMergeError(
       `Workspace task ${task.id} cannot merge until per-repo merge support (master-plan U6) lands`,
     );
   }
+}
+
+/*
+FNXC:Workspace 2026-06-22-05:10 (Phase C review B5/B7-dep — canonical workspace predicate):
+A workspace-mode task is identified by having at least one `workspaceWorktrees` entry
+(one git worktree per sub-repo). This single predicate replaces the inlined
+`!!task.workspaceWorktrees && Object.keys(task.workspaceWorktrees).length > 0` that was
+copy-pasted across the engine merge dispatch and the merge-confirmed reachability fast-path
+(B2). It lives in @fusion/core so the engine, store, and CLI doors share ONE definition.
+The dashboard keeps its own local `isWorkspaceTask` (WorkspaceWorktreesSummary, UI-only) —
+this core export is for engine/CLI use.
+*/
+export function isWorkspaceTask(task: Pick<Task, "workspaceWorktrees">): boolean {
+  const worktrees = task.workspaceWorktrees;
+  return !!worktrees && Object.keys(worktrees).length > 0;
 }
 
 export type RetrySummary = {

@@ -1,5 +1,5 @@
-import { TaskStore, COLUMNS, COLUMN_LABELS, CentralCore, assertNotWorkspaceTaskMerge, buildAutoPauseClearPatch, buildManualRetryResetPatch, extractIntentSignature, findNearDuplicates, getTaskDuplicateLineage, reconcileDeterministicDuplicate, runDeterministicDuplicateGuard, type Settings, type Column, type ColumnId, type StepStatus, type AgentLogType, type AgentLogEntry, type IntentSignature, type NearDuplicateCandidate, type NearDuplicateMatch, type TaskDependencyMutation } from "@fusion/core";
-import { runAiMerge } from "@fusion/engine";
+import { TaskStore, COLUMNS, COLUMN_LABELS, CentralCore, buildAutoPauseClearPatch, buildManualRetryResetPatch, extractIntentSignature, findNearDuplicates, getTaskDuplicateLineage, isWorkspaceTask, reconcileDeterministicDuplicate, runDeterministicDuplicateGuard, type Settings, type Column, type ColumnId, type StepStatus, type AgentLogType, type AgentLogEntry, type IntentSignature, type NearDuplicateCandidate, type NearDuplicateMatch, type TaskDependencyMutation } from "@fusion/core";
+import { runAiMerge, landWorkspaceTask } from "@fusion/engine";
 import { createInterface } from "node:readline/promises";
 import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
 import { createSession, submitResponse, RateLimitError, SessionNotFoundError, InvalidSessionStateError } from "@fusion/dashboard/planning";
@@ -851,14 +851,38 @@ export async function runTaskMerge(id: string, projectName?: string) {
   console.log(`\n  Merging ${id} with AI...\n`);
 
   try {
-    // FNXC:Workspace 2026-06-21-19:05: R7 merge-boundary guard (master-plan U0).
-    // Reject workspace-mode tasks before any merge work; per-repo merge lands in
-    // master-plan U6, which removes this guard.
-    // FNXC:MergerUnification 2026-06-21-19:05: unified onto runAiMerge (U0).
-    // The guard lives INSIDE this try so its throw renders via the formatted
-    // `  ✗ ...` output below instead of the generic top-level bin.ts handler.
+    // FNXC:Workspace 2026-06-21-23:40 (Phase C U1, KTD2):
+    // User-triggered `fn task merge`. A workspace-mode task routes through the
+    // ENGINE per-repo merge loop `landWorkspaceTask` (each sub-repo lands on its own
+    // LOCAL integration ref, no push) instead of throwing — manual merge works in
+    // Phase C (user decision). U0's R7 throw is replaced here by routing; the
+    // engine chokepoint + store.mergeTask/aiMergeTask keep throwing.
     const mergeTaskRecord = await store.getTask(id).catch(() => null);
-    if (mergeTaskRecord) assertNotWorkspaceTaskMerge(mergeTaskRecord);
+    // FNXC:Workspace 2026-06-22-09:30 (Phase C review B10): use the exported `isWorkspaceTask`
+    // (the engine/CLI canonical predicate) instead of re-inlining the workspaceWorktrees check.
+    const isWorkspaceMerge = !!mergeTaskRecord && isWorkspaceTask(mergeTaskRecord);
+    if (isWorkspaceMerge) {
+      const workspaceResult = await landWorkspaceTask(store, mergeTaskRecord!, projectPath, {
+        onAgentText: (delta) => process.stdout.write(delta),
+      });
+      console.log();
+      for (const repo of workspaceResult.repos) {
+        const label =
+          repo.status === "landed" ? `landed ${repo.landedSha?.slice(0, 8) ?? ""} → ${repo.integrationBranch}`
+          : repo.status === "empty" ? "no net changes"
+          : `failed: ${repo.error ?? "unknown"}`;
+        console.log(`  ${repo.status === "failed" ? "✗" : "✓"} ${repo.repo}: ${label}`);
+      }
+      // FNXC:Workspace 2026-06-22-05:10 (Phase C review B3):
+      // landWorkspaceTask now finalizes the workspace task to done on allLanded (Phase C U2),
+      // so report it as merged rather than "remains in review until U2". A partial land leaves
+      // the task in review (landed repos stay landed locally) and exits non-zero.
+      console.log(
+        `\n  ${workspaceResult.allLanded ? "✓ All sub-repos landed — task finalized to done" : "✗ Partial land — see failures above (task remains in review; landed repos stay landed locally)"}\n`,
+      );
+      if (!workspaceResult.allLanded) process.exit(1);
+      return;
+    }
 
     const result = await runAiMerge(store, projectPath, id, {
       onAgentText: (delta) => process.stdout.write(delta),

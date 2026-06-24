@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Task } from "@fusion/core";
 import { ProjectEngine, __resetDeterministicMergerModeDeprecationWarned } from "../project-engine.js";
+// Resolves to the vi.mock factory above (the mocked merger-ai exports the real-shaped
+// workspace land error classes so the dispatch's `instanceof` matching is exercised).
+import { WorkspacePartialLandError, WorkspaceRepoLandBusyError } from "../merger-ai.js";
 import { runtimeLog } from "../logger.js";
 import { TunnelProcessManager } from "../remote-access/tunnel-process-manager.js";
 import { NtfyNotifier } from "../notifier.js";
@@ -19,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   runtimeStop: vi.fn(async () => undefined),
   runtimeResumeAfterUnpause: vi.fn(async () => undefined),
   runAiMerge: vi.fn(),
+  landWorkspaceTask: vi.fn(),
   execFile: vi.fn(),
   currentStore: null as Record<string, unknown> | null,
   notifierStart: vi.fn(async () => undefined),
@@ -69,9 +73,42 @@ vi.mock("../merger.js", () => ({
   VerificationError: class VerificationError extends Error {},
 }));
 
-vi.mock("../merger-ai.js", () => ({
-  runAiMerge: mocks.runAiMerge,
-}));
+// FNXC:Workspace 2026-06-22-05:10 (Phase C review B7): the dispatch now matches the
+// workspace land errors via `instanceof`, and routes workspace tasks through
+// `landWorkspaceTask`. The mock must export REAL error classes (so `instanceof` is callable)
+// and a mockable `landWorkspaceTask`; otherwise `err instanceof WorkspacePartialLandError`
+// throws "not callable" and the workspace dispatch can't be exercised. The classes are
+// declared INSIDE the (hoisted) factory so they exist when the mock is evaluated.
+vi.mock("../merger-ai.js", () => {
+  class WorkspaceRepoLandBusyError extends Error {
+    public readonly retryable = true;
+    constructor(
+      public readonly repoRel: string,
+      public readonly holderTaskId: string,
+      public readonly requestingTaskId: string,
+    ) {
+      super(`workspace sub-repo ${repoRel} land is in progress for task ${holderTaskId}`);
+      this.name = "WorkspaceRepoLandBusyError";
+    }
+  }
+  class WorkspacePartialLandError extends Error {
+    public readonly retryable = true;
+    constructor(
+      public readonly landedCount: number,
+      public readonly failedRepos: string[],
+      message: string,
+    ) {
+      super(message);
+      this.name = "WorkspacePartialLandError";
+    }
+  }
+  return {
+    runAiMerge: mocks.runAiMerge,
+    landWorkspaceTask: mocks.landWorkspaceTask,
+    WorkspaceRepoLandBusyError,
+    WorkspacePartialLandError,
+  };
+});
 
 vi.mock("node:child_process", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:child_process")>();
@@ -1295,7 +1332,11 @@ describe("ProjectEngine U0 merge unification dispatch", () => {
     }
   });
 
-  it("R7 guard: rejects a workspace-mode task at the engine merge entry point before any merge", async () => {
+  // FNXC:Workspace 2026-06-22-05:10 (Phase C U1/U2 routing — supersedes the old R7 throw test):
+  // A workspace-mode task no longer throws WorkspaceTaskMergeError at the engine dispatch; it
+  // ROUTES to the per-repo land loop `landWorkspaceTask` (runAiMerge's R7 chokepoint stays as
+  // defense-in-depth but is not the primary path). On a full land, the merge reports merged=true.
+  it("routes a workspace-mode task to landWorkspaceTask (not runAiMerge) on full land", async () => {
     const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
     mockStore.store.getTask.mockResolvedValue({
       id: "FN-WS",
@@ -1303,58 +1344,250 @@ describe("ProjectEngine U0 merge unification dispatch", () => {
       paused: false,
       mergeRetries: 0,
       status: "queued",
+      branch: "fusion/fn-ws",
       workspaceWorktrees: {
         "repo-a": { worktreePath: "/tmp/a", branch: "fusion/fn-ws-a" },
         "repo-b": { worktreePath: "/tmp/b", branch: "fusion/fn-ws-b" },
       },
     } as any);
     mocks.currentStore = mockStore.store;
+    mocks.landWorkspaceTask.mockResolvedValue({
+      allLanded: true,
+      repos: [
+        { repo: "repo-a", status: "landed", landedSha: "aaaa1111", integrationBranch: "main" },
+        { repo: "repo-b", status: "landed", landedSha: "bbbb2222", integrationBranch: "main" },
+      ],
+    } as any);
 
     const engine = createEngine();
     await engine.start();
-    await expect(engine.onMerge("FN-WS")).rejects.toThrow(
-      /Workspace task FN-WS cannot merge until per-repo merge support \(master-plan U6\) lands/,
-    );
+    const result = await engine.onMerge("FN-WS");
+    expect(mocks.landWorkspaceTask).toHaveBeenCalled();
     expect(mocks.runAiMerge).not.toHaveBeenCalled();
+    expect(result.merged).toBe(true);
+    await engine.stop();
+  });
+});
+
+/*
+FNXC:Workspace 2026-06-22-05:10 (Phase C review B1/B2/B4/B5):
+Merge DISPATCH hardening for workspace tasks. These drive the REAL ProjectEngine dispatch
+catch via the mocked merger-ai seam (landWorkspaceTask + the real-shaped error classes),
+asserting the failure modes the review flagged: fail-closed on getTask null (B1), the
+merge-confirmed reachability fast-path skipping workspace tasks (B2), busy-contention not
+burning the merge-retry quota (B4), and the capped backoff (B5). No real AI, no real git
+for the fast-path (the gate's git is asserted NOT to run for workspace tasks).
+*/
+describe("ProjectEngine workspace merge dispatch hardening (Phase C review)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const workspaceTask = (overrides: Record<string, unknown> = {}) => ({
+    id: "FN-WSH",
+    column: "in-review",
+    paused: false,
+    mergeRetries: 0,
+    status: "queued",
+    branch: "fusion/fn-wsh",
+    workspaceWorktrees: {
+      "repo-a": { worktreePath: "/tmp/a", branch: "fusion/fn-wsh-a" },
+    },
+    ...overrides,
+  });
+
+  // B1: getTask returning null in the partial-land catch must FAIL CLOSED — no retry timer.
+  it("B1: partial land with getTask null fails closed (parks failed, no retry timer)", async () => {
+    vi.useFakeTimers();
+    try {
+      const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
+      // First getTask (dispatch routing) returns the workspace task; the catch's getTask
+      // (after the throw) returns null to simulate a DB outage.
+      mockStore.store.getTask
+        .mockResolvedValueOnce(workspaceTask() as any) // dispatch routing read
+        .mockResolvedValueOnce(workspaceTask() as any) // canMergeTask sweep read (if any)
+        .mockResolvedValue(null as any); // catch-block read → DB outage
+      mocks.currentStore = mockStore.store;
+      mocks.landWorkspaceTask.mockRejectedValue(
+        new WorkspacePartialLandError(0, ["repo-a"], "Workspace partial land for FN-WSH: 0 landed, 1 failed"),
+      );
+
+      const engine = createEngine();
+      await engine.start();
+      const enqueueSpy = vi.spyOn(
+        engine as unknown as { internalEnqueueMerge: (id: string) => void },
+        "internalEnqueueMerge",
+      );
+      engine.enqueueMerge("FN-WSH");
+
+      // Drain microtasks until the catch parks the task (fail-closed path).
+      await vi.waitFor(
+        () => {
+          expect(mockStore.store.updateTask).toHaveBeenCalledWith(
+            "FN-WSH",
+            expect.objectContaining({ status: "failed" }),
+          );
+        },
+        { timeout: 2000, interval: 5 },
+      );
+
+      // No retry timer was scheduled, and no re-enqueue happened: advancing all timers
+      // must not trigger another internalEnqueueMerge.
+      enqueueSpy.mockClear();
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(enqueueSpy).not.toHaveBeenCalled();
+      // It must NOT have incremented mergeRetries (it couldn't even read the row).
+      expect(mockStore.store.updateTask).not.toHaveBeenCalledWith(
+        "FN-WSH",
+        expect.objectContaining({ mergeRetries: expect.anything(), status: null }),
+      );
+
+      await engine.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // B2: a merged workspace task (mergeConfirmed + sub-repo commitSha) must SKIP the root-cwd
+  // reachability fast-path so it is finalized, not demoted/parked.
+  it("B2: merge-confirmed workspace task skips the root-cwd reachability gate (not demoted)", async () => {
+    const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
+    mockStore.store.getTask.mockResolvedValue(
+      workspaceTask({
+        status: null,
+        mergeDetails: {
+          mergeConfirmed: true,
+          // A sub-repo squash sha — unreachable from the workspace ROOT cwd; the gate would
+          // (wrongly) clear mergeConfirmed and demote the task if it ran here.
+          commitSha: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+          mergeTargetBranch: "main",
+          mergedAt: "2026-06-22T00:00:00.000Z",
+        },
+      }) as any,
+    );
+    mockStore.store.moveTask.mockResolvedValue(
+      workspaceTask({ column: "done" }) as any,
+    );
+    mocks.currentStore = mockStore.store;
+    // If the gate ran, it would invoke `git cat-file`. Make any git call fail so a gate
+    // run would be observable (and would demote). We assert it is NOT called.
+    mocks.execFile.mockImplementation((
+      _file: string,
+      _args: string[],
+      optionsOrCb: unknown,
+      callback?: (e: Error | null, r: { stdout: string; stderr: string }) => void,
+    ) => {
+      const cb = (typeof optionsOrCb === "function" ? optionsOrCb : callback) as (
+        e: Error | null,
+        r: { stdout: string; stderr: string },
+      ) => void;
+      cb(new Error("git should not be called for workspace fast-path"), { stdout: "", stderr: "" });
+      return {} as never;
+    });
+
+    const engine = createEngine();
+    await engine.start();
+    engine.enqueueMerge("FN-WSH");
+
+    await vi.waitFor(() => {
+      expect(mockStore.store.emit).toHaveBeenCalledWith(
+        "task:merged",
+        expect.objectContaining({ merged: true }),
+      );
+    });
+
+    // The reachability gate's `git cat-file` must NOT have run (workspace skip).
+    const gitCatFileCalls = (mocks.execFile.mock.calls as Array<[string, string[]]>).filter(
+      (c) => Array.isArray(c[1]) && c[1][0] === "cat-file",
+    );
+    expect(gitCatFileCalls).toHaveLength(0);
+    // The task must NOT have been demoted (mergeConfirmed cleared / status failed).
+    expect(mockStore.store.updateTask).not.toHaveBeenCalledWith(
+      "FN-WSH",
+      expect.objectContaining({ status: "failed" }),
+    );
     await engine.stop();
   });
 
-  // Regression: the auto-merge park for a WorkspaceTaskMergeError must set status:"failed",
-  // not status:null. status:null + mergeRetries:0 passes every eligibility gate, so the
-  // cooldown sweep re-enqueues the task every tick → tight re-throw/re-park loop. status:"failed"
-  // makes canMergeTask short-circuit; manual retry still works (it bypasses canMergeTask).
-  it("R7 auto-merge park: workspace task is parked status:'failed' so it is not re-enqueued", async () => {
-    const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
-    mockStore.store.getTask.mockResolvedValue({
-      id: "FN-WS-AUTO",
-      column: "in-review",
-      paused: false,
-      mergeRetries: 0,
-      status: "queued",
-      workspaceWorktrees: {
-        "repo-a": { worktreePath: "/tmp/a", branch: "fusion/fn-ws-a" },
-      },
-    } as any);
-    mocks.currentStore = mockStore.store;
-
-    const engine = createEngine();
-    await engine.start();
-    // Auto-merge path (no manual resolver): the R7 door guard throws before runAiMerge,
-    // and the dispatch catch parks the task.
-    engine.enqueueMerge("FN-WS-AUTO");
-    await vi.waitFor(() => {
-      expect(mockStore.store.updateTask).toHaveBeenCalledWith(
-        "FN-WS-AUTO",
-        expect.objectContaining({ status: "failed", mergeRetries: 0 }),
+  // B4 + B5: repeated WorkspaceRepoLandBusyError re-enqueues with capped backoff WITHOUT
+  // consuming mergeRetries (pure contention does not park a never-failed task).
+  it("B4/B5: busy contention re-enqueues with capped backoff, never burns mergeRetries", async () => {
+    vi.useFakeTimers();
+    try {
+      const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
+      mockStore.store.getTask.mockResolvedValue(workspaceTask() as any);
+      mocks.currentStore = mockStore.store;
+      mocks.landWorkspaceTask.mockRejectedValue(
+        new WorkspaceRepoLandBusyError("repo-a", "FN-OTHER", "FN-WSH"),
       );
-    });
-    expect(mocks.runAiMerge).not.toHaveBeenCalled();
-    // Guard against regression to the re-enqueue loop (status:null park):
-    expect(mockStore.store.updateTask).not.toHaveBeenCalledWith(
-      "FN-WS-AUTO",
-      expect.objectContaining({ status: null }),
-    );
-    await engine.stop();
+
+      const engine = createEngine();
+      await engine.start();
+      const enqueueSpy = vi.spyOn(
+        engine as unknown as { internalEnqueueMerge: (id: string) => void },
+        "internalEnqueueMerge",
+      );
+      engine.enqueueMerge("FN-WSH");
+
+      // The busy catch logs a WorkspaceRepoLandBusy entry then schedules a backoff timer.
+      await vi.waitFor(
+        () => {
+          expect(mockStore.store.logEntry).toHaveBeenCalledWith(
+            "FN-WSH",
+            expect.stringContaining("busy"),
+            "WorkspaceRepoLandBusy",
+          );
+        },
+        { timeout: 2000, interval: 5 },
+      );
+
+      // It must NOT have written any mergeRetries increment (busy ≠ real failure).
+      const burnedRetries = (mockStore.store.updateTask.mock.calls as Array<[string, Record<string, unknown>]>)
+        .some((c) => c[0] === "FN-WSH" && typeof c[1]?.mergeRetries === "number");
+      expect(burnedRetries).toBe(false);
+
+      /*
+      FNXC:Workspace 2026-06-22-09:30 (Phase C review B5b — assert the 60s CAP, not just the first retry):
+      Advancing 60s once only proves the first 5s timer fired; an UNcapped exponential
+      (5s,10s,20s,40s,80s,160s,…) would still pass that. Capture EVERY scheduled busy backoff delay
+      across enough cycles to pass the cap point (busyCount=4 → 5000*2^4 = 80_000ms, clamped to 60_000)
+      and assert no delay exceeds 60_000 AND the cap is actually reached. Each advance fires the pending
+      timer → re-enqueue → landWorkspaceTask rejects busy again → next backoff is scheduled.
+      */
+      const scheduledBusyDelays: number[] = [];
+      // `globalThis.setTimeout` is already the fake-timer impl here (vi.useFakeTimers above).
+      // Wrap it to record the requested delay, then delegate to the SAME fake timer so the
+      // fake clock still drives the callback — no real-timer leakage.
+      const fakeSetTimeout = globalThis.setTimeout;
+      const setTimeoutSpy = vi
+        .spyOn(globalThis, "setTimeout")
+        .mockImplementation(((cb: (...a: unknown[]) => void, ms?: number, ...rest: unknown[]) => {
+          if (typeof ms === "number") scheduledBusyDelays.push(ms);
+          return (fakeSetTimeout as (...a: unknown[]) => unknown)(cb, ms, ...rest);
+        }) as typeof setTimeout);
+
+      try {
+        // Drive enough busy cycles to climb past the cap point (busyCount 0..5 = 6 cycles).
+        for (let i = 0; i < 6; i++) {
+          await vi.advanceTimersByTimeAsync(60_000);
+        }
+      } finally {
+        setTimeoutSpy.mockRestore();
+      }
+
+      // The exponential climbed (more than one distinct delay) AND every delay is capped at 60s.
+      expect(scheduledBusyDelays.length).toBeGreaterThanOrEqual(5);
+      expect(Math.max(...scheduledBusyDelays)).toBe(60_000);
+      expect(scheduledBusyDelays.every((d) => d <= 60_000)).toBe(true);
+      // The cap was actually exercised: at least one delay sits at the 60s ceiling.
+      expect(scheduledBusyDelays).toContain(60_000);
+      // Each fired backoff re-enqueued the merge (the contention retry loop is live).
+      expect(enqueueSpy).toHaveBeenCalledWith("FN-WSH");
+
+      await engine.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

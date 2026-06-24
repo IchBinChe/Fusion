@@ -102,6 +102,19 @@ async function gitOk(args: string[], cwd: string): Promise<boolean> {
   }
 }
 
+/**
+ * FNXC:Workspace 2026-06-22-04:10 (Phase C review A1):
+ * Capture git stdout, returning undefined (never throwing) on failure — for read-only
+ * probes (merge-base, log --grep) where a non-zero exit is an expected "not found".
+ */
+async function gitCapture(args: string[], cwd: string): Promise<string | undefined> {
+  try {
+    return await git(args, cwd);
+  } catch {
+    return undefined;
+  }
+}
+
 function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
@@ -959,6 +972,209 @@ export async function landSquash(input: {
 }
 
 // ---------------------------------------------------------------------------
+// Per-repo land (extracted from runAiMerge's inline clean-room closure)
+// ---------------------------------------------------------------------------
+
+/*
+FNXC:Workspace 2026-06-21-23:40 (Phase C U1, KTD1):
+`landOneRepo` is the per-repo land mechanic extracted byte-for-byte from
+`runAiMerge`'s former inline clean-room closure: pre-merge prune (rooted at THIS
+repo) → mkdtemp clean room → `git worktree add --detach` → installWorktreeDependencies
+→ mergeAndReview → landSquash → the concurrent-advance CAS retry loop → the
+activeSessionRegistry register/unregister + cleanup-finally. It advances ONE local
+integration ref (no remote push) and returns what landed. It deliberately does NOT
+move the task or write task-level mergeDetails — that task-global finalization
+(`finalizeMerged`/`finalizeTask`/`evaluateNoCommitsNoOpFinalize`) stays with the
+caller, so the same primitive is callable per sub-repo from `landWorkspaceTask`
+without finalizing the whole task per repo (KTD3).
+
+`runAiMerge` is the SINGLE-REPO caller: it builds the same context it always built
+and calls `landOneRepo` once against the project root, then runs its existing
+finalization on the result. Single-repo behavior is unchanged.
+*/
+
+/** Per-task context shared by every per-repo land (agents/audit/log are bound to
+ *  the task, not the repo). The repo-varying inputs (rootDir/branch/integrationBranch)
+ *  are explicit `landOneRepo` args. */
+export interface LandRepoContext {
+  taskId: string;
+  settings: Settings;
+  audit: RunAuditor;
+  log: (message: string) => Promise<void>;
+  setStatus: (status: string | null) => Promise<unknown>;
+  maxPasses: number;
+  mergeAgent: (cwd: string, prompt: string) => Promise<void>;
+  reviewAgent: (cwd: string, prompt: string) => Promise<string>;
+  stashResolveAgent: (cwd: string, prompt: string) => Promise<void>;
+  includeTaskId: boolean;
+  trailers: string[];
+  taskTitle?: string;
+  signal?: AbortSignal;
+  allowDirtyLocalCheckoutSync?: boolean;
+  store: TaskStore;
+}
+
+/** What a single repo's land produced. No task move / mergeDetails — the caller
+ *  decides task-global finalization. */
+export type LandOneRepoResult =
+  | {
+      /** The branch had no net changes vs the integration tip — nothing landed. */
+      outcome: "empty";
+      tipSha: string;
+      integrationBranch: string;
+    }
+  | {
+      /** The squash landed; the local integration ref now points at `squashSha`. */
+      outcome: "landed";
+      squashSha: string;
+      localSync: LocalSyncOutcome;
+      tipSha: string;
+      integrationBranch: string;
+    };
+
+/**
+ * Land `branch` onto `integrationBranch`'s LOCAL ref in `repoRootDir` via a
+ * repo-scoped clean room, retrying on concurrent advance. No remote push. See
+ * the FNXC note above for the extraction contract.
+ */
+// FNXC:Workspace 2026-06-22-09:30 (Phase C review B12): `landOneRepo` takes its store access
+// exclusively through the `ctx` callbacks (log/setStatus/audit) and pre-built agents — it never
+// touches a TaskStore directly. The former leading `store` param was dead and misleading at the
+// call sites (they looked like they forwarded a store the function ignored), so it was dropped.
+export async function landOneRepo(
+  repoRootDir: string,
+  branch: string,
+  integrationBranch: string,
+  ctx: LandRepoContext,
+): Promise<LandOneRepoResult> {
+  const {
+    taskId, settings, audit, log, setStatus, maxPasses,
+    mergeAgent, reviewAgent, stashResolveAgent,
+    includeTaskId, trailers, taskTitle, signal, store,
+  } = ctx;
+
+  // Pre-merge prune is rooted at THIS sub-repo (KTD1): N per-repo clean rooms for
+  // one task share the `fusion-ai-merge-<taskId>-` prefix, so a prune rooted at a
+  // shared root could reap a sibling repo's live clean room. Rooting it at
+  // repoRootDir keeps each repo's prune to its own temp roots.
+  try {
+    const pruned = await pruneExistingAiMergeWorktrees(taskId, repoRootDir, audit, log, settings);
+    if (pruned > 0) await log(`AI merge: pruned ${pruned} pre-existing worktree(s) for ${taskId}`);
+  } catch (err: unknown) {
+    await log(`AI merge: pre-merge prune failed: ${getErrorMessage(err)}`);
+  }
+  let advanceRetries = 0;
+  while (true) {
+    throwIfAborted(signal, taskId);
+    const tipSha = await git(["rev-parse", "--verify", `refs/heads/${integrationBranch}`], repoRootDir);
+
+    // 1. Clean-room worktree at the integration tip.
+    let mergeRoot: string | undefined;
+    let worktreeAdded = false;
+    const registeredMergePaths = new Set<string>();
+    const registerMergeRoot = (pathToRegister: string): void => {
+      if (registeredMergePaths.has(pathToRegister)) return;
+      activeSessionRegistry.registerPath(pathToRegister, { taskId, kind: "ai-merge", ownerKey: `ai-merge:${taskId}` });
+      registeredMergePaths.add(pathToRegister);
+    };
+    try {
+      mergeRoot = await mkdtemp(join(resolveAiMergeRoot(repoRootDir, settings), `fusion-ai-merge-${taskId.toLowerCase()}-`));
+      /*
+       * FNXC:AIMerge 2026-06-14-16:36:
+       * The AI-merge clean-room directory must be created and registered inside the cleanup guard. Any terminal path or interrupt after `mkdtemp`, including active-session registration failure before `git worktree add`, must still unregister known paths and remove the `fusion-ai-merge-*` directory.
+       */
+      // Register the repo-local clean-room path as soon as it exists, before
+      // `git worktree add`, so self-healing/pre-merge sweeps cannot reap a
+      // just-created clean room in the small window before canonical registration
+      // is available.
+      registerMergeRoot(mergeRoot);
+      await git(["worktree", "add", "--detach", mergeRoot, tipSha], repoRootDir);
+      worktreeAdded = true;
+      let canonicalMergeRoot = mergeRoot;
+      try {
+        canonicalMergeRoot = realpathSync(mergeRoot);
+      } catch {
+        canonicalMergeRoot = mergeRoot;
+      }
+      for (const pathToRegister of new Set([canonicalMergeRoot, mergeRoot])) {
+        registerMergeRoot(pathToRegister);
+      }
+      await audit.git({ type: "merge:ai-clean-room", target: integrationBranch, metadata: { taskId, tipSha, mergeRoot } });
+      await log(`AI merge: merging ${branch} into ${integrationBranch} (clean room at ${short(tipSha)})${advanceRetries ? ` — retry ${advanceRetries} after concurrent advance` : ""}`);
+
+      /*
+       * FNXC:AIMerge 2026-06-13-20:32:
+       * The detached AI-merge clean room is rebuilt from the integration tip and starts without workspace dependencies. Hard-fail configured or inferred install failures so verification cannot silently run against an uninstalled checkout; aborts propagate before merge agents run.
+       */
+      const depsSyncStartedAt = Date.now();
+      const depsSyncResult = await installWorktreeDependencies({
+        cwd: canonicalMergeRoot,
+        settings,
+        taskId,
+        signal,
+        context: "for AI merge clean room",
+        logger: aiMergeLog,
+        log,
+      });
+      await audit.git({
+        type: "merge:ai-deps-sync",
+        target: integrationBranch,
+        metadata: {
+          taskId,
+          tipSha,
+          mergeRoot: canonicalMergeRoot,
+          installCommand: depsSyncResult.installCommand,
+          configured: depsSyncResult.configured,
+          skipped: depsSyncResult.skipped,
+          skipReason: depsSyncResult.skipReason,
+          durationMs: depsSyncResult.durationMs,
+        },
+      });
+      await log(`[timing] AI merge dependency sync completed in ${Date.now() - depsSyncStartedAt}ms${depsSyncResult.installCommand ? ` (${depsSyncResult.skipped ? "skipped" : "ran"}: ${depsSyncResult.installCommand})` : " (no command)"}`);
+
+      // 2 + 3. Merge + review loop (corrective passes).
+      const squashSha = await mergeAndReview({
+        mergeRoot, branch, integrationBranch, tipSha, taskTitle, includeTaskId, trailers, taskId,
+        maxPasses, mergeAgent, reviewAgent, audit, log, setStatus, store, signal,
+      });
+
+      if (!squashSha) {
+        // Branch had no net changes vs the tip — nothing to land. The caller
+        // decides how to finalize the (possibly multi-repo) task.
+        await audit.git({ type: "merge:ai-empty", target: integrationBranch, metadata: { taskId, tipSha } });
+        return { outcome: "empty", tipSha, integrationBranch };
+      }
+
+      // 4 + 5. Land the squash on the target branch and sync the user's
+      //        checkout (AI reconciles a conflicting restore).
+      await setStatus("landing");
+      const landed = await landSquash({
+        projectRootDir: repoRootDir, mergeRoot, integrationBranch, tipSha, squashSha, taskId, audit,
+        resolveConflicts: stashResolveAgent,
+        allowDirtyLocalCheckoutSync: ctx.allowDirtyLocalCheckoutSync === true,
+      });
+      if (landed.outcome === "concurrent") {
+        if (advanceRetries < MAX_CONCURRENT_ADVANCE_RETRIES) {
+          advanceRetries++;
+          await log(`AI merge: ${integrationBranch} moved during merge — rebuilding on new tip (retry ${advanceRetries})`);
+          continue; // rebuild the clean room on the new tip
+        }
+        throw new Error(`AI merge could not advance ${integrationBranch} for ${taskId} after ${advanceRetries} retries (concurrent advances)`);
+      }
+      await log(`AI merge: advanced ${integrationBranch} → ${short(squashSha)} (local checkout: ${landed.localSync})`);
+      return { outcome: "landed", squashSha, localSync: landed.localSync, tipSha, integrationBranch };
+    } finally {
+      for (const registeredPath of registeredMergePaths) {
+        activeSessionRegistry.unregisterPath(registeredPath);
+      }
+      if (mergeRoot) {
+        await cleanupAiMergeWorktree({ taskId, mergeRoot, projectRootDir: repoRootDir, worktreeAdded, audit, log });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Orchestrator
 // ---------------------------------------------------------------------------
 
@@ -1068,165 +1284,633 @@ export async function runAiMerge(
   const taskTitle = task.title?.trim() ? task.title.split("\n")[0] : undefined;
 
   await setStatus("merging");
-  try {
-    const pruned = await pruneExistingAiMergeWorktrees(taskId, projectRootDir, audit, log, settings);
-    if (pruned > 0) await log(`AI merge: pruned ${pruned} pre-existing worktree(s) for ${taskId}`);
-  } catch (err: unknown) {
-    await log(`AI merge: pre-merge prune failed: ${getErrorMessage(err)}`);
-  }
-  let advanceRetries = 0;
-  while (true) {
-    throwIfAborted(options.signal, taskId);
-    const tipSha = await git(["rev-parse", "--verify", `refs/heads/${integrationBranch}`], projectRootDir);
+  // FNXC:Workspace 2026-06-21-23:40 (Phase C U1, KTD1):
+  // runAiMerge is now the SINGLE-REPO caller of the extracted `landOneRepo`. It
+  // builds the same per-task context it always built and lands the project root
+  // once; the task-global finalization below (empty no-op / no-commits demote /
+  // finalizeMerged) is unchanged byte-for-byte — only the inline clean-room land
+  // loop moved into `landOneRepo` so `landWorkspaceTask` can reuse it per sub-repo.
+  const landResult = await landOneRepo(projectRootDir, branch, integrationBranch, {
+    taskId, settings, audit, log, setStatus, maxPasses,
+    mergeAgent, reviewAgent, stashResolveAgent,
+    includeTaskId, trailers, taskTitle, signal: options.signal,
+    allowDirtyLocalCheckoutSync: options.allowDirtyLocalCheckoutSync === true,
+    store,
+  });
 
-    // 1. Clean-room worktree at the integration tip.
-    let mergeRoot: string | undefined;
-    let worktreeAdded = false;
-    const registeredMergePaths = new Set<string>();
-    const registerMergeRoot = (pathToRegister: string): void => {
-      if (registeredMergePaths.has(pathToRegister)) return;
-      activeSessionRegistry.registerPath(pathToRegister, { taskId, kind: "ai-merge", ownerKey: `ai-merge:${taskId}` });
-      registeredMergePaths.add(pathToRegister);
-    };
-    try {
-      mergeRoot = await mkdtemp(join(resolveAiMergeRoot(projectRootDir, settings), `fusion-ai-merge-${taskId.toLowerCase()}-`));
+  if (landResult.outcome === "empty") {
+    const noCommitsFinalize = evaluateNoCommitsNoOpFinalize(task);
+    if (noCommitsFinalize.blocked) {
+      const reason = noCommitsFinalize.reason ?? "no-commits task has incomplete work with no net branch changes";
       /*
-       * FNXC:AIMerge 2026-06-14-16:36:
-       * The AI-merge clean-room directory must be created and registered inside the cleanup guard. Any terminal path or interrupt after `mkdtemp`, including active-session registration failure before `git worktree add`, must still unregister known paths and remove the `fusion-ai-merge-*` directory.
+       * FNXC:Lifecycle 2026-06-14-20:02:
+       * FN-6461/FN-6455 requires the AI empty-merge lane to demote no-commits tasks whose skipped/incomplete steps outweigh done steps instead of finalizing the operational work as done.
        */
-      // Register the repo-local clean-room path as soon as it exists, before
-      // `git worktree add`, so self-healing/pre-merge sweeps cannot reap a
-      // just-created clean room in the small window before canonical registration
-      // is available.
-      registerMergeRoot(mergeRoot);
-      await git(["worktree", "add", "--detach", mergeRoot, tipSha], projectRootDir);
-      worktreeAdded = true;
-      let canonicalMergeRoot = mergeRoot;
-      try {
-        canonicalMergeRoot = realpathSync(mergeRoot);
-      } catch {
-        canonicalMergeRoot = mergeRoot;
-      }
-      for (const pathToRegister of new Set([canonicalMergeRoot, mergeRoot])) {
-        registerMergeRoot(pathToRegister);
-      }
-      await audit.git({ type: "merge:ai-clean-room", target: integrationBranch, metadata: { taskId, tipSha, mergeRoot } });
-      await log(`AI merge: merging ${branch} into ${integrationBranch} (clean room at ${short(tipSha)})${advanceRetries ? ` — retry ${advanceRetries} after concurrent advance` : ""}`);
-
-      /*
-       * FNXC:AIMerge 2026-06-13-20:32:
-       * The detached AI-merge clean room is rebuilt from the integration tip and starts without workspace dependencies. Hard-fail configured or inferred install failures so verification cannot silently run against an uninstalled checkout; aborts propagate before merge agents run.
-       */
-      const depsSyncStartedAt = Date.now();
-      const depsSyncResult = await installWorktreeDependencies({
-        cwd: canonicalMergeRoot,
-        settings,
+      await store.updateTask(taskId, { error: reason });
+      await store.logEntry(
         taskId,
-        signal: options.signal,
-        context: "for AI merge clean room",
-        logger: aiMergeLog,
-        log,
-      });
-      await audit.git({
-        type: "merge:ai-deps-sync",
-        target: integrationBranch,
+        `Finalize blocked (no-commits incomplete-work guard): ${reason} — moving back to todo with progress preserved`,
+        JSON.stringify({
+          doneCount: noCommitsFinalize.doneCount,
+          incompleteCount: noCommitsFinalize.incompleteCount,
+          branch,
+          integrationBranch,
+          lane: "ai-empty-merge",
+        }, null, 2),
+      );
+      await audit.database({
+        type: "task:no-commits-finalize-blocked-incomplete-steps" as Parameters<typeof audit.database>[0]["type"],
+        target: taskId,
         metadata: {
-          taskId,
-          tipSha,
-          mergeRoot: canonicalMergeRoot,
-          installCommand: depsSyncResult.installCommand,
-          configured: depsSyncResult.configured,
-          skipped: depsSyncResult.skipped,
-          skipReason: depsSyncResult.skipReason,
-          durationMs: depsSyncResult.durationMs,
+          reason,
+          doneCount: noCommitsFinalize.doneCount,
+          incompleteCount: noCommitsFinalize.incompleteCount,
+          branch,
+          integrationBranch,
+          lane: "ai-empty-merge",
         },
       });
-      await log(`[timing] AI merge dependency sync completed in ${Date.now() - depsSyncStartedAt}ms${depsSyncResult.installCommand ? ` (${depsSyncResult.skipped ? "skipped" : "ran"}: ${depsSyncResult.installCommand})` : " (no command)"}`);
+      await store.moveTask(taskId, "todo", { preserveProgress: true, moveSource: "engine" } as Parameters<TaskStore["moveTask"]>[2]);
+      return {
+        task,
+        branch,
+        merged: false,
+        noOp: false,
+        ok: true,
+        reason,
+        error: reason,
+        worktreeRemoved: false,
+        branchDeleted: false,
+      };
+    }
+    await log(`AI merge: ${branch} had no net changes vs ${integrationBranch} — finalizing as no-op`);
+    return await finalizeMerged(store, projectRootDir, taskId, task, branch, integrationBranch, landResult.tipSha, audit, log, { empty: true });
+  }
 
-      // 2 + 3. Merge + review loop (corrective passes).
-      const squashSha = await mergeAndReview({
-        mergeRoot, branch, integrationBranch, tipSha, taskTitle, includeTaskId, trailers, taskId,
-        maxPasses, mergeAgent, reviewAgent, audit, log, setStatus, store, signal: options.signal,
-      });
+  return await finalizeMerged(store, projectRootDir, taskId, task, branch, integrationBranch, landResult.squashSha, audit, log, { empty: false });
+}
 
-      if (!squashSha) {
-        // Branch had no net changes vs the tip — nothing to land.
-        await audit.git({ type: "merge:ai-empty", target: integrationBranch, metadata: { taskId, tipSha } });
-        const noCommitsFinalize = evaluateNoCommitsNoOpFinalize(task);
-        if (noCommitsFinalize.blocked) {
-          const reason = noCommitsFinalize.reason ?? "no-commits task has incomplete work with no net branch changes";
-          /*
-           * FNXC:Lifecycle 2026-06-14-20:02:
-           * FN-6461/FN-6455 requires the AI empty-merge lane to demote no-commits tasks whose skipped/incomplete steps outweigh done steps instead of finalizing the operational work as done.
-           */
-          await store.updateTask(taskId, { error: reason });
-          await store.logEntry(
-            taskId,
-            `Finalize blocked (no-commits incomplete-work guard): ${reason} — moving back to todo with progress preserved`,
-            JSON.stringify({
-              doneCount: noCommitsFinalize.doneCount,
-              incompleteCount: noCommitsFinalize.incompleteCount,
-              branch,
-              integrationBranch,
-              lane: "ai-empty-merge",
-            }, null, 2),
-          );
-          await audit.database({
-            type: "task:no-commits-finalize-blocked-incomplete-steps" as Parameters<typeof audit.database>[0]["type"],
-            target: taskId,
-            metadata: {
-              reason,
-              doneCount: noCommitsFinalize.doneCount,
-              incompleteCount: noCommitsFinalize.incompleteCount,
-              branch,
-              integrationBranch,
-              lane: "ai-empty-merge",
-            },
-          });
-          await store.moveTask(taskId, "todo", { preserveProgress: true, moveSource: "engine" } as Parameters<TaskStore["moveTask"]>[2]);
-          return {
-            task,
-            branch,
-            merged: false,
-            noOp: false,
-            ok: true,
-            reason,
-            error: reason,
-            worktreeRemoved: false,
-            branchDeleted: false,
-          };
-        }
-        await log(`AI merge: ${branch} had no net changes vs ${integrationBranch} — finalizing as no-op`);
-        return await finalizeMerged(store, projectRootDir, taskId, task, branch, integrationBranch, tipSha, audit, log, { empty: true });
+// ---------------------------------------------------------------------------
+// Workspace-mode per-repo merge loop (Phase C U1)
+// ---------------------------------------------------------------------------
+
+/** Per-repo land outcome inside a workspace task, tagged with its sub-repo. */
+export interface WorkspaceRepoLandResult {
+  /** The sub-repo's relative path (the `workspaceWorktrees` key). */
+  repo: string;
+  /** Absolute path to the sub-repo's main checkout (where the ref advanced). */
+  repoRootDir: string;
+  /** The per-repo integration branch this repo landed onto (origin/HEAD-derived). */
+  integrationBranch: string;
+  /** The `fusion/<id>` branch that was landed. */
+  branch: string;
+  /** What happened: landed, empty (no net changes), or failed. */
+  status: "landed" | "empty" | "failed";
+  /** The squash sha when `status === "landed"`. */
+  landedSha?: string;
+  /** How the sub-repo checkout was reconciled when landed. */
+  localSync?: LocalSyncOutcome;
+  /** Failure message when `status === "failed"`. */
+  error?: string;
+  /**
+   * FNXC:Workspace 2026-06-22-00:30 (Phase C U2, KTD3):
+   * True when this repo was SKIPPED by the landed predicate on a retry (its recorded
+   * `landedSha` is already an ancestor of the integration tip) — its ref was NOT
+   * re-advanced this run.
+   */
+  alreadyLanded?: boolean;
+}
+
+/** Aggregated result of a workspace task's per-repo merge loop. */
+export interface WorkspaceMergeResult {
+  taskId: string;
+  repos: WorkspaceRepoLandResult[];
+  /** True iff every acquired sub-repo landed (or was empty) with no failure. */
+  allLanded: boolean;
+  /**
+   * FNXC:Workspace 2026-06-22-00:30 (Phase C U2, KTD3):
+   * True iff the finalize-once move-to-done ran this call (only when `allLanded`).
+   * False on a partial land (the task stays put for the engine dispatch's auto-retry).
+   */
+  finalized: boolean;
+}
+
+/*
+FNXC:Workspace 2026-06-21-23:40 (Phase C U1, KTD1/KTD2):
+`landWorkspaceTask` replaces U0's R7 fail-fast throw with the real per-repo merge
+loop. For each acquired sub-repo (iterated by SORTED relative-path key for
+determinism) it lands that repo's `fusion/<id>` branch onto THAT repo's own LOCAL
+integration ref via the extracted `landOneRepo` — no remote push, land-as-you-go
+(settled D2/D5).
+
+Per-repo integration branch (KTD1): `workspaceWorktrees[repo]` does NOT store the
+integration branch (acquisition computes then discards it), so we re-resolve it per
+repo with the SAME override-stripping acquisition used — integrationBranch/baseBranch
+undefined — so each sub-repo falls through to its own origin/HEAD rather than a shared
+workspace branch.
+
+U1 scope: on a repo failure we stop the loop and return a PARTIAL result (repo A may
+have landed; B reports the failure). Routing the engine + CLI doors to this loop is KTD2.
+
+FNXC:Workspace 2026-06-22-00:30 (Phase C U2, KTD3):
+U2 adds per-repo landed tracking + finalize-once + idempotent retry on top of U1's loop:
+
+  - Landed predicate + skip: before landing a repo, we skip it iff its `landedSha` is
+    recorded AND that sha is an ancestor of (or equals) the repo's CURRENT integration
+    tip. A skipped repo's ref is NEVER re-advanced, so re-running `landWorkspaceTask`
+    after a partial land (A landed, B failed) re-attempts ONLY B — A is idempotent.
+  - landedSha persistence: after a repo lands, we record `workspaceWorktrees[repo].landedSha`
+    = the advanced integration tip via a FRESH-read-then-merge `store.updateTask` (re-read
+    the latest task and merge only this repo's entry, so concurrent sibling-entry writes
+    are not clobbered — the Phase A/B per-repo persistence pattern).
+  - finalize-once: the task moves to `done` EXACTLY ONCE, only after EVERY acquired repo's
+    landed predicate holds (all landed/empty, none failed). We reuse the task-global
+    `finalizeTask` move-done path with an AGGREGATE mergeDetails (representative
+    `commitSha` = first sorted landed repo + a `workspaceLandedShas` map) so the existing
+    `task:merged` consumer is satisfied. On a partial land we do NOT move done — we return
+    `allLanded:false` with the landed repos' `landedSha` already persisted.
+
+The partial-land retry/park policy (consume a mergeRetry, auto-retry skipping landed
+repos up to MAX, then operator-park) is wired at the engine dispatch (project-engine.ts),
+NOT here: this function reports the partial via `allLanded:false` and the dispatch drives
+the retry seam.
+
+FNXC:Workspace 2026-06-22-02:10 (Phase C U3, KTD4):
+Per-repo LAND lease. Before each `landOneRepo` we register the sub-repo ABSOLUTE
+path in the path-keyed activeSessionRegistry under kind "workspace-repo-land" and
+release it in a per-repo `finally` (so the lease is freed on land success OR land
+failure — no stuck lock). If another task already holds the land lease for that
+sub-repo path we FAST-FAIL the whole `landWorkspaceTask` with a retryable
+`WorkspaceRepoLandBusyError`, which the U2 partial-land retry/park machinery
+(project-engine dispatch) already handles — reusing that path instead of
+reimplementing a waiting lock. The lease serializes same-sub-repo lands so two
+tasks' clean-room ai-merge worktrees do not collide; it is NOT what makes the
+interleaved `update-ref` correct — `advanceIntegrationBranchRef`'s CAS already
+guarantees ref correctness (concurrent-advance → rebuild). Disjoint sub-repos lease
+DIFFERENT paths, so they never serialize against each other (no false contention).
+This lease is a DIFFERENT scope/kind from the execution-phase
+"workspace-repo-acquire" lease and from `landOneRepo`'s own inner "ai-merge"
+clean-room registration on the temp worktree path — none of the three collide.
+*/
+
+/** FNXC:Workspace 2026-06-22-02:10 (Phase C U3, KTD4): ownerKey for the land-time lease. */
+const WORKSPACE_REPO_LAND_OWNER_KEY = "workspace-repo-land";
+
+/*
+FNXC:Workspace 2026-06-22-02:10 (Phase C U3, KTD4):
+Thrown when a second workspace task tries to land a sub-repo already inside another
+task's land critical section. Distinct from a generic land failure so the engine
+dispatch (and tests) can tell "serialized, retry later" apart from "this land is
+broken". Carries `retryable = true` so the existing partial-land auto-retry/park
+path treats it as a transient contention, not a terminal failure.
+*/
+export class WorkspaceRepoLandBusyError extends Error {
+  public readonly retryable = true;
+  constructor(
+    public readonly repoRel: string,
+    public readonly holderTaskId: string,
+    public readonly requestingTaskId: string,
+  ) {
+    super(`workspace sub-repo ${repoRel} land is in progress for task ${holderTaskId}`);
+    this.name = "WorkspaceRepoLandBusyError";
+  }
+}
+
+/*
+FNXC:Workspace 2026-06-22-04:10 (Phase C review A4 — real WorkspacePartialLandError class):
+Previously the partial-land signal was a bare `new Error()` with `.name` patched in
+project-engine.ts (a footgun: no instanceof, no typed payload). It is now a real exported
+class so the dispatch can switch to `instanceof` (separate pass) and tests can assert
+`instanceof`. `retryable = true` because a partial land is recoverable — the landed repos'
+`landedSha` is persisted and a re-run skips them (the U2 idempotency contract).
+
+`landWorkspaceTask` throws this from ONE place: the A1 persist-after-advance failure window
+(the integration ref ALREADY advanced but `persistRepoLandedSha` could not record the
+`landedSha`). The ORDINARY partial land (repo A landed, repo B's land failed) still RETURNS
+`allLanded:false` — that return-based contract is what the engine dispatch and the oracle
+workspace-merger tests already consume; only the persist-failure window escalates to a throw
+so the engine parks/retries and A1's `isRepoLanded` ancestor-fallback skips the actually-landed
+repo on retry (no double-squash).
+*/
+export class WorkspacePartialLandError extends Error {
+  public readonly retryable = true;
+  constructor(
+    public readonly landedCount: number,
+    public readonly failedRepos: string[],
+    message: string,
+  ) {
+    super(message);
+    this.name = "WorkspacePartialLandError";
+  }
+}
+
+export async function landWorkspaceTask(
+  store: TaskStore,
+  task: Task,
+  workspaceRootDir: string,
+  options: MergerOptions = {},
+  deps: AgentDeps = {},
+): Promise<WorkspaceMergeResult> {
+  const taskId = task.id;
+  const settings = await store.getSettings();
+  const audit = createRunAuditor(store, {
+    runId: generateSyntheticRunId("ai-merge", taskId),
+    agentId: "merger",
+    taskId,
+    phase: "merge",
+  });
+  const log = async (message: string): Promise<void> => {
+    await store.logEntry(taskId, message, "AiMerge").catch(() => undefined);
+    await store.appendAgentLog(taskId, message, "text", undefined, "merger").catch(() => undefined);
+  };
+  const setStatus = (status: string | null): Promise<unknown> =>
+    store.updateTask(taskId, { status }).catch(() => undefined);
+
+  const maxPasses = Math.max(0, Math.trunc(settings.merger?.maxReviewPasses ?? 3));
+  const mergeAgent = deps.mergeAgent ?? makeMutatingAgent(store, settings, taskId, options, audit, buildMergeSystemPrompt(settings.agentPrompts));
+  const reviewAgent = deps.reviewAgent ?? makeReviewAgent(store, settings, taskId, options, audit);
+  const stashResolveAgent = deps.stashResolveAgent ?? makeMutatingAgent(store, settings, taskId, options, audit, buildStashResolveSystemPrompt());
+  const includeTaskId = settings.includeTaskIdInCommit !== false;
+  const trailers = taskTrailers(taskId, task.lineageId);
+  const taskTitle = task.title?.trim() ? task.title.split("\n")[0] : undefined;
+
+  const workspaceWorktrees = task.workspaceWorktrees ?? {};
+  // SORTED keys for deterministic land order (KTD1).
+  const repoKeys = Object.keys(workspaceWorktrees).sort();
+  const repos: WorkspaceRepoLandResult[] = [];
+  let allLanded = true;
+
+  await setStatus("merging");
+  /*
+  FNXC:Workspace 2026-06-22-04:10 (Phase C review A3 — status 'merging' must never leak):
+  The busy-throw (WorkspaceRepoLandBusyError) and the persist-failure throw
+  (WorkspacePartialLandError) exit the loop BEFORE the post-loop `setStatus(null)`. If the
+  engine catch never runs (process crash between throw and catch) the task stays stuck
+  'merging' with no manual door to clear it. Wrap the whole per-repo loop so `setStatus(null)`
+  ALWAYS runs (in finally) before ANY throw escapes. The success path still finalizes to done
+  AFTER this finally (finalizeWorkspaceTask sets its own column/status), so clearing 'merging'
+  first is safe — finalize overwrites it. This finally only clears the transient merge status;
+  it does not move the task.
+  */
+  try {
+  for (const repoRel of repoKeys) {
+    throwIfAborted(options.signal, taskId);
+    const entry = workspaceWorktrees[repoRel];
+    const repoRootDir = join(workspaceRootDir, repoRel);
+
+    // Re-resolve THIS sub-repo's integration branch with the shared overrides
+    // stripped (KTD1) so each sub-repo lands on its OWN origin/HEAD, not a shared
+    // workspace branch.
+    let integrationBranch: string;
+    try {
+      integrationBranch = await resolveIntegrationBranch(
+        repoRootDir,
+        { ...settings, integrationBranch: undefined, baseBranch: undefined },
+      );
+    } catch (err: unknown) {
+      const message = getErrorMessage(err);
+      await log(`AI merge (workspace): failed to resolve integration branch for sub-repo ${repoRel}: ${message}`);
+      repos.push({ repo: repoRel, repoRootDir, integrationBranch: "", branch: entry.branch, status: "failed", error: message });
+      allLanded = false;
+      break;
+    }
+
+    // U2 landed predicate + skip (KTD3): a repo whose recorded `landedSha` is an
+    // ancestor of (or equals) its CURRENT integration tip is already landed — SKIP
+    // it so a retry never re-advances the ref. This makes a re-run after a partial
+    // land idempotent for the already-landed repos.
+    /*
+    FNXC:Workspace 2026-06-22-09:30 (Phase C review A1 — concrete landedSha on the skip path):
+    Resolve a CONCRETE landed sha (recorded landedSha OR the trailer-fallback squash sha) rather
+    than trusting `entry.landedSha`, which is `undefined` when the land's persist was lost and only
+    the A1 trailer fallback recognises the repo. If we recovered the sha via the fallback, REPAIR
+    the persisted entry so a later run (and `finalizeWorkspaceTask`) sees a present landedSha. A
+    repair-persist failure is non-fatal: we still carry the concrete sha in-memory for this run's
+    finalize, and the trailer fallback will re-recover it next time.
+    */
+    const recoveredLandedSha = await resolveLandedShaIfLanded(
+      repoRootDir, integrationBranch, entry.landedSha, taskId, entry.branch,
+    );
+    if (recoveredLandedSha) {
+      if (!entry.landedSha) {
+        await persistRepoLandedSha(store, taskId, repoRel, recoveredLandedSha).catch(async (persistErr: unknown) => {
+          await log(`AI merge (workspace): sub-repo ${repoRel} re-recorded landedSha (${short(recoveredLandedSha)}) persist failed (non-fatal, trailer fallback will re-recover): ${getErrorMessage(persistErr)}`);
+        });
       }
+      await log(`AI merge (workspace): sub-repo ${repoRel} already landed (${short(recoveredLandedSha)} ⊑ ${integrationBranch}) — skipping`);
+      repos.push({
+        repo: repoRel, repoRootDir, integrationBranch, branch: entry.branch,
+        status: "landed", landedSha: recoveredLandedSha, alreadyLanded: true,
+      });
+      continue;
+    }
 
-      // 4 + 5. Land the squash on the target branch and sync the user's
-      //        checkout (AI reconciles a conflicting restore).
-      await setStatus("landing");
-      const landed = await landSquash({
-        projectRootDir, mergeRoot, integrationBranch, tipSha, squashSha, taskId, audit,
-        resolveConflicts: stashResolveAgent,
+    /*
+    FNXC:Workspace 2026-06-22-02:10 (Phase C U3, KTD4):
+    Same-sub-repo LAND lease. Register the sub-repo absolute path BEFORE landing so
+    two tasks landing the SAME sub-repo are serialized (their clean-room ai-merge
+    worktrees would otherwise collide). The lookupByPath → registerPath pair stays in
+    ONE synchronous slice (no `await` between them) so the claim is atomic — an
+    interleaved await would let a second task pass the gate before we register. If
+    another task holds the land lease we FAST-FAIL with a retryable busy error; the
+    U2 dispatch auto-retry/park path handles it (no waiting lock reimplemented here).
+
+    FNXC:Workspace 2026-06-22-04:10 (Phase C review A2 — taskId-aware contention across kinds):
+    Previously we only treated a HELD entry of OUR OWN land ownerKey as contention, so a
+    MERGING task would registerPath-OVERWRITE an EXECUTING task's "workspace-repo-acquire"
+    entry on a shared sub-repo (cross-phase clobber). Now ANY foreign-task holder on this
+    path — regardless of kind (acquire OR land OR anything else) — is contention: we throw
+    WorkspaceRepoLandBusyError so the engine retries when the other task releases its hold.
+    A SAME-task holder is NOT contention (idempotent re-claim of our own path). The
+    registerPath guard (A2b) backstops this: it also rejects a foreign-task overwrite, so a
+    missed check can never silently clobber.
+    */
+    const landLeaseHolder = activeSessionRegistry.lookupByPath(repoRootDir);
+    if (landLeaseHolder && landLeaseHolder.taskId !== taskId) {
+      throw new WorkspaceRepoLandBusyError(repoRel, landLeaseHolder.taskId, taskId);
+    }
+    activeSessionRegistry.registerPath(repoRootDir, {
+      taskId,
+      kind: "workspace-repo-land",
+      ownerKey: WORKSPACE_REPO_LAND_OWNER_KEY,
+    });
+
+    try {
+      const landResult = await landOneRepo(repoRootDir, entry.branch, integrationBranch, {
+        taskId, settings, audit, log, setStatus, maxPasses,
+        mergeAgent, reviewAgent, stashResolveAgent,
+        includeTaskId, trailers, taskTitle, signal: options.signal,
         allowDirtyLocalCheckoutSync: options.allowDirtyLocalCheckoutSync === true,
+        store,
       });
-      if (landed.outcome === "concurrent") {
-        if (advanceRetries < MAX_CONCURRENT_ADVANCE_RETRIES) {
-          advanceRetries++;
-          await log(`AI merge: ${integrationBranch} moved during merge — rebuilding on new tip (retry ${advanceRetries})`);
-          continue; // rebuild the clean room on the new tip
+      if (landResult.outcome === "landed") {
+        /*
+        FNXC:Workspace 2026-06-22-04:10 (Phase C review A1 — persist-after-advance is a HARD failure):
+        The integration ref has ALREADY advanced (squash landed) by the time we persist
+        `landedSha`. If the DB write fails here the ref is advanced but UNRECORDED — we must NOT
+        silently continue (a return-based partial would let a retry double-squash). Escalate to a
+        retryable WorkspacePartialLandError so the engine parks/retries; on retry, `isRepoLanded`'s
+        trailer ancestor-fallback recognises this actually-landed repo and skips it. The repo IS
+        recorded as `landed` in the in-memory result first so the error payload is accurate.
+        */
+        try {
+          await persistRepoLandedSha(store, taskId, repoRel, landResult.squashSha);
+        } catch (persistErr: unknown) {
+          const pmsg = getErrorMessage(persistErr);
+          await log(`AI merge (workspace): sub-repo ${repoRel} landed (${short(landResult.squashSha)}) but persisting landedSha FAILED: ${pmsg} — escalating to partial land so a retry can recover (ref already advanced; retry will skip via trailer ancestor-check)`);
+          repos.push({
+            repo: repoRel, repoRootDir, integrationBranch, branch: entry.branch,
+            status: "landed", landedSha: landResult.squashSha, localSync: landResult.localSync,
+          });
+          allLanded = false;
+          const landedCount = repos.filter((r) => r.status === "landed").length;
+          throw new WorkspacePartialLandError(
+            landedCount,
+            [repoRel],
+            `Workspace land for ${taskId}: sub-repo ${repoRel} advanced its integration ref but the landedSha persist failed (${pmsg}); retry to record/skip it`,
+          );
         }
-        throw new Error(`AI merge could not advance ${integrationBranch} for ${taskId} after ${advanceRetries} retries (concurrent advances)`);
+        repos.push({
+          repo: repoRel, repoRootDir, integrationBranch, branch: entry.branch,
+          status: "landed", landedSha: landResult.squashSha, localSync: landResult.localSync,
+        });
+      } else {
+        repos.push({ repo: repoRel, repoRootDir, integrationBranch, branch: entry.branch, status: "empty" });
       }
-      await log(`AI merge: advanced ${integrationBranch} → ${short(squashSha)} (local checkout: ${landed.localSync})`);
-      return await finalizeMerged(store, projectRootDir, taskId, task, branch, integrationBranch, squashSha, audit, log, { empty: false });
+    } catch (err: unknown) {
+      // A WorkspacePartialLandError from the persist-failure window above must PROPAGATE
+      // (the engine parks/retries). The outer try/finally below resets status first (A3).
+      if (err instanceof WorkspacePartialLandError) throw err;
+      const message = getErrorMessage(err);
+      await log(`AI merge (workspace): sub-repo ${repoRel} land failed: ${message}`);
+      await audit.git({ type: "merge:ai-no-branch", target: entry.branch, metadata: { taskId, kind: "workspace-repo-land-failed", repo: repoRel, error: message } }).catch(() => undefined);
+      repos.push({ repo: repoRel, repoRootDir, integrationBranch, branch: entry.branch, status: "failed", error: message });
+      allLanded = false;
+      // Stop on first failure and return a partial result. The already-landed repos'
+      // `landedSha` is persisted, so the engine dispatch's auto-retry re-runs this
+      // loop and the landed predicate above skips them (only the failed repo retries).
+      break;
     } finally {
-      for (const registeredPath of registeredMergePaths) {
-        activeSessionRegistry.unregisterPath(registeredPath);
-      }
-      if (mergeRoot) {
-        await cleanupAiMergeWorktree({ taskId, mergeRoot, projectRootDir, worktreeAdded, audit, log });
+      /*
+      FNXC:Workspace 2026-06-22-02:10 (Phase C U3, KTD4):
+      Release the land lease — on land SUCCESS or land FAILURE — but ONLY when WE hold
+      it (own taskId + own ownerKey), so a future-acquire path's entry on this path is
+      never yanked. The fast-fail busy throw above happens BEFORE registerPath, so a
+      serialized loser never unregisters the winner's lease.
+      */
+      const held = activeSessionRegistry.lookupByPath(repoRootDir);
+      if (held && held.taskId === taskId && held.ownerKey === WORKSPACE_REPO_LAND_OWNER_KEY) {
+        activeSessionRegistry.unregisterPath(repoRootDir);
       }
     }
   }
+  } finally {
+    // A3: clear the transient 'merging' status before ANY throw (busy / partial-land /
+    // abort) escapes, AND on the normal fall-through. The success path's finalize below
+    // re-sets the task's column/status to done, so clearing here first is safe.
+    await setStatus(null);
+  }
+
+  // U2 finalize-once (KTD3): move the task to `done` EXACTLY ONCE, only after EVERY
+  // acquired repo's landed predicate holds (all landed/empty, none failed). Reuse the
+  // task-global `finalizeTask` move-done path with an aggregate mergeDetails so the
+  // existing `task:merged` consumer is satisfied. On a partial land we do NOT move
+  // done (the landed repos' `landedSha` is already persisted for the retry).
+  if (allLanded) {
+    const finalized = await finalizeWorkspaceTask(store, taskId, task, repos);
+    return { taskId, repos, allLanded, finalized };
+  }
+  return { taskId, repos, allLanded, finalized: false };
+}
+
+/**
+ * FNXC:Workspace 2026-06-22-00:30 (Phase C U2, KTD3):
+ * Landed predicate: a sub-repo is landed iff a `landedSha` is recorded AND that sha is
+ * an ancestor of (or equals) the repo's CURRENT integration tip. The ancestor check
+ * (not just sha presence) survives a later un-related advance of the integration ref:
+ * the landed commit is still reachable, so the repo stays "landed". A `landedSha` that
+ * is NOT reachable from the tip (e.g. the ref was reset/rebuilt) reads as NOT landed and
+ * the repo re-lands.
+ *
+ * FNXC:Workspace 2026-06-22-04:10 (Phase C review A1 — task-trailer ancestor fallback):
+ * The double-land window: a land advances the integration ref via `advanceIntegrationBranchRef`'s
+ * CAS, then `persistRepoLandedSha` records `landedSha`. If that DB write fails AFTER the ref
+ * advanced, the repo is ACTUALLY landed but has NO recorded `landedSha`, so the landedSha check
+ * above reports NOT-landed → a retry re-runs `landOneRepo`, the CAS rebuilds, and a SECOND squash
+ * lands (not idempotent). To close the window we ALSO treat the repo as landed when the live
+ * integration ref carries a commit with THIS task's `Fusion-Task-Id` trailer.
+ *
+ * Why a trailer scan and NOT a branch-tip ancestor check: the land is a `git merge --squash`,
+ * whose squash commit's parent is the integration tip, NOT the task branch — so `merge-base
+ * --is-ancestor <branch> <integration>` is FALSE even right after a successful land. The
+ * `Fusion-Task-Id` trailer (always stamped onto the squash by `taskTrailers` + the
+ * ensureTaskMetadata safety net) is the only reliable "this task's work is already on the ref"
+ * signal that does not depend on the landedSha row, so it is what survives a lost persist. We
+ * bound the scan to commits the integration tip has gained since the branch's merge-base (the
+ * land base) so an unrelated historical reuse of the same trailer cannot false-positive.
+ *
+ * Exported (A6) so Phase D self-healing reuses THIS canonical predicate instead of
+ * reimplementing the ancestor/trailer check.
+ */
+export async function isRepoLanded(
+  repoRootDir: string,
+  integrationBranch: string,
+  landedSha: string | undefined,
+  taskId?: string,
+  branch?: string,
+): Promise<boolean> {
+  return (
+    (await resolveLandedShaIfLanded(repoRootDir, integrationBranch, landedSha, taskId, branch)) !==
+    undefined
+  );
+}
+
+/**
+ * FNXC:Workspace 2026-06-22-09:30 (Phase C review A1 — concrete landedSha on trailer fallback):
+ * The shared core of {@link isRepoLanded}: returns a CONCRETE landed sha when the sub-repo is
+ * already landed, else `undefined`. When the recorded `landedSha` survives it is returned as-is;
+ * when the A1 trailer fallback matches (the persist was lost so no `landedSha` is recorded) the
+ * concrete squash sha is read off the integration ref via the same bounded trailer scan.
+ *
+ * Why this matters (review A1 / finalize misfinalise): the `landWorkspaceTask` skip path and
+ * `finalizeWorkspaceTask` both key off a present `landedSha`. A trailer-fallback match with a
+ * `undefined` recorded sha would be dropped by the finalize filter, finalizing an already-landed
+ * task as a no-op (`mergeConfirmed:false`, empty `workspaceLandedShas`) — the exact dashboard
+ * `merged:false` contradiction Phase C set out to eliminate. Resolving the concrete sha here lets
+ * the skip path persist+propagate it so the repo is correctly counted as landed.
+ */
+async function resolveLandedShaIfLanded(
+  repoRootDir: string,
+  integrationBranch: string,
+  landedSha: string | undefined,
+  taskId?: string,
+  branch?: string,
+): Promise<string | undefined> {
+  const intRef = `refs/heads/${integrationBranch}`;
+  if (!(await gitOk(["rev-parse", "--verify", intRef], repoRootDir))) {
+    return undefined;
+  }
+  // Primary: recorded landedSha is an ancestor of (or equals) the integration tip.
+  // `merge-base --is-ancestor X Y` exits 0 iff X is an ancestor of (or equal to) Y.
+  if (
+    landedSha &&
+    (await gitOk(["merge-base", "--is-ancestor", landedSha, intRef], repoRootDir))
+  ) {
+    return landedSha;
+  }
+  // A1 fallback: even without a recorded landedSha, the repo is already landed if the
+  // integration ref carries a commit with this task's Fusion-Task-Id trailer (the squash
+  // we lost the persist for). Bound the scan to commits gained since the branch's land base
+  // so a stale historical trailer of the same id cannot false-positive. Return the MOST RECENT
+  // matching commit sha (the squash) so callers can persist a concrete landedSha.
+  if (taskId) {
+    const branchRef = branch ? `refs/heads/${branch}` : undefined;
+    let range = intRef;
+    if (branchRef && (await gitOk(["rev-parse", "--verify", branchRef], repoRootDir))) {
+      const base = await gitCapture(["merge-base", branchRef, intRef], repoRootDir);
+      if (base) range = `${base.trim()}..${intRef}`;
+    }
+    const trailer = `${FUSION_TASK_ID_TRAILER_KEY}: ${taskId}`;
+    const found = await gitCapture(
+      ["log", "--format=%H", `--grep=${trailer}`, "--fixed-strings", range],
+      repoRootDir,
+    );
+    const firstSha = found?.split(/\r?\n/).map((s) => s.trim()).find((s) => s.length > 0);
+    if (firstSha) return firstSha;
+  }
+  return undefined;
+}
+
+/**
+ * FNXC:Workspace 2026-06-22-00:30 (Phase C U2, KTD3):
+ * Persist one sub-repo's `landedSha` with a FRESH-read-then-merge so a concurrent
+ * sibling-entry write is not clobbered (Phase A/B per-repo `workspaceWorktrees`
+ * pattern). Re-read the latest task, merge only this repo's entry, write the whole map.
+ *
+ * FNXC:Workspace 2026-06-22-04:10 (Phase C review A1 — do NOT swallow the DB write):
+ * Previously the `store.updateTask(...)` was `.catch(() => undefined)`. That swallow is the
+ * double-land bug: the integration ref has ALREADY advanced by the time we persist, so a
+ * silently-lost write means `landedSha` is never recorded → on retry the landedSha check sees
+ * NOT-landed and re-runs the squash (a SECOND squash commit). We now PROPAGATE the write
+ * failure. The caller (`landWorkspaceTask`) catches it as a partial-land for this repo and
+ * escalates to `WorkspacePartialLandError` so the engine parks/retries; on retry, `isRepoLanded`'s
+ * trailer ancestor-fallback (A1) recognises the actually-landed repo and skips it (no double
+ * squash). We DELIBERATELY do not swallow the `getTask` read either-way: a failed read leaves
+ * `landedSha` unrecorded for the same reason, so it must also escalate.
+ */
+async function persistRepoLandedSha(
+  store: TaskStore,
+  taskId: string,
+  repoRel: string,
+  landedSha: string,
+): Promise<void> {
+  const latest = await store.getTask(taskId);
+  const current = latest?.workspaceWorktrees ?? {};
+  const entry = current[repoRel];
+  if (!entry) return; // entry vanished — nothing to merge into
+  const next = { ...current, [repoRel]: { ...entry, landedSha } };
+  await store.updateTask(taskId, { workspaceWorktrees: next });
+}
+
+/**
+ * FNXC:Workspace 2026-06-22-00:30 (Phase C U2, KTD3):
+ * Finalize-once: build an aggregate `MergeResult` from the per-repo lands and run the
+ * task-global `finalizeTask` move-done path ONCE. The representative `commitSha` is the
+ * first sorted landed repo's sha (so `mergeDetails.commitSha` is populated for the
+ * `task:merged` consumer); the full per-repo map is carried in `mergeDetails.workspaceLandedShas`.
+ * Returns true iff the task was moved to done.
+ */
+async function finalizeWorkspaceTask(
+  store: TaskStore,
+  taskId: string,
+  task: Task,
+  repos: WorkspaceRepoLandResult[],
+): Promise<boolean> {
+  const landed = repos.filter((r) => r.status === "landed" && r.landedSha);
+  const workspaceLandedShas: Record<string, string> = {};
+  for (const r of landed) workspaceLandedShas[r.repo] = r.landedSha!;
+  const representative = landed.length > 0 ? landed[0].landedSha : undefined;
+  const anyLanded = landed.length > 0;
+
+  /*
+  FNXC:Workspace 2026-06-22-04:10 (Phase C review A5 — fresh-read + no-swallow finalize):
+  Two fixes to the FN-5627 TOCTOU class:
+   1. The `task` argument is the SNAPSHOT captured at the START of `landWorkspaceTask`; by
+      finalize time the persisted row has gained each repo's `landedSha` (and possibly other
+      concurrent edits). Spreading the stale snapshot's mergeDetails could drop/clobber those.
+      Re-read the LATEST task and spread ITS mergeDetails (fresh-read-then-merge), falling back
+      to the snapshot only if the read fails.
+   2. The `store.updateTask(...)` was `.catch(() => undefined)` — a swallowed write left the
+      in-memory `mergeConfirmed:true` while the persisted row stayed stale (the finalize would
+      then report done with an unpersisted merge). PROPAGATE the failure so finalization aborts
+      and self-healing recovers, rather than silently finalizing on a stale row.
+  */
+  const fresh = await store.getTask(taskId).catch(() => undefined);
+  const baseMergeDetails = fresh?.mergeDetails ?? task.mergeDetails;
+  const mergeDetails: MergeDetails = {
+    ...baseMergeDetails,
+    ...(representative ? { commitSha: representative } : {}),
+    ...(anyLanded ? { workspaceLandedShas } : {}),
+    mergeConfirmed: anyLanded,
+  };
+  await store.updateTask(taskId, { mergeDetails });
+  task.mergeDetails = mergeDetails;
+
+  const result: MergeResult = {
+    task,
+    branch: task.branch ?? "",
+    merged: anyLanded,
+    noOp: !anyLanded,
+    ok: true,
+    reason: anyLanded ? undefined : "no-net-changes",
+    commitSha: representative,
+    mergeConfirmed: anyLanded,
+    worktreeRemoved: false,
+    branchDeleted: false,
+  };
+  await store.logEntry(taskId, `AI merge (workspace): all ${repos.length} sub-repo(s) landed — task → done`, "AiMerge").catch(() => undefined);
+  await finalizeTask(store, taskId, result);
+  return true;
 }
 
 async function mergeAndReview(input: {

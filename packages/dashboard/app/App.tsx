@@ -95,12 +95,13 @@ import { ShellProvider } from "./context/ShellContext";
 import { RetryWarningProvider } from "./context/RetryWarningContext";
 import { ShellHostProvider, useShellHostContext } from "./context/ShellHostContext";
 import { useShellConnection } from "./hooks/useShellConnection";
+import { useStashOrphanCount } from "./hooks/useStashOrphanCount";
 import { NativeShellOnboardingModal } from "./components/NativeShellOnboardingModal";
 import { NativeShellConnectionManager } from "./components/NativeShellConnectionManager";
 import { ShellConnectionStatus } from "./components/ShellConnectionStatus";
 import { getShellConnectionNativeResult, type ShellConnectionNativeResult } from "./shell-native";
 import type { AiSessionSummary, DashboardHealthResponse, PluginDashboardViewEntry } from "./api";
-import { api, fetchDashboardHealth, fetchUnreadCount, fetchTaskDetail, fetchWorkflowSteps, refreshDashboardHealth } from "./api";
+import { fetchDashboardHealth, fetchUnreadCount, fetchTaskDetail, fetchWorkflowSteps, refreshDashboardHealth } from "./api";
 import { getScopedItem, removeScopedItem, setScopedItem } from "./utils/projectStorage";
 import {
   SETUP_WARNING_DISMISSED_KEY,
@@ -579,7 +580,7 @@ function AppInner() {
   const [mailboxUnreadCount, setMailboxUnreadCount] = useState(0);
   const [mailboxPendingApprovalCount, setMailboxPendingApprovalCount] = useState(0);
   const [chatHasUnreadResponse, setChatHasUnreadResponse] = useState(false);
-  const [stashOrphanCount, setStashOrphanCount] = useState(0);
+  const { stashOrphanCount } = useStashOrphanCount(currentProject?.id);
   const [approvalBannerCandidate, setApprovalBannerCandidate] = useState<ApprovalBannerCandidate | null>(null);
   const [showGitHubStarPrompt, setShowGitHubStarPrompt] = useState(false);
   const taskStatusByIdRef = useRef<Map<string, string | undefined>>(new Map());
@@ -698,23 +699,6 @@ function AppInner() {
     }
   }, [quickChatOpen, taskView]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const data = await api<{ count: number }>("/stash-recovery/orphans");
-        if (!cancelled) setStashOrphanCount(data.count ?? 0);
-      } catch {
-        if (!cancelled) setStashOrphanCount(0);
-      }
-    };
-    void load();
-    const timer = window.setInterval(() => void load(), 30000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [currentProject?.id]);
 
   useEffect(() => {
     const params = new URLSearchParams();

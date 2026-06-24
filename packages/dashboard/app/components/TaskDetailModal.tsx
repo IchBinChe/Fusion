@@ -1888,6 +1888,18 @@ export function TaskDetailContent({
 
   const handleDelete = useCallback(async () => {
     let allowResurrection = false;
+    let deleteCloseRequested = false;
+    const closeBeforeDeleteRequest = () => {
+      if (deleteCloseRequested) {
+        return;
+      }
+      /*
+      FNXC:TaskDetailDelete 2026-06-23-10:55:
+      Task detail hosts must close optimistically after the operator completes every required delete prompt and before the server delete request settles. Keep async success/error toasts attached to the delete promise so conflict handling and failure reporting continue after the modal, embedded panel, or floating host is gone.
+      */
+      requestClose();
+      deleteCloseRequested = true;
+    };
 
     if (task.column !== "archived" && onArchiveTask) {
       const deleteChoice = await confirmWithChoice({
@@ -1975,12 +1987,12 @@ export function TaskDetailContent({
     }
 
     try {
+      closeBeforeDeleteRequest();
       if (githubIssueAction) {
         await onDeleteTask(task.id, { githubIssueAction, allowResurrection });
       } else {
         await onDeleteTask(task.id, { allowResurrection });
       }
-      requestClose();
       const issueSuffix = trackedIssue?.owner && trackedIssue.repo && trackedIssue.number && githubIssueAction
         ? ` ${t("taskDetail.delete.issueSuffix", "and {{action}} issue {{ref}}", { action: githubIssueAction === "close" ? t("taskDetail.delete.actionClosed", "closed") : githubIssueAction === "delete" ? t("taskDetail.delete.actionDeleted", "deleted") : t("taskDetail.delete.actionLeft", "left"), ref: `${trackedIssue.owner}/${trackedIssue.repo}#${trackedIssue.number}` })}`
         : "";
@@ -2001,13 +2013,13 @@ export function TaskDetailContent({
         }
 
         try {
+          closeBeforeDeleteRequest();
           await onDeleteTask(task.id, {
             removeDependencyReferences: true,
             removeLineageReferences: true,
             githubIssueAction,
             allowResurrection,
           });
-          requestClose();
           addToast(t("taskDetail.delete.deletedAfterRemovingDeps", "Deleted {{id}} after removing dependency references", { id: task.id }), "info");
         } catch (retryErr) {
           const lineageConflict = extractLineageDeleteConflict(retryErr);
@@ -2028,13 +2040,13 @@ export function TaskDetailContent({
           }
 
           try {
+            closeBeforeDeleteRequest();
             await onDeleteTask(task.id, {
               removeDependencyReferences: true,
               removeLineageReferences: true,
               githubIssueAction,
               allowResurrection,
             });
-            requestClose();
             addToast(t("taskDetail.delete.deletedAfterUnlinkLineage", "Deleted {{id}} after unlinking lineage references", { id: task.id }), "info");
           } catch (lineageRetryErr) {
             addToast(getErrorMessage(lineageRetryErr), "error");
@@ -2061,13 +2073,13 @@ export function TaskDetailContent({
       }
 
       try {
+        closeBeforeDeleteRequest();
         await onDeleteTask(task.id, {
           removeDependencyReferences: true,
           removeLineageReferences: true,
           githubIssueAction,
           allowResurrection,
         });
-        requestClose();
         addToast(t("taskDetail.delete.deletedAfterUnlinkLineage", "Deleted {{id}} after unlinking lineage references", { id: task.id }), "info");
       } catch (retryErr) {
         addToast(getErrorMessage(retryErr), "error");

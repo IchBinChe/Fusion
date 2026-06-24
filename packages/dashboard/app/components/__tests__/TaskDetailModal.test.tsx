@@ -4,7 +4,7 @@ FN-6532 made Chat the default TaskDetailModal tab. Tests that assert Definition-
 */
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
-import type { ComponentProps } from "react";
+import React, { type ComponentProps } from "react";
 import userEvent from "@testing-library/user-event";
 import {
   makeTask,
@@ -14,9 +14,11 @@ import {
   noopMove,
   noopOpenDetail,
   setupTaskDetailModalHooks,
+  mockConfirm,
+  mockConfirmWithCheckbox,
   mockConfirmWithChoice,
 } from "./TaskDetailModal.test-helpers";
-import { TaskDetailModal } from "../TaskDetailModal";
+import { TaskDetailContent, TaskDetailModal } from "../TaskDetailModal";
 
 vi.mock("../BranchGroupCard", () => ({
   BranchGroupCard: ({ groupId }: { groupId: string }) => <div>Mock Branch Group {groupId}</div>,
@@ -486,6 +488,140 @@ describe("TaskDetailModal branch group surfacing", () => {
 });
 
 describe("TaskDetailModal delete affordance", () => {
+  function dependencyConflictError(dependentIds: string[]) {
+    const error = new Error("Task has dependents");
+    (error as Error & { details: { code: string; dependentIds: string[] } }).details = {
+      code: "TASK_HAS_DEPENDENTS",
+      dependentIds,
+    };
+    return error;
+  }
+
+  function renderClosingTaskDetailModal(props: Partial<ComponentProps<typeof TaskDetailModal>> = {}) {
+    const onClose = vi.fn();
+    const Harness = () => {
+      const [open, setOpen] = React.useState(true);
+      if (!open) return null;
+      return (
+        <TaskDetailModal
+          initialTab="definition"
+          task={makeTask({ column: "triage", ...props.task })}
+          onClose={() => {
+            onClose();
+            setOpen(false);
+          }}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+          {...props}
+        />
+      );
+    };
+
+    const result = render(<Harness />);
+    return { ...result, onClose };
+  }
+
+  it.each(["close", "back"] as const)("closes the %s-header task dialog before a confirmed delete settles", async (mobileHeaderMode) => {
+    const user = userEvent.setup();
+    const pendingDelete = createDeferred<ReturnType<typeof makeTask>>();
+    const onDeleteTask = vi.fn(() => pendingDelete.promise);
+    const { onClose } = renderClosingTaskDetailModal({
+      mobileHeaderMode,
+      onDeleteTask,
+    });
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Delete task" }));
+
+    await waitFor(() => expect(onDeleteTask).toHaveBeenCalledWith("FN-099", { allowResurrection: false }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    pendingDelete.resolve(makeTask());
+  });
+
+  it("closes an embedded task-detail host before a confirmed delete settles", async () => {
+    const user = userEvent.setup();
+    const pendingDelete = createDeferred<ReturnType<typeof makeTask>>();
+    const onDeleteTask = vi.fn(() => pendingDelete.promise);
+    const onRequestClose = vi.fn();
+
+    render(
+      <TaskDetailContent
+        initialTab="definition"
+        embedded
+        task={makeTask({ column: "triage" })}
+        onRequestClose={onRequestClose}
+        onMoveTask={noopMove}
+        onDeleteTask={onDeleteTask}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Delete task" }));
+
+    await waitFor(() => expect(onDeleteTask).toHaveBeenCalledWith("FN-099", { allowResurrection: false }));
+    expect(onRequestClose).toHaveBeenCalledTimes(1);
+
+    pendingDelete.resolve(makeTask());
+  });
+
+  it("closes embedded retry deletes before the force-delete retry settles", async () => {
+    const user = userEvent.setup();
+    const pendingRetry = createDeferred<ReturnType<typeof makeTask>>();
+    const onDeleteTask = vi
+      .fn()
+      .mockRejectedValueOnce(dependencyConflictError(["FN-200"]))
+      .mockReturnValueOnce(pendingRetry.promise);
+    const onRequestClose = vi.fn();
+    mockConfirm.mockResolvedValueOnce(true);
+
+    render(
+      <TaskDetailContent
+        initialTab="definition"
+        embedded
+        task={makeTask({ column: "triage" })}
+        onRequestClose={onRequestClose}
+        onMoveTask={noopMove}
+        onDeleteTask={onDeleteTask}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Delete task" }));
+
+    await waitFor(() => expect(onDeleteTask).toHaveBeenCalledTimes(2));
+    expect(onDeleteTask).toHaveBeenNthCalledWith(2, "FN-099", {
+      removeDependencyReferences: true,
+      removeLineageReferences: true,
+      githubIssueAction: undefined,
+      allowResurrection: false,
+    });
+    expect(onRequestClose).toHaveBeenCalledTimes(1);
+
+    pendingRetry.resolve(makeTask());
+  });
+
+  it("keeps the dialog open when the delete confirmation is cancelled", async () => {
+    const user = userEvent.setup();
+    const onDeleteTask = vi.fn(async () => makeTask());
+    mockConfirmWithCheckbox.mockResolvedValueOnce({ choice: "cancel", checkboxValue: false });
+    const { onClose } = renderClosingTaskDetailModal({ onDeleteTask });
+
+    await user.click(screen.getByRole("button", { name: "Delete task" }));
+
+    expect(onDeleteTask).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
   it("archives done task when Archive Instead is chosen", async () => {
     const user = userEvent.setup();
     const onArchiveTask = vi.fn(async () => makeTask({ column: "archived" }));

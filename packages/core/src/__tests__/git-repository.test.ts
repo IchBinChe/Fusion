@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { execFile } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -106,5 +106,18 @@ describe("ensureGitRepositoryForProjectPath", () => {
     await expect(
       ensureGitRepositoryForProjectPath(projectPath, { runner }),
     ).rejects.toBeInstanceOf(GitRepositoryInitializationError);
+  });
+
+  it("skips git init for a workspace-mode project root (.fusion/workspace.json present)", async () => {
+    const projectPath = tempDir("fusion-git-workspace-");
+    // Simulate workspace init: .fusion/workspace.json exists, root is non-git
+    mkdirSync(join(projectPath, ".fusion"), { recursive: true });
+    writeFileSync(join(projectPath, ".fusion", "workspace.json"), JSON.stringify({ repos: ["repo-a"] }));
+
+    const outcome = await ensureGitRepositoryForProjectPath(projectPath);
+
+    expect(outcome).toBe("existing");
+    // No .git should be created at the workspace root
+    expect(existsSync(join(projectPath, ".git"))).toBe(false);
   });
 });

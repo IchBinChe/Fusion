@@ -2465,8 +2465,8 @@ describe("StepSessionExecutor", () => {
       await executor.executeAll();
 
       expect(appendAgentLog).toHaveBeenCalledWith("FN-001", "step output", "text", undefined, "executor");
-      expect(appendAgentLog).toHaveBeenCalledWith("FN-001", "read", "tool", "src/foo.ts", "executor");
-      expect(appendAgentLog).toHaveBeenCalledWith("FN-001", "read", "tool_result", "ok", "executor");
+      expect(appendAgentLog).toHaveBeenCalledWith("FN-001", "read", "tool", undefined, "executor");
+      expect(appendAgentLog).toHaveBeenCalledWith("FN-001", "read", "tool_result", undefined, "executor");
     });
 
     it("flushes AgentLogger in attempt finally block", async () => {

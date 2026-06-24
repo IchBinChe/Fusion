@@ -1382,7 +1382,7 @@ describe("GET /settings/scopes", () => {
       global: {
         themeMode: "dark",
         defaultProvider: "anthropic",
-        persistAgentToolOutput: true,
+        persistAgentToolOutput: false,
         persistAgentThinkingLogPermanent: false,
         persistAgentThinkingLogEphemeral: false,
         persistAgentThinkingLog: false,
@@ -1395,7 +1395,7 @@ describe("GET /settings/scopes", () => {
     expect(res.status).toBe(200);
     expect(res.body.global.themeMode).toBe("dark");
     expect(res.body.global.defaultProvider).toBe("anthropic");
-    expect(res.body.global.persistAgentToolOutput).toBe(true);
+    expect(res.body.global.persistAgentToolOutput).toBe(false);
     expect(res.body.global.persistAgentThinkingLogPermanent).toBe(false);
     expect(res.body.global.persistAgentThinkingLogEphemeral).toBe(false);
     expect(res.body.global.persistAgentThinkingLog).toBe(false);

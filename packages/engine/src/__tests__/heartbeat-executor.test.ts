@@ -3528,8 +3528,8 @@ describe("executeHeartbeat", () => {
       const result = await monitor.executeHeartbeat({ agentId: "agent-001", source: "on_demand" });
 
       expect(appendAgentLog).toHaveBeenCalledWith("FN-001", "Heartbeat produced visible output", "text", undefined, "executor");
-      expect(appendAgentLog).toHaveBeenCalledWith("FN-001", "read", "tool", "README.md", "executor");
-      expect(appendAgentLog).toHaveBeenCalledWith("FN-001", "read", "tool_result", "done", "executor");
+      expect(appendAgentLog).toHaveBeenCalledWith("FN-001", "read", "tool", undefined, "executor");
+      expect(appendAgentLog).toHaveBeenCalledWith("FN-001", "read", "tool_result", undefined, "executor");
       expect(result.contextSnapshot?.taskId).toBe("FN-001");
       expect(result.stdoutExcerpt).toContain("Heartbeat produced visible output");
     });

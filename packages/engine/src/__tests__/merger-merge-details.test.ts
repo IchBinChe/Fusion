@@ -522,7 +522,7 @@ describe("aiMergeTask — agent log persistence", () => {
 
     await aiMergeTask(store, "/tmp/root", "FN-050");
 
-    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-050", "Bash", "tool", "git status", "merger");
+    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-050", "Bash", "tool", undefined, "merger");
   });
 
   it("still fires onAgentText callback alongside logging", async () => {

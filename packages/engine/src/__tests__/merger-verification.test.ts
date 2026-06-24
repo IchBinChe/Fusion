@@ -2354,7 +2354,7 @@ describe("aiMergeTask — in-merge verification fix", () => {
     expect(capturedFixOptions.onToolStart).toBeTypeOf("function");
     expect(capturedFixOptions.onToolEnd).toBeTypeOf("function");
 
-    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-050", "Bash", "tool", "vitest run", "merger");
+    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-050", "Bash", "tool", undefined, "merger");
 
     const logMessages = (store.logEntry as ReturnType<typeof vi.fn>).mock.calls
       .map((call: any[]) => call[1])

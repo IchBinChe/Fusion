@@ -23,7 +23,7 @@ export function GlobalGeneralSection({ scopeBanner, form, setForm, globalTrackin
       <CliBinaryPanel />
       <div className="form-group">
         <label htmlFor="persistAgentToolOutput" className="checkbox-label">
-          <input id="persistAgentToolOutput" type="checkbox" checked={form.persistAgentToolOutput !== false} onChange={(e) => setForm((f) => ({ ...f, persistAgentToolOutput: e.target.checked }))}/>{t("settings.globalGeneral.saveToolOutputInAgentLogs", " Save tool output in agent logs ")}</label>
+          <input id="persistAgentToolOutput" type="checkbox" checked={form.persistAgentToolOutput === true} onChange={(e) => setForm((f) => ({ ...f, persistAgentToolOutput: e.target.checked }))}/>{t("settings.globalGeneral.saveToolOutputInAgentLogs", " Save tool output in agent logs ")}</label>
         <small>{t("settings.globalGeneral.whenDisabledToolRowsAreStillLoggedBut", " When disabled, tool rows are still logged but detailed tool payloads are omitted. Very large tool payloads may still be clipped even when this stays enabled. ")}</small>
       </div>
       <div className="form-group">

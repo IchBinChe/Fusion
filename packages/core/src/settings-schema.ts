@@ -159,7 +159,11 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   vitestAutoKillEnabled: true,
   vitestKillThresholdPct: 90,
   // Agent log persistence controls
-  persistAgentToolOutput: true,
+  /*
+  FNXC:AgentLogs 2026-06-23-00:00:
+  Verbose tool arguments and results are default-off to reduce persisted log volume and payload exposure. Operators who need saved tool details can explicitly opt in with persistAgentToolOutput: true; tool timeline rows remain logged either way.
+  */
+  persistAgentToolOutput: false,
   persistAgentThinkingLogPermanent: false,
   persistAgentThinkingLogEphemeral: false,
   persistAgentThinkingLog: false,

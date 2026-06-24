@@ -893,8 +893,8 @@ describe("SettingsModal", () => {
       renderModal({ initialSection: "global-general" });
       await waitForSettingsModalReady();
 
-      // persistAgentToolOutput defaults to checked; Star-on-GitHub control absent.
-      expect(screen.getByRole("checkbox", { name: "Save tool output in agent logs" })).toBeChecked();
+      // persistAgentToolOutput defaults to unchecked; Star-on-GitHub control absent.
+      expect(screen.getByRole("checkbox", { name: "Save tool output in agent logs" })).not.toBeChecked();
       expect(screen.queryByRole("checkbox", { name: /Show "Star on GitHub" button in Settings header/i })).toBeNull();
 
       // thinking-log checkboxes default to unchecked.
@@ -911,6 +911,22 @@ describe("SettingsModal", () => {
       // Global default tracking repo control + inheritance hint render.
       expect(screen.getByRole("combobox", { name: "Global default tracking repo" })).toBeInTheDocument();
       expect(screen.getByText(/Projects inherit this value when they do not set a project default tracking repo/i)).toBeInTheDocument();
+    });
+
+    it("reflects persisted checked value from global settings", async () => {
+      mockFetchSettings.mockResolvedValue({
+        ...defaultSettings,
+        persistAgentToolOutput: true,
+      });
+      mockFetchSettingsByScope.mockResolvedValue({
+        global: { ...defaultSettings, persistAgentToolOutput: true },
+        project: {},
+      });
+
+      renderModal({ initialSection: "global-general" });
+      await waitForSettingsModalReady();
+
+      expect(screen.getByRole("checkbox", { name: "Save tool output in agent logs" })).toBeChecked();
     });
 
     it("reflects persisted unchecked value from global settings", async () => {
@@ -958,7 +974,7 @@ describe("SettingsModal", () => {
       });
 
       const globalPayload = mockUpdateGlobalSettings.mock.calls[0]?.[0] as Record<string, unknown>;
-      expect(globalPayload.persistAgentToolOutput).toBe(false);
+      expect(globalPayload.persistAgentToolOutput).toBe(true);
       if (mockUpdateSettings.mock.calls.length > 0) {
         const projectPayload = mockUpdateSettings.mock.calls[0]?.[0] as Record<string, unknown>;
         expect(projectPayload.persistAgentToolOutput).toBeUndefined();

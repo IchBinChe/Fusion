@@ -141,18 +141,32 @@ describe("AgentLogger", () => {
     expect(calls.length).toBe(2);
     // Text flushed first
     expect(calls[0]).toEqual(["FN-003", "pending text", "text", undefined, undefined]);
-    // Tool logged second with detail
-    expect(calls[1]).toEqual(["FN-003", "Bash", "tool", "ls", undefined]);
+    // Tool logged second without detail by default.
+    expect(calls[1]).toEqual(["FN-003", "Bash", "tool", undefined, undefined]);
   });
 
-  it("logs tool detail using summarizeToolArgs", async () => {
+  it("omits tool detail by default when persistAgentToolOutput is unset", async () => {
     const store = createMockStore();
     const logger = new AgentLogger({ store, taskId: "FN-004" });
 
     logger.onToolStart("Read", { path: "src/index.ts" });
+    logger.onToolEnd("Read", false, "ok");
+    logger.onToolEnd("Read", true, "err");
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-004", "Read", "tool", "src/index.ts", undefined);
+    expect(store.appendAgentLog).toHaveBeenNthCalledWith(1, "FN-004", "Read", "tool", undefined, undefined);
+    expect(store.appendAgentLog).toHaveBeenNthCalledWith(2, "FN-004", "Read", "tool_result", undefined, undefined);
+    expect(store.appendAgentLog).toHaveBeenNthCalledWith(3, "FN-004", "Read", "tool_error", undefined, undefined);
+  });
+
+  it("logs tool detail using summarizeToolArgs when explicitly enabled", async () => {
+    const store = createMockStore();
+    const logger = new AgentLogger({ store, taskId: "FN-004A", persistAgentToolOutput: true });
+
+    logger.onToolStart("Read", { path: "src/index.ts" });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-004A", "Read", "tool", "src/index.ts", undefined);
   });
 
   it("omits tool detail when persistAgentToolOutput is disabled", async () => {
@@ -264,7 +278,7 @@ describe("AgentLogger", () => {
     (store.appendAgentLog as ReturnType<typeof vi.fn>).mockClear();
     logger.onToolStart("Bash", { command: "ls" });
     await vi.advanceTimersByTimeAsync(0);
-    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-010", "Bash", "tool", "ls", "executor");
+    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-010", "Bash", "tool", undefined, "executor");
   });
 
   // ── Thinking buffer/flush ────────────────────────────────────────
@@ -344,6 +358,7 @@ describe("AgentLogger", () => {
       store,
       taskId: "FN-014",
       agent: "executor",
+      persistAgentToolOutput: true,
       persistAgentThinkingLog: true,
       flushSizeBytes: 1024,
     });
@@ -365,6 +380,7 @@ describe("AgentLogger", () => {
       store,
       taskId: "FN-015",
       agent: "executor",
+      persistAgentToolOutput: true,
     });
 
     logger.onToolEnd("Bash", false, "command output");
@@ -378,6 +394,7 @@ describe("AgentLogger", () => {
       store,
       taskId: "FN-016",
       agent: "executor",
+      persistAgentToolOutput: true,
     });
 
     logger.onToolEnd("Read", true, "file not found");
@@ -391,6 +408,7 @@ describe("AgentLogger", () => {
       store,
       taskId: "FN-016B",
       agent: "executor",
+      persistAgentToolOutput: true,
     });
 
     const longError = "error:" + "y".repeat(1200);
@@ -407,6 +425,7 @@ describe("AgentLogger", () => {
       store,
       taskId: "FN-017",
       agent: "executor",
+      persistAgentToolOutput: true,
     });
 
     const longResult = "x".repeat(600);
@@ -423,6 +442,7 @@ describe("AgentLogger", () => {
       store,
       taskId: "FN-017B",
       agent: "executor",
+      persistAgentToolOutput: true,
     });
     const circular: Record<string, unknown> = {};
     circular.self = circular;

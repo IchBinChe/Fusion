@@ -145,7 +145,7 @@ export function summarizeToolArgs(name: string, args?: Record<string, unknown>):
  *    When both are provided, both sinks receive every entry.
  */
 export interface AgentLoggerOptions {
-  /** When false, omit `detail` payloads for tool entries while preserving the rows. */
+  /** When true, persist `detail` payloads for tool entries; default false preserves rows without verbose payloads. */
   persistAgentToolOutput?: boolean;
   /** When true, persist `thinking` rows. Default: false (skip thinking persistence). */
   persistAgentThinkingLog?: boolean;
@@ -233,7 +233,11 @@ export class AgentLogger {
     this.externalToolCb = options.onAgentTool;
     this.flushSizeBytes = options.flushSizeBytes ?? FLUSH_SIZE_BYTES;
     this.flushIntervalMs = options.flushIntervalMs ?? FLUSH_INTERVAL_MS;
-    this.persistAgentToolOutput = options.persistAgentToolOutput !== false;
+    /*
+    FNXC:AgentLogs 2026-06-23-00:00:
+    Direct logger construction must match global settings: verbose tool payload persistence is default-off and only explicit persistAgentToolOutput: true saves tool entry detail. Tool/tool_result/tool_error rows still persist so timelines and usage telemetry remain intact.
+    */
+    this.persistAgentToolOutput = options.persistAgentToolOutput === true;
     this.persistAgentThinkingLog = options.persistAgentThinkingLog === true;
     this.usageContext = options.usageContext;
 

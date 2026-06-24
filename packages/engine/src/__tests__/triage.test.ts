@@ -3978,7 +3978,7 @@ describe("tool callback behavior (FN-1500)", () => {
       "FN-TOOL-002",
       "read",
       "tool",
-      "test.txt",
+      undefined,
       "triage",
     );
   });

@@ -94,6 +94,18 @@ export function GeneralSection({ scopeBanner, form, setForm, projectId, addToast
           <input id="ephemeralAgentsEnabled" type="checkbox" checked={form.ephemeralAgentsEnabled !== false} onChange={(e) => setForm((f) => ({ ...f, ephemeralAgentsEnabled: e.target.checked }))}/>{t("settings.general.useEphemeralTaskWorkerAgents", " Use ephemeral task-worker agents ")}</label>
         <small>{t("settings.general.whenEnabledDefaultFusionSpawnsShortLived", " When enabled (default), Fusion spawns short-lived ")}<code>executor-FN-XXXX</code>{t("settings.general.agentsToRunEachTaskWhenDisabledOnly", " agents to run each task. When disabled, only permanent agents execute tasks and the scheduler auto-assigns work using the agent reporting chain. Tasks with no eligible permanent agent stay queued. ")}</small>
       </div>
+      {/*
+        FNXC:Workspace 2026-06-24-16:00:
+        Workspace mode toggle: when enabled, the project root is treated as a workspace parent
+        containing multiple git sub-repos instead of a single git repo. The executor runs tasks
+        per-sub-repo, and git init is skipped at the root. Toggling on triggers detectWorkspaceRepos
+        and persists .fusion/workspace.json; toggling off removes it.
+      */}
+      <div className="form-group">
+        <label htmlFor="workspaceMode" className="checkbox-label">
+          <input id="workspaceMode" type="checkbox" checked={form.workspaceMode === true} onChange={(e) => setForm((f) => ({ ...f, workspaceMode: e.target.checked }))}/>{t("settings.general.workspaceMode", " Workspace mode (multi-repo) ")}</label>
+        <small>{t("settings.general.workspaceModeHint", "When enabled, the project root is treated as a workspace containing multiple git sub-repos. Tasks run per-sub-repo and no git repo is created at the root. Disable for single-repo projects.")}</small>
+      </div>
       <div className="form-group">
         <label htmlFor="completionDocumentationMode">{t("settings.general.completionDocumentationAutomation", "Completion Documentation Automation")}</label>
         <select id="completionDocumentationMode" value={form.completionDocumentationMode || "off"} onChange={(e) => setForm((f) => ({

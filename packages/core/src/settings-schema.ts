@@ -538,6 +538,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   researchDefaultTimeout: 300000,
   researchMaxSourcesPerRun: 20,
   researchMaxSynthesisRounds: 2,
+  workspaceMode: false,
 } satisfies CompleteSettings<ProjectSettingsSchema>;
 
 /**

@@ -4466,6 +4466,16 @@ export interface ProjectSettings {
   /** Hard cap on the synthesized "Earlier room context" summary block.
    *  Default: 1500. */
   chatRoomSummaryMaxChars?: number;
+  /**
+   * FNXC:Workspace 2026-06-24-16:00:
+   * When true, the project root is treated as a workspace-mode parent directory containing
+   * multiple git sub-repos (recorded in .fusion/workspace.json), not a single git repo.
+   * ensureGitRepositoryForProjectPath skips `git init` for workspace roots, and the executor
+   * runs tasks per-sub-repo instead of at the root. Auto-detected at registration time when
+   * sub-repos are found, with an interactive confirmation prompt. Can be toggled per-project
+   * via the dashboard Settings modal or PUT /settings.
+   */
+  workspaceMode?: boolean;
 }
 
 /**

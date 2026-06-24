@@ -1,8 +1,9 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, stat, writeFile, rename, unlink } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile, rename, unlink, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync, watch, type Dirent, type FSWatcher } from "node:fs";
+import { detectWorkspaceRepos, saveWorkspaceConfig, loadWorkspaceConfig } from "./git-repository.js";
 import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, ColumnId, CheckoutClaimPrecondition, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, Artifact, ArtifactCreateInput, ArtifactType, ArtifactWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, Agent, AutostashOrphanRecord, TaskCommitAssociation, TaskCommitAssociationMatchSource, TaskCommitAssociationConfidence, CommitAssociationDiffBackfillReport, GithubIssueAction, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome, HandoffToReviewOptions, GoalCitation, GoalCitationFilter, GoalCitationInput, GoalCitationSurface, BranchGroup, BranchGroupCreateInput, BranchGroupUpdate, TaskBranchAssignmentMode, MergeRequestRecord, MergeRequestState, MergeRequestWorkflowProjectionOptions, CompletionHandoffMarker, WorkflowWorkItem, WorkflowWorkItemDueFilter, WorkflowWorkItemKind, WorkflowWorkItemState, WorkflowWorkItemTransitionPatch, WorkflowWorkItemUpsertInput, PrEntity, PrEntityCreateInput, PrEntityUpdate, PrEntityState, PrThreadState, PrThreadOutcome, PrConflictState, PrChecksRollup, PrReviewDecision, PluginActivation, PluginActivationInput } from "./types.js";
 import { createActivityLogSnapshot, createRunAuditSnapshot, createTaskMetadataSnapshot, toTaskMetadataRecord, validateSnapshotEnvelope, type ActivityLogSnapshot, type RunAuditSnapshot, type TaskMetadataSnapshot } from "./shared-mesh-state.js";
 import { VALID_TRANSITIONS, COLUMNS, DEFAULT_SETTINGS, isColumn, isGlobalOnlySettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey, assertNotWorkspaceTaskMerge } from "./types.js";
@@ -3873,6 +3874,40 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
           // Non-fatal — memory bootstrap failure should not block settings update
           storeLog.warn("Project-memory bootstrap failed after memory toggle-on", {
             phase: "updateSettings:memory-toggle-on",
+            rootDir: this.rootDir,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      /*
+      FNXC:Workspace 2026-06-24-16:00:
+      When workspaceMode is toggled on, detect sub-repos and persist workspace.json so the
+      executor and ensureGitRepositoryForProjectPath treat the root as workspace-mode. When
+      toggled off, remove workspace.json so the root falls back to single-repo behavior.
+      */
+      if (updatedMerged.workspaceMode === true && previousMerged.workspaceMode !== true) {
+        try {
+          const existing = await loadWorkspaceConfig(this.rootDir);
+          if (!existing) {
+            const repos = await detectWorkspaceRepos(this.rootDir);
+            if (repos.length > 0) {
+              await saveWorkspaceConfig(this.rootDir, { repos });
+            }
+          }
+        } catch (err) {
+          storeLog.warn("workspace.json sync failed after workspaceMode toggle-on", {
+            phase: "updateSettings:workspace-toggle-on",
+            rootDir: this.rootDir,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      } else if (updatedMerged.workspaceMode === false && previousMerged.workspaceMode === true) {
+        try {
+          await rm(join(this.rootDir, ".fusion", "workspace.json"), { force: true });
+        } catch (err) {
+          storeLog.warn("workspace.json removal failed after workspaceMode toggle-off", {
+            phase: "updateSettings:workspace-toggle-off",
             rootDir: this.rootDir,
             error: err instanceof Error ? err.message : String(err),
           });

@@ -645,8 +645,27 @@ export async function registerProjectInteractive(
       if (subRepos.length > 0) {
         console.log(`\n  Found ${subRepos.length} git repositories in ${absPath}:`);
         subRepos.forEach((r: string) => console.log(`    • ${r}`));
-        console.log(`\n  Initializing as a Fusion workspace...\n`);
-        detectedSubRepos = subRepos;
+
+        if (interactive) {
+          /*
+          FNXC:Workspace 2026-06-24-16:00:
+          Ask the user to confirm workspace mode instead of auto-applying it. A directory with
+          nested git repos might be a monorepo with submodules or an existing project that
+          happens to have git-tracked dependencies — the user must explicitly opt in.
+          */
+          const useWorkspace = await promptConfirm(
+            `\n  Use workspace mode? (tasks run per sub-repo, no git at the root)`,
+            true,
+          );
+          if (useWorkspace) {
+            detectedSubRepos = subRepos;
+          } else {
+            console.log(`  ⚠ Skipping workspace mode. A git repo will be initialized at the root.`);
+          }
+        } else {
+          // Non-interactive: auto-apply (dashboard registration or scripted flow)
+          detectedSubRepos = subRepos;
+        }
         // workspace.json is written below, only after a confirmed store.init() succeeds.
       }
       // else: fall through to existing error path
@@ -663,6 +682,8 @@ export async function registerProjectInteractive(
         await store.init();
         if (detectedSubRepos) {
           await saveWorkspaceConfig(absPath, { repos: detectedSubRepos });
+          // Persist workspaceMode in config.json so it's visible/toggleable in the dashboard
+          await store.updateSettings({ workspaceMode: true });
         }
         console.log(`  ✓ Initialized fn at ${absPath}`);
       } else {

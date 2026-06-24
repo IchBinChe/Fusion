@@ -18,6 +18,7 @@ import {
   writeProjectIdentity,
   detectWorkspaceRepos,
   saveWorkspaceConfig,
+  suggestTaskPrefix,
   type RegisteredProject,
   type TaskStore,
 } from "@fusion/core";
@@ -538,19 +539,6 @@ export function suggestProjectName(path: string): string {
 }
 
 /**
- * FNXC:TaskPrefix 2026-06-24-18:00:
- * Derive a task prefix from a project name by taking the first 2-4 uppercase
- * letters. Falls back to "FN" for short names. Used as the suggested default
- * during project onboarding so each project gets a recognizable prefix.
- */
-export function suggestTaskPrefix(projectName: string): string {
-  const cleaned = projectName.replace(/[^a-zA-Z]/g, "").toUpperCase();
-  if (cleaned.length >= 2 && cleaned.length <= 4) return cleaned;
-  if (cleaned.length > 4) return cleaned.slice(0, 4);
-  return "FN";
-}
-
-/**
  * Resolve absolute path and validate it exists.
  */
 export function resolveAbsolutePath(inputPath: string): string {
@@ -698,6 +686,7 @@ export async function registerProjectInteractive(
           // Persist workspaceMode in config.json so it's visible/toggleable in the dashboard
           await store.updateSettings({ workspaceMode: true });
         }
+        await store.close();
         console.log(`  ✓ Initialized fn at ${absPath}`);
       } else {
         throw new ProjectResolutionError(
@@ -772,7 +761,8 @@ export async function registerProjectInteractive(
     const rl = createInterface({ input: process.stdin, output: process.stdout });
     const prefixInput = await rl.question(`\n  Task prefix [${suggestedPrefix}]: `);
     rl.close();
-    const prefix = prefixInput.trim().toUpperCase() || suggestedPrefix;
+    const rawPrefix = prefixInput.trim().toUpperCase().replace(/[^A-Z]/g, "");
+    const prefix = rawPrefix.length >= 2 ? rawPrefix : suggestedPrefix;
 
     await store.updateSettings({
       taskPrefix: prefix,

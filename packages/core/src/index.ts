@@ -1957,3 +1957,4 @@ export {
   clearSyncPassphrase,
   hasSyncPassphraseConfigured,
 } from "./secrets-sync-passphrase.js";
+export { suggestTaskPrefix } from "./task-prefix.js";

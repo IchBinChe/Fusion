@@ -382,10 +382,10 @@ export const registerProjectRoutes: ApiRouteRegistrar = (ctx) => {
       */
       if (activeProjectWithOutcome.outcome === "registered") {
         try {
-          const { TaskStore } = await import("@fusion/core");
+          const { TaskStore, suggestTaskPrefix } = await import("@fusion/core");
           const store = new TaskStore(normalizedPath);
           await store.init();
-          const prefix = normalizedName.replace(/[^a-zA-Z]/g, "").toUpperCase().slice(0, 4) || "FN";
+          const prefix = suggestTaskPrefix(normalizedName);
           await store.updateSettings({
             taskPrefix: prefix,
             defaultWorkflowId: "builtin:coding",

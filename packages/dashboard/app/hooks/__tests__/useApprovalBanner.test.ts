@@ -14,10 +14,7 @@ vi.mock("../../sse-bus", () => ({
 }));
 
 import { useApprovalBanner } from "../useApprovalBanner";
-
-function msg(data: object): MessageEvent {
-  return { data: JSON.stringify(data) } as MessageEvent;
-}
+import { msg } from "./sseTestHelpers";
 
 const task = (id: string, status: string): Task => ({ id, status, title: id } as Task);
 

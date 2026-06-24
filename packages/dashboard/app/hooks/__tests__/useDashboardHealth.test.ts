@@ -59,7 +59,7 @@ describe("useDashboardHealth", () => {
     expect(result.current.refreshError).toBe("nope");
     expect(result.current.refreshing).toBe(false);
   });
-  it("does not apply the mount fetch after unmount", async () => {
+  it("fires the mount fetch and tolerates an unmount before it resolves", async () => {
     let resolveMount: (value: { status: string }) => void = () => {};
     fetchDashboardHealth.mockImplementation(
       () =>
@@ -69,17 +69,24 @@ describe("useDashboardHealth", () => {
     );
 
     const { result, unmount } = renderHook(() => useDashboardHealth());
+    // The effect has fired the mount fetch; health starts null until it settles.
+    expect(fetchDashboardHealth).toHaveBeenCalledTimes(1);
     expect(result.current.health).toBeNull();
 
+    // Unmount while the fetch is still in flight, then resolve it.
     unmount();
     resolveMount({ status: "ok" });
-
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
     });
 
-    // The cancelled flag suppresses setState — health stays at its initial null.
-    expect(result.current.health).toBeNull();
+    // NOTE: the effect's `cancelled` guard defensively suppresses setHealth
+    // after unmount, but under React 19 setState on an unmounted component is
+    // silently dropped — `result.current.health` stays null *whether or not the
+    // guard exists*. Asserting state here would give false confidence (the test
+    // passes even with the guard removed), so the guard is treated as a
+    // React-19-untestable-via-state invariant and is intentionally NOT asserted
+    // here. Verified empirically: removing the guard leaves the suite green.
   });
 });

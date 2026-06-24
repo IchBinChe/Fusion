@@ -14,10 +14,7 @@ vi.mock("../../sse-bus", () => ({
 }));
 
 import { useChatUnreadBadge } from "../useChatUnreadBadge";
-
-function message(data: object): MessageEvent {
-  return { data: JSON.stringify(data) } as MessageEvent;
-}
+import { message } from "./sseTestHelpers";
 
 describe("useChatUnreadBadge", () => {
   beforeEach(() => {
@@ -111,6 +108,17 @@ describe("useChatUnreadBadge", () => {
 
     act(() => {
       handlers["chat:message:added"]?.(message({ role: "assistant", projectId: "p2" }));
+    });
+
+    expect(result.current.chatHasUnreadResponse).toBe(false);
+  });
+  it("ignores assistant chat:room:message:added events scoped to a different project", () => {
+    const { result } = renderHook(() =>
+      useChatUnreadBadge("p1", { taskView: "board", quickChatOpen: false }),
+    );
+
+    act(() => {
+      handlers["chat:room:message:added"]?.(message({ role: "assistant", projectId: "p2" }));
     });
 
     expect(result.current.chatHasUnreadResponse).toBe(false);

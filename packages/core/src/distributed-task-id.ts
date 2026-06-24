@@ -86,7 +86,7 @@ function getConfiguredPrefixAndLegacyNextId(db: Database): { prefix: string; nex
       nextId: typeof row.nextId === "number" ? row.nextId : null,
     };
   } catch {
-    return { prefix: "KB", nextId: null };
+    return { prefix: "FN", nextId: null };
   }
 }
 

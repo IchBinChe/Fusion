@@ -680,8 +680,8 @@ export async function registerProjectInteractive(
         // Initialize the project (create .fusion/)
         const { TaskStore } = await import("@fusion/core");
         const store = new TaskStore(absPath);
-        await store.init();
         try {
+          await store.init();
           if (detectedSubRepos) {
             await saveWorkspaceConfig(absPath, { repos: detectedSubRepos });
             // Persist workspaceMode in config.json so it's visible/toggleable in the dashboard
@@ -758,15 +758,15 @@ export async function registerProjectInteractive(
   {
     const { TaskStore } = await import("@fusion/core");
     const store = new TaskStore(absPath);
-    await store.init();
     try {
+      await store.init();
       let prefix = suggestTaskPrefix(name);
       if (interactive) {
         const rl = createInterface({ input: process.stdin, output: process.stdout });
         const prefixInput = await rl.question(`\n  Task prefix [${prefix}]: `);
         rl.close();
         const rawPrefix = prefixInput.trim().toUpperCase().replace(/[^A-Z]/g, "");
-        if (rawPrefix.length >= 2 && rawPrefix.length <= 5) prefix = rawPrefix;
+        if (rawPrefix.length >= 1 && rawPrefix.length <= 5) prefix = rawPrefix;
       }
       await store.updateSettings({
         taskPrefix: prefix,

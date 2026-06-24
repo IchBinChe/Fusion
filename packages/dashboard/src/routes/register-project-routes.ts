@@ -419,36 +419,39 @@ export const registerProjectRoutes: ApiRouteRegistrar = (ctx) => {
         try {
           const { TaskStore, suggestTaskPrefix, detectWorkspaceRepos, saveWorkspaceConfig } = await import("@fusion/core");
           const store = new TaskStore(normalizedPath);
-          await store.init();
+          try {
+            await store.init();
 
-          /*
-          FNXC:Workspace 2026-06-24-19:00:
-          Workspace mode: if the client explicitly requested it (workspaceMode: true from the
-          wizard checkbox), detect and persist sub-repos. If the client didn't specify and
-          auto-detection finds sub-repos, also apply it. This mirrors the CLI interactive flow.
-          */
-          if (workspaceMode === true) {
-            const repos = await detectWorkspaceRepos(normalizedPath);
-            if (repos.length > 0) {
-              await saveWorkspaceConfig(normalizedPath, { repos });
+            /*
+            FNXC:Workspace 2026-06-24-19:00:
+            Workspace mode: if the client explicitly requested it (workspaceMode: true from the
+            wizard checkbox), detect and persist sub-repos. If the client didn't specify and
+            auto-detection finds sub-repos, also apply it. This mirrors the CLI interactive flow.
+            */
+            if (workspaceMode === true) {
+              const repos = await detectWorkspaceRepos(normalizedPath);
+              if (repos.length > 0) {
+                await saveWorkspaceConfig(normalizedPath, { repos });
+                await store.updateSettings({ workspaceMode: true });
+              }
+            } else if (workspaceMode === undefined) {
+              const repos = await detectWorkspaceRepos(normalizedPath);
+              if (repos.length > 0) {
+                await saveWorkspaceConfig(normalizedPath, { repos });
+                await store.updateSettings({ workspaceMode: true });
+              }
             }
-            await store.updateSettings({ workspaceMode: true });
-          } else if (workspaceMode === undefined) {
-            const repos = await detectWorkspaceRepos(normalizedPath);
-            if (repos.length > 0) {
-              await saveWorkspaceConfig(normalizedPath, { repos });
-              await store.updateSettings({ workspaceMode: true });
-            }
+
+            const rawPrefix = typeof taskPrefix === "string" ? taskPrefix.trim().toUpperCase() : "";
+            const validPrefix = /^[A-Z]{1,5}$/.test(rawPrefix) ? rawPrefix : "";
+            const prefix = validPrefix || suggestTaskPrefix(normalizedName);
+            await store.updateSettings({
+              taskPrefix: prefix,
+              defaultWorkflowId: "builtin:coding",
+            });
+          } finally {
+            await store.close();
           }
-
-          const prefix = typeof taskPrefix === "string" && taskPrefix.trim()
-            ? taskPrefix.trim().toUpperCase()
-            : suggestTaskPrefix(normalizedName);
-          await store.updateSettings({
-            taskPrefix: prefix,
-            defaultWorkflowId: "builtin:coding",
-          });
-          await store.close();
         } catch {
           // Non-fatal: project registration succeeded; settings can be configured later
         }

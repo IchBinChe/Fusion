@@ -146,6 +146,8 @@ export function SetupWizardModal({
     }
   }, [state.agentError]);
 
+  const detectWorkspaceRequestId = useRef(0);
+
   const handlePathChange = useCallback((path: string) => {
     setState((prev) => {
       const updates: Partial<WizardState> = { manualPath: path, detectedRepos: [], workspaceMode: false };
@@ -161,11 +163,18 @@ export function SetupWizardModal({
       return { ...prev, ...updates };
     });
 
-    // Detect workspace sub-repos when path is set (existing directory mode only)
-    if (path.trim() && path.trim() !== "/") {
+    /*
+    FNXC:Workspace 2026-06-24-21:00:
+    Detect workspace sub-repos only in existing-directory mode (clone mode creates a fresh
+    directory with a single repo). A monotonic request ID guards against stale responses
+    overwriting state from a newer path entry (race condition on rapid typing).
+    */
+    if (state.manualMode === "existing" && path.trim() && path.trim() !== "/") {
+      const requestId = ++detectWorkspaceRequestId.current;
       setState((prev) => ({ ...prev, isDetectingWorkspace: true }));
       detectWorkspace(path.trim())
         .then((result) => {
+          if (requestId !== detectWorkspaceRequestId.current) return;
           setState((prev) => ({
             ...prev,
             isDetectingWorkspace: false,
@@ -174,10 +183,11 @@ export function SetupWizardModal({
           }));
         })
         .catch(() => {
+          if (requestId !== detectWorkspaceRequestId.current) return;
           setState((prev) => ({ ...prev, isDetectingWorkspace: false }));
         });
     }
-  }, []);
+  }, [state.manualMode]);
 
   const handleManualRegister = useCallback(async () => {
     const trimmedPath = state.manualPath.trim();
@@ -196,7 +206,7 @@ export function SetupWizardModal({
         isolationMode: state.manualIsolationMode,
         nodeId: state.manualNodeId || undefined,
         cloneUrl: state.manualMode === "clone" ? trimmedCloneUrl : undefined,
-        workspaceMode: state.workspaceMode || undefined,
+        workspaceMode: state.workspaceMode,
         taskPrefix: state.manualTaskPrefix.trim() || undefined,
       };
 

@@ -23,7 +23,7 @@ It also installs the **R7 workspace merge-boundary guard** at every merge entry 
 
 Merge is dispatched at `packages/engine/src/project-engine.ts:2275-2282`:
 
-```
+```ts
 const mergerMode = normalizeMergerMode(settings.merger?.mode);   // defaults to "ai"
 return mergerMode === "ai"
   ? runAiMerge(store, cwd, taskId, mergeOptionsWithSettings)
@@ -61,7 +61,7 @@ Before claiming low blast radius, grep test fixtures, CI configs, and seeded/def
 ## Implementation Units
 
 > **Units `U1–U4` below are local to this plan** (they decompose master-plan U0); they are **not** the master plan's `U1–U10`. U4 (audit) may run in parallel with U1–U3.
-
+>
 > **Standing requirements:** `FNXC:Workspace <yyyy-MM-dd-hh:mm>` dated comments at each non-obvious decision point (dispatch collapse, the R7 guard, the deprecation warning). A `.changeset/*.md` (`@runfusion/fusion: minor`). Respect the merge gate (`pnpm lint`, typecheck, `pnpm build`, `pnpm test:gate`) and FN-5048 (narrow seams, fake timers, no real polling / mock-the-world). **Base branch (decided):** branch off the **foundation** (`pr-1710` / `feat/workspace-multi-repo` head) — the R7 guard (U3) reads `task.workspaceWorktrees`, which the foundation adds and `main` lacks. Do **not** commit onto `pr-1710` directly; use a new branch and open a **stacked PR targeting `feat/workspace-multi-repo`** so the diff is only U0's changes.
 
 ### U1. Collapse the engine dispatch and route the two direct callers to `runAiMerge`

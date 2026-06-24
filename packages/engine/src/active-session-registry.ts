@@ -125,6 +125,27 @@ export class ActiveSessionRegistry {
     return paths;
   }
 
+  /*
+  FNXC:Workspace 2026-06-22-09:30 (Phase D U1, KTD3 — enumeration seam for phantom-lease reclaim):
+  The existing accessors are path-first (lookupByPath / isPathActive) or task-first
+  (pathsForTask). Phantom-lease reclaim needs the inverse: enumerate every live entry of a
+  given KIND so self-healing can find a leaked "workspace-repo-land" lease whose owning task is
+  already terminal/dead. A dead task is gone from the in-progress lists, so FN-6736's
+  iterate-tasks approach cannot surface the lease — it must be discovered from the registry
+  itself. Returns shallow copies (path + the full record fields incl. `registeredAt`, already
+  tracked) so callers can age-gate against the FN-6736 staleness floor without holding a
+  reference into the internal map.
+  */
+  entriesByKind(kind: ActiveSessionKind): Array<{ path: string; taskId: string; kind: ActiveSessionKind; registeredAt: number }> {
+    const out: Array<{ path: string; taskId: string; kind: ActiveSessionKind; registeredAt: number }> = [];
+    for (const [path, record] of this.records.entries()) {
+      if (record.kind === kind) {
+        out.push({ path, taskId: record.taskId, kind: record.kind, registeredAt: record.registeredAt });
+      }
+    }
+    return out;
+  }
+
   reconcileStaleSelfOwned(worktreePath: string, expectedTaskId: string): ReconcileStaleSelfOwnedResult {
     const record = this.lookupByPath(worktreePath);
     if (!record) {

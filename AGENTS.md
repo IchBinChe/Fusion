@@ -195,6 +195,9 @@ Scoped exception (FN-5819): shared-branch-group members (`branchContext.assignme
 - FN-6783: task-store open and self-healing housekeeping emit `task:reconcile-orphaned-task-dir` when they non-destructively re-import a valid live `.fusion/tasks/{ID}/task.json` directory that has no task row anywhere, preserving soft-deleted/archived/tombstoned IDs.
 - FN-6782/FN-6796: self-healing emits `task:auto-recover-paused-abort-park` when it clears a benign pause-abort operator park, requeueing safe `todo`/`in-progress` rows or preserving a clean auto-merge-eligible `in-review` row for review progression.
 - FN-6793/FN-6797: self-healing emits `task:reconcile-in-review-unmet-dependencies` when it rebounds an `in-review` task whose declared dependencies are still unmet, and `task:reconcile-in-review-unmet-dependencies-no-action` when pause/user-pause, `autoMerge:false`, live execution/checkout proof, or a failed rebound mutation blocks that backward move.
+- Workspace (Phase D U1): self-healing emits `task:reconcile-workspace-partial-land` when it re-enqueues a partial/zero-landed workspace task's per-repo land (or parks it `failed` when a sub-repo's `fusion/<id>` branch is gone with no `landedSha`), and `task:reconcile-workspace-partial-land-no-action` when `autoMerge:false`, user-pause, or a live sub-repo worktree (workspace-aware liveness) blocks that backward move.
+- Workspace (Phase D U1): self-healing emits `task:reclaim-phantom-workspace-land-lease` when it clears a leaked `workspace-repo-land` lease whose owning task is terminal/dead and older than the FN-6736 staleness floor (a live merging owner is left untouched).
+- Workspace (Phase D U1): self-healing emits `task:reconcile-orphaned-workspace-worktree` when it removes a done/dead workspace task's recorded per-repo worktree from its stored `worktreePath` (guarded by `isPathActive`; no temp-root walk).
 
 
 ## Reference docs (deeper detail)

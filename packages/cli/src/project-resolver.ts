@@ -18,6 +18,7 @@ import {
   writeProjectIdentity,
   detectWorkspaceRepos,
   saveWorkspaceConfig,
+  suggestTaskPrefix,
   type RegisteredProject,
   type TaskStore,
 } from "@fusion/core";
@@ -685,6 +686,7 @@ export async function registerProjectInteractive(
           // Persist workspaceMode in config.json so it's visible/toggleable in the dashboard
           await store.updateSettings({ workspaceMode: true });
         }
+        await store.close();
         console.log(`  ✓ Initialized fn at ${absPath}`);
       } else {
         throw new ProjectResolutionError(
@@ -741,6 +743,33 @@ export async function registerProjectInteractive(
     });
   } catch {
     // Best-effort stamp only.
+  }
+
+  /*
+  FNXC:Onboarding 2026-06-24-18:00:
+  After registration, prompt the user to confirm a task prefix and default workflow.
+  The prefix defaults to the first 2-4 chars of the project name so each project gets
+  recognizable task IDs (e.g., "MYPR" for "my-project"). The workflow defaults to coding.
+  Both are persisted to config.json via the TaskStore.
+  */
+  if (interactive) {
+    const { TaskStore } = await import("@fusion/core");
+    const store = new TaskStore(absPath);
+    await store.init();
+
+    const suggestedPrefix = suggestTaskPrefix(name);
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const prefixInput = await rl.question(`\n  Task prefix [${suggestedPrefix}]: `);
+    rl.close();
+    const rawPrefix = prefixInput.trim().toUpperCase().replace(/[^A-Z]/g, "");
+    const prefix = rawPrefix.length >= 2 && rawPrefix.length <= 5 ? rawPrefix : suggestedPrefix;
+
+    await store.updateSettings({
+      taskPrefix: prefix,
+      defaultWorkflowId: "builtin:coding",
+    });
+    await store.close();
+    console.log(`  ✓ Task prefix set to "${prefix}", default workflow: coding`);
   }
 
   return createResolvedProject(project);

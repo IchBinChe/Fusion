@@ -4151,7 +4151,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     },
   ): Promise<Task> {
     const settings = await this.getSettingsFast();
-    const prefix = (settings.taskPrefix || "KB").trim().toUpperCase();
+    const prefix = (settings.taskPrefix || "FN").trim().toUpperCase();
     const allocator = this.getDistributedTaskIdAllocator();
     const nodeId = await this.resolveLocalNodeIdForTaskAllocation();
     const reservation = await allocator.reserveDistributedTaskId({

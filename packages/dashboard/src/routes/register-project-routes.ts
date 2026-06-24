@@ -374,6 +374,28 @@ export const registerProjectRoutes: ApiRouteRegistrar = (ctx) => {
         // Memory bootstrap failure is non-fatal - project registration succeeded
       });
 
+      /*
+      FNXC:Onboarding 2026-06-24-18:00:
+      For new registrations (not reattachments), set a derived task prefix and default
+      workflow via the per-project TaskStore config.json so the project is immediately
+      usable without manual settings configuration.
+      */
+      if (activeProjectWithOutcome.outcome === "registered") {
+        try {
+          const { TaskStore, suggestTaskPrefix } = await import("@fusion/core");
+          const store = new TaskStore(normalizedPath);
+          await store.init();
+          const prefix = suggestTaskPrefix(normalizedName);
+          await store.updateSettings({
+            taskPrefix: prefix,
+            defaultWorkflowId: "builtin:coding",
+          });
+          await store.close();
+        } catch {
+          // Non-fatal: project registration succeeded; settings can be configured later
+        }
+      }
+
       // Notify the host (serve.ts/daemon.ts) so it can run project-setup
       // side-effects like installing the fusion Claude-skill into
       // .claude/skills/fusion when pi-claude-cli is configured. The callback

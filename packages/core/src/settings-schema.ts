@@ -307,7 +307,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
     onFailure: "fail",
   },
   worktreesDir: undefined,
-  taskPrefix: "FN",
+  taskPrefix: undefined,
   taskAttributionTrailerNames: ["Fusion-Task-Id"],
   commitMsgHookEnabled: true,
   includeTaskIdInCommit: true,
@@ -538,7 +538,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   researchDefaultTimeout: 300000,
   researchMaxSourcesPerRun: 20,
   researchMaxSynthesisRounds: 2,
-  workspaceMode: false,
+  workspaceMode: undefined,
 } satisfies CompleteSettings<ProjectSettingsSchema>;
 
 /**

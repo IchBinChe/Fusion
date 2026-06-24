@@ -14,15 +14,32 @@ const testState = vi.hoisted(() => {
 
   return {
     currentStore: null as MockTaskStore | null,
-    aiMergeTask: vi.fn(),
+    runAiMerge: vi.fn(),
     VerificationError: MockVerificationError,
   };
 });
 
+// FNXC:MergerUnification 2026-06-21-19:05: master-plan U0 unified the merge
+// dispatch onto runAiMerge (merger-ai.js). These error-recovery tests use the
+// merge fn as a mockable seam; they now mock/assert runAiMerge. VerificationError
+// still comes from merger.js (shared, not deprecated).
 vi.mock("../merger.js", () => ({
-  aiMergeTask: testState.aiMergeTask,
+  sweepStaleAutostashes: vi.fn(async () => undefined),
   VerificationError: testState.VerificationError,
 }));
+
+// FNXC:Workspace 2026-06-22-09:30 (Phase C review fix): the dispatch's error handler does
+// `err instanceof WorkspaceRepoLandBusyError` / `WorkspacePartialLandError` on EVERY merge error
+// (these classes are imported from ./merger-ai.js). A bare replacement mock left them undefined,
+// so `instanceof undefined` threw on every recovery path (24 pre-existing red tests). Re-export the
+// REAL error classes via importOriginal so the instanceof guards evaluate; only runAiMerge is faked.
+vi.mock("../merger-ai.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../merger-ai.js")>();
+  return {
+    ...actual,
+    runAiMerge: testState.runAiMerge,
+  };
+});
 
 vi.mock("../runtimes/in-process-runtime.js", () => ({
   InProcessRuntime: vi.fn().mockImplementation(function () {
@@ -42,7 +59,8 @@ vi.mock("../runtimes/in-process-runtime.js", () => ({
 
 import { ProjectEngine } from "../project-engine.js";
 import { runtimeLog } from "../logger.js";
-import { aiMergeTask, VerificationError } from "../merger.js";
+import { VerificationError } from "../merger.js";
+import { runAiMerge } from "../merger-ai.js";
 
 type MockTask = {
   id: string;
@@ -118,9 +136,9 @@ function makeStore({
       globalPause: false,
       enginePaused: false,
       pollIntervalMs: 15_000,
-      // These tests mock + assert aiMergeTask (the legacy merge path); pin the
-      // legacy merger so onMerge routes there rather than the AI merge path.
-      merger: { mode: "deterministic" },
+      // FNXC:MergerUnification 2026-06-21-19:05: U0 unified merges onto runAiMerge;
+      // these tests mock/assert runAiMerge directly. No `merger.mode` pin needed —
+      // the dispatch ignores the value.
       ...settings,
     })),
     listTasks: vi.fn(async () => listedTasks ?? taskSequence.filter((task): task is MockTask => Boolean(task))),
@@ -193,7 +211,7 @@ describe("ProjectEngine merge error recovery", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(aiMergeTask).mockReset();
+    vi.mocked(runAiMerge).mockReset();
     testState.currentStore = null;
 
     errorSpy = vi.spyOn(runtimeLog, "error").mockImplementation(() => undefined);
@@ -347,7 +365,7 @@ describe("ProjectEngine merge error recovery", () => {
     const store = makeStore({
       tasks: [makeTask({ mergeRetries: 2 }), makeTask({ mergeRetries: 3, branch: "fusion/fn-2084" })],
     });
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(new Error("merge conflict detected"));
+    vi.mocked(runAiMerge).mockRejectedValueOnce(new Error("merge conflict detected"));
 
     const engine = createEngine(store);
     await runMergeCycle(engine);
@@ -379,7 +397,7 @@ describe("ProjectEngine merge error recovery", () => {
         throw new Error("db write failed");
       }),
     });
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(new Error("Conflict while merging"));
+    vi.mocked(runAiMerge).mockRejectedValueOnce(new Error("Conflict while merging"));
 
     const engine = createEngine(store);
     await expect(runMergeCycle(engine)).resolves.toBeUndefined();
@@ -396,7 +414,7 @@ describe("ProjectEngine merge error recovery", () => {
         makeTask({ mergeRetries: 3, mergeConflictBounceCount: 2, branch: "fusion/fn-2084" }),
       ],
     });
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(new Error("merge conflict detected"));
+    vi.mocked(runAiMerge).mockRejectedValueOnce(new Error("merge conflict detected"));
 
     const engine = createEngine(store);
     await runMergeCycle(engine);
@@ -429,7 +447,7 @@ describe("ProjectEngine merge error recovery", () => {
         },
       ],
     });
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(new Error("merge conflict detected"));
+    vi.mocked(runAiMerge).mockRejectedValueOnce(new Error("merge conflict detected"));
 
     const engine = createEngine(store);
     await runMergeCycle(engine);
@@ -462,7 +480,7 @@ describe("ProjectEngine merge error recovery", () => {
         },
       ],
     });
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(new Error("merge conflict detected"));
+    vi.mocked(runAiMerge).mockRejectedValueOnce(new Error("merge conflict detected"));
 
     const engine = createEngine(store);
     await runMergeCycle(engine);
@@ -495,7 +513,7 @@ describe("ProjectEngine merge error recovery", () => {
         },
       ],
     });
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(new Error("merge conflict detected"));
+    vi.mocked(runAiMerge).mockRejectedValueOnce(new Error("merge conflict detected"));
 
     const engine = createEngine(store);
     await runMergeCycle(engine);
@@ -525,7 +543,7 @@ describe("ProjectEngine merge error recovery", () => {
         },
       ],
     });
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(new Error("merge conflict detected"));
+    vi.mocked(runAiMerge).mockRejectedValueOnce(new Error("merge conflict detected"));
 
     const engine = createEngine(store);
     await runMergeCycle(engine);
@@ -558,7 +576,7 @@ describe("ProjectEngine merge error recovery", () => {
         },
       ],
     });
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(new Error("merge conflict detected"));
+    vi.mocked(runAiMerge).mockRejectedValueOnce(new Error("merge conflict detected"));
 
     const engine = createEngine(store);
     await runMergeCycle(engine);
@@ -586,7 +604,7 @@ describe("ProjectEngine merge error recovery", () => {
         },
       ],
     });
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(new Error("merge conflict detected"));
+    vi.mocked(runAiMerge).mockRejectedValueOnce(new Error("merge conflict detected"));
 
     const engine = createEngine(store);
     await runMergeCycle(engine);
@@ -600,7 +618,7 @@ describe("ProjectEngine merge error recovery", () => {
     vi.useFakeTimers();
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
     const store = makeStore();
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(new Error("This operation was aborted"));
+    vi.mocked(runAiMerge).mockRejectedValueOnce(new Error("This operation was aborted"));
 
     const engine = createEngine(store);
     const privateEngine = engine as unknown as { internalEnqueueMerge: (taskId: string) => void };
@@ -626,7 +644,7 @@ describe("ProjectEngine merge error recovery", () => {
     const store = makeStore({
       tasks: [makeTask({ mergeTransientRetryCount: 3 }), makeTask({ mergeTransientRetryCount: 3 })],
     });
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(new Error("socket hang up"));
+    vi.mocked(runAiMerge).mockRejectedValueOnce(new Error("socket hang up"));
 
     const engine = createEngine(store);
     await runMergeCycle(engine);
@@ -647,7 +665,7 @@ describe("ProjectEngine merge error recovery", () => {
     vi.useFakeTimers();
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
     const store = makeStore();
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(new Error("remote branch missing"));
+    vi.mocked(runAiMerge).mockRejectedValueOnce(new Error("remote branch missing"));
 
     const engine = createEngine(store);
     await runMergeCycle(engine);
@@ -800,7 +818,7 @@ describe("ProjectEngine merge error recovery", () => {
         throw new Error("sqlite locked");
       }),
     });
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(new Error("remote push rejected"));
+    vi.mocked(runAiMerge).mockRejectedValueOnce(new Error("remote push rejected"));
 
     const engine = createEngine(store);
     await expect(runMergeCycle(engine)).resolves.toBeUndefined();
@@ -874,7 +892,7 @@ describe("ProjectEngine merge error recovery", () => {
   it("treats post-finalize verification failures as a no-op diagnostic", async () => {
     const verificationError = new Error("Deterministic test verification failed: assertion mismatch in workspace");
     verificationError.name = "VerificationError";
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(verificationError);
+    vi.mocked(runAiMerge).mockRejectedValueOnce(verificationError);
 
     const store = makeStore({
       tasks: [
@@ -930,7 +948,7 @@ describe("ProjectEngine merge error recovery", () => {
   it("moves task back to in-progress with merge-remediation status on verification errors", async () => {
     const verificationError = new Error("Deterministic test verification failed");
     verificationError.name = "VerificationError";
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(verificationError);
+    vi.mocked(runAiMerge).mockRejectedValueOnce(verificationError);
 
     const store = makeStore();
     const engine = createEngine(store);
@@ -968,7 +986,7 @@ describe("ProjectEngine merge error recovery", () => {
         recovered: false,
       },
     });
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(verificationError);
+    vi.mocked(runAiMerge).mockRejectedValueOnce(verificationError);
 
     const store = makeStore({
       tasks: [makeTask({ verificationFailureCount: 2, status: "in-review" })],
@@ -987,7 +1005,7 @@ describe("ProjectEngine merge error recovery", () => {
   it("increments verificationFailureCount across consecutive verification bounces", async () => {
     const verificationError = new Error("Deterministic test verification failed");
     verificationError.name = "VerificationError";
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(verificationError);
+    vi.mocked(runAiMerge).mockRejectedValueOnce(verificationError);
 
     const store = makeStore({
       tasks: [makeTask({ verificationFailureCount: 1, status: "merging-fix" })],
@@ -1008,7 +1026,7 @@ describe("ProjectEngine merge error recovery", () => {
   it("caps verification-failure bounces and creates a follow-up task", async () => {
     const verificationError = new Error("Deterministic test verification failed");
     verificationError.name = "VerificationError";
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(verificationError);
+    vi.mocked(runAiMerge).mockRejectedValueOnce(verificationError);
 
     // Task already bounced 2 times — this attempt would push it to 3 (the cap)
     const store = makeStore({
@@ -1045,7 +1063,7 @@ describe("ProjectEngine merge error recovery", () => {
   it("skips duplicate verification follow-up creation when active recovery task exists", async () => {
     const verificationError = new Error("Deterministic test verification failed");
     verificationError.name = "VerificationError";
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(verificationError);
+    vi.mocked(runAiMerge).mockRejectedValueOnce(verificationError);
 
     const store = makeStore({
       tasks: [makeTask({ verificationFailureCount: 2, title: "do the thing" })],
@@ -1078,7 +1096,7 @@ describe("ProjectEngine merge error recovery", () => {
   it("logs when verification-error recovery fails", async () => {
     const verificationError = new Error("Deterministic test verification failed");
     verificationError.name = "VerificationError";
-    vi.mocked(aiMergeTask).mockRejectedValueOnce(verificationError);
+    vi.mocked(runAiMerge).mockRejectedValueOnce(verificationError);
 
     const store = makeStore({
       updateTask: vi.fn(async () => {

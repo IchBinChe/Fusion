@@ -40,6 +40,7 @@ import { TaskChatTab } from "./TaskChatTab";
 import { TaskReviewTab } from "./TaskReviewTab";
 import { MergeDetails } from "./MergeDetails";
 import { TaskChangesTab } from "./TaskChangesTab";
+import { WorkspaceWorktreesSummary, isWorkspaceTask } from "./WorkspaceWorktreesSummary";
 import { TaskForm, type PendingImage } from "./TaskForm";
 import { useNodes } from "../hooks/useNodes";
 import { WorkflowResultsTab } from "./WorkflowResultsTab";
@@ -3144,6 +3145,14 @@ export function TaskDetailContent({
               {task.branchContext?.groupId && (
                 <BranchGroupCard groupId={task.branchContext.groupId} projectId={projectId} />
               )}
+              {/* FNXC:Workspace 2026-06-21-00:00: workspace tasks have no singular
+                  task.worktree/task.branch; surface their acquired per-sub-repo worktrees
+                  as a flat read-only list so the detail view isn't blank (U3/KTD5). */}
+              {/* FNXC:Workspace 2026-06-22-09:00: gate/render off the hydrated
+                  workingTask, not the sparse task row. workspaceWorktrees is only
+                  present in fetched detail, so keying off task renders blank on the
+                  optimistic-open path before the detail fetch resolves. */}
+              {isWorkspaceTask(workingTask) && <WorkspaceWorktreesSummary task={workingTask} />}
             </>
           )}
           {task.status === "failed" && task.error && (

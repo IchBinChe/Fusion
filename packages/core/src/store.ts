@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { existsSync, watch, type Dirent, type FSWatcher } from "node:fs";
 import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, ColumnId, CheckoutClaimPrecondition, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, Artifact, ArtifactCreateInput, ArtifactType, ArtifactWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, Agent, AutostashOrphanRecord, TaskCommitAssociation, TaskCommitAssociationMatchSource, TaskCommitAssociationConfidence, CommitAssociationDiffBackfillReport, GithubIssueAction, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome, HandoffToReviewOptions, GoalCitation, GoalCitationFilter, GoalCitationInput, GoalCitationSurface, BranchGroup, BranchGroupCreateInput, BranchGroupUpdate, TaskBranchAssignmentMode, MergeRequestRecord, MergeRequestState, MergeRequestWorkflowProjectionOptions, CompletionHandoffMarker, WorkflowWorkItem, WorkflowWorkItemDueFilter, WorkflowWorkItemKind, WorkflowWorkItemState, WorkflowWorkItemTransitionPatch, WorkflowWorkItemUpsertInput, PrEntity, PrEntityCreateInput, PrEntityUpdate, PrEntityState, PrThreadState, PrThreadOutcome, PrConflictState, PrChecksRollup, PrReviewDecision, PluginActivation, PluginActivationInput } from "./types.js";
 import { createActivityLogSnapshot, createRunAuditSnapshot, createTaskMetadataSnapshot, toTaskMetadataRecord, validateSnapshotEnvelope, type ActivityLogSnapshot, type RunAuditSnapshot, type TaskMetadataSnapshot } from "./shared-mesh-state.js";
-import { VALID_TRANSITIONS, COLUMNS, DEFAULT_SETTINGS, isColumn, isGlobalOnlySettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey } from "./types.js";
+import { VALID_TRANSITIONS, COLUMNS, DEFAULT_SETTINGS, isColumn, isGlobalOnlySettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey, assertNotWorkspaceTaskMerge } from "./types.js";
 import { DEFAULT_PROJECT_SETTINGS } from "./settings-schema.js";
 import {
   MOVED_SETTINGS_KEYS,
@@ -86,6 +86,7 @@ import type {
   WorkflowNodeLayout,
 } from "./workflow-definition-types.js";
 import { compileWorkflowToSteps, isInterpreterDeferredWorkflowCompileError } from "./workflow-compiler.js";
+import { resolveDefaultOnOptionalGroupIds, resolveAllOptionalGroupIds } from "./workflow-optional-steps.js";
 import {
   BUILTIN_WORKFLOWS,
   getBuiltinWorkflow,
@@ -4286,7 +4287,26 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     });
   }
 
-  private async resolveEnabledWorkflowSteps(stepIds?: string[]): Promise<string[] | undefined> {
+  /*
+  FNXC:WorkflowOptionalGroup 2026-06-21-16:30:
+  `optionalGroupIds` are the optional-group node ids of the task's workflow. They are executor toggle keys (matched by node id in `enabledWorkflowSteps`), NOT legacy `WorkflowStep` template ids. A built-in group id can deliberately collide with a `WORKFLOW_STEP_TEMPLATES` id (e.g. "browser-verification"); without this pass-through the colliding id is materialized into a step row whose id differs from the group node id, so the executor's `enabledWorkflowSteps.includes(node.id)` check fails and an enabled group is silently bypassed (P1 from code review). Editor-authored group ids never collide (they come from `newNodeId()`), so they already passed through; this guards the built-in collision.
+  */
+  /** Optional-group node ids for a workflow (its `enabledWorkflowSteps` toggle
+   *  keys). Falls back to the project default workflow when `workflowId` is
+   *  nullish; empty for missing/fragment workflows. Used to keep group ids out of
+   *  the legacy step-template materialization in {@link resolveEnabledWorkflowSteps}. */
+  private async optionalGroupIdSet(workflowId?: string | null): Promise<Set<string>> {
+    const wfId = workflowId ?? (await this.getDefaultWorkflowId());
+    if (!wfId) return new Set();
+    const def = await this.getWorkflowDefinition(wfId);
+    if (!def || def.kind === "fragment") return new Set();
+    return new Set(resolveAllOptionalGroupIds(def.ir));
+  }
+
+  private async resolveEnabledWorkflowSteps(
+    stepIds?: string[],
+    optionalGroupIds?: Set<string>,
+  ): Promise<string[] | undefined> {
     if (!stepIds?.length) return undefined;
 
     const resolved: string[] = [];
@@ -4304,7 +4324,10 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         continue;
       }
 
-      const template = this.getBuiltInWorkflowTemplate(stepId);
+      // Optional-group toggle ids pass through raw — never materialized as legacy step rows.
+      const template = optionalGroupIds?.has(stepId)
+        ? undefined
+        : this.getBuiltInWorkflowTemplate(stepId);
       const resolvedId = template
         ? (await this.ensureWorkflowStepForTemplate(stepId)).id
         : stepId;
@@ -4444,7 +4467,10 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
 
     // Determine enabledWorkflowSteps: explicit input takes precedence, otherwise auto-apply default-on steps
     let resolvedWorkflowSteps: string[] | undefined = input.enabledWorkflowSteps?.length
-      ? await this.resolveEnabledWorkflowSteps(input.enabledWorkflowSteps)
+      ? await this.resolveEnabledWorkflowSteps(
+          input.enabledWorkflowSteps,
+          await this.optionalGroupIdSet(input.workflowId),
+        )
       : undefined;
 
     // When a project default workflow is configured, new tasks inherit it
@@ -4639,7 +4665,10 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
 
     const title = input.title?.trim() || undefined;
     let resolvedWorkflowSteps: string[] | undefined = input.enabledWorkflowSteps?.length
-      ? await this.resolveEnabledWorkflowSteps(input.enabledWorkflowSteps)
+      ? await this.resolveEnabledWorkflowSteps(
+          input.enabledWorkflowSteps,
+          await this.optionalGroupIdSet(input.workflowId),
+        )
       : undefined;
 
     let pendingWorkflowSelection: { workflowId: string; stepIds: string[] } | undefined;
@@ -8712,7 +8741,14 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         task.nextRecoveryAt = updates.nextRecoveryAt;
       }
       if (updates.enabledWorkflowSteps !== undefined) {
-        task.enabledWorkflowSteps = await this.resolveEnabledWorkflowSteps(updates.enabledWorkflowSteps);
+        // Pass the task's own workflow optional-group ids through untouched so a
+        // toggled built-in group id (e.g. "browser-verification") is not remapped
+        // to a materialized step row the executor never matches (code-review P1).
+        const taskWorkflowId = this.getTaskWorkflowSelection(task.id)?.workflowId;
+        task.enabledWorkflowSteps = await this.resolveEnabledWorkflowSteps(
+          updates.enabledWorkflowSteps,
+          await this.optionalGroupIdSet(taskWorkflowId),
+        );
       }
       if (updates.noCommitsExpected === null) {
         task.noCommitsExpected = undefined;
@@ -11251,6 +11287,12 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     return this.withTaskLock(id, async () => {
       const dir = this.taskDir(id);
       const task = await this.readTaskJson(dir);
+      // FNXC:Workspace 2026-06-21-19:05:
+      // R7 merge-boundary guard (master-plan U0). Reject workspace-mode tasks
+      // BEFORE any git checkout/squash — they need the per-repo merge loop that
+      // lands in master-plan U6, which removes this guard. See the predicate's
+      // FNXC:Workspace note in @fusion/core types.
+      assertNotWorkspaceTaskMerge(task);
       const branch = task.branch || `fusion/${id.toLowerCase()}`;
       // Branch is derived from the task id (already validated at create time),
       // but assert as defense-in-depth against future id-format changes.
@@ -15946,11 +15988,17 @@ ${stepsSection}`;
       if (isBuiltinWorkflowId(workflowId) && isInterpreterDeferredWorkflowCompileError(err)) return undefined;
       throw err;
     }
+    // FNXC:WorkflowOptionalGroup 2026-06-21-14:20: seed `enabledWorkflowSteps`
+    // with the ids of `optional-group` nodes whose `defaultOn` is true, mirroring
+    // the prior `optionalStep.defaultOn ?? false` precedence (U3, R3). These group
+    // ids are NOT WorkflowStep rows — they are toggle keys the executor reads at
+    // the optional-group seam — so they ride alongside the compiled step ids.
+    const defaultGroupIds = resolveDefaultOnOptionalGroupIds(def.ir);
     if (isBuiltinWorkflowId(workflowId) && inputs.length === 0) {
-      return { workflowId, stepIds: [] };
+      return { workflowId, stepIds: defaultGroupIds };
     }
     const stepIds = await this.materializeWorkflowSteps(workflowId, inputs);
-    return { workflowId, stepIds };
+    return { workflowId, stepIds: [...stepIds, ...defaultGroupIds] };
   }
 
   /** Resolve an EXPLICITLY requested workflow id (U6/R3/KTD-4) into materialized
@@ -15971,11 +16019,15 @@ ${stepsSection}`;
     try {
       inputs = compileWorkflowToSteps(def.ir);
     } catch (err) {
-      if (isBuiltinWorkflowId(workflowId) && isInterpreterDeferredWorkflowCompileError(err)) return { workflowId, stepIds: [] };
+      if (isBuiltinWorkflowId(workflowId) && isInterpreterDeferredWorkflowCompileError(err))
+        return { workflowId, stepIds: resolveDefaultOnOptionalGroupIds(def.ir) };
       throw err;
     }
+    // FNXC:WorkflowOptionalGroup 2026-06-21-14:20: same defaultOn-group seeding as
+    // the default-workflow path, for an explicitly requested create-time workflow.
+    const defaultGroupIds = resolveDefaultOnOptionalGroupIds(def.ir);
     const stepIds = await this.materializeWorkflowSteps(workflowId, inputs);
-    return { workflowId, stepIds };
+    return { workflowId, stepIds: [...stepIds, ...defaultGroupIds] };
   }
 
   /**

@@ -176,8 +176,13 @@ export {
 export { MeshLeaseManager, type MeshLeaseManagerOptions, type LeaseRecoveryContext } from "./mesh-lease-manager.js";
 export { MissionAutopilot, type MissionAutopilotOptions } from "./mission-autopilot.js";
 export { MissionExecutionLoop, type MissionExecutionLoopOptions, type ValidationResult, loopLog } from "./mission-execution-loop.js";
+// FNXC:MergerUnification 2026-06-22-00:00: @deprecated must sit on aiMergeTask's own
+// export so IDE/type-aware tooling flags only aiMergeTask, not the helpers it shares with
+// runAiMerge (those are NOT deprecated). A single @deprecated on the multi-member block
+// would mark every symbol below as deprecated.
+/** @deprecated Use runAiMerge — aiMergeTask is the soft-deprecated legacy path. */
+export { aiMergeTask } from "./merger.js";
 export {
-  aiMergeTask,
   listAutostashOrphans,
   applyAutostashBySha,
   dropAutostashBySha,
@@ -195,6 +200,26 @@ export {
   getConflictedFiles,
   type AutostashHandle,
 } from "./merger.js";
+// FNXC:MergerUnification 2026-06-21-19:05: runAiMerge is the sole merge path
+// (master-plan U0); exported for the CLI callers (fn task merge + UI-only merge).
+export { runAiMerge } from "./merger-ai.js";
+// FNXC:Workspace 2026-06-22-14:10 (Phase D review G): canonical landed predicate now lives in its
+// own dependency-free module (self-healing ↔ merger-ai cycle dissolved). Public export preserved.
+export { isRepoLanded } from "./workspace-land-predicate.js";
+// FNXC:Workspace 2026-06-21-23:40 (Phase C U1): per-repo workspace merge loop +
+// the extracted per-repo land primitive, exported for the CLI/dashboard merge doors.
+export {
+  landWorkspaceTask,
+  landOneRepo,
+  // FNXC:Workspace 2026-06-22-04:10 (Phase C review A4): real error classes (instanceof-able),
+  // re-exported so the engine dispatch can switch to instanceof in the separate pass.
+  WorkspaceRepoLandBusyError,
+  WorkspacePartialLandError,
+  type WorkspaceMergeResult,
+  type WorkspaceRepoLandResult,
+  type LandOneRepoResult,
+  type LandRepoContext,
+} from "./merger-ai.js";
 export {
   resolveMergePolicy,
   type ResolvedMergePolicy,

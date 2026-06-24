@@ -45,7 +45,7 @@ describe("FN-4976: stale self-owned activeSessionRegistry deadlock backstop", ()
   it("FN-4976 does not clear foreign-owned activeSessionRegistry entry and FN-4811 refusal still fires", async () => {
     const store = createMockStore();
     const executor = new TaskExecutor(store, ROOT);
-    (executor as any).activeWorktrees.set("FN-OTHER", PATH);
+    (executor as any).addActiveWorktree("FN-OTHER", PATH);
     store.listTasks.mockResolvedValue([]);
     activeSessionRegistry.registerPath(PATH, { taskId: "FN-OTHER", kind: "executor", ownerKey: "FN-OTHER" });
 

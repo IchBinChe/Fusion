@@ -23,7 +23,7 @@ describe("FN-5346 reliability interactions: post-completion stale self-owned bin
   it("reconciles stale same-task registry entry during cleanup()", async () => {
     const store = createMockStore();
     const executor = new TaskExecutor(store, ROOT);
-    (executor as any).activeWorktrees.set(TASK_ID, PATH);
+    (executor as any).addActiveWorktree(TASK_ID, PATH);
     activeSessionRegistry.registerPath(PATH, { taskId: TASK_ID, kind: "executor", ownerKey: TASK_ID });
     (activeSessionRegistry.lookupByPath(PATH) as any).registeredAt = 0;
     const removeSpy = vi.spyOn(worktreePoolModule, "removeWorktree").mockResolvedValue(undefined);
@@ -56,7 +56,7 @@ describe("FN-5346 reliability interactions: post-completion stale self-owned bin
   it("preserves refusal for truly-live same-task bindings", async () => {
     const store = createMockStore();
     const executor = new TaskExecutor(store, ROOT);
-    (executor as any).activeWorktrees.set(TASK_ID, PATH);
+    (executor as any).addActiveWorktree(TASK_ID, PATH);
     activeSessionRegistry.registerPath(PATH, { taskId: TASK_ID, kind: "executor", ownerKey: TASK_ID });
     vi.spyOn(worktreePoolModule, "removeWorktree").mockRejectedValue(
       new ActiveSessionWorktreeRemovalError({
@@ -82,7 +82,7 @@ describe("FN-5346 reliability interactions: post-completion stale self-owned bin
     const store = createMockStore();
     store.listTasks.mockResolvedValue([]);
     const executor = new TaskExecutor(store, ROOT);
-    (executor as any).activeWorktrees.set("FN-FOREIGN", PATH);
+    (executor as any).addActiveWorktree("FN-FOREIGN", PATH);
     activeSessionRegistry.registerPath(PATH, { taskId: "FN-FOREIGN", kind: "executor", ownerKey: "FN-FOREIGN" });
     const removeSpy = vi.spyOn(worktreePoolModule, "removeWorktree").mockResolvedValue(undefined);
 
@@ -96,13 +96,13 @@ describe("FN-5346 reliability interactions: post-completion stale self-owned bin
   it("is idempotent across repeated cleanup sweeps", async () => {
     const store = createMockStore();
     const executor = new TaskExecutor(store, ROOT);
-    (executor as any).activeWorktrees.set(TASK_ID, PATH);
+    (executor as any).addActiveWorktree(TASK_ID, PATH);
     activeSessionRegistry.registerPath(PATH, { taskId: TASK_ID, kind: "executor", ownerKey: TASK_ID });
     (activeSessionRegistry.lookupByPath(PATH) as any).registeredAt = 0;
     const removeSpy = vi.spyOn(worktreePoolModule, "removeWorktree").mockResolvedValue(undefined);
 
     await executor.cleanup(TASK_ID);
-    (executor as any).activeWorktrees.set(TASK_ID, PATH);
+    (executor as any).addActiveWorktree(TASK_ID, PATH);
     await executor.cleanup(TASK_ID);
 
     const clearedCalls = (store.logEntry as any).mock.calls.filter(
@@ -120,7 +120,7 @@ describe("FN-5346 reliability interactions: post-completion stale self-owned bin
 
     const store = createMockStore();
     const executor = new TaskExecutor(store, ROOT);
-    (executor as any).activeWorktrees.set(TASK_ID, PATH);
+    (executor as any).addActiveWorktree(TASK_ID, PATH);
     activeSessionRegistry.registerPath(PATH, { taskId: TASK_ID, kind: "executor", ownerKey: TASK_ID });
     vi.spyOn(worktreePoolModule, "removeWorktree").mockResolvedValue(undefined);
 

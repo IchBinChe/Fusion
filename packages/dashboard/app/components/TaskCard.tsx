@@ -35,6 +35,7 @@ import { extractDependencyDeleteConflict, extractLineageDeleteConflict } from ".
 import { MAX_AUTO_MERGE_RETRIES, type BlockerFanoutEntry } from "../hooks/useBlockerFanout";
 import { useRetryWarning } from "../context/RetryWarningContext";
 import { useColumnLabel } from "../i18n/labels";
+import { WorkspaceWorktreesSummary, isWorkspaceTask } from "./WorkspaceWorktreesSummary";
 
 /** Per-branch progress snapshot (U13). Surfaced as an optional additive field
  *  on the task payload for the parallel-window badge (U9). */
@@ -625,6 +626,17 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previousTask.blockedBy === nextTask.blockedBy &&
     previousTask.overlapBlockedBy === nextTask.overlapBlockedBy &&
     previousTask.worktree === nextTask.worktree &&
+    // FNXC:Workspace 2026-06-21-22:30: re-render the card when a workspace task acquires/
+    // releases sub-repo worktrees so the "N repos acquired" placeholder stays current (U3).
+    // F7 — compare the sorted key SETS, not just the count: a same-count repo swap (one
+    // repo released, a different one acquired) keeps the count but must still re-render,
+    // otherwise the placeholder shows a stale repo set.
+    // FNXC:Workspace 2026-06-22-09:00: compare full VALUES, not only the key set. A
+    // pool-reclaim re-acquire keeps the same repo key but produces a different
+    // worktreePath/branch; a key-set-only check would leave the card showing stale path
+    // text. Whole-map JSON compare covers keys and values at negligible cost for small N.
+    JSON.stringify(previousTask.workspaceWorktrees ?? null) ===
+      JSON.stringify(nextTask.workspaceWorktrees ?? null) &&
     previousTask.branch === nextTask.branch &&
     previousTask.baseBranch === nextTask.baseBranch &&
     previousTask.breakIntoSubtasks === nextTask.breakIntoSubtasks &&
@@ -2186,6 +2198,10 @@ function TaskCardComponent({
           </div>
         );
       })()}
+      {/* FNXC:Workspace 2026-06-21-00:00: workspace tasks have no singular task.branch,
+          so the branch-metadata row below renders nothing. Surface the acquired sub-repos
+          as a compact "N repos acquired" placeholder so the card isn't blank (U3/KTD5). */}
+      {isWorkspaceTask(task) && <WorkspaceWorktreesSummary task={task} compact />}
       {hasBranchMetadata && (
         <div className="card-branch-row" aria-label={t("tasks.branchMetadata", "Branch metadata")}>
           {branchMetadata.branch && (

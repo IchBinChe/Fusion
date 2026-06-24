@@ -15,6 +15,11 @@ const findMock = vi.fn();
 const getAllMock = vi.fn(() => [] as any[]);
 const registerProviderMock = vi.fn();
 const refreshMock = vi.fn();
+// FNXC:SessionRouting 2026-06-24-11:30:
+// #1675: capture model-registry auth resolution + session id so the wiring
+// test can assert X-Session-Id/X-Session-Affinity precedence end-to-end.
+const getApiKeyAndHeadersMock = vi.fn(async () => ({ ok: true, apiKey: undefined, headers: undefined }));
+const sessionManagerGetSessionIdMock = vi.fn(() => undefined);
 const settingsManagerCreateMock = vi.fn(() => ({ kind: "settings-manager-create" }));
 const settingsManagerInMemoryMock = vi.fn(() => ({ kind: "settings-manager" }));
 const setFallbackResolverMock = vi.fn();
@@ -138,9 +143,12 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
     refresh() {
       return refreshMock();
     }
+    getApiKeyAndHeaders() {
+      return getApiKeyAndHeadersMock();
+    }
   },
   SessionManager: {
-    inMemory: () => ({ kind: "session-manager" }),
+    inMemory: () => ({ kind: "session-manager", getSessionId: sessionManagerGetSessionIdMock }),
   },
   SettingsManager: {
     create: settingsManagerCreateMock,
@@ -1024,6 +1032,9 @@ describe("createFnAgent", () => {
     realpathSyncNativeMock.mockImplementation((path: PathLike) => String(path));
     readCustomProvidersMock.mockReturnValue([]);
     findMock.mockImplementation((provider: string, modelId: string) => ({ provider, id: modelId }));
+    // #1675: re-establish default auth + session-id mock returns after clearAllMocks.
+    getApiKeyAndHeadersMock.mockResolvedValue({ ok: true, apiKey: undefined, headers: undefined });
+    sessionManagerGetSessionIdMock.mockReturnValue(undefined);
     createBashToolMock.mockClear();
     createAgentSessionMock.mockResolvedValue({
       session: {
@@ -1919,6 +1930,62 @@ describe("createFnAgent", () => {
     expect(setThinkingLevel).toHaveBeenCalledWith("high");
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Disabling explicit thinking level"));
     warnSpy.mockRestore();
+  });
+
+  // FNXC:SessionRouting 2026-06-24-11:30:
+  // #1675: createFnAgent must resolve sessionRoutingId = taskId ?? piSessionId and
+  // wrap the registry's getApiKeyAndHeaders so outbound requests carry routing
+  // headers. These assert the wiring precedence end-to-end, not just the helper.
+  describe("session routing headers wiring (#1675)", () => {
+    const anyModel = { provider: "anthropic", id: "claude" } as never;
+
+    async function createAndCaptureRegistry(overrides: Record<string, unknown> = {}) {
+      const { createFnAgent } = await import("../pi.js");
+      await createFnAgent({
+        cwd: "/tmp",
+        systemPrompt: "test",
+        tools: "readonly",
+        ...overrides,
+      });
+      const sessionOptions = createAgentSessionMock.mock.calls.at(-1)?.[0] as {
+        modelRegistry: { getApiKeyAndHeaders: (model: unknown) => Promise<unknown> };
+      };
+      return sessionOptions.modelRegistry;
+    }
+
+    it("uses taskId as the routing id when provided", async () => {
+      const registry = await createAndCaptureRegistry({ taskId: "FN-7788" });
+
+      const result = await registry.getApiKeyAndHeaders(anyModel) as { ok: boolean; headers?: Record<string, string> };
+
+      expect(result.ok).toBe(true);
+      expect(result.headers).toEqual({
+        "X-Session-Id": "FN-7788",
+        "X-Session-Affinity": "FN-7788",
+      });
+    });
+
+    it("falls back to the pi session id when taskId is absent", async () => {
+      sessionManagerGetSessionIdMock.mockReturnValue("pi-session-abc");
+      const registry = await createAndCaptureRegistry();
+
+      const result = await registry.getApiKeyAndHeaders(anyModel) as { ok: boolean; headers?: Record<string, string> };
+
+      expect(result.headers).toEqual({
+        "X-Session-Id": "pi-session-abc",
+        "X-Session-Affinity": "pi-session-abc",
+      });
+    });
+
+    it("does not wrap getApiKeyAndHeaders when neither taskId nor a session id is available", async () => {
+      // getApiKeyAndHeadersMock returns { ok: true, headers: undefined }; if the
+      // wrapper were applied, headers would be populated with X-Session-*.
+      const registry = await createAndCaptureRegistry();
+
+      const result = await registry.getApiKeyAndHeaders(anyModel) as { ok: boolean; headers?: Record<string, string> };
+
+      expect(result.headers).toBeUndefined();
+    });
   });
 
   describe("skill selection", () => {

@@ -1896,6 +1896,64 @@ export function wrapToolsWithActionGate(
 }
 
 /**
+ * FNXC:SessionRouting 2026-06-23-16:40:
+ * Outbound LLM chat completion requests must carry `X-Session-Id` and
+ * `X-Session-Affinity` headers (GitHub issue #1675). These are widely
+ * understood by LLM gateways, proxies, and observability tooling:
+ *  - Gateways/routers use them for sticky routing, keeping consecutive requests
+ *    from one conversation on the same backend or cache instance.
+ *  - Observability tools (e.g. Langfuse, Arize) use them to group individually
+ *    stateless API calls into a single cohesive multi-turn chat trace.
+ *  - Memory/proxy middleware uses them to fetch and append conversation history.
+ *
+ * Both headers carry the same stable identifier so sticky-routing affinity and
+ * trace grouping refer to the same session. Builds the header pair for a given
+ * session id.
+ */
+export function buildSessionRoutingHeaders(sessionId: string): Record<string, string> {
+  return {
+    "X-Session-Id": sessionId,
+    "X-Session-Affinity": sessionId,
+  };
+}
+
+/**
+ * FNXC:SessionRouting 2026-06-23-16:40:
+ * Merge the session-routing headers into every header set the model registry
+ * resolves for outbound LLM requests (#1675). `getApiKeyAndHeaders` is the
+ * single point pi-coding-agent uses to resolve per-request auth and headers
+ * (for the main stream and compaction alike), so wrapping it applies the
+ * headers to every HTTP-based provider path (built-in, custom, and
+ * HTTP-streaming extension providers). Subprocess-based providers that make
+ * their own outbound HTTP calls inside a child process (e.g. CLI bridges) are
+ * outside this seam and do not inherit the headers.
+ * Operating on the resolved output (rather than re-registering providers)
+ * preserves provider-specific headers and never disturbs API-key resolution.
+ */
+export function attachSessionRoutingHeaders(modelRegistry: ModelRegistry, sessionId: string): void {
+  // FNXC:SessionRouting 2026-06-23-16:46:
+  // Auxiliary feature: never let header injection break session creation. If a
+  // future pi-coding-agent rename removes getApiKeyAndHeaders, warn (rather than
+  // silently no-op) so the degraded routing/observability headers are detectable.
+  if (typeof modelRegistry.getApiKeyAndHeaders !== "function") {
+    piLog.warn("[pi] session-routing headers not attached: ModelRegistry.getApiKeyAndHeaders is not a function (pi API changed?)");
+    return;
+  }
+  const routingHeaders = buildSessionRoutingHeaders(sessionId);
+  const resolveAuth = modelRegistry.getApiKeyAndHeaders.bind(modelRegistry);
+  modelRegistry.getApiKeyAndHeaders = async (model) => {
+    const result = await resolveAuth(model);
+    if (!result.ok) {
+      return result;
+    }
+    return {
+      ...result,
+      headers: { ...result.headers, ...routingHeaders },
+    };
+  };
+}
+
+/**
  * Create a pi agent session configured for fn.
  * Reuses the user's existing pi auth and model configuration.
  *
@@ -2097,6 +2155,20 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
 
   const sessionManager = options.sessionManager ?? SessionManager.inMemory();
   normalizeSessionHistoryEntries(sessionManager as unknown as SessionManagerLike);
+
+  // FNXC:SessionRouting 2026-06-23-16:40:
+  // Tag every outbound LLM chat completion request with stable session-routing
+  // headers (X-Session-Id / X-Session-Affinity) for gateway sticky routing and
+  // observability trace grouping (#1675). Prefer the task id, which is stable
+  // across pause/resume (each resume spins up a fresh SessionManager), and fall
+  // back to the pi session id for non-task sessions (chat, summarizer, reviewer).
+  const piSessionId = typeof sessionManager.getSessionId === "function"
+    ? sessionManager.getSessionId()
+    : undefined;
+  const sessionRoutingId = options.taskId ?? piSessionId;
+  if (sessionRoutingId) {
+    attachSessionRoutingHeaders(modelRegistry, sessionRoutingId);
+  }
 
   const createSessionWithModel = async (modelOverride?: typeof selectedModel) => {
     // pi-coding-agent 0.68+: `tools` is a string[] allowlist of tool names, not

@@ -88,7 +88,7 @@ describe("pause-abort benign requeue-to-todo (FN-6782)", () => {
     // executor must retry the agent session in place rather than bouncing the
     // task through todo (and must not fire a failure notification).
     const { store, task, executor } = makeHarness({ column: "todo" });
-    (executor as any).activeWorktrees.set(task.id, task.worktree);
+    (executor as any).addActiveWorktree(task.id, task.worktree);
     const executeSpy = vi
       .spyOn(executor as any, "execute")
       .mockResolvedValue(undefined);
@@ -137,7 +137,7 @@ describe("pause-abort benign requeue-to-todo (FN-6782)", () => {
       // and a retry scheduled); the task then changes state before the timer
       // fires, and the fire-time re-fetch must abort the dispatch.
       const { store, task, executor } = makeHarness({ column: "todo" });
-      (executor as any).activeWorktrees.set(task.id, task.worktree);
+      (executor as any).addActiveWorktree(task.id, task.worktree);
       const executeSpy = vi.spyOn(executor as any, "execute").mockResolvedValue(undefined);
 
       await invokeGraphFailure(executor, task);
@@ -164,7 +164,7 @@ describe("pause-abort benign requeue-to-todo (FN-6782)", () => {
       status: "failed",
       error: "Workflow graph failure surfaced after paused engine abort during pause/resume",
     });
-    (executor as any).activeWorktrees.set(task.id, task.worktree);
+    (executor as any).addActiveWorktree(task.id, task.worktree);
     const executeSpy = vi.spyOn(executor as any, "execute").mockResolvedValue(undefined);
 
     await invokeGraphFailure(executor, task);
@@ -197,7 +197,7 @@ describe("pause-abort benign requeue-to-todo (FN-6782)", () => {
       // pause that ended up in todo must stay parked-benign and wait for
       // explicit resume — auto-resuming it would override the operator's intent.
       const { store, task, executor } = makeHarness(overrides, provenance);
-      (executor as any).activeWorktrees.set(task.id, task.worktree);
+      (executor as any).addActiveWorktree(task.id, task.worktree);
       const executeSpy = vi.spyOn(executor as any, "execute").mockResolvedValue(undefined);
 
       await invokeGraphFailure(executor, task);
@@ -217,7 +217,7 @@ describe("pause-abort benign requeue-to-todo (FN-6782)", () => {
       column: "todo",
       graphResumeRetryCount: 2,
     });
-    (executor as any).activeWorktrees.set(task.id, task.worktree);
+    (executor as any).addActiveWorktree(task.id, task.worktree);
     const executeSpy = vi
       .spyOn(executor as any, "execute")
       .mockResolvedValue(undefined);
@@ -246,7 +246,7 @@ describe("pause-abort benign requeue-to-todo (FN-6782)", () => {
       status: "failed",
       error: "Workflow graph failure surfaced after paused engine abort during pause/resume",
     });
-    (executor as any).activeWorktrees.set(task.id, task.worktree);
+    (executor as any).addActiveWorktree(task.id, task.worktree);
 
     await invokeGraphFailure(executor, task);
 

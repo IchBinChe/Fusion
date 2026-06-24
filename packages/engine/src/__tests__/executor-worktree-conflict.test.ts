@@ -39,7 +39,7 @@ describe("FN-4973: executor worktree conflict cleanup", () => {
     const store = createMockStore();
     const executor = new TaskExecutor(store, "/tmp/test");
     store.listTasks.mockResolvedValue([]);
-    (executor as any).activeWorktrees.set("FN-4973", CONFLICT_PATH);
+    (executor as any).addActiveWorktree("FN-4973", CONFLICT_PATH);
     activeSessionRegistry.registerPath(CONFLICT_PATH, { taskId: "FN-4973", kind: "executor", ownerKey: "FN-4973" });
 
     vi.spyOn(worktreePoolModule, "removeWorktree").mockRejectedValue(

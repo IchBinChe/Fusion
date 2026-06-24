@@ -58,7 +58,7 @@ describe("FN-4811: active worktree removal liveness gate", () => {
     it("returns the owner taskId when activeWorktrees has another task using the path", async () => {
       const store = createMockStore();
       const executor = new TaskExecutor(store, "/tmp/test");
-      (executor as any).activeWorktrees.set("FN-OTHER", ACTIVE_PATH);
+      (executor as any).addActiveWorktree("FN-OTHER", ACTIVE_PATH);
 
       const owner = await (executor as any).findActiveWorktreeOwner(ACTIVE_PATH, "FN-4811");
       expect(owner).toBe("FN-OTHER");
@@ -67,7 +67,7 @@ describe("FN-4811: active worktree removal liveness gate", () => {
     it("returns null when activeWorktrees only has the requesting task at the path", async () => {
       const store = createMockStore();
       const executor = new TaskExecutor(store, "/tmp/test");
-      (executor as any).activeWorktrees.set("FN-4811", ACTIVE_PATH);
+      (executor as any).addActiveWorktree("FN-4811", ACTIVE_PATH);
       store.listTasks.mockResolvedValue([]);
 
       const owner = await (executor as any).findActiveWorktreeOwner(ACTIVE_PATH, "FN-4811");
@@ -125,7 +125,7 @@ describe("FN-4811: active worktree removal liveness gate", () => {
     it("refuses removal when worktree is in activeWorktrees for another task", async () => {
       const store = createMockStore();
       const executor = new TaskExecutor(store, "/tmp/test");
-      (executor as any).activeWorktrees.set("FN-OTHER", ACTIVE_PATH);
+      (executor as any).addActiveWorktree("FN-OTHER", ACTIVE_PATH);
       store.listTasks.mockResolvedValue([]);
 
       const result = await (executor as any).cleanupConflictingWorktree(
@@ -226,7 +226,7 @@ describe("FN-4811: active worktree removal liveness gate", () => {
     it("returns 'sticky' without invoking inspection when conflict path is actively owned", async () => {
       const store = createMockStore();
       const executor = new TaskExecutor(store, "/tmp/test");
-      (executor as any).activeWorktrees.set("FN-OWNER", ACTIVE_PATH);
+      (executor as any).addActiveWorktree("FN-OWNER", ACTIVE_PATH);
       store.listTasks.mockResolvedValue([]);
 
       const inspectSpy = vi.spyOn(branchConflictModule, "inspectBranchConflict");

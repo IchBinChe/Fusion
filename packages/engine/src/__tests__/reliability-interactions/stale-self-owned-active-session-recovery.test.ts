@@ -118,7 +118,7 @@ describe("FN-4973 reliability interactions: stale self-owned active-session reco
     const store = createMockStore();
     store.listTasks.mockResolvedValue([]);
     const executor = new TaskExecutor(store, "/tmp/test");
-    (executor as any).activeWorktrees.set(TASK_ID, CONFLICT_PATH);
+    (executor as any).addActiveWorktree(TASK_ID, CONFLICT_PATH);
     activeSessionRegistry.registerPath(CONFLICT_PATH, { taskId: TASK_ID, kind: "executor", ownerKey: TASK_ID });
 
     vi.spyOn(worktreePoolModule, "removeWorktree").mockRejectedValue(

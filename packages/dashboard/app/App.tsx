@@ -96,12 +96,14 @@ import { ShellHostProvider, useShellHostContext } from "./context/ShellHostConte
 import { useShellConnection } from "./hooks/useShellConnection";
 import { useStashOrphanCount } from "./hooks/useStashOrphanCount";
 import { useChatUnreadBadge } from "./hooks/useChatUnreadBadge";
+import { useMailboxUnread } from "./hooks/useMailboxUnread";
+import { useApprovalBanner } from "./hooks/useApprovalBanner";
 import { NativeShellOnboardingModal } from "./components/NativeShellOnboardingModal";
 import { NativeShellConnectionManager } from "./components/NativeShellConnectionManager";
 import { ShellConnectionStatus } from "./components/ShellConnectionStatus";
 import { getShellConnectionNativeResult, type ShellConnectionNativeResult } from "./shell-native";
 import type { AiSessionSummary, DashboardHealthResponse, PluginDashboardViewEntry } from "./api";
-import { fetchDashboardHealth, fetchUnreadCount, fetchTaskDetail, fetchWorkflowSteps, refreshDashboardHealth } from "./api";
+import { fetchDashboardHealth, fetchTaskDetail, fetchWorkflowSteps, refreshDashboardHealth } from "./api";
 import { getScopedItem, removeScopedItem, setScopedItem } from "./utils/projectStorage";
 import {
   SETUP_WARNING_DISMISSED_KEY,
@@ -110,18 +112,12 @@ import {
   NO_BRANCH_FILTER_VALUE,
   CAPACITY_RISK_DISMISSED_KEY,
   RETRY_WARNING_RATIO,
-  parseDateMs,
-  loadApprovalBannerDismissals,
-  persistApprovalBannerDismissals,
   buildRemoteDashboardUrl,
-  didEnterAwaitingApproval,
-  didEnterDone,
   requiresNativeShellOnboarding,
   shouldShowFirstEverBootLoader,
   isSessionNeedingInputForBanner,
   getCliActionDisabledReasonForBanner,
   executeCliSessionBannerAction,
-  type ApprovalBannerCandidate,
 } from "./utils/appLifecycle";
 // Re-export the unit-tested lifecycle helpers so existing `from "./App"` /
 // `from "../../App"` imports keep resolving after the bodies moved to utils.
@@ -577,121 +573,19 @@ function AppInner() {
   useMobileViewportRestoreReset(isMobile);
 
   // App-level mailbox/chat unread state (used for header/mobile nav badges)
-  const [mailboxUnreadCount, setMailboxUnreadCount] = useState(0);
-  const [mailboxPendingApprovalCount, setMailboxPendingApprovalCount] = useState(0);
+  const { mailboxUnreadCount, mailboxPendingApprovalCount, setMailboxUnreadCount, refresh: mailboxRefresh } = useMailboxUnread(currentProject?.id);
   const { chatHasUnreadResponse } = useChatUnreadBadge(currentProject?.id, { taskView, quickChatOpen });
   const { stashOrphanCount } = useStashOrphanCount(currentProject?.id);
-  const [approvalBannerCandidate, setApprovalBannerCandidate] = useState<ApprovalBannerCandidate | null>(null);
   const [showGitHubStarPrompt, setShowGitHubStarPrompt] = useState(false);
-  const taskStatusByIdRef = useRef<Map<string, string | undefined>>(new Map());
-  const seenApprovalKeysRef = useRef<Set<string>>(new Set());
-  const approvalDismissalsRef = useRef<Map<string, number>>(loadApprovalBannerDismissals());
   const gitHubStarPromptShown = useGitHubStarPromptShown();
-
-  const refreshMailboxUnreadCount = useCallback(() => {
-    fetchUnreadCount(currentProject?.id)
-      .then((data: { unreadCount: number; pendingApprovalCount?: number }) => {
-        setMailboxUnreadCount(data.unreadCount);
-        setMailboxPendingApprovalCount(data.pendingApprovalCount ?? 0);
-      })
-      .catch((err) => {
-        console.warn("[App] Failed to fetch mailbox unread count:", err);
-      });
-  }, [currentProject?.id]);
-
-  useEffect(() => {
-    const next = new Map<string, string | undefined>();
-    const nextSeen = new Set<string>();
-    for (const task of tasks) {
-      next.set(task.id, task.status);
-      if (task.status === "awaiting-approval") {
-        nextSeen.add(`task:${task.id}`);
-      }
-    }
-    taskStatusByIdRef.current = next;
-    seenApprovalKeysRef.current = nextSeen;
-  }, [tasks]);
-
-  // Initial fetch + live updates from mailbox SSE events.
-  useEffect(() => {
-    refreshMailboxUnreadCount();
-
-    const params = new URLSearchParams();
-    if (currentProject?.id) {
-      params.set("projectId", currentProject.id);
-    }
-    const query = params.size > 0 ? `?${params.toString()}` : "";
-
-    const triggerApprovalBanner = (candidate: ApprovalBannerCandidate) => {
-      const dismissedAt = approvalDismissalsRef.current.get(candidate.dedupeKey);
-      if (dismissedAt !== undefined && candidate.updatedAtMs <= dismissedAt) {
-        return;
-      }
-      setApprovalBannerCandidate(candidate);
-    };
-
-    return subscribeSse(`/api/events${query}`, {
-      onReconnect: refreshMailboxUnreadCount,
-      events: {
-        "message:sent": refreshMailboxUnreadCount,
-        "message:received": refreshMailboxUnreadCount,
-        "message:read": refreshMailboxUnreadCount,
-        "message:deleted": refreshMailboxUnreadCount,
-        "approval:requested": (event: MessageEvent) => {
-          refreshMailboxUnreadCount();
-          try {
-            const payload = JSON.parse(event.data) as { id?: string; taskId?: string; updatedAt?: string; createdAt?: string };
-            const dedupeKey = payload.id ? `approval:${payload.id}` : payload.taskId ? `task:${payload.taskId}` : undefined;
-            if (!dedupeKey || seenApprovalKeysRef.current.has(dedupeKey)) {
-              return;
-            }
-            seenApprovalKeysRef.current.add(dedupeKey);
-            triggerApprovalBanner({
-              dedupeKey,
-              updatedAtMs: parseDateMs(payload.updatedAt ?? payload.createdAt),
-            });
-          } catch {
-            // no-op
-          }
-        },
-        "approval:updated": refreshMailboxUnreadCount,
-        "approval:decided": refreshMailboxUnreadCount,
-        "task:updated": (event: MessageEvent) => {
-          try {
-            const payload = JSON.parse(event.data) as { id?: string; status?: string; updatedAt?: string };
-            if (!payload?.id) {
-              return;
-            }
-            const dedupeKey = `task:${payload.id}`;
-            const previousStatus = taskStatusByIdRef.current.get(payload.id);
-            taskStatusByIdRef.current.set(payload.id, payload.status);
-            if (!gitHubStarPromptShown && didEnterDone(payload.status, previousStatus)) {
-              setShowGitHubStarPrompt(true);
-            }
-            if (payload.status !== "awaiting-approval") {
-              seenApprovalKeysRef.current.delete(dedupeKey);
-              approvalDismissalsRef.current.delete(dedupeKey);
-              persistApprovalBannerDismissals(approvalDismissalsRef.current);
-              return;
-            }
-            if (seenApprovalKeysRef.current.has(dedupeKey)) {
-              return;
-            }
-            if (didEnterAwaitingApproval(payload.status, previousStatus)) {
-              seenApprovalKeysRef.current.add(dedupeKey);
-              triggerApprovalBanner({
-                dedupeKey,
-                updatedAtMs: parseDateMs(payload.updatedAt),
-              });
-              refreshMailboxUnreadCount();
-            }
-          } catch {
-            // no-op
-          }
-        },
-      },
-    });
-  }, [currentProject?.id, gitHubStarPromptShown, refreshMailboxUnreadCount]);
+  const handleStarPrompt = useCallback(() => setShowGitHubStarPrompt(true), []);
+  const { candidate: approvalBannerCandidate, dismissApproval } = useApprovalBanner({
+    tasks,
+    currentProjectId: currentProject?.id,
+    gitHubStarPromptShown,
+    onStarPrompt: handleStarPrompt,
+    onMailboxRefresh: mailboxRefresh,
+  });
 
   const branchOptions = useMemo(() => {
     return Array.from(
@@ -2247,14 +2141,7 @@ function AppInner() {
         <ApprovalNotificationBanner
           pendingCount={Math.max(mailboxPendingApprovalCount, 1)}
           onOpenMailbox={() => handleTaskViewChange("mailbox")}
-          onDismiss={() => {
-            approvalDismissalsRef.current.set(
-              approvalBannerCandidate.dedupeKey,
-              Math.max(Date.now(), approvalBannerCandidate.updatedAtMs),
-            );
-            persistApprovalBannerDismissals(approvalDismissalsRef.current);
-            setApprovalBannerCandidate(null);
-          }}
+          onDismiss={() => dismissApproval(approvalBannerCandidate)}
         />
       )}
       {/* FNXC:Onboarding 2026-06-22-03:11: The one-time GitHub star prompt stays tied to first completed task, but first-run setup must finish the optional persistent-agent create/skip step before any star ask can surface. Do not add a second setup-specific star prompt. */}

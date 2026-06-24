@@ -168,7 +168,16 @@ The newest surfaces in Fusion, at a glance — the live board, your agent team, 
   <img src="./demo/assets/dashboard-tokyo.png" alt="Fusion board: Triage, Todo, In Progress, In Review, Done columns with live task cards across the Tokyo Night theme" width="900" />
 </div>
 
-Every task, every column, every step — live. Cards carry GitHub links, step counts, review levels, and promote/move/archive actions. Here is the same fleet re-skinned into the **Ember** theme (dark graphite with an orange accent), alongside the **Agents** roster:
+Every task, every column, every step — live. Cards carry GitHub links, step counts, review levels, and promote/move/archive actions. Switch to the **Graph** view to see task dependencies as an interactive node graph:
+
+<table>
+<tr>
+<td width="50%"><img src="./demo/assets/dashboard-tokyo.png" alt="Fusion board: Triage, Todo, In Progress, In Review, Done columns with live task cards" /><br/><sub><b>Board</b> — kanban columns</sub></td>
+<td width="50%"><img src="./demo/assets/dashboard-graph.png" alt="Fusion graph view: task dependency graph with connected nodes" /><br/><sub><b>Graph</b> — dependency map</sub></td>
+</tr>
+</table>
+
+Here is the same fleet re-skinned into the **Ember** theme (dark graphite with an orange accent), alongside the **Agents** roster:
 
 <table>
 <tr>
@@ -189,13 +198,24 @@ Import a team and every agent shows up here — role, reports-to chain, heartbea
   <img src="./demo/assets/command-center.gif" alt="Fusion Command Center: live concurrency gauges, token charts, and fleet telemetry across tabs" width="900" />
 </div>
 
-One screen for everything your agents are doing. Tune live scheduler capacity, watch token spend by model in real time, and prove the value with hard numbers.
+One screen for everything your agents are doing. Tune live scheduler capacity, watch token spend by model in real time, and prove the value with hard numbers. The **Overview** tab opens with live gauges and charts:
+
+<div align="center">
+  <img src="./demo/assets/command-center-overview.png" alt="Fusion Command Center Overview: concurrency gauges, engine status, and fleet charts" width="900" />
+</div>
+
+Every tab is a different lens on the same live fleet:
 
 <table>
 <tr>
 <td width="33%"><img src="./demo/assets/command-center-tokens.png" alt="Tokens by model, token trend, and tokens-over-time charts" /><br/><sub><b>Tokens</b> — spend by model, cached vs. input vs. output, over time.</sub></td>
 <td width="33%"><img src="./demo/assets/command-center-productivity.png" alt="Productivity: commits, human-hours saved, task duration percentiles, and files by language" /><br/><sub><b>Productivity</b> — outcomes, duration percentiles, language mix.</sub></td>
 <td width="33%"><img src="./demo/assets/command-center-team.png" alt="Agent org chart with token share and tokens-by-agent breakdown" /><br/><sub><b>Team</b> — agent org chart and token share per agent.</sub></td>
+</tr>
+<tr>
+<td width="33%"><img src="./demo/assets/command-center-activity.png" alt="Activity: task throughput and event timeline charts" /><br/><sub><b>Activity</b> — task throughput and event timelines.</sub></td>
+<td width="33%"><img src="./demo/assets/command-center-signals.png" alt="Signals: anomaly detection and fleet signal charts" /><br/><sub><b>Signals</b> — anomaly detection and fleet health.</sub></td>
+<td width="33%"><img src="./demo/assets/command-center-tokens.png" alt="Command Center tab" /><br/><sub><b>More</b> — Tools · Ecosystem · GitHub · System · Reliability.</sub></td>
 </tr>
 </table>
 

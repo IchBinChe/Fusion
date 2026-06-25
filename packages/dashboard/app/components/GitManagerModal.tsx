@@ -285,6 +285,16 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
   // common non-workspace-OK path (where the first fetch already succeeded).
   const suppressedRootRaceRef = useRef(false);
   const [detectionResolved, setDetectionResolved] = useState(false);
+  /*
+  FNXC:Workspace 2026-06-25-09:40 (detection generation guard):
+  A rapid projectId switch (or close→reopen) can leave a previous project's fetchWorkspaceRepos
+  promise in flight. When it resolves it must NOT overwrite the CURRENT project's detection verdict —
+  doing so could suppress a real error for the new project or mis-fire the re-surface effect. Each
+  detection run is stamped with a monotonically increasing generation; only the latest run is allowed
+  to mutate detection state, and the effect cleanup bumps the generation so a superseded/unmounted run
+  is abandoned.
+  */
+  const detectionGenerationRef = useRef(0);
 
   // ── Changes state
   const [fileChanges, setFileChanges] = useState<GitFileChange[]>([]);
@@ -950,11 +960,15 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
   selectedRepo in the effect deps, preserving the projectId-keyed intent.
   */
   useEffect(() => {
-    // Reset detection on project switch so a stale verdict can't suppress a real error.
+    // Reset detection on project switch so a stale verdict can't suppress a real error. The
+    // generation guard (see ref note above) makes a superseded in-flight resolution a no-op.
+    const gen = ++detectionGenerationRef.current;
     workspaceDetectionRef.current = { resolved: false, isWorkspace: false };
+    suppressedRootRaceRef.current = false;
     setDetectionResolved(false);
     fetchWorkspaceRepos(projectId)
       .then((result) => {
+        if (gen !== detectionGenerationRef.current) return;
         const repos = result.repos;
         workspaceDetectionRef.current = { resolved: true, isWorkspace: repos.length > 0 };
         setWorkspaceRepos(repos);
@@ -963,11 +977,17 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
         );
       })
       .catch(() => {
+        if (gen !== detectionGenerationRef.current) return;
         workspaceDetectionRef.current = { resolved: true, isWorkspace: false };
         setWorkspaceRepos([]);
         setSelectedRepo(null);
       })
-      .finally(() => setDetectionResolved(true));
+      .finally(() => {
+        if (gen !== detectionGenerationRef.current) return;
+        setDetectionResolved(true);
+      });
+    // Bump the generation on cleanup so an unmounted/superseded run's late resolution is abandoned.
+    return () => { detectionGenerationRef.current++; };
   }, [projectId]); // keyed on projectId; selectedRepo is revalidated via the functional updater
 
   // FNXC:Workspace 2026-06-25-00:10: once detection settles, re-surface a suppressed root-race error

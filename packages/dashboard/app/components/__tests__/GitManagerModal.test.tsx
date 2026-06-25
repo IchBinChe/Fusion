@@ -323,6 +323,30 @@ describe("GitManagerModal", () => {
     });
   });
 
+  it("does not let a stale workspace project's late detection suppress a real error after a rapid project switch", async () => {
+    // FNXC:Workspace 2026-06-25-09:40 (generation guard): switch from workspace project A (whose
+    // fetchWorkspaceRepos resolves LATE) to broken non-workspace project B before A resolves. A's late
+    // "workspace" verdict must be abandoned (generation guard) so it can't suppress B's real error.
+    let resolveA: (v: { repos: string[] }) => void = () => {};
+    const aPromise = new Promise<{ repos: string[] }>((r) => { resolveA = r; });
+    (fetchWorkspaceRepos as any).mockImplementation((pid: string) =>
+      pid === "projA" ? aPromise : Promise.resolve({ repos: [] }));
+    (fetchGitStatus as any).mockRejectedValue(new Error("Not a git repository"));
+
+    const { rerender } = render(
+      <GitManagerModal isOpen={true} onClose={vi.fn()} tasks={mockTasks} addToast={mockAddToast} projectId="projA" />,
+    );
+    // Switch to B before A's detection resolves.
+    rerender(<GitManagerModal isOpen={true} onClose={vi.fn()} tasks={mockTasks} addToast={mockAddToast} projectId="projB" />);
+    // A resolves late as a workspace — must be ignored for the now-current project B.
+    resolveA({ repos: ["openvide"] });
+
+    // B is a genuinely broken non-workspace repo → its error must still surface.
+    await waitFor(() => {
+      expect(mockAddToast).toHaveBeenCalledWith(expect.stringMatching(/not a git repository/i), "error");
+    });
+  });
+
   // ── Basic Rendering ─────────────────────────────────────────
 
   it("renders nothing when not open", () => {

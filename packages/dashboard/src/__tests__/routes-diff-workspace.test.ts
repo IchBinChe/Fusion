@@ -103,6 +103,42 @@ describe("workspace task diff aggregation", () => {
     expect(res.body.stats).toEqual({ filesChanged: 2, additions: 3, deletions: 1 });
   });
 
+  it("preserves deterministic repo-sorted order across the concurrent (parallelized) aggregation", async () => {
+    // FNXC:WorkspaceDiff 2026-06-25-09:40: sub-repos are now diffed concurrently; the output must
+    // still be sorted by repo key regardless of which sub-repo's git calls finish first. Three repos
+    // inserted out of order, with the first-sorted repo deliberately given the slowest git response.
+    const task = workspaceTask();
+    (task as any).workspaceWorktrees = {
+      zulu: { worktreePath: "/wt/zulu", branch: "fusion/mult-002", baseCommitSha: "baseZ" },
+      alpha: { worktreePath: "/wt/alpha", branch: "fusion/mult-002", baseCommitSha: "baseA" },
+      mike: { worktreePath: "/wt/mike", branch: "fusion/mult-002", baseCommitSha: "baseM" },
+    };
+    const resp: Record<string, Record<string, string>> = {
+      "/wt/alpha": { "diff --name-status -M baseA..HEAD": "A\ta.ts", "diff --cached --name-status -M": "", "diff --name-status -M": "", "diff baseA -- a.ts": "+x\n" },
+      "/wt/mike": { "diff --name-status -M baseM..HEAD": "A\tm.ts", "diff --cached --name-status -M": "", "diff --name-status -M": "", "diff baseM -- m.ts": "+y\n" },
+      "/wt/zulu": { "diff --name-status -M baseZ..HEAD": "A\tz.ts", "diff --cached --name-status -M": "", "diff --name-status -M": "", "diff baseZ -- z.ts": "+w\n" },
+    };
+    runGitCommandMock.mockImplementation(async (gitArgs: string[], cwd?: string) => {
+      const key = gitArgs.join(" ");
+      const repo = (cwd && resp[cwd]) || {};
+      if (key in repo) {
+        // Make the first-sorted repo (alpha) resolve LAST to prove order is by key, not completion.
+        if (cwd === "/wt/alpha") await new Promise((r) => setTimeout(r, 5));
+        return repo[key] ?? "";
+      }
+      throw new Error(`Unexpected git command [${cwd}]: ${key}`);
+    });
+
+    const store = new MockStore();
+    store.addTask(task);
+    const app = createServer(store as any);
+    const { get } = await import("../test-request.js");
+    const res = await get(app, "/api/tasks/MULT-002/diff");
+
+    expect(res.status).toBe(200);
+    expect(res.body.files.map((f: any) => f.path)).toEqual(["alpha/a.ts", "mike/m.ts", "zulu/z.ts"]);
+  });
+
   it("/file-diffs returns repo-prefixed per-file patches", async () => {
     const store = new MockStore();
     store.addTask(workspaceTask());

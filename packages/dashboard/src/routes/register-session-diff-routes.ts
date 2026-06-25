@@ -383,6 +383,38 @@ interface WorktreeDetailedFile {
   oldPath?: string;
 }
 
+/*
+FNXC:WorkspaceDiff 2026-06-25-09:40:
+Per-call git timeouts for the task-diff endpoints. /diff allows a longer budget than /file-diffs
+because the former drives the primary Changes view; both are named so the difference is visible at a
+glance and the literals are not duplicated across call sites.
+*/
+const DIFF_TIMEOUT_MS = 10_000;
+const FILE_DIFFS_TIMEOUT_MS = 5_000;
+
+/*
+FNXC:WorkspaceDiff 2026-06-25-09:40:
+Bounded-concurrency mapper. A workspace task fans the diff out across N sub-repos × M files; running
+those git subprocesses strictly serially makes the Changes tab block for a long time on large
+multi-repo tasks (each per-file `git diff` is an independent subprocess). Run them concurrently with a
+cap so we get parallel wall-clock without spawning an unbounded herd of git processes. Output order is
+preserved (results indexed by input position) so the aggregated diff stays deterministic.
+*/
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  const workers = Array.from({ length: workerCount }, async () => {
+    for (;;) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index]!, index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 /**
  * Build the per-file detailed diff for a SINGLE worktree: committed
  * (diffBase..HEAD) + staged + unstaged, with the committed set scoped to the
@@ -445,14 +477,18 @@ async function computeWorktreeDetailedFiles(
     // working tree diff failed
   }
 
-  const results: WorktreeDetailedFile[] = [];
-  for (const [filePath, { statusCode, oldPath }] of fileMap.entries()) {
-    if (!filePath) continue;
-
-    let status: "added" | "modified" | "deleted" | "renamed" = "modified";
-    if (statusCode.startsWith("A")) status = "added";
-    else if (statusCode.startsWith("D")) status = "deleted";
-    else if (statusCode.startsWith("R")) status = "renamed";
+  /*
+  FNXC:WorkspaceDiff 2026-06-25-09:40:
+  The per-file `git diff` patch fetch is the dominant cost (one subprocess per changed file). Run it
+  with bounded concurrency instead of a serial await loop — independent files do not depend on each
+  other, so this collapses M serial git spawns to ~M/limit wall-clock. We deliberately do NOT skip the
+  patch for deleted files: /file-diffs filters out empty-patch entries and the patch supplies the
+  additions/deletions counts, so a delete needs its real patch to stay visible and counted. Status
+  uses the shared parseStatusCode helper (single source of truth for the A/D/R/M mapping).
+  */
+  const entries = Array.from(fileMap.entries()).filter(([filePath]) => Boolean(filePath));
+  const results = await mapWithConcurrency(entries, 8, async ([filePath, { statusCode, oldPath }]) => {
+    const status = parseStatusCode(statusCode);
 
     let patch = "";
     try {
@@ -464,8 +500,10 @@ async function computeWorktreeDetailedFiles(
     }
 
     const { additions, deletions } = countPatchLines(patch);
-    results.push(oldPath ? { path: filePath, status, additions, deletions, patch, oldPath } : { path: filePath, status, additions, deletions, patch });
-  }
+    return oldPath
+      ? { path: filePath, status, additions, deletions, patch, oldPath }
+      : { path: filePath, status, additions, deletions, patch };
+  });
 
   return results;
 }
@@ -491,23 +529,30 @@ async function computeWorkspaceTaskFiles(
   timeoutMs: number,
 ): Promise<WorktreeDetailedFile[]> {
   const worktrees = task.workspaceWorktrees ?? {};
-  const all: WorktreeDetailedFile[] = [];
 
-  // Deterministic, repo-sorted order so the aggregated list is stable.
-  for (const repoRel of Object.keys(worktrees).sort()) {
+  /*
+  FNXC:WorkspaceDiff 2026-06-25-09:40:
+  Resolve each sub-repo's diff CONCURRENTLY (bounded) rather than awaiting them one at a time: every
+  sub-repo's git work is independent, so a serial loop made the aggregate cost N×(per-repo) and could
+  block the response for a long time on a many-repo task. Keys are sorted first and mapped by position,
+  so the aggregated output stays in deterministic repo-sorted order regardless of completion order.
+  */
+  const repoRels = Object.keys(worktrees).sort();
+  const perRepo = await mapWithConcurrency(repoRels, 4, async (repoRel) => {
     const entry = worktrees[repoRel];
-    if (!entry) continue;
+    if (!entry) return [] as WorktreeDetailedFile[];
 
     let repoFiles: WorktreeDetailedFile[] = [];
 
-    // Prefer the live sub-repo worktree (in-progress / in-review).
+    // Prefer the live sub-repo worktree (in-progress / in-review). The access()
+    // probe is an optimistic fast-path skip; the try/catch below is the real guard.
     let worktreeUsable = false;
     if (entry.worktreePath) {
       try {
         await access(entry.worktreePath);
         worktreeUsable = true;
       } catch {
-        worktreeUsable = false;
+        // worktree gone → fall through to the landed-range fallback
       }
     }
     if (worktreeUsable) {
@@ -528,6 +573,9 @@ async function computeWorkspaceTaskFiles(
     // Fallback: landed range in the sub-repo root (a done task whose per-repo
     // worktree was already cleaned up). Each sub-repo lands independently with
     // its own baseCommitSha → landedSha.
+    // FNXC:WorkspaceDiff 2026-06-25-09:40: collectDoneRangeFiles returns AggregatedDoneTaskFile, which
+    // carries no oldPath, so a renamed file's rename-SOURCE is unavailable on this done fallback (the
+    // file still shows under its new path). The live-worktree path above does preserve oldPath.
     if (repoFiles.length === 0 && entry.baseCommitSha && entry.landedSha) {
       const repoRootDir = join(rootDir, repoRel);
       try {
@@ -544,16 +592,15 @@ async function computeWorkspaceTaskFiles(
       }
     }
 
-    for (const file of repoFiles) {
-      all.push({
-        ...file,
-        path: `${repoRel}/${file.path}`,
-        oldPath: file.oldPath ? `${repoRel}/${file.oldPath}` : undefined,
-      });
-    }
-  }
+    // Prefix every path with the sub-repo key so the Changes tab shows which repo each file is in.
+    return repoFiles.map((file) => ({
+      ...file,
+      path: `${repoRel}/${file.path}`,
+      oldPath: file.oldPath ? `${repoRel}/${file.oldPath}` : undefined,
+    }));
+  });
 
-  return all;
+  return perRepo.flat();
 }
 
 function extractCommitShaCandidate(event: { target?: unknown; metadata?: unknown; payload?: unknown; newValue?: unknown }): string | undefined {
@@ -914,12 +961,13 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
         return;
       }
 
-      // Workspace tasks have no singular worktree/branch; their changes live in
-      // per-sub-repo worktrees. Aggregate across them (repo-prefixed paths) and
-      // short-circuit before the single-repo logic, which would diff the non-git
-      // workspace root and return empty.
+      // FNXC:WorkspaceDiff 2026-06-25-09:40:
+      // Workspace tasks have no singular worktree/branch; their changes live in per-sub-repo
+      // worktrees. Aggregate across them (repo-prefixed paths) and short-circuit BEFORE the single-repo
+      // logic, which would diff the non-git workspace root and return empty. renamed→modified is folded
+      // to match the /diff contract (which has no 'renamed' status; /file-diffs keeps it).
       if (isWorkspaceTask(task)) {
-        const workspaceFiles = await computeWorkspaceTaskFiles(task, scopedStore.getRootDir(), 10000);
+        const workspaceFiles = await computeWorkspaceTaskFiles(task, scopedStore.getRootDir(), DIFF_TIMEOUT_MS);
         const files = workspaceFiles.map((file) => ({
           path: file.path,
           status: file.status === "renamed" ? "modified" : file.status,
@@ -1118,7 +1166,7 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
       // shared with the per-sub-repo workspace aggregation. Renames fold to
       // "modified" here (the /diff shape has no "renamed" status), matching the
       // previous inline behaviour.
-      const detailed = await computeWorktreeDetailedFiles(task, cwd, 10000);
+      const detailed = await computeWorktreeDetailedFiles(task, cwd, DIFF_TIMEOUT_MS);
       const files = detailed.map((file) => ({
         path: file.path,
         status: file.status === "renamed" ? ("modified" as const) : file.status,
@@ -1151,10 +1199,12 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
         return;
       }
 
-      // Workspace tasks aggregate per-sub-repo patches (repo-prefixed paths);
-      // short-circuit before the single-repo logic that diffs the non-git root.
+      // FNXC:WorkspaceDiff 2026-06-25-09:40:
+      // Workspace tasks aggregate per-sub-repo patches (repo-prefixed paths); short-circuit before the
+      // single-repo logic that diffs the non-git root. Unlike /diff, /file-diffs preserves the
+      // 'renamed' status + oldPath. Empty-patch entries are dropped (parity with the single-repo path).
       if (isWorkspaceTask(task)) {
-        const workspaceFiles = (await computeWorkspaceTaskFiles(task, scopedStore.getRootDir(), 5000))
+        const workspaceFiles = (await computeWorkspaceTaskFiles(task, scopedStore.getRootDir(), FILE_DIFFS_TIMEOUT_MS))
           .filter((file) => file.patch)
           .map((file) => (file.oldPath
             ? { path: file.path, status: file.status, diff: file.patch, oldPath: file.oldPath }
@@ -1311,7 +1361,7 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
       // shared with the per-sub-repo workspace aggregation. Files with an empty
       // patch (e.g. pure renames with no content change) are dropped, matching
       // the previous inline behaviour.
-      const detailed = await computeWorktreeDetailedFiles(task, cwd, 5000);
+      const detailed = await computeWorktreeDetailedFiles(task, cwd, FILE_DIFFS_TIMEOUT_MS);
       const files = detailed
         .filter((file) => file.patch)
         .map((file) => (file.oldPath

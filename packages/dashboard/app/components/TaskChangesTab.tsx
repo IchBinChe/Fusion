@@ -20,6 +20,7 @@ interface TaskChangesTabProps {
   column?: ColumnId;
   mergeDetails?: MergeDetails;
   /**
+   * FNXC:Workspace 2026-06-25-09:40:
    * True for a workspace (multi-repo) task. Such a task has no singular
    * `worktree`/`branch` — its changes live in per-sub-repo worktrees, which the
    * backend `/tasks/:id/diff` now aggregates (repo-prefixed paths). Used to skip

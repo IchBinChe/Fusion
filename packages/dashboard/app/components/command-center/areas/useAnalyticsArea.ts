@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../../../api/legacy";
 import type { DateRange } from "../DateRangePicker";
 import { isInvalidRange, rangeQuery } from "./areaShared";
@@ -34,6 +34,9 @@ function withRangeQuery(endpoint: string, query: string): string {
  * - Polling is opt-in via `options.pollMs`; invalid ranges never schedule an
  *   interval, and the interval is cleaned up on unmount/range/endpoint changes.
  *
+ * FNXC:CommandCenterTokenLive 2026-06-25-09:06:
+ * Live token refresh is background revalidation after the first successful payload, not a loading-state replacement. Command Center must keep Overview and Tokens surfaces mounted while a 15s poll is in flight so increased token totals render without manual refresh or range toggles.
+ *
  * NOTE on the SWR-identity trap: this hook intentionally replaces `data`
  * identity on every successful fetch. Consumers MUST key any selection / sort /
  * drill-down reset effect on a DERIVED value (e.g. `rows.map(r => r.id).join()`),
@@ -45,6 +48,7 @@ export function useAnalyticsArea<T>(
   options: AnalyticsAreaOptions = {},
 ): AnalyticsAreaState<T> {
   const [data, setData] = useState<T | null>(null);
+  const dataRef = useRef<T | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,10 +61,14 @@ export function useAnalyticsArea<T>(
       setIsLoading(false);
       return;
     }
-    setIsLoading(true);
+    const hasFallbackData = dataRef.current !== null;
+    if (!hasFallbackData) {
+      setIsLoading(true);
+    }
     setError(null);
     try {
       const result = await api<T>(withRangeQuery(endpoint, query));
+      dataRef.current = result;
       setData(result);
     } catch (loadError: unknown) {
       setError(loadError instanceof Error ? loadError.message : "Failed to load analytics");

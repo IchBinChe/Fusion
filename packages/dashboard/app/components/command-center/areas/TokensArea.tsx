@@ -20,6 +20,10 @@ import { formatCost, formatCount } from "./areaShared";
 
 type SortKey = "key" | "totalTokens" | "cost";
 
+/*
+FNXC:CommandCenterTokenLive 2026-06-25-09:06:
+The Tokens detail area is the canonical token-usage live view. Polling must update totals, series bars, trends, and per-model rows in place while preserving controls such as granularity and sort state.
+*/
 const TOKENS_LIVE_REFRESH_MS = 15_000;
 const GRANULARITIES: TokenTimeGranularity[] = ["hour", "day", "week"];
 

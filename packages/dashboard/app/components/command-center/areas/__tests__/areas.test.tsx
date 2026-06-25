@@ -426,6 +426,78 @@ describe("useAnalyticsArea", () => {
     });
     expect(apiMock).not.toHaveBeenCalled();
   });
+
+  it("treats poll refreshes as background revalidation after data has loaded", async () => {
+    vi.useFakeTimers();
+    let resolvePoll: ((value: { ok: boolean; total: number }) => void) | null = null;
+    apiMock
+      .mockResolvedValueOnce({ ok: true, total: 1 })
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolvePoll = resolve;
+          }),
+      );
+
+    const { result } = renderHook(() =>
+      useAnalyticsArea<{ ok: boolean; total: number }>("/command-center/tokens", range7d, { pollMs: 1_000 }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.data?.total).toBe(1);
+    expect(result.current.isLoading).toBe(false);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+      await Promise.resolve();
+    });
+    expect(apiMock).toHaveBeenCalledTimes(2);
+    expect(resolvePoll).not.toBeNull();
+    expect(result.current.data?.total).toBe(1);
+    expect(result.current.isLoading).toBe(false);
+
+    await act(async () => {
+      resolvePoll?.({ ok: true, total: 2 });
+      await Promise.resolve();
+    });
+    expect(result.current.data?.total).toBe(2);
+  });
+
+  it("cleans up polling when a valid range becomes invalid and restarts after it becomes valid", async () => {
+    vi.useFakeTimers();
+    apiMock.mockResolvedValue({ ok: true });
+
+    const { rerender } = renderHook(
+      ({ range }) => useAnalyticsArea<{ ok: boolean }>("/command-center/tokens", range, { pollMs: 1_000 }),
+      { initialProps: { range: range7d } },
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(apiMock).toHaveBeenCalledTimes(1);
+
+    rerender({ range: customRange("2026-06-10", "2026-06-01") });
+    await act(async () => {
+      vi.advanceTimersByTime(2_000);
+      await Promise.resolve();
+    });
+    expect(apiMock).toHaveBeenCalledTimes(1);
+
+    rerender({ range: customRange("2026-06-01", "2026-06-10") });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(apiMock).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+      await Promise.resolve();
+    });
+    expect(apiMock).toHaveBeenCalledTimes(3);
+  });
 });
 
 describe("ActivityArea", () => {
@@ -660,12 +732,15 @@ describe("TokensArea", () => {
 
   it("polls the live token value while preserving rendered content", async () => {
     vi.useFakeTimers();
+    let resolvePoll: ((value: ReturnType<typeof tokenFixture>) => void) | null = null;
     apiMock
       .mockResolvedValueOnce(tokenFixture())
-      .mockResolvedValueOnce({
-        ...tokenFixture(),
-        totals: { ...tokenFixture().totals, totalTokens: 1700 },
-      });
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolvePoll = resolve;
+          }),
+      );
 
     render(<TokensArea range={range7d} />);
     await act(async () => {
@@ -673,14 +748,38 @@ describe("TokensArea", () => {
       await Promise.resolve();
     });
     expect(screen.getByTestId("cc-tokens-total").textContent).toContain("1,500");
+    expect(screen.getByLabelText("2026-06-09: 900")).toBeTruthy();
+    expect(screen.getByTestId("cc-tokens-row-gpt-4o").textContent).toContain("900");
 
     await act(async () => {
       vi.advanceTimersByTime(15_000);
       await Promise.resolve();
+    });
+    expect(resolvePoll).not.toBeNull();
+    expect(screen.queryByTestId("cc-area-tokens-loading")).toBeNull();
+    expect(screen.getByTestId("cc-tokens-total").textContent).toContain("1,500");
+    expect(screen.getByTestId("cc-token-series-chart")).toBeTruthy();
+
+    const updated = {
+      ...tokenFixture(1_900),
+      series: [
+        tokenFixture().series[0],
+        { ...tokenFixture().series[1], totalTokens: 1_300, inputTokens: 900, outputTokens: 400 },
+      ],
+      groups: [
+        { ...tokenFixture().groups[0], totalTokens: 1_100, inputTokens: 700, outputTokens: 300 },
+        { ...tokenFixture().groups[1], totalTokens: 800, inputTokens: 500, outputTokens: 200 },
+      ],
+    };
+    await act(async () => {
+      resolvePoll?.(updated);
+      await Promise.resolve();
       await Promise.resolve();
     });
-    expect(screen.getByTestId("cc-tokens-total").textContent).toContain("1,700");
-    expect(screen.getByTestId("cc-token-series-chart")).toBeTruthy();
+    expect(screen.getByTestId("cc-tokens-total").textContent).toContain("1,900");
+    expect(screen.getByLabelText("2026-06-09: 1,300")).toBeTruthy();
+    expect(screen.getByTestId("cc-tokens-row-gpt-4o").textContent).toContain("1,100");
+    expect(screen.getByTestId("cc-tokens-line")).toBeTruthy();
   });
 
   it("refetches when the date range changes", async () => {

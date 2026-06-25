@@ -534,11 +534,18 @@ describe("CommandCenter shell", () => {
     expect(liveMetricValue("command-center-live-tokens")).toBe("1,234,567,890");
   });
 
-  it("live-polls token totals for the Overview card and live strip", async () => {
+  it("live-polls token totals for the Overview card, live strip, and model charts", async () => {
     vi.useFakeTimers();
-    let tokenTotal = 1_500;
+    let resolvePoll: ((value: ReturnType<typeof tokenFixture>) => void) | null = null;
     apiMock.mockImplementation((path: string) => {
-      if (path.startsWith("/command-center/tokens")) return Promise.resolve(tokenFixture(tokenTotal));
+      if (path.startsWith("/command-center/tokens")) {
+        if (apiMock.mock.calls.filter(([calledPath]) => typeof calledPath === "string" && calledPath.startsWith("/command-center/tokens")).length === 1) {
+          return Promise.resolve(tokenFixture(1_500));
+        }
+        return new Promise((resolve) => {
+          resolvePoll = resolve;
+        });
+      }
       if (path.startsWith("/command-center/tools")) return Promise.resolve(toolsFixture());
       if (path.startsWith("/command-center/activity")) return Promise.resolve(activityFixture());
       if (path.startsWith("/command-center/github")) return Promise.resolve(githubFixture());
@@ -553,16 +560,78 @@ describe("CommandCenter shell", () => {
       await Promise.resolve();
     });
     expect(statValue("command-center-stat-tokens")).toBe("1,500");
+    expect(screen.getByTestId("command-center-live-tokens").textContent).toContain("1,500");
+    expect(within(screen.getByTestId("command-center-overview-chart-tokens")).getByText("900")).toBeTruthy();
 
-    tokenTotal = 1_700;
     await act(async () => {
       vi.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
+    expect(resolvePoll).not.toBeNull();
+    expect(screen.queryByTestId("command-center-overview-loading")).toBeNull();
+    expect(statValue("command-center-stat-tokens")).toBe("1,500");
+
+    await act(async () => {
+      resolvePoll?.({
+        ...tokenFixture(1_900),
+        groups: [
+          { ...tokenFixture().groups[0], totalTokens: 1_100, inputTokens: 700, outputTokens: 300 },
+          { ...tokenFixture().groups[1], totalTokens: 800, inputTokens: 500, outputTokens: 200 },
+        ],
+      });
       await Promise.resolve();
       await Promise.resolve();
     });
 
-    expect(statValue("command-center-stat-tokens")).toBe("1,700");
-    expect(screen.getByTestId("command-center-live-tokens").textContent).toContain("1,700");
+    expect(statValue("command-center-stat-tokens")).toBe("1,900");
+    expect(screen.getByTestId("command-center-live-tokens").textContent).toContain("1,900");
+    expect(within(screen.getByTestId("command-center-overview-chart-tokens")).getByText("1,100")).toBeTruthy();
+  });
+
+  it("updates mounted Overview token surfaces from empty token data to populated poll data", async () => {
+    vi.useFakeTimers();
+    let resolvePoll: ((value: ReturnType<typeof tokenFixture>) => void) | null = null;
+    apiMock.mockImplementation((path: string) => {
+      if (path.startsWith("/command-center/tokens")) {
+        if (apiMock.mock.calls.filter(([calledPath]) => typeof calledPath === "string" && calledPath.startsWith("/command-center/tokens")).length === 1) {
+          return Promise.resolve(tokenFixture(0));
+        }
+        return new Promise((resolve) => {
+          resolvePoll = resolve;
+        });
+      }
+      if (path.startsWith("/command-center/tools")) return Promise.resolve(toolsFixture(0));
+      if (path.startsWith("/command-center/activity")) return Promise.resolve(emptyActivityFixture());
+      if (path.startsWith("/command-center/github")) return Promise.resolve(githubFixture());
+      if (path.startsWith("/command-center/signals")) return Promise.resolve(signalsFixture(0));
+      if (path === "/command-center/live") return Promise.resolve(liveFixture([{ column: "in-progress", count: 0 }]));
+      return Promise.reject(new Error(`Unhandled api path: ${path}`));
+    });
+
+    render(<CommandCenter />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("command-center-empty")).toBeTruthy();
+    expect(screen.queryByTestId("command-center-stat-tokens")).toBeNull();
+
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
+    expect(resolvePoll).not.toBeNull();
+    expect(screen.getByTestId("command-center-empty")).toBeTruthy();
+
+    await act(async () => {
+      resolvePoll?.(tokenFixture(1_500));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(statValue("command-center-stat-tokens")).toBe("1,500");
+    expect(screen.getByTestId("command-center-live-tokens").textContent).toContain("1,500");
+    expect(screen.getByTestId("command-center-overview-chart-tokens")).toBeTruthy();
   });
 
   it("sources live tasks in progress from current column counts instead of funnel entered", async () => {

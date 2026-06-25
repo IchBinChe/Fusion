@@ -20,6 +20,9 @@ export interface AreaShellProps {
  * mirroring `ReliabilityView`'s state handling. Renders children only once
  * there is data to show; never crashes on an empty area (degrades to the
  * empty state instead).
+ *
+ * FNXC:CommandCenterTokenLive 2026-06-25-09:06:
+ * `isLoading` is a blocking initial-load signal. Background analytics polls with fallback data must keep children rendered so live token cards/charts do not disappear while revalidating.
  */
 export function AreaShell({ testId, isLoading, error, isEmpty, emptyMessage, children }: AreaShellProps) {
   const { t } = useTranslation("app");

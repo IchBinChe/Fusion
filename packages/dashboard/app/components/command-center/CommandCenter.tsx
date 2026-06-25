@@ -94,6 +94,10 @@ The Open signals card must be real project data, not a swallowed missing-route b
 FNXC:CommandCenter 2026-06-18-23:45:
 FN-6683 adds real Overview pie and line charts by reusing the already-fetched tokens and activity analytics. Keep the existing overview bars, sparkline, live strip, funnel, and loading/error/empty branches intact; no new endpoint is allowed for these additive affordances.
 */
+/*
+FNXC:CommandCenterTokenLive 2026-06-25-09:06:
+Overview token usage is a live surface: the stat card, live strip, and token-by-model charts must consume the latest successful `/command-center/tokens` poll without remounting the page or requiring a date-range nudge.
+*/
 const OVERVIEW_TOKEN_REFRESH_MS = 15_000;
 
 interface CommandCenterProps {

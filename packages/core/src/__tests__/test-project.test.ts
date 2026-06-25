@@ -44,7 +44,8 @@ describe("test-project fixture", () => {
     const configRaw = await readFile(join(fixture.rootDir, ".fusion", "config.json"), "utf-8");
     const config = JSON.parse(configRaw);
     expect(config.nextId).toBeUndefined();
-    expect(config.settings.taskPrefix).toBe("FN");
+    // FNXC:Workspace 2026-06-24-23:50: taskPrefix defaults to undefined (derived from project name at runtime, see commit 800f845e1). The "FN" fallback is applied in store.ts createTask, not persisted in config.json.
+    expect(config.settings.taskPrefix).toBeUndefined();
 
     const tasks = await fixture.store.listTasks();
     expect(tasks).toHaveLength(0);

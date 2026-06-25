@@ -2330,7 +2330,7 @@ The previous bespoke rules here hid the tab labels (icon-only) and used a crampe
   flex: 1;
   min-width: 0;
   background: var(--bg-input);
-  color: var(--text-primary);
+  color: var(--text);
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 2px 4px;

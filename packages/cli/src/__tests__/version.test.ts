@@ -30,7 +30,8 @@ describe("Changeset configuration", () => {
 
     expect(pkg.scripts.changeset).toBe("changeset");
     expect(pkg.scripts.version).toBe("changeset version");
-    expect(pkg.scripts["release:version"]).toBe("changeset version && node scripts/sync-workspace-version.mjs");
+    // FNXC:ReleasePipeline 2026-06-24-23:50: release:version now includes run-ci-distill.mjs to distill changelog entries after version bump.
+    expect(pkg.scripts["release:version"]).toBe("changeset version && node scripts/sync-workspace-version.mjs && node scripts/run-ci-distill.mjs");
   });
 
   it("should keep the workspace package.json version aligned with the published CLI package", () => {

@@ -54,6 +54,9 @@ These tools are **not** part of the user-invokable extension surface. They are i
 | `fn_send_message` | executor, step-session, heartbeat | Send inbox messages to agents/users | `to_id` (string), `content` (string), `type?` (`agent-to-agent` \| `agent-to-user`), `reply_to_message_id?` (string) |
 | `fn_read_messages` | executor, step-session, heartbeat | Read inbox messages | `unread_only?` (boolean), `limit?` (number) |
 | `fn_post_room_message` | heartbeat | Post a message to a chat room the agent is a member of | `roomId` (string), `content` (string), `replyToMessageId?` (string), `mentions?` (string[]) |
+| `fn_artifact_register` | triage, executor, heartbeat; chat/planning (explicit `task_id`) | Register an artifact (document, image, video, audio, or other) so other agents and tasks can discover it | `type` (string), `title` (string), `description?` (string), `mimeType?` (string), `uri?` (string), `content?` (string), `taskId?` (string); chat/planning also require `task_id` (string) |
+| `fn_artifact_list` | triage, executor, heartbeat; chat/planning (explicit `task_id`) | List registered artifacts across agents and tasks with filters for type, authorId, taskId, search, limit, and offset | `type?` (string), `authorId?` (string), `taskId?` (string), `search?` (string), `limit?` (number), `offset?` (number); chat/planning also require `task_id` (string) |
+| `fn_artifact_view` | triage, executor, heartbeat | View a registered artifact by id, including metadata and inline content or the uri/path reference for media artifacts | `id` (string) |
 
 ## Triage-only runtime tools (`triage.ts`)
 
@@ -75,6 +78,7 @@ Note: step-session execution (`step-session-executor.ts`) reuses executor coordi
 | `fn_task_done` | Mark task complete and optionally store summary | `summary?` (string) |
 | `fn_review_step` | Spawn step plan/code reviewer | `step` (number, 0-indexed; matches `### Step N:` in PROMPT.md), `type` (`plan` \| `code`), `step_name` (string), `baseline?` (string) |
 | `fn_spawn_agent` | Spawn child agent in separate worktree | `name` (string), `role` (enum), `task` (string) |
+| `fn_acquire_repo_worktree` | Acquire an isolated git worktree for a sub-repo in a workspace task (workspace mode only) | `repo` (string — must be one of the workspace's configured repos) |
 
 ## Merger-only runtime tools (`merger.ts`)
 

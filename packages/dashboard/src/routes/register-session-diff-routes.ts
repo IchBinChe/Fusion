@@ -1,6 +1,8 @@
 import { access } from "node:fs/promises";
+import { join } from "node:path";
 import type { Request, Router } from "express";
 import type { RunAuditEvent, RunAuditEventFilter } from "@fusion/core";
+import { isWorkspaceTask } from "@fusion/core";
 import { ApiError, notFound, rethrowAsApiError } from "../api-error.js";
 import { resolveDiffBase, runGitCommand } from "./resolve-diff-base.js";
 import { countPatchLines } from "./diff-counts.js";
@@ -372,6 +374,235 @@ async function collectDoneRangeFiles(range: string, rootDir: string): Promise<Ag
   return files;
 }
 
+interface WorktreeDetailedFile {
+  path: string;
+  status: "added" | "modified" | "deleted" | "renamed";
+  additions: number;
+  deletions: number;
+  patch: string;
+  oldPath?: string;
+}
+
+/*
+FNXC:WorkspaceDiff 2026-06-25-09:40:
+Per-call git timeouts for the task-diff endpoints. /diff allows a longer budget than /file-diffs
+because the former drives the primary Changes view; both are named so the difference is visible at a
+glance and the literals are not duplicated across call sites.
+*/
+const DIFF_TIMEOUT_MS = 10_000;
+const FILE_DIFFS_TIMEOUT_MS = 5_000;
+
+/*
+FNXC:WorkspaceDiff 2026-06-25-09:40:
+Bounded-concurrency mapper. A workspace task fans the diff out across N sub-repos × M files; running
+those git subprocesses strictly serially makes the Changes tab block for a long time on large
+multi-repo tasks (each per-file `git diff` is an independent subprocess). Run them concurrently with a
+cap so we get parallel wall-clock without spawning an unbounded herd of git processes. Output order is
+preserved (results indexed by input position) so the aggregated diff stays deterministic.
+*/
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const workerCount = Math.max(1, Math.min(limit, items.length));
+  const workers = Array.from({ length: workerCount }, async () => {
+    for (;;) {
+      const index = cursor++;
+      if (index >= items.length) return;
+      results[index] = await fn(items[index]!, index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+/**
+ * Build the per-file detailed diff for a SINGLE worktree: committed
+ * (diffBase..HEAD) + staged + unstaged, with the committed set scoped to the
+ * task's own commits. Untracked files are intentionally excluded — at review
+ * time they are almost always build artifacts/cache/logs.
+ *
+ * Extracted so the single-repo diff endpoints AND the per-sub-repo workspace
+ * aggregation (computeWorkspaceTaskFiles) share ONE implementation. The
+ * single-repo `/tasks/:id/diff` and `/tasks/:id/file-diffs` paths must remain
+ * behaviour-identical to their previous inline form.
+ */
+async function computeWorktreeDetailedFiles(
+  taskLike: { id: string; baseBranch?: string; baseCommitSha?: string },
+  cwd: string,
+  timeoutMs: number,
+): Promise<WorktreeDetailedFile[]> {
+  const diffBase = await resolveDiffBase(taskLike, cwd, "HEAD", undefined, { enableDisplayRecovery: true });
+
+  const fileMap = new Map<string, { statusCode: string; oldPath?: string }>();
+
+  if (diffBase) {
+    try {
+      const committedOutput = (await runGitCommand(["diff", "--name-status", "-M", `${diffBase}..HEAD`], cwd, timeoutMs)).trim();
+      for (const line of committedOutput.split("\n").filter(Boolean)) {
+        const parsed = parseNameStatusLine(line);
+        if (!parsed) continue;
+        fileMap.set(parsed.path, { statusCode: parsed.statusCode, oldPath: parsed.oldPath });
+      }
+    } catch {
+      // committed diff failed
+    }
+  }
+
+  await restrictActiveCommittedFilesToOwnTask(fileMap, {
+    taskId: taskLike.id,
+    diffBase,
+    worktreePath: cwd,
+    runGit: (args) => runGitCommand(args, cwd, timeoutMs),
+  });
+
+  try {
+    const stagedOutput = (await runGitCommand(["diff", "--cached", "--name-status", "-M"], cwd, timeoutMs)).trim();
+    for (const line of stagedOutput.split("\n").filter(Boolean)) {
+      const parsed = parseNameStatusLine(line);
+      if (!parsed || fileMap.has(parsed.path)) continue;
+      fileMap.set(parsed.path, { statusCode: parsed.statusCode, oldPath: parsed.oldPath });
+    }
+  } catch {
+    // staged diff failed
+  }
+
+  try {
+    const workingTreeOutput = (await runGitCommand(["diff", "--name-status", "-M"], cwd, timeoutMs)).trim();
+    for (const line of workingTreeOutput.split("\n").filter(Boolean)) {
+      const parsed = parseNameStatusLine(line);
+      if (!parsed || fileMap.has(parsed.path)) continue;
+      fileMap.set(parsed.path, { statusCode: parsed.statusCode, oldPath: parsed.oldPath });
+    }
+  } catch {
+    // working tree diff failed
+  }
+
+  /*
+  FNXC:WorkspaceDiff 2026-06-25-09:40:
+  The per-file `git diff` patch fetch is the dominant cost (one subprocess per changed file). Run it
+  with bounded concurrency instead of a serial await loop — independent files do not depend on each
+  other, so this collapses M serial git spawns to ~M/limit wall-clock. We deliberately do NOT skip the
+  patch for deleted files: /file-diffs filters out empty-patch entries and the patch supplies the
+  additions/deletions counts, so a delete needs its real patch to stay visible and counted. Status
+  uses the shared parseStatusCode helper (single source of truth for the A/D/R/M mapping).
+  */
+  const entries = Array.from(fileMap.entries()).filter(([filePath]) => Boolean(filePath));
+  const results = await mapWithConcurrency(entries, 8, async ([filePath, { statusCode, oldPath }]) => {
+    const status = parseStatusCode(statusCode);
+
+    let patch = "";
+    try {
+      patch = diffBase
+        ? await runGitCommand(["diff", diffBase, "--", filePath], cwd, timeoutMs)
+        : await runGitCommand(["diff", "HEAD", "--", filePath], cwd, timeoutMs);
+    } catch {
+      // ignore individual file errors
+    }
+
+    const { additions, deletions } = countPatchLines(patch);
+    return oldPath
+      ? { path: filePath, status, additions, deletions, patch, oldPath }
+      : { path: filePath, status, additions, deletions, patch };
+  });
+
+  return results;
+}
+
+/**
+ * Aggregate a workspace task's changed files across ALL acquired sub-repo
+ * worktrees. A workspace task has no singular `task.worktree`/`task.branch`
+ * (those are null by design); its per-repo state lives in
+ * `task.workspaceWorktrees`. Each sub-repo's diff is computed in its own live
+ * worktree (in-progress/in-review) or, when that worktree is gone (done tasks),
+ * from its landed range in the sub-repo root. Every file path is prefixed with
+ * the sub-repo key (e.g. `openvide/src/foo.ts`) so the Changes tab shows which
+ * sub-repo each file belongs to. A missing/unreadable sub-repo is skipped
+ * best-effort rather than failing the whole response.
+ */
+async function computeWorkspaceTaskFiles(
+  task: {
+    id: string;
+    baseBranch?: string;
+    workspaceWorktrees?: Record<string, { worktreePath: string; branch: string; baseCommitSha?: string; landedSha?: string }>;
+  },
+  rootDir: string,
+  timeoutMs: number,
+): Promise<WorktreeDetailedFile[]> {
+  const worktrees = task.workspaceWorktrees ?? {};
+
+  /*
+  FNXC:WorkspaceDiff 2026-06-25-09:40:
+  Resolve each sub-repo's diff CONCURRENTLY (bounded) rather than awaiting them one at a time: every
+  sub-repo's git work is independent, so a serial loop made the aggregate cost N×(per-repo) and could
+  block the response for a long time on a many-repo task. Keys are sorted first and mapped by position,
+  so the aggregated output stays in deterministic repo-sorted order regardless of completion order.
+  */
+  const repoRels = Object.keys(worktrees).sort();
+  const perRepo = await mapWithConcurrency(repoRels, 4, async (repoRel) => {
+    const entry = worktrees[repoRel];
+    if (!entry) return [] as WorktreeDetailedFile[];
+
+    let repoFiles: WorktreeDetailedFile[] = [];
+
+    // Prefer the live sub-repo worktree (in-progress / in-review). The access()
+    // probe is an optimistic fast-path skip; the try/catch below is the real guard.
+    let worktreeUsable = false;
+    if (entry.worktreePath) {
+      try {
+        await access(entry.worktreePath);
+        worktreeUsable = true;
+      } catch {
+        // worktree gone → fall through to the landed-range fallback
+      }
+    }
+    if (worktreeUsable) {
+      try {
+        repoFiles = await computeWorktreeDetailedFiles(
+          // Per-repo base: use the sub-repo's own captured fork point, with the
+          // workspace task's baseBranch stripped so resolveDiffBase uses the
+          // per-repo baseCommitSha rather than a shared workspace branch.
+          { id: task.id, baseBranch: undefined, baseCommitSha: entry.baseCommitSha },
+          entry.worktreePath,
+          timeoutMs,
+        );
+      } catch {
+        repoFiles = [];
+      }
+    }
+
+    // Fallback: landed range in the sub-repo root (a done task whose per-repo
+    // worktree was already cleaned up). Each sub-repo lands independently with
+    // its own baseCommitSha → landedSha.
+    // FNXC:WorkspaceDiff 2026-06-25-09:40: collectDoneRangeFiles returns AggregatedDoneTaskFile, which
+    // carries no oldPath, so a renamed file's rename-SOURCE is unavailable on this done fallback (the
+    // file still shows under its new path). The live-worktree path above does preserve oldPath.
+    if (repoFiles.length === 0 && entry.baseCommitSha && entry.landedSha) {
+      const repoRootDir = join(rootDir, repoRel);
+      try {
+        const rangeFiles = await collectDoneRangeFiles(`${entry.baseCommitSha}..${entry.landedSha}`, repoRootDir);
+        repoFiles = rangeFiles.map((file) => ({
+          path: file.path,
+          status: file.status,
+          additions: file.additions,
+          deletions: file.deletions,
+          patch: file.patch,
+        }));
+      } catch {
+        repoFiles = [];
+      }
+    }
+
+    // Prefix every path with the sub-repo key so the Changes tab shows which repo each file is in.
+    return repoFiles.map((file) => ({
+      ...file,
+      path: `${repoRel}/${file.path}`,
+      oldPath: file.oldPath ? `${repoRel}/${file.oldPath}` : undefined,
+    }));
+  });
+
+  return perRepo.flat();
+}
+
 function extractCommitShaCandidate(event: { target?: unknown; metadata?: unknown; payload?: unknown; newValue?: unknown }): string | undefined {
   if (typeof event.target === "string" && event.target.trim()) {
     return event.target.trim();
@@ -730,6 +961,31 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
         return;
       }
 
+      // FNXC:WorkspaceDiff 2026-06-25-09:40:
+      // Workspace tasks have no singular worktree/branch; their changes live in per-sub-repo
+      // worktrees. Aggregate across them (repo-prefixed paths) and short-circuit BEFORE the single-repo
+      // logic, which would diff the non-git workspace root and return empty. renamed→modified is folded
+      // to match the /diff contract (which has no 'renamed' status; /file-diffs keeps it).
+      if (isWorkspaceTask(task)) {
+        const workspaceFiles = await computeWorkspaceTaskFiles(task, scopedStore.getRootDir(), DIFF_TIMEOUT_MS);
+        const files = workspaceFiles.map((file) => ({
+          path: file.path,
+          status: file.status === "renamed" ? "modified" : file.status,
+          additions: file.additions,
+          deletions: file.deletions,
+          patch: file.patch,
+        }));
+        res.json({
+          files,
+          stats: {
+            filesChanged: files.length,
+            additions: files.reduce((sum, file) => sum + file.additions, 0),
+            deletions: files.reduce((sum, file) => sum + file.deletions, 0),
+          },
+        });
+        return;
+      }
+
       if (task.column === "done") {
         const mergeShaForBaseBoundary = await resolveDoneTaskMergeSha(task, scopedStore, { includeBaseCommitSha: true });
         const resolvedMergeSha = await resolveDoneTaskMergeSha(task, scopedStore);
@@ -906,85 +1162,18 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
       }
       const cwd = resolvedWorktree;
 
-      const diffBase = await resolveDiffBase(task, cwd, "HEAD", undefined, { enableDisplayRecovery: true });
-
-      // Only count files actually changed by the task: committed (base..HEAD)
-      // + staged + unstaged. Untracked files are intentionally excluded — at
-      // review time they're almost always build artifacts/cache/logs that
-      // weren't in .gitignore, not real task changes.
-      const fileMap = new Map<string, string>();
-
-      if (diffBase) {
-        try {
-          const committedOutput = (await runGitCommand(["diff", "--name-status", "-M", `${diffBase}..HEAD`], cwd, 10000)).trim();
-          for (const line of committedOutput.split("\n").filter(Boolean)) {
-            const parsed = parseNameStatusLine(line);
-            if (!parsed) continue;
-            fileMap.set(parsed.path, parsed.statusCode);
-          }
-        } catch {
-          // committed diff failed
-        }
-      }
-
-      await restrictActiveCommittedFilesToOwnTask(fileMap, {
-        taskId: task.id,
-        diffBase,
-        worktreePath: cwd,
-        runGit: (args) => runGitCommand(args, cwd, 10000),
-      });
-
-      try {
-        const stagedOutput = (await runGitCommand(["diff", "--cached", "--name-status", "-M"], cwd, 10000)).trim();
-        for (const line of stagedOutput.split("\n").filter(Boolean)) {
-          const parsed = parseNameStatusLine(line);
-          if (!parsed || fileMap.has(parsed.path)) continue;
-          fileMap.set(parsed.path, parsed.statusCode);
-        }
-      } catch {
-        // staged diff failed
-      }
-
-      try {
-        const workingTreeOutput = (await runGitCommand(["diff", "--name-status", "-M"], cwd, 10000)).trim();
-        for (const line of workingTreeOutput.split("\n").filter(Boolean)) {
-          const parsed = parseNameStatusLine(line);
-          if (!parsed || fileMap.has(parsed.path)) continue;
-          fileMap.set(parsed.path, parsed.statusCode);
-        }
-      } catch {
-        // working tree diff failed
-      }
-
-      const files: Array<{
-        path: string;
-        status: "added" | "modified" | "deleted";
-        additions: number;
-        deletions: number;
-        patch: string;
-      }> = [];
-
-      for (const [filePath, statusCode] of fileMap) {
-        if (!filePath) continue;
-
-        let status: "added" | "modified" | "deleted";
-        if (statusCode.startsWith("A")) status = "added";
-        else if (statusCode.startsWith("D")) status = "deleted";
-        else status = "modified";
-
-        let patch = "";
-        try {
-          patch = diffBase
-            ? await runGitCommand(["diff", diffBase, "--", filePath], cwd, 10000)
-            : await runGitCommand(["diff", "HEAD", "--", filePath], cwd, 10000);
-        } catch {
-          // ignore individual file errors
-        }
-
-        const { additions, deletions } = countPatchLines(patch);
-
-        files.push({ path: filePath, status, additions, deletions, patch });
-      }
+      // Single-repo detailed diff (committed base..HEAD + staged + unstaged),
+      // shared with the per-sub-repo workspace aggregation. Renames fold to
+      // "modified" here (the /diff shape has no "renamed" status), matching the
+      // previous inline behaviour.
+      const detailed = await computeWorktreeDetailedFiles(task, cwd, DIFF_TIMEOUT_MS);
+      const files = detailed.map((file) => ({
+        path: file.path,
+        status: file.status === "renamed" ? ("modified" as const) : file.status,
+        additions: file.additions,
+        deletions: file.deletions,
+        patch: file.patch,
+      }));
 
       const stats = {
         filesChanged: files.length,
@@ -1007,6 +1196,20 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
       const task = await scopedStore.getTask(req.params.id);
       if (!task) {
         res.status(404).json({ error: "Task not found" });
+        return;
+      }
+
+      // FNXC:WorkspaceDiff 2026-06-25-09:40:
+      // Workspace tasks aggregate per-sub-repo patches (repo-prefixed paths); short-circuit before the
+      // single-repo logic that diffs the non-git root. Unlike /diff, /file-diffs preserves the
+      // 'renamed' status + oldPath. Empty-patch entries are dropped (parity with the single-repo path).
+      if (isWorkspaceTask(task)) {
+        const workspaceFiles = (await computeWorkspaceTaskFiles(task, scopedStore.getRootDir(), FILE_DIFFS_TIMEOUT_MS))
+          .filter((file) => file.patch)
+          .map((file) => (file.oldPath
+            ? { path: file.path, status: file.status, diff: file.patch, oldPath: file.oldPath }
+            : { path: file.path, status: file.status, diff: file.patch }));
+        res.json(workspaceFiles);
         return;
       }
 
@@ -1153,83 +1356,17 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
       }
 
       const cwd = worktree;
-      const diffBase = await resolveDiffBase(task, cwd, "HEAD", undefined, { enableDisplayRecovery: true });
 
-      // Only files actually changed by the task: committed + staged + unstaged.
-      // Untracked files (build artifacts, cache, logs) are intentionally
-      // excluded so the count matches "ACTUAL files changed by the task".
-      const fileMap = new Map<string, { statusCode: string; oldPath?: string }>();
-
-      if (diffBase) {
-        try {
-          const committedOutput = (await runGitCommand(["diff", "--name-status", "-M", `${diffBase}..HEAD`], cwd, 5000)).trim();
-          for (const line of committedOutput.split("\n").filter(Boolean)) {
-            const parsed = parseNameStatusLine(line);
-            if (!parsed) continue;
-            fileMap.set(parsed.path, { statusCode: parsed.statusCode, oldPath: parsed.oldPath });
-          }
-        } catch {
-          // continue with working-tree-only changes
-        }
-      }
-
-      await restrictActiveCommittedFilesToOwnTask(fileMap, {
-        taskId: task.id,
-        diffBase,
-        worktreePath: cwd,
-        runGit: (args) => runGitCommand(args, cwd, 5000),
-      });
-
-      try {
-        const stagedOutput = (await runGitCommand(["diff", "--cached", "--name-status", "-M"], cwd, 5000)).trim();
-        for (const line of stagedOutput.split("\n").filter(Boolean)) {
-          const parsed = parseNameStatusLine(line);
-          if (!parsed || fileMap.has(parsed.path)) continue;
-          fileMap.set(parsed.path, { statusCode: parsed.statusCode, oldPath: parsed.oldPath });
-        }
-      } catch {
-        // ignore staged diff failures
-      }
-
-      try {
-        const workingTreeOutput = (await runGitCommand(["diff", "--name-status", "-M"], cwd, 5000)).trim();
-        for (const line of workingTreeOutput.split("\n").filter(Boolean)) {
-          const parsed = parseNameStatusLine(line);
-          if (!parsed || fileMap.has(parsed.path)) continue;
-          fileMap.set(parsed.path, { statusCode: parsed.statusCode, oldPath: parsed.oldPath });
-        }
-      } catch {
-        // ignore unstaged diff failures
-      }
-
-      const files = [];
-
-      for (const [filePath, { statusCode, oldPath }] of fileMap.entries()) {
-        let status: "added" | "modified" | "deleted" | "renamed" = "modified";
-
-        if (statusCode.startsWith("A")) {
-          status = "added";
-        } else if (statusCode.startsWith("D")) {
-          status = "deleted";
-        } else if (statusCode.startsWith("R")) {
-          status = "renamed";
-        }
-
-        let diff = "";
-        try {
-          diff = diffBase
-            ? await runGitCommand(["diff", diffBase, "--", filePath], cwd, 5000)
-            : await runGitCommand(["diff", "HEAD", "--", filePath], cwd, 5000);
-        } catch {
-          diff = "";
-        }
-
-        if (!diff) {
-          continue;
-        }
-
-        files.push(oldPath ? { path: filePath, status, diff, oldPath } : { path: filePath, status, diff });
-      }
+      // Single-repo per-file patches (committed base..HEAD + staged + unstaged),
+      // shared with the per-sub-repo workspace aggregation. Files with an empty
+      // patch (e.g. pure renames with no content change) are dropped, matching
+      // the previous inline behaviour.
+      const detailed = await computeWorktreeDetailedFiles(task, cwd, FILE_DIFFS_TIMEOUT_MS);
+      const files = detailed
+        .filter((file) => file.patch)
+        .map((file) => (file.oldPath
+          ? { path: file.path, status: file.status, diff: file.patch, oldPath: file.oldPath }
+          : { path: file.path, status: file.status, diff: file.patch }));
 
       fileDiffsCache.set(task.id, {
         files,

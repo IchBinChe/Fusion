@@ -20,6 +20,15 @@ interface TaskChangesTabProps {
   column?: ColumnId;
   mergeDetails?: MergeDetails;
   /**
+   * FNXC:Workspace 2026-06-25-09:40:
+   * True for a workspace (multi-repo) task. Such a task has no singular
+   * `worktree`/`branch` — its changes live in per-sub-repo worktrees, which the
+   * backend `/tasks/:id/diff` now aggregates (repo-prefixed paths). Used to skip
+   * the single-repo "No worktree available" empty state, which would otherwise
+   * fire on every workspace task because `worktree` is undefined.
+   */
+  isWorkspace?: boolean;
+  /**
    * Files modified by the task during execution, captured from the worktree.
    * Used as a last-resort fallback when the live worktree diff is empty or the
    * recorded `mergeDetails.commitSha` resolves to an empty git commit (which
@@ -127,7 +136,7 @@ interface NormalizedFile {
  * modifiedFiles view instead of showing a hard error. This preserves the prior
  * graceful behavior while allowing FN-4563/FN-4576 lineage-backed parity.
  */
-export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetails, modifiedFiles }: TaskChangesTabProps) {
+export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetails, modifiedFiles, isWorkspace }: TaskChangesTabProps) {
   const { t } = useTranslation("app");
   const [files, setFiles] = useState<NormalizedFile[]>([]);
   const [stats, setStats] = useState<{ filesChanged: number; additions: number; deletions: number }>({ filesChanged: 0, additions: 0, deletions: 0 });
@@ -309,7 +318,10 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
   }
 
   // Non-done task without a worktree → only show fallback state when branch-fallback diff is empty.
-  if (!isDone && !worktree && files.length === 0) {
+  // A workspace task legitimately has no singular `worktree` (its changes come from the per-sub-repo
+  // aggregation), so it must NOT hit this "No worktree available" branch — fall through to the
+  // standard empty/populated rendering below.
+  if (!isDone && !worktree && !isWorkspace && files.length === 0) {
     if (modifiedFiles && modifiedFiles.length > 0) {
       return renderModifiedFilesFallback(modifiedFiles, false, undefined, "execution", t);
     }

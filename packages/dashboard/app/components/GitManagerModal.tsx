@@ -267,6 +267,34 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
   const [workspaceRepos, setWorkspaceRepos] = useState<string[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
   const gitRepoPath = selectedRepo ?? undefined;
+  /*
+  FNXC:Workspace 2026-06-25-00:10:
+  In a workspace the project root is a non-git browse-only directory. On modal open the section fetch
+  fires immediately with no repoPath (selectedRepo not yet resolved), so a git status against the root
+  returns "Not a git repository" and toasts a spurious error on every open — even though the repo
+  dropdown renders correctly. fetchWorkspaceRepos resolves a tick later and re-fetches against a real
+  sub-repo. We track detection status in a REF (read inside the async fetch catch without a stale
+  closure or extra render dep) so we can SUPPRESS that one benign root-race error: a "Not a git
+  repository" with no repoPath while detection is unresolved OR has detected a workspace. A genuine
+  broken non-workspace project (resolved, repos empty) still surfaces the error normally.
+  */
+  const workspaceDetectionRef = useRef<{ resolved: boolean; isWorkspace: boolean }>({ resolved: false, isWorkspace: false });
+  // Tracks whether the most recent fetch suppressed a root-race error, and a state tick that flips
+  // when detection resolves — together they let a genuinely-broken NON-workspace project re-surface
+  // the error (a single re-fetch) after detection settles, without adding a redundant fetch to the
+  // common non-workspace-OK path (where the first fetch already succeeded).
+  const suppressedRootRaceRef = useRef(false);
+  const [detectionResolved, setDetectionResolved] = useState(false);
+  /*
+  FNXC:Workspace 2026-06-25-09:40 (detection generation guard):
+  A rapid projectId switch (or close→reopen) can leave a previous project's fetchWorkspaceRepos
+  promise in flight. When it resolves it must NOT overwrite the CURRENT project's detection verdict —
+  doing so could suppress a real error for the new project or mis-fire the re-surface effect. Each
+  detection run is stamped with a monotonically increasing generation; only the latest run is allowed
+  to mutate detection state, and the effect cleanup bumps the generation so a superseded/unmounted run
+  is abandoned.
+  */
+  const detectionGenerationRef = useRef(0);
 
   // ── Changes state
   const [fileChanges, setFileChanges] = useState<GitFileChange[]>([]);
@@ -322,6 +350,7 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
     if (!isOpen) return;
     setLoading(true);
     setSectionError(null);
+    suppressedRootRaceRef.current = false;
     try {
       switch (activeSection) {
         case "status": {
@@ -375,8 +404,30 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
         }
       }
     } catch (err) {
-      setSectionError(getErrorMessage(err) || t("git.failedToFetchData", "Failed to fetch git data"));
-      addToast(getErrorMessage(err) || t("git.failedToFetchData", "Failed to fetch git data"), "error");
+      const message = getErrorMessage(err) || t("git.failedToFetchData", "Failed to fetch git data");
+      /*
+      FNXC:Workspace 2026-06-25-00:10:
+      Suppress the benign workspace-root race: on open, the first fetch fires before selectedRepo
+      resolves (no repoPath → the non-git browse root), which fails "Not a git repository". A workspace
+      re-fetches against a real sub-repo a tick later. Only swallow this when there is NO repoPath AND
+      detection is still pending OR has confirmed a workspace; a resolved non-workspace project surfaces
+      a genuine "Not a git repository" normally.
+      */
+      const detection = workspaceDetectionRef.current;
+      const isWorkspaceRootRace =
+        gitRepoPath === undefined &&
+        /not a git repository/i.test(message) &&
+        (!detection.resolved || detection.isWorkspace);
+      if (isWorkspaceRootRace) {
+        // Benign: defer reporting. A workspace re-fetches against its sub-repo (selectedRepo change);
+        // a non-workspace re-fetches once via the detection-resolved effect below, surfacing any real
+        // error then.
+        suppressedRootRaceRef.current = true;
+        setSectionError(null);
+      } else {
+        setSectionError(message);
+        addToast(message, "error");
+      }
     } finally {
       setLoading(false);
     }
@@ -909,19 +960,45 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
   selectedRepo in the effect deps, preserving the projectId-keyed intent.
   */
   useEffect(() => {
+    // Reset detection on project switch so a stale verdict can't suppress a real error. The
+    // generation guard (see ref note above) makes a superseded in-flight resolution a no-op.
+    const gen = ++detectionGenerationRef.current;
+    workspaceDetectionRef.current = { resolved: false, isWorkspace: false };
+    suppressedRootRaceRef.current = false;
+    setDetectionResolved(false);
     fetchWorkspaceRepos(projectId)
       .then((result) => {
+        if (gen !== detectionGenerationRef.current) return;
         const repos = result.repos;
+        workspaceDetectionRef.current = { resolved: true, isWorkspace: repos.length > 0 };
         setWorkspaceRepos(repos);
         setSelectedRepo((current) =>
           current && repos.includes(current) ? current : (repos[0] ?? null),
         );
       })
       .catch(() => {
+        if (gen !== detectionGenerationRef.current) return;
+        workspaceDetectionRef.current = { resolved: true, isWorkspace: false };
         setWorkspaceRepos([]);
         setSelectedRepo(null);
+      })
+      .finally(() => {
+        if (gen !== detectionGenerationRef.current) return;
+        setDetectionResolved(true);
       });
+    // Bump the generation on cleanup so an unmounted/superseded run's late resolution is abandoned.
+    return () => { detectionGenerationRef.current++; };
   }, [projectId]); // keyed on projectId; selectedRepo is revalidated via the functional updater
+
+  // FNXC:Workspace 2026-06-25-00:10: once detection settles, re-surface a suppressed root-race error
+  // for a NON-workspace project (a genuinely broken/non-git repo). A workspace already re-fetches via
+  // the selectedRepo change, so we skip it here to avoid a redundant second fetch.
+  useEffect(() => {
+    if (isOpen && detectionResolved && suppressedRootRaceRef.current && !workspaceDetectionRef.current.isWorkspace) {
+      suppressedRootRaceRef.current = false;
+      void fetchSectionData();
+    }
+  }, [isOpen, detectionResolved, fetchSectionData]);
 
   const handleSyncIntegrationTip = useCallback(async () => {
     if (!status?.integrationBranch || status.isOnIntegrationBranch === false) return;

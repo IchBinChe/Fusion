@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, lazy, Suspense } from "react";
+import { useCallback, useEffect, useRef, useState, lazy, Suspense } from "react";
 import type { ProjectInfo } from "../api";
 import type { ColorTheme, Column, MergeResult, Task, TaskCreateInput, ThemeMode, GithubIssueAction } from "@fusion/core";
 import type { UseProjectActionsResult } from "../hooks/useProjectActions";
@@ -117,6 +117,7 @@ export function AppModals({
 }: AppModalsProps) {
   const { pushNav, removeNav } = useNavigationHistoryContext();
   const [firstCreatedTask, setFirstCreatedTask] = useState<Task | null>(null);
+  const detailNavCloseRef = useRef<(() => void) | null>(null);
   const detailTask = modalManager.detailTask
     ? (() => {
         const liveTask = tasks.find((task) => task.id === modalManager.detailTask?.id);
@@ -140,10 +141,20 @@ export function AppModals({
   // Use the override handler if provided, otherwise fall back to modalManager.closeSettings
   const handleSettingsClose = onSettingsClose ?? modalManager.closeSettings;
 
-  const closeDetailWithNav = useCallback(() => {
-    removeNav(modalManager.closeDetailTask);
+  /*
+  FNXC:TaskDetailBack 2026-06-25-00:00:
+  Modal task detail uses the same idempotent close path for explicit Close and browser/Android Back so deep-link URL cleanup is not skipped during popstate. Each open records the pushed history callback because nested task-detail links can create multiple detail entries with otherwise identical close behavior.
+  */
+  const closeDetailFromHistory = useCallback(() => {
+    modalManager.closeDetailTask();
     deepLink.handleDetailClose();
-  }, [deepLink, modalManager.closeDetailTask, removeNav]);
+    detailNavCloseRef.current = null;
+  }, [deepLink, modalManager]);
+
+  const closeDetailWithNav = useCallback(() => {
+    removeNav(detailNavCloseRef.current ?? closeDetailFromHistory);
+    closeDetailFromHistory();
+  }, [closeDetailFromHistory, removeNav]);
 
   const closeGroupWithNav = useCallback(() => {
     removeNav(modalManager.closeGroupModal);
@@ -234,9 +245,17 @@ export function AppModals({
       tab?: Parameters<typeof modalManager.openDetailTask>[1],
     ) => {
       modalManager.openDetailTask(task, tab);
-      pushNav({ type: "modal", close: modalManager.closeDetailTask });
+      const closeFromHistory = () => {
+        modalManager.closeDetailTask();
+        deepLink.handleDetailClose();
+        if (detailNavCloseRef.current === closeFromHistory) {
+          detailNavCloseRef.current = null;
+        }
+      };
+      detailNavCloseRef.current = closeFromHistory;
+      pushNav({ type: "modal", close: closeFromHistory });
     },
-    [modalManager, pushNav],
+    [deepLink, modalManager, pushNav],
   );
 
   const openGroupModalWithNav = useCallback((groupId: string) => {

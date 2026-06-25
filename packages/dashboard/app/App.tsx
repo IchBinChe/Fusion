@@ -377,6 +377,7 @@ function AppInner() {
   */
   const { task: mainPanelDetailTask, initialTab: mainPanelDetailInitialTab, setTask: setMainPanelDetailTask, setInitialTab: setMainPanelDetailInitialTab } = useMainPanelTaskDetail();
   const { capture: captureCurrentBoardScrollSnapshot, requestRestore } = useBoardScrollRestore(taskView);
+  const mainPanelDetailNavRevertRef = useRef<(() => void) | null>(null);
   /*
   FNXC:FloatingWindow 2026-06-22-20:45:
   Open popped-out task-detail windows. Each entry is a task snapshot rendered inside its own movable, resizable, non-blocking FloatingWindow. Several can be open at once and coexist with the right-dock pop-out and terminal (all click-through overlays). Snapshots survive a tasks revalidation; rendering prefers the live row by id and falls back to the snapshot. Pop-out dedupes by task id — re-popping an already-open task is a no-op (its window stays; focus-to-front in FloatingWindow handles re-raising on click).
@@ -806,21 +807,59 @@ function AppInner() {
   /*
   FNXC:Navigation 2026-06-22-00:00:
   Board card clicks open task detail as a full main-content view that replaces the board (design: "Full main panel (replaces board)"), instead of the TaskDetailModal overlay. We store a snapshot of the clicked task and navigate to the registered `task-detail` view; renderMainContent renders TaskDetailContent embedded with a Back-to-board button. Only the Board uses this handler — list-view split-detail, right-dock cards, and other openDetail callers keep the modal behavior.
+
+  FNXC:TaskDetailBack 2026-06-25-00:00:
+  Browser and Android Back must close the currently viewed full-panel task detail before leaving the prior dashboard view. The history entry owns an idempotent revert callback that clears stale snapshot state for board/list origins or restores the previous task snapshot for nested task-detail links, and explicit Back-to-board consumes that same entry without pushing a contradictory view entry during popstate.
   */
   const openTaskDetailInMainPanel = useCallback((task: Task | TaskDetail, initialTab: DetailTaskTab = "chat") => {
-    captureCurrentBoardScrollSnapshot();
+    const previousView = taskView;
+    const previousDetailTask = mainPanelDetailTask;
+    const previousDetailTab = mainPanelDetailInitialTab;
+
+    if (previousView === "task-detail" && previousDetailTask?.id === task.id && previousDetailTab === initialTab) {
+      setMainPanelDetailTask(task);
+      return;
+    }
+
+    if (previousView !== "task-detail") {
+      captureCurrentBoardScrollSnapshot();
+    }
+
+    const revertMainPanelDetail = () => {
+      if (previousView === "task-detail" && previousDetailTask) {
+        setMainPanelDetailTask(previousDetailTask);
+        setMainPanelDetailInitialTab(previousDetailTab);
+        handleChangeTaskView("task-detail");
+        mainPanelDetailNavRevertRef.current = null;
+        return;
+      }
+
+      requestRestore();
+      setMainPanelDetailTask(null);
+      setMainPanelDetailInitialTab("chat");
+      handleChangeTaskView(previousView);
+      mainPanelDetailNavRevertRef.current = null;
+    };
+
     setMainPanelDetailTask(task);
     setMainPanelDetailInitialTab(initialTab);
-    handleTaskViewChange("task-detail");
-  }, [captureCurrentBoardScrollSnapshot, handleTaskViewChange]);
+    handleChangeTaskView("task-detail");
+    mainPanelDetailNavRevertRef.current = revertMainPanelDetail;
+    pushNav({ type: "view", revert: revertMainPanelDetail });
+  }, [captureCurrentBoardScrollSnapshot, handleChangeTaskView, mainPanelDetailInitialTab, mainPanelDetailTask, pushNav, requestRestore, taskView]);
 
   // FNXC:Navigation 2026-06-22-00:00: Leaving task-detail clears the snapshot so a stale task never lingers if the view is reopened empty.
   const closeTaskDetailMainPanel = useCallback(() => {
+    const revert = mainPanelDetailNavRevertRef.current;
+    if (revert) {
+      removeNav(revert);
+      mainPanelDetailNavRevertRef.current = null;
+    }
     requestRestore();
     setMainPanelDetailTask(null);
     setMainPanelDetailInitialTab("chat");
-    handleTaskViewChange("board");
-  }, [handleTaskViewChange]);
+    handleChangeTaskView("board");
+  }, [handleChangeTaskView, removeNav, requestRestore]);
 
   const handleOpenDetailWithTab = useCallback((task: Task | TaskDetail, initialTab: "changes" | "retries" | "workflow") => {
     if (initialTab === "changes") {
@@ -1205,7 +1244,6 @@ function AppInner() {
     mainPanelDetailInitialTab,
     closeTaskDetailMainPanel,
     setMainPanelDetailTask,
-    setMainPanelDetailInitialTab,
     mergeTask,
     resetTask,
     duplicateTask,

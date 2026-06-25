@@ -198,7 +198,6 @@ export interface MainContentProps {
   mainPanelDetailInitialTab: DetailTaskTab;
   closeTaskDetailMainPanel: () => void;
   setMainPanelDetailTask: Dispatch<SetStateAction<Task | TaskDetail | null>>;
-  setMainPanelDetailInitialTab: (tab: DetailTaskTab) => void;
   mergeTask: (id: string) => Promise<MergeResult>;
   resetTask: (id: string) => Promise<Task>;
   duplicateTask: (id: string) => Promise<Task>;

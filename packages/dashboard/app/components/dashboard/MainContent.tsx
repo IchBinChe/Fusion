@@ -143,7 +143,6 @@ export function MainContent({
   mainPanelDetailInitialTab,
   closeTaskDetailMainPanel,
   setMainPanelDetailTask,
-  setMainPanelDetailInitialTab,
   mergeTask,
   resetTask,
   duplicateTask,
@@ -722,10 +721,7 @@ export function MainContent({
               onBackToBoard={closeTaskDetailMainPanel}
               /* FNXC:FloatingWindow 2026-06-22-21:10: Popping out from the board's full-panel detail also returns the main panel to the board, so the board (not the emptied detail) sits behind the floating window. */
               onPopOut={(task) => { popOutTaskDetail(task); closeTaskDetailMainPanel(); }}
-              onOpenDetail={(value) => {
-                setMainPanelDetailTask(value);
-                setMainPanelDetailInitialTab("chat");
-              }}
+              onOpenDetail={(value) => openTaskDetailInMainPanel(value, "chat")}
               onMoveTask={moveTask}
               onDeleteTask={deleteTask}
               onMergeTask={mergeTask}

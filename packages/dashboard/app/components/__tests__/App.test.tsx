@@ -292,6 +292,13 @@ vi.mock("../../components/TaskDetailModal", () => ({
       </div>
     </div>
   ),
+  TaskDetailContent: ({ task, onBackToBoard, onOpenDetail }: { task: { id: string; title?: string }; onBackToBoard?: () => void; onOpenDetail?: (task: { id: string; title?: string }) => void }) => (
+    <section data-testid="main-panel-task-detail">
+      <button type="button" onClick={onBackToBoard}>Back to board</button>
+      <h2>{task.title ?? task.id}</h2>
+      <button type="button" onClick={() => onOpenDetail?.({ id: "FN-6965", title: "Nested task" })}>Open nested task</button>
+    </section>
+  ),
 }));
 
 vi.mock("../../components/GitHubImportModal", () => ({
@@ -1703,6 +1710,89 @@ describe("App deep link handling", () => {
     // We directly trigger handleDetailOpen by finding a task card
     // For simplicity, verify replaceState hasn't been called yet
     expect(window.history.replaceState).not.toHaveBeenCalled();
+  });
+
+  it("closes board-opened main-panel task detail on one browser back", async () => {
+    const boardTask = { id: "FN-6964", title: "Back nav task", description: "x", status: "todo", column: "todo", dependencies: [], steps: [], currentStep: 0, log: [], createdAt: "", updatedAt: "" };
+    mockUseTasks.mockImplementation(() => ({
+      tasks: [boardTask],
+      isStale: false,
+      createTask: mockCreateTask,
+      moveTask: vi.fn(),
+      pauseTask: vi.fn(),
+      unpauseTask: vi.fn(),
+      deleteTask: vi.fn(),
+      mergeTask: vi.fn(),
+      retryTask: vi.fn(),
+      resetTask: vi.fn(),
+      updateTask: vi.fn(),
+      duplicateTask: vi.fn(),
+      archiveTask: vi.fn(),
+      unarchiveTask: vi.fn(),
+      archiveAllDone: vi.fn(),
+      loadArchivedTasks: vi.fn(),
+      refreshTasks: vi.fn(),
+      ingestCreatedTasks: vi.fn(),
+      lastFetchTimeMs: Date.now(),
+    }));
+
+    render(<App />);
+    await waitForAppShell();
+
+    fireEvent.click(screen.getByText("Back nav task"));
+    expect(await screen.findByTestId("main-panel-task-detail")).toBeTruthy();
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: { navIndex: 0 } }));
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("main-panel-task-detail")).toBeNull();
+      expect(screen.getByText("Back nav task")).toBeTruthy();
+    });
+  });
+
+  it("restores the previous main-panel task detail on nested detail browser back", async () => {
+    const boardTask = { id: "FN-6964", title: "Back nav task", description: "x", status: "todo", column: "todo", dependencies: [], steps: [], currentStep: 0, log: [], createdAt: "", updatedAt: "" };
+    mockUseTasks.mockImplementation(() => ({
+      tasks: [boardTask],
+      isStale: false,
+      createTask: mockCreateTask,
+      moveTask: vi.fn(),
+      pauseTask: vi.fn(),
+      unpauseTask: vi.fn(),
+      deleteTask: vi.fn(),
+      mergeTask: vi.fn(),
+      retryTask: vi.fn(),
+      resetTask: vi.fn(),
+      updateTask: vi.fn(),
+      duplicateTask: vi.fn(),
+      archiveTask: vi.fn(),
+      unarchiveTask: vi.fn(),
+      archiveAllDone: vi.fn(),
+      loadArchivedTasks: vi.fn(),
+      refreshTasks: vi.fn(),
+      ingestCreatedTasks: vi.fn(),
+      lastFetchTimeMs: Date.now(),
+    }));
+
+    render(<App />);
+    await waitForAppShell();
+
+    fireEvent.click(screen.getByText("Back nav task"));
+    expect(await screen.findByText("Open nested task")).toBeTruthy();
+    fireEvent.click(screen.getByText("Open nested task"));
+    expect(await screen.findByText("Nested task")).toBeTruthy();
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: { navIndex: 1 } }));
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByText("Nested task")).toBeNull();
+      expect(screen.getByTestId("main-panel-task-detail")).toBeTruthy();
+      expect(screen.getByText("Back nav task")).toBeTruthy();
+    });
   });
 
   it("does not reopen deep-linked task after dismissal and re-render", async () => {

@@ -542,12 +542,14 @@ describe("AppModals", () => {
       settings: mockSettings,
     };
 
-    it("pushes history for activity-log open and closes on popstate", async () => {
+    it("pushes history for activity-log open and closes with deep-link cleanup on popstate", async () => {
       const pushStateSpy = vi.spyOn(window.history, "pushState");
       const closeDetailTask = vi.fn();
+      const handleDetailClose = vi.fn();
       render(
         <AppModals
           {...commonProps}
+          deepLink={{ handleDetailClose }}
           modalManager={{ ...mockModalManager, activityLogOpen: true, closeDetailTask }}
         />,
       );
@@ -557,6 +559,7 @@ describe("AppModals", () => {
 
       window.dispatchEvent(new PopStateEvent("popstate", { state: { navIndex: 0 } }));
       await waitFor(() => expect(closeDetailTask).toHaveBeenCalledTimes(1));
+      expect(handleDetailClose).toHaveBeenCalledTimes(1);
     });
 
     it("pushes history for onboarding view-task open and closes on popstate", async () => {

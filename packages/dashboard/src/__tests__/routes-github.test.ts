@@ -2557,7 +2557,7 @@ describe("PR conflict refresh + reclaim routes", () => {
       commentCount: 0,
     } as any);
 
-    const res = await REQUEST(buildApp(), "POST", `/api/tasks/${task.id}/pr/create`, JSON.stringify({ title: "New PR" }), { "content-type": "application/json" });
+    const res = await REQUEST(buildApp(), "POST", `/api/tasks/${task.id}/pr/create`, JSON.stringify({ title: "New PR", body: "New PR body" }), { "content-type": "application/json" });
 
     expect(res.status).toBe(201);
     expect(store.addPrInfo).toHaveBeenCalledWith(task.id, expect.objectContaining({ number: 901 }));

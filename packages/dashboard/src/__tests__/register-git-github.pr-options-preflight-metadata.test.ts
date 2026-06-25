@@ -10,6 +10,11 @@ const { mockGeneratePrMetadata } = vi.hoisted(() => ({
 
 vi.mock("../pr-metadata-generator.js", () => ({
   generatePrMetadata: mockGeneratePrMetadata,
+  buildFallbackPrMetadata: (task: Task) => ({
+    title: task.title ?? task.id,
+    body: ["## Summary", "", task.description ?? "Summary unavailable.", "", "## Changes", "", "- Details unavailable.", "", "## Testing", "", "- Not provided.", "", "## Linked Task", "", `Closes ${task.id}`].join("\n"),
+    templateUsed: false,
+  }),
 }));
 
 import { prRouteCommandRunner } from "../routes/register-git-github.js";
@@ -126,6 +131,7 @@ describe("PR metadata/preflight/options routes", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     if (originalRepoEnv === undefined) {
       delete process.env.GITHUB_REPOSITORY;
@@ -144,7 +150,26 @@ describe("PR metadata/preflight/options routes", () => {
       task: expect.objectContaining({ id: "FN-001" }),
       repoRoot: "/tmp/project",
       signal: expect.any(AbortSignal),
+      timeoutMs: 25_000,
     }));
+  });
+
+  it("POST /pr/generate-metadata returns deterministic fallback when the generator never resolves", async () => {
+    vi.useFakeTimers();
+    mockGeneratePrMetadata.mockImplementationOnce(() => new Promise(() => undefined));
+    const app = createServer(createStore(createTask()));
+
+    const responsePromise = performRequest(app, "POST", "/api/tasks/FN-001/pr/generate-metadata", "{}", { "content-type": "application/json" });
+    await vi.advanceTimersByTimeAsync(25_000);
+    const response = await responsePromise;
+
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ title: "Task", templateUsed: false });
+    expect(response.body.body).toContain("## Summary");
+    expect(response.body.body).toContain("## Changes");
+    expect(response.body.body).toContain("## Testing");
+    expect(response.body.body).toContain("## Linked Task");
+    expect(response.body.body).toContain("Closes FN-001");
   });
 
   it("POST /pr/generate-metadata returns 404 for missing task", async () => {

@@ -225,28 +225,19 @@ describe("GitHubClient", () => {
       expect(result.status).toBe("open");
     });
 
-    it("creates PR without body when not provided", async () => {
-      mockRunGh.mockReturnValue("https://github.com/test-owner/test-repo/pull/42\n");
+    it("rejects PR creation without a non-empty body before invoking gh", async () => {
       const paramsWithoutBody: CreatePrParams = {
         owner: "test-owner",
         repo: "test-repo",
         title: "Test PR",
         head: "feature-branch",
-        // body and base not provided
       };
 
-      await client.createPr(paramsWithoutBody);
+      await expect(client.createPr(paramsWithoutBody)).rejects.toThrow("PR body is required");
+      expect(mockRunGh).not.toHaveBeenCalled();
 
-      expect(mockRunGh).toHaveBeenCalledWith([
-        "pr", "create",
-        "--repo", "test-owner/test-repo",
-        "--title", "Test PR",
-        "--head", "feature-branch",
-      ]);
-      // Should not include --body or --base when not provided
-      const callArgs = mockRunGh.mock.calls[0][0];
-      expect(callArgs).not.toContain("--body");
-      expect(callArgs).not.toContain("--base");
+      await expect(client.createPr({ ...paramsWithoutBody, body: "   " })).rejects.toThrow("PR body is required");
+      expect(mockRunGh).not.toHaveBeenCalled();
     });
 
     it("uses current repo context when owner/repo not specified", async () => {
@@ -255,6 +246,7 @@ describe("GitHubClient", () => {
 
       const paramsWithoutRepo = {
         title: "Test PR",
+        body: "Test body",
         head: "feature-branch",
       };
 
@@ -266,6 +258,7 @@ describe("GitHubClient", () => {
         "--repo", "current-owner/current-repo",
         "--title", "Test PR",
         "--head", "feature-branch",
+        "--body", "Test body",
       ]);
       expect(result.number).toBe(5);
     });

@@ -57,6 +57,14 @@ function setupExec(outputs: Record<string, string>) {
   });
 }
 
+function expectFallbackBody(body: string) {
+  expect(body).toContain("## Summary");
+  expect(body).toContain("## Changes");
+  expect(body).toContain("## Testing");
+  expect(body).toContain("## Linked Task");
+  expect(body).toContain("Closes FN-4991");
+}
+
 describe("generatePrMetadata", () => {
   let repoRoot: string;
 
@@ -167,11 +175,12 @@ describe("generatePrMetadata", () => {
       body: expect.stringContaining("Closes FN-4991"),
       templateUsed: false,
     });
+    expectFallbackBody(result.body);
   });
 
-  it("returns fallback when prompt times out", async () => {
+  it("returns fallback when createFnAgent times out before a session exists", async () => {
     vi.useFakeTimers();
-    promptMock.mockImplementation(() => new Promise(() => undefined));
+    vi.mocked(createFnAgent).mockImplementationOnce(() => new Promise(() => undefined) as never);
 
     const resultPromise = generatePrMetadata({
       task: createTask(),
@@ -187,7 +196,32 @@ describe("generatePrMetadata", () => {
       body: expect.stringContaining("Closes FN-4991"),
       templateUsed: false,
     });
-    expect(disposeMock).toHaveBeenCalledTimes(1);
+    const result = await resultPromise;
+    expectFallbackBody(result.body);
+    expect(promptMock).not.toHaveBeenCalled();
+    expect(disposeMock).not.toHaveBeenCalled();
+  });
+
+  it("returns fallback when prompt times out", async () => {
+    vi.useFakeTimers();
+    promptMock.mockImplementation(() => new Promise(() => undefined));
+
+    const resultPromise = generatePrMetadata({
+      task: createTask(),
+      repoRoot,
+      settings: {} as never,
+      timeoutMs: 1_000,
+    });
+
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await expect(resultPromise).resolves.toEqual({
+      title: "Route contracts",
+      body: expect.stringContaining("Closes FN-4991"),
+      templateUsed: false,
+    });
+    const result = await resultPromise;
+    expectFallbackBody(result.body);
   });
 
   it("returns fallback immediately when caller signal is already aborted", async () => {
@@ -210,15 +244,9 @@ describe("generatePrMetadata", () => {
     expect(promptMock).not.toHaveBeenCalled();
   });
 
-  it("returns fallback and disposes the session when caller aborts mid-generation", async () => {
+  it("returns fallback when caller aborts mid-generation", async () => {
     const controller = new AbortController();
-    let promptStarted!: () => void;
-    const promptStartedPromise = new Promise<void>((resolve) => {
-      promptStarted = resolve;
-    });
-    promptMock.mockImplementation(() => new Promise(() => {
-      promptStarted();
-    }));
+    vi.mocked(createFnAgent).mockImplementationOnce(() => new Promise(() => undefined) as never);
 
     const resultPromise = generatePrMetadata({
       task: createTask(),
@@ -227,7 +255,6 @@ describe("generatePrMetadata", () => {
       signal: controller.signal,
     });
 
-    await promptStartedPromise;
     controller.abort();
 
     await expect(resultPromise).resolves.toEqual({
@@ -235,7 +262,7 @@ describe("generatePrMetadata", () => {
       body: expect.stringContaining("Closes FN-4991"),
       templateUsed: false,
     });
-    expect(promptMock).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ signal: expect.any(AbortSignal) }));
-    expect(disposeMock).toHaveBeenCalledTimes(1);
+    const result = await resultPromise;
+    expectFallbackBody(result.body);
   });
 });

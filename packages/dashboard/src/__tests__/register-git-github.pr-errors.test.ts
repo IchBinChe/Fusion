@@ -80,7 +80,7 @@ describe("PR route structured GitHub errors", () => {
     vi.spyOn(GitHubClient.prototype, "findPrForBranch").mockRejectedValue(new Error("authentication required 401"));
 
     const app = createServer(createStore(task));
-    const response = await performRequest(app, "POST", "/api/tasks/FN-001/pr/create", JSON.stringify({ title: "PR title" }), { "content-type": "application/json" });
+    const response = await performRequest(app, "POST", "/api/tasks/FN-001/pr/create", JSON.stringify({ title: "PR title", body: "PR body" }), { "content-type": "application/json" });
 
     expect(response.status).toBe(401);
     expect(response.body.details.githubError.code).toBe("not-authenticated");

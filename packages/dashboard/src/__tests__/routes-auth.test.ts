@@ -3058,7 +3058,7 @@ describe("Pause/Unpause endpoints", () => {
         buildApp(),
         "POST",
         "/api/tasks/KB-001/pr/create",
-        JSON.stringify({ title: "Test PR" }),
+        JSON.stringify({ title: "Test PR", body: "Test body" }),
         { "Content-Type": "application/json" }
       );
 
@@ -3081,7 +3081,7 @@ describe("Pause/Unpause endpoints", () => {
         buildApp(),
         "POST",
         "/api/tasks/KB-001/pr/create",
-        JSON.stringify({ title: "Test PR" }),
+        JSON.stringify({ title: "Test PR", body: "Test body" }),
         { "Content-Type": "application/json" }
       );
 
@@ -3138,7 +3138,7 @@ describe("Pause/Unpause endpoints", () => {
           app,
           "POST",
           `/api/tasks/KB-RATE-${i}/pr/create`,
-          JSON.stringify({ title: `Test PR ${i}` }),
+          JSON.stringify({ title: `Test PR ${i}`, body: "Test body" }),
           { "Content-Type": "application/json" }
         );
         // Should not get 429 from our code (may get 500 from gh CLI not being available in test)
@@ -3166,7 +3166,7 @@ describe("Pause/Unpause endpoints", () => {
         buildApp(),
         "POST",
         "/api/tasks/KB-001/pr/create",
-        JSON.stringify({ title: "Test PR" }),
+        JSON.stringify({ title: "Test PR", body: "Test body" }),
         { "Content-Type": "application/json" }
       );
 
@@ -3192,7 +3192,7 @@ describe("Pause/Unpause endpoints", () => {
         buildApp(),
         "POST",
         "/api/tasks/KB-001/pr/create",
-        JSON.stringify({ title: "Test PR" }),
+        JSON.stringify({ title: "Test PR", body: "Test body" }),
         { "Content-Type": "application/json" }
       );
 
@@ -3217,7 +3217,7 @@ describe("Pause/Unpause endpoints", () => {
         buildApp(),
         "POST",
         "/api/tasks/KB-999/pr/create",
-        JSON.stringify({ title: "Test PR" }),
+        JSON.stringify({ title: "Test PR", body: "Test body" }),
         { "Content-Type": "application/json" }
       );
 

@@ -46,7 +46,7 @@ import { GitHubSourceIssueCloseService } from "../github-source-issue-close.js";
 import { KnowledgeIndexRefreshService } from "../knowledge-index-refresh.js";
 import { githubRateLimiter } from "../github-poll.js";
 import * as projectStoreResolver from "../project-store-resolver.js";
-import { generatePrMetadata } from "../pr-metadata-generator.js";
+import { buildFallbackPrMetadata, generatePrMetadata } from "../pr-metadata-generator.js";
 import { resolvePrConflicts } from "../pr-conflict-resolver.js";
 import {
   classifyWebhookEvent,
@@ -62,6 +62,7 @@ const execAsync = promisify(execCb);
 const PR_ROUTE_MAX_BUFFER_BYTES = 10 * 1024 * 1024;
 const PR_PREFLIGHT_TIMEOUT_MS = 15_000;
 const PR_OPTIONS_TIMEOUT_MS = 10_000;
+const PR_METADATA_ROUTE_TIMEOUT_MS = 25_000;
 const SAFE_GIT_REF_PATTERN = /^[A-Za-z0-9._/-]+$/;
 export const GITHUB_TRACKING_RECONCILE_INTERVAL_MS = 15 * 60 * 1000;
 
@@ -4855,7 +4856,7 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
   /**
    * POST /api/tasks/:id/pr/create
    * Create a GitHub PR for an in-review task.
-   * Body: { title: string, body?: string, base?: string }
+   * Body: { title: string, body: string, base?: string }
    * Returns: Created PrInfo
    */
   router.post("/tasks/:id/pr/create", async (req, res) => {
@@ -4863,15 +4864,20 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
       const { store: scopedStore } = await getProjectContext(req);
       const { title, body, base } = req.body;
 
-      if (!title || typeof title !== "string") {
-        throw badRequest("title is required and must be a string");
-      }
-
       // Get task and validate
       const task = await scopedStore.getTask(req.params.id);
       if (task.column !== "in-review") {
         throw badRequest("Task must be in 'in-review' column to create a PR");
       }
+
+      if (!title || typeof title !== "string") {
+        throw badRequest("title is required and must be a string");
+      }
+      if (!body || typeof body !== "string" || !body.trim()) {
+        throw badRequest("body is required and must be a non-empty string");
+      }
+      const prTitle = title.trim();
+      const prBody = body.trim();
 
       const existingPrs = getTaskPrList(task);
 
@@ -4920,8 +4926,8 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
         prInfo = await client.createPr({
           owner,
           repo,
-          title,
-          body,
+          title: prTitle,
+          body: prBody,
           head: branchName,
           base,
         });
@@ -5098,20 +5104,53 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
    */
   router.post("/tasks/:id/pr/generate-metadata", async (req, res) => {
     const controller = new AbortController();
-    const abortRequest = () => controller.abort();
-    req.on("close", abortRequest);
+    let responseCompleted = false;
+    const abortRequest = () => {
+      if (!responseCompleted && !controller.signal.aborted) {
+        const error = new Error("PR metadata request aborted");
+        error.name = "AbortError";
+        controller.abort(error);
+      }
+    };
+    const markCompleted = () => {
+      responseCompleted = true;
+    };
+    req.on("aborted", abortRequest);
+    res.on("close", abortRequest);
+    res.on("finish", markCompleted);
 
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
       const settings = await scopedStore.getSettings();
-      const metadata = await generatePrMetadata({
+      /*
+      FNXC:PrMetadataGeneration 2026-06-23-00:00:
+      The dashboard route owns a shorter Create PR dialog budget than the reusable generator default. If a mocked or broken generator ignores aborts and never settles, return deterministic fallback metadata before the modal crosses the 30s UX threshold; do not treat the timeout abort as a disconnected-client signal.
+      */
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const generatorPromise = generatePrMetadata({
         task,
         repoRoot: scopedStore.getRootDir(),
         settings,
         signal: controller.signal,
+        timeoutMs: PR_METADATA_ROUTE_TIMEOUT_MS,
       });
-      if (req.destroyed || res.writableEnded || res.writableFinished || controller.signal.aborted) {
+      void generatorPromise.catch(() => undefined);
+      const timeoutFallbackPromise = new Promise<Awaited<ReturnType<typeof generatePrMetadata>>>((resolve) => {
+        timeoutId = setTimeout(() => {
+          abortRequest();
+          resolve(buildFallbackPrMetadata(task));
+        }, PR_METADATA_ROUTE_TIMEOUT_MS);
+      });
+      let metadata: Awaited<ReturnType<typeof generatePrMetadata>>;
+      try {
+        metadata = await Promise.race([generatorPromise, timeoutFallbackPromise]);
+      } finally {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+      }
+      if (res.writableEnded || res.writableFinished || res.destroyed) {
         return;
       }
       res.json(metadata);
@@ -5124,7 +5163,9 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
       }
       rethrowAsApiError(err, "Failed to generate PR metadata");
     } finally {
-      req.off("close", abortRequest);
+      req.removeListener("aborted", abortRequest);
+      res.removeListener("close", abortRequest);
+      res.removeListener("finish", markCompleted);
     }
   });
 

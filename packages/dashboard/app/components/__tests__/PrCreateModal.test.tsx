@@ -182,6 +182,8 @@ describe("PrCreateModal", () => {
     expect(screen.getByRole("button", { name: "Create PR" })).toBeDisabled();
 
     fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Manual PR title" } });
+    expect(screen.getByRole("button", { name: "Create PR" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/body/i), { target: { value: "Manual PR body" } });
     await waitFor(() => expect(screen.getByRole("button", { name: "Create PR" })).toBeEnabled());
 
     fireEvent.change(screen.getByPlaceholderText("Filter reviewers"), { target: { value: "rev" } });
@@ -215,8 +217,47 @@ describe("PrCreateModal", () => {
     expect(screen.getByText("Branch pushed to remote")).toBeInTheDocument();
     expect(screen.getByLabelText(/base branch/i)).toBeEnabled();
 
+    const bodyInput = screen.getByLabelText(/body/i) as HTMLTextAreaElement;
+    expect(bodyInput.value).toContain("## Summary");
+    expect(bodyInput.value).toContain("## Changes");
+    expect(bodyInput.value).toContain("## Testing");
+    expect(bodyInput.value).toContain("Closes FN-4756");
+
     fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Manual fallback title" } });
     await waitFor(() => expect(screen.getByRole("button", { name: "Create PR" })).toBeEnabled());
+  });
+
+  it("requires a non-empty body before submitting manual PR metadata", async () => {
+    mocks.generatePrMetadata.mockRejectedValueOnce(new Error("metadata blew up"));
+    renderModal();
+
+    expect(await screen.findByText("metadata blew up")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Manual fallback title" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create PR" })).toBeEnabled());
+
+    fireEvent.change(screen.getByLabelText(/body/i), { target: { value: "" } });
+    expect(screen.getByRole("button", { name: "Create PR" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Create PR" }));
+    expect(mocks.createPr).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText(/body/i), { target: { value: "Manual fallback body" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create PR" })).toBeEnabled());
+  });
+
+  it("uses route fallback metadata as editable content after a timeout response", async () => {
+    mocks.generatePrMetadata.mockResolvedValueOnce({
+      title: "Fallback title",
+      body: "## Summary\n\nSummary unavailable.\n\n## Changes\n\n- Details unavailable.\n\n## Testing\n\n- Not provided.\n\n## Linked Task\n\nCloses FN-4756",
+      templateUsed: false,
+    });
+    renderModal();
+
+    expect(await screen.findByDisplayValue("Fallback title")).toBeInTheDocument();
+    const bodyInput = screen.getByLabelText(/body/i) as HTMLTextAreaElement;
+    expect(bodyInput.value).toContain("## Summary");
+    expect(bodyInput.value).toContain("Closes FN-4756");
+    expect(screen.queryByText(/generating ai title/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create PR" })).toBeEnabled();
   });
 
   it("keeps options failure scoped so metadata and preflight still render", async () => {

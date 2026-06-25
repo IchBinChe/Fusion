@@ -85,6 +85,16 @@ describe("PR routes contract", () => {
     expect(response.body.error).toContain("title is required");
   });
 
+  it("rejects PR create requests with a title but no body before GitHub invocation", async () => {
+    const app = createServer(createStore(createTask({ prInfo: undefined })));
+    const response = await performRequest(app, "POST", "/api/tasks/FN-001/pr/create", JSON.stringify({ title: "Manual title", body: "   " }), {
+      "content-type": "application/json",
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.body.error).toContain("body is required");
+  });
+
   it("does not return conflict when task already has PR", async () => {
     const app = createServer(createStore(createTask()));
     const response = await performRequest(app, "POST", "/api/tasks/FN-001/pr/create", JSON.stringify({ title: "x" }), {

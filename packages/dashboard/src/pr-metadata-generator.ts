@@ -7,7 +7,7 @@ import { resolveTitleSummarizerSettingsModel } from "@fusion/core";
 import { createFnAgent } from "@fusion/engine";
 
 const execAsync = promisify(execCb);
-const PR_METADATA_TIMEOUT_MS = 60_000;
+export const PR_METADATA_TIMEOUT_MS = 60_000;
 
 export interface GeneratedPrMetadata {
   title: string;
@@ -23,7 +23,7 @@ interface AiMetadataResult {
   linkedTask: string;
 }
 
-function buildFallback(task: Task): GeneratedPrMetadata {
+export function buildFallbackPrMetadata(task: Task): GeneratedPrMetadata {
   return {
     title: task.title ?? task.id,
     body: [
@@ -136,12 +136,13 @@ function fillTemplate(template: string, result: AiMetadataResult, taskId: string
 }
 
 async function runCommand(command: string, cwd: string, signal?: AbortSignal): Promise<string> {
-  const { stdout } = await execAsync(command, {
+  const commandPromise = execAsync(command, {
     cwd,
     timeout: 15_000,
     maxBuffer: 10 * 1024 * 1024,
     signal,
   });
+  const { stdout } = signal ? await raceWithAbort(commandPromise, signal) : await commandPromise;
   return stdout.trim();
 }
 
@@ -158,18 +159,43 @@ function throwIfAborted(signal?: AbortSignal): void {
   throw signal.reason instanceof Error ? signal.reason : createAbortError();
 }
 
-function waitForAbort(signal: AbortSignal): Promise<never> {
-  return new Promise((_, reject) => {
-    if (signal.aborted) {
-      reject(signal.reason instanceof Error ? signal.reason : createAbortError());
-      return;
-    }
-    signal.addEventListener(
-      "abort",
-      () => reject(signal.reason instanceof Error ? signal.reason : createAbortError()),
-      { once: true },
+function getAbortReason(signal: AbortSignal): Error {
+  return signal.reason instanceof Error ? signal.reason : createAbortError();
+}
+
+function raceWithAbort<T>(operation: PromiseLike<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    return Promise.reject(getAbortReason(signal));
+  }
+  return new Promise<T>((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener("abort", onAbort);
+    const onAbort = () => {
+      cleanup();
+      reject(getAbortReason(signal));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve(operation).then(
+      (value) => {
+        cleanup();
+        resolve(value);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
     );
   });
+}
+
+function disposeSessionBestEffort(session: { dispose?: () => void | Promise<void> }): void {
+  try {
+    const disposeResult = session.dispose?.();
+    if (disposeResult && typeof (disposeResult as Promise<void>).catch === "function") {
+      void (disposeResult as Promise<void>).catch(() => undefined);
+    }
+  } catch {
+    // best effort
+  }
 }
 
 function isAbortLikeError(error: unknown): boolean {
@@ -202,9 +228,13 @@ export async function generatePrMetadata(input: {
   timeoutMs?: number;
 }): Promise<GeneratedPrMetadata> {
   const { task, repoRoot, settings, signal, timeoutMs = PR_METADATA_TIMEOUT_MS } = input;
-  const fallback = buildFallback(task);
+  const fallback = buildFallbackPrMetadata(task);
   const controller = new AbortController();
   const abortFromCaller = () => controller.abort(signal?.reason instanceof Error ? signal.reason : createAbortError());
+  /*
+  FNXC:PrMetadataGeneration 2026-06-23-00:00:
+  The Create PR dialog must receive usable title/body metadata within its UX budget even when git, template reads, provider startup, prompt streaming, or disposal misbehaves. Race every awaited operation against one shared abort signal so provider/session hangs degrade to deterministic fallback content instead of leaving the modal spinner pending indefinitely.
+  */
   const timeoutId = setTimeout(() => controller.abort(createAbortError()), timeoutMs);
   const combinedSignal = controller.signal;
   const callerSignalWasActive = Boolean(signal && !signal.aborted);
@@ -220,27 +250,27 @@ export async function generatePrMetadata(input: {
   try {
     throwIfAborted(combinedSignal);
 
-    const baseBranch = await resolveBaseBranch(task, repoRoot, combinedSignal);
-    const [logOut, diffStatOut] = await Promise.all([
+    const baseBranch = await raceWithAbort(resolveBaseBranch(task, repoRoot, combinedSignal), combinedSignal);
+    const [logOut, diffStatOut] = await raceWithAbort(Promise.all([
       runCommand(`git log --no-merges ${baseBranch}..HEAD --format=%s%n%b`, repoRoot, combinedSignal).catch(() => ""),
       runCommand(`git diff --stat ${baseBranch}..HEAD`, repoRoot, combinedSignal).catch(() => ""),
-    ]);
+    ]), combinedSignal);
 
     let promptContent = "";
     try {
       const promptPath = join(repoRoot, ".fusion", "tasks", task.id, "PROMPT.md");
-      promptContent = (await readFile(promptPath, "utf8")).trim();
+      promptContent = (await raceWithAbort(readFile(promptPath, "utf8"), combinedSignal)).trim();
     } catch {
       promptContent = "";
     }
 
     const templatePath = join(repoRoot, ".github", "pull_request_template.md");
-    const templateExists = await access(templatePath).then(() => true).catch(() => false);
-    const template = templateExists ? await readFile(templatePath, "utf8") : "";
+    const templateExists = await raceWithAbort(access(templatePath).then(() => true).catch(() => false), combinedSignal);
+    const template = templateExists ? await raceWithAbort(readFile(templatePath, "utf8"), combinedSignal) : "";
 
     const model = resolveTitleSummarizerSettingsModel(settings as Partial<Settings>);
     let aiText = "";
-    const { session } = await createFnAgent({
+    const { session } = await raceWithAbort(createFnAgent({
       cwd: repoRoot,
       tools: "readonly",
       defaultProvider: model.provider,
@@ -253,7 +283,7 @@ export async function generatePrMetadata(input: {
       onText: (delta: string) => {
         aiText += delta;
       },
-    });
+    }), combinedSignal);
 
     try {
       const contextPrompt = [
@@ -270,16 +300,12 @@ export async function generatePrMetadata(input: {
       ].join("\n\n");
 
       throwIfAborted(combinedSignal);
-      await Promise.race([
+      await raceWithAbort(
         (session.prompt as (prompt: string, options?: { signal?: AbortSignal }) => Promise<unknown>)(contextPrompt, { signal: combinedSignal }),
-        waitForAbort(combinedSignal),
-      ]);
+        combinedSignal,
+      );
     } finally {
-      try {
-        session.dispose();
-      } catch {
-        // best effort
-      }
+      disposeSessionBestEffort(session);
     }
 
     const parsed = parseAiResult(aiText);

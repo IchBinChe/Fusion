@@ -32,7 +32,7 @@ describe("GitHubClient.createPr draft/reviewer", () => {
     mockRunGh.mockReturnValue("https://github.com/owner/repo/pull/42\n");
     const client = new GitHubClient({ forceMode: "gh-cli" });
 
-    await client.createPr({ title: "T", head: "fusion/fn-001", base: "main", draft, reviewers });
+    await client.createPr({ title: "T", body: "B", head: "fusion/fn-001", base: "main", draft, reviewers });
 
     const args = mockRunGh.mock.calls[0][0];
     expect(args.includes("--draft")).toBe(expectsDraft);
@@ -48,7 +48,7 @@ describe("GitHubClient.createPr draft/reviewer", () => {
       } as any)
       .mockResolvedValueOnce({ ok: true, json: async () => ({}) } as any);
 
-    await client.createPr({ title: "T", head: "fusion/fn-001", base: "main", draft: true, reviewers: ["alice", "bob"] });
+    await client.createPr({ title: "T", body: "B", head: "fusion/fn-001", base: "main", draft: true, reviewers: ["alice", "bob"] });
 
     expect(String(fetchSpy.mock.calls[0][1]?.body)).toContain('"draft":true');
     expect(fetchSpy.mock.calls[1][0]).toContain("/requested_reviewers");
@@ -65,7 +65,7 @@ describe("GitHubClient.createPr draft/reviewer", () => {
       } as any)
       .mockResolvedValueOnce({ ok: false, status: 422, statusText: "Unprocessable", json: async () => ({ message: "invalid reviewers" }) } as any);
 
-    const pr = await client.createPr({ title: "T", head: "fusion/fn-001", reviewers: ["alice"] });
+    const pr = await client.createPr({ title: "T", body: "B", head: "fusion/fn-001", reviewers: ["alice"] });
 
     expect(pr.number).toBe(8);
     expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining("failed to request reviewers"));

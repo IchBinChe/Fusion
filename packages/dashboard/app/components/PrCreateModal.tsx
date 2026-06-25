@@ -39,6 +39,30 @@ type PreflightCheck = {
   warning?: boolean;
 };
 
+/*
+FNXC:PrCreateModal 2026-06-23-00:00:
+The Create PR modal must stay manually usable after metadata generation fails, but non-interactive GitHub PR creation cannot accept a title-only payload. Seed an editable body fallback with the required sections so users can complete or revise the PR instead of submitting an empty body.
+*/
+function buildManualPrBodyFallback(taskId: string): string {
+  return [
+    "## Summary",
+    "",
+    "Summary unavailable. Add context before creating this PR.",
+    "",
+    "## Changes",
+    "",
+    "- Details unavailable.",
+    "",
+    "## Testing",
+    "",
+    "- Not provided.",
+    "",
+    "## Linked Task",
+    "",
+    `Closes ${taskId}`,
+  ].join("\n");
+}
+
 function OptionChips<T extends { login?: string; name?: string; color?: string }>(
   {
     label,
@@ -208,6 +232,8 @@ export function PrCreateModal({
     } catch (loadError) {
       if (requestId === requestSeqRef.current.metadata) {
         setMetadataError(getErrorMessage(loadError));
+        setBody((current) => (current.trim() ? current : buildManualPrBodyFallback(taskId)));
+        setAiBody((current) => current || buildManualPrBodyFallback(taskId));
       }
     } finally {
       if (requestId === requestSeqRef.current.metadata) {
@@ -351,6 +377,8 @@ export function PrCreateModal({
     } catch (regenerateError) {
       if (requestId === requestSeqRef.current.metadata) {
         setMetadataError(getErrorMessage(regenerateError));
+        setBody((current) => (current.trim() ? current : buildManualPrBodyFallback(taskId)));
+        setAiBody((current) => current || buildManualPrBodyFallback(taskId));
       }
     } finally {
       if (requestId === requestSeqRef.current.metadata) {
@@ -445,7 +473,7 @@ export function PrCreateModal({
   }), [assignees, baseBranch, body, draft, labels, reviewers, title]);
 
   const submit = useCallback(async () => {
-    if (!payload.title || submitting) return;
+    if (!payload.title || !payload.body || submitting) return;
     setSubmitting(true);
     setSubmitError(null);
     setLastGhError(null);
@@ -465,6 +493,8 @@ export function PrCreateModal({
       setSubmitting(false);
     }
   }, [addToast, onClose, onCreated, payload, projectId, submitting, taskId]);
+
+  const hasRequiredPrContent = title.trim().length > 0 && body.trim().length > 0;
 
   if (!open) return null;
 
@@ -672,7 +702,7 @@ export function PrCreateModal({
 
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose} disabled={submitting}>{t("actions.cancel", "Cancel")}</button>
-          <button type="button" className="btn btn-primary" onClick={() => void submit()} disabled={!preflight || preflightLoading || !canSubmit || !title.trim() || submitting}>
+          <button type="button" className="btn btn-primary" onClick={() => void submit()} disabled={!preflight || preflightLoading || !canSubmit || !hasRequiredPrContent || submitting}>
             {submitting ? <RefreshCw size={14} className="spin" /> : null}
             {draft ? t("pr.createDraftPr", "Create draft PR") : t("pr.createPr", "Create PR")}
           </button>

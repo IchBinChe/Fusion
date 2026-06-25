@@ -94,7 +94,7 @@ describe("GitHubClient forced mode", () => {
     } as never);
 
     const client = new GitHubClient("token-legacy");
-    await client.createPr({ owner: "o", repo: "r", title: "t", head: "head", base: "main" });
+    await client.createPr({ owner: "o", repo: "r", title: "t", body: "b", head: "head", base: "main" });
 
     expect(mockRunGh).toHaveBeenCalledTimes(1);
     expect(fetchSpy).toHaveBeenCalledTimes(1);

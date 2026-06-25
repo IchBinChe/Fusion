@@ -153,6 +153,14 @@ export interface CreateIssueParams {
   labels?: string[];
 }
 
+function requireNonEmptyPrBody(body: string | undefined): string {
+  const trimmed = body?.trim() ?? "";
+  if (!trimmed) {
+    throw new Error("PR body is required when creating a pull request");
+  }
+  return trimmed;
+}
+
 export interface CreatedIssue {
   owner: string;
   repo: string;
@@ -828,6 +836,11 @@ export class GitHubClient {
   private createPrWithGh(params: CreatePrParams): PrInfo {
     const { owner: paramOwner, repo: paramRepo, title, body, head, base, draft, reviewers } = params;
     const { owner, repo } = this.resolveRepo(paramOwner, paramRepo);
+    /*
+    FNXC:GitHubPrCreate 2026-06-23-00:00:
+    The Create PR flow runs `gh pr create` non-interactively, so a title without a body fails at the CLI boundary. Validate here as a final guard in addition to dashboard/API checks and always pass `--body` with non-empty content.
+    */
+    const prBody = requireNonEmptyPrBody(body);
 
     // Build gh pr create command arguments (as array for safety)
     const args = [
@@ -835,11 +848,9 @@ export class GitHubClient {
       "--repo", `${owner}/${repo}`,
       "--title", title,
       "--head", head,
+      "--body", prBody,
     ];
 
-    if (body) {
-      args.push("--body", body);
-    }
     if (base) {
       args.push("--base", base);
     }
@@ -877,6 +888,7 @@ export class GitHubClient {
   private async createPrWithApi(params: CreatePrParams): Promise<PrInfo> {
     const { owner: paramOwner, repo: paramRepo, title, body, head, base = "main", draft, reviewers } = params;
     const { owner, repo } = this.resolveRepo(paramOwner, paramRepo);
+    const prBody = requireNonEmptyPrBody(body);
 
     const url = `${this.baseUrl}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`;
 
@@ -887,7 +899,7 @@ export class GitHubClient {
       headers,
       body: JSON.stringify({
         title,
-        body: body || "",
+        body: prBody,
         head,
         base,
         draft: draft === true,

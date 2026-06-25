@@ -72,7 +72,7 @@ FN-6887 makes the footer status bar the canonical desktop/tablet terminal launch
   border: none;
   background: transparent;
   /*
-   * FNXC:FooterChrome 2026-06-23-00:20:
+   * FNXC:FooterLaunchers 2026-06-24-00:00:
    * Quick Chat and Terminal are peer footer launchers. Pin both to the footer's compact UI font and color token so switching the launcher location does not make one control read heavier or dimmer than the other.
    */
   color: inherit;

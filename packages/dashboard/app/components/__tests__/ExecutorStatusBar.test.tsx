@@ -46,11 +46,21 @@ import type { ExecutorStats } from "../../api";
 
 const mockUseExecutorStats = useExecutorStats as ReturnType<typeof vi.fn>;
 const executorStatusBarCss = fs.readFileSync(path.join(__dirname, "../ExecutorStatusBar.css"), "utf-8");
+const terminalLauncherCss = fs.readFileSync(path.join(__dirname, "../TerminalLauncher.css"), "utf-8");
 
-function getCssRuleBlock(selector: string): string {
+function getCssRuleBlock(css: string, selector: string): string {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const match = executorStatusBarCss.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`));
+  const match = css.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`));
   return match?.[1] ?? "";
+}
+
+function getCssRuleBlockByPattern(css: string, pattern: RegExp): string {
+  const match = css.match(pattern);
+  return match?.[1] ?? "";
+}
+
+function expectNoHardcodedColors(cssBlock: string): void {
+  expect(cssBlock).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(/i);
 }
 
 /** Minimal empty task list used by tests that mock the hook. */
@@ -205,11 +215,32 @@ describe("ExecutorStatusBar", () => {
       await waitFor(() => expect(mockFetchScripts).toHaveBeenCalledWith(undefined));
     });
 
-    it("renders the terminal launcher in the footer on tablet", () => {
-      viewportModeMock.value = "tablet";
+    it("keeps the footer terminal scripts chevron usable when scripts are empty", async () => {
+      const user = userEvent.setup();
+      mockFetchScripts.mockResolvedValueOnce({});
 
       render(<ExecutorStatusBar tasks={emptyTasks} onToggleTerminal={vi.fn()} onOpenScripts={vi.fn()} onRunScript={vi.fn()} />);
 
+      await user.click(screen.getByTestId("scripts-btn"));
+
+      expect(await screen.findByTestId("quick-scripts-empty")).toBeInTheDocument();
+    });
+
+    it("renders the peer Quick Chat and Terminal footer launchers on tablet", () => {
+      viewportModeMock.value = "tablet";
+
+      render(
+        <ExecutorStatusBar
+          tasks={emptyTasks}
+          onToggleTerminal={vi.fn()}
+          onOpenScripts={vi.fn()}
+          onRunScript={vi.fn()}
+          quickChatButtonMode="footer"
+          onOpenQuickChat={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByTestId("executor-quick-chat-launcher-segment")).toBeInTheDocument();
       expect(screen.getByTestId("executor-terminal-launcher-segment")).toBeInTheDocument();
       expect(screen.getByTestId("terminal-toggle-btn")).toBeInTheDocument();
     });
@@ -237,13 +268,67 @@ describe("ExecutorStatusBar", () => {
     });
 
     it("keeps Quick Chat and Terminal footer launchers on the same font and color tokens", () => {
-      const launcherRule = getCssRuleBlock(".executor-status-bar__footer-launcher");
+      render(
+        <ExecutorStatusBar
+          tasks={emptyTasks}
+          onToggleTerminal={vi.fn()}
+          onOpenScripts={vi.fn()}
+          onRunScript={vi.fn()}
+          quickChatButtonMode="footer"
+          onOpenQuickChat={vi.fn()}
+        />,
+      );
 
-      expect(launcherRule).toContain("color: inherit");
-      expect(launcherRule).toContain("font-family: var(--font-primary)");
-      expect(launcherRule).toContain("font-size: inherit");
-      expect(launcherRule).toContain("font-weight: 500");
-      expect(launcherRule).not.toMatch(/#|rgb\(/i);
+      const quickChatLauncher = screen.getByTestId("executor-quick-chat-launcher");
+      const terminalLauncher = screen.getByTestId("terminal-toggle-btn");
+      expect(quickChatLauncher).toHaveClass("executor-status-bar__footer-launcher");
+      expect(terminalLauncher).toHaveClass("terminal-launcher__main");
+      expect(screen.getByTestId("executor-quick-chat-launcher-segment")).toBeInTheDocument();
+      expect(screen.getByTestId("executor-terminal-launcher-segment")).toBeInTheDocument();
+
+      const quickChatRule = getCssRuleBlock(executorStatusBarCss, ".executor-status-bar__footer-launcher");
+      const quickChatHoverRule = getCssRuleBlock(executorStatusBarCss, ".executor-status-bar__footer-launcher:hover");
+      const quickChatFocusRule = getCssRuleBlock(executorStatusBarCss, ".executor-status-bar__footer-launcher:focus-visible");
+      const terminalFooterRule = getCssRuleBlock(terminalLauncherCss, ".terminal-launcher--footer");
+      const terminalControlRule = getCssRuleBlockByPattern(
+        terminalLauncherCss,
+        /\.terminal-launcher--footer \.terminal-launcher__main,\s*\.terminal-launcher--footer \.terminal-launcher__chevron\s*\{([^}]*)\}/,
+      );
+      const terminalLabelRule = getCssRuleBlock(terminalLauncherCss, ".terminal-launcher--footer .terminal-launcher__label");
+      const terminalHoverRule = getCssRuleBlockByPattern(
+        terminalLauncherCss,
+        /\.terminal-launcher--footer \.terminal-launcher__main:hover,\s*\.terminal-launcher--footer \.terminal-launcher__chevron:hover\s*\{([^}]*)\}/,
+      );
+      const terminalFocusRule = getCssRuleBlockByPattern(
+        terminalLauncherCss,
+        /\.terminal-launcher--footer \.terminal-launcher__main:focus-visible,\s*\.terminal-launcher--footer \.terminal-launcher__chevron:focus-visible\s*\{([^}]*)\}/,
+      );
+
+      expect(quickChatRule).toContain("color: inherit");
+      expect(quickChatRule).toContain("font-family: var(--font-primary)");
+      expect(quickChatRule).toContain("font-size: inherit");
+      expect(quickChatRule).toContain("font-weight: 500");
+      expect(quickChatRule).toContain("line-height: 1");
+      expect(quickChatHoverRule).toContain("color: var(--text)");
+      expect(quickChatFocusRule).toContain("box-shadow: var(--focus-ring-strong)");
+
+      expect(terminalFooterRule).toContain("color: inherit");
+      expect(terminalFooterRule).toContain("font-family: var(--font-primary)");
+      expect(terminalFooterRule).toContain("font-size: inherit");
+      expect(terminalFooterRule).toContain("font-weight: 500");
+      expect(terminalFooterRule).toContain("line-height: 1");
+      expect(terminalControlRule).toContain("color: inherit");
+      expect(terminalControlRule).toContain("font-family: inherit");
+      expect(terminalControlRule).toContain("font-size: inherit");
+      expect(terminalControlRule).toContain("font-weight: inherit");
+      expect(terminalControlRule).toContain("line-height: inherit");
+      expect(terminalLabelRule).toContain("font-size: inherit");
+      expect(terminalLabelRule).toContain("font-weight: inherit");
+      expect(terminalLabelRule).toContain("line-height: inherit");
+      expect(terminalHoverRule).toContain("color: var(--text)");
+      expect(terminalFocusRule).toContain("box-shadow: var(--focus-ring-strong)");
+
+      [quickChatRule, quickChatHoverRule, quickChatFocusRule, terminalFooterRule, terminalControlRule, terminalLabelRule, terminalHoverRule, terminalFocusRule].forEach(expectNoHardcodedColors);
     });
 
     it("omits the Quick Chat footer launcher for floating, off, and mobile modes", () => {

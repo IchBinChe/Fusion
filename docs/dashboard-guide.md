@@ -374,7 +374,7 @@ Chat Rooms are project-scoped group conversations for multiple agents. They are 
 
 ## Quick Chat
 
-Quick Chat is an optional floating panel for fast, project-scoped assistant conversations without leaving your current view.
+Quick Chat is an optional fast, project-scoped assistant surface for conversations without leaving your current view. Depending on the project launcher setting, desktop and tablet can open it from the footer status bar beside Terminal, while mobile continues to use the compact Quick Chat panel behavior.
 
 - Controlled by the project setting `showQuickChatFAB`
 - Supports agent mentions (`@agent`) and shared `#` task/file mentions

@@ -18,6 +18,7 @@ import {
 import { parseWorkflowIr, serializeWorkflowIr, downgradeIrToV1IfPure } from "./workflow-ir.js";
 import { stepsToWorkflowIr, stepToFragmentIr, layoutForIr } from "./workflow-steps-to-ir.js";
 import { resolveAllowedColumns, workflowHasColumn } from "./workflow-transitions.js";
+import { extractEffectiveWriteScopeFromPrompt, extractFileScopeTokens, isValidFileScopeEntry } from "./file-scope-classification.js";
 
 function isWorkflowColumnsCompatibilityFlagEnabled(settings: Pick<Settings, "experimentalFeatures"> | undefined): boolean {
   /*
@@ -1093,79 +1094,8 @@ export class InvalidFileScopeError extends Error {
   }
 }
 
-const KNOWN_FILE_SCOPE_ROOT_FILES = new Set([
-  "makefile",
-  "dockerfile",
-  "justfile",
-  "license",
-  "readme",
-  "changelog",
-  "agents.md",
-]);
-
-// `parseStepHeadings` (the `### Step N:` parser, step-inversion U1) was extracted
-// into `step-parsers.ts` as the `step-headings` built-in parser (U12, KTD-12).
-// It is re-exported here for back-compat with callers/tests that import it from
-// `store.ts`. `parseStepsFromPrompt` below delegates through the registry.
+export { isValidFileScopeEntry } from "./file-scope-classification.js";
 export { parseStepHeadings } from "./step-parsers.js";
-
-export function isValidFileScopeEntry(token: string): boolean {
-  const trimmed = token.trim();
-  if (!trimmed) return false;
-
-  const lower = trimmed.toLowerCase();
-  if (
-    lower.startsWith("origin/")
-    || lower.startsWith("upstream/")
-    || lower.startsWith("refs/")
-    || /^https?:\/\//i.test(trimmed)
-    || /^git@/i.test(trimmed)
-    || /^ssh:\/\//i.test(trimmed)
-    || /^[a-z]+\/fn-\d+$/i.test(trimmed)
-    || /^[a-f0-9]{7,}$/i.test(trimmed)
-    || trimmed.includes("..")
-    || trimmed.startsWith("/")
-  ) {
-    return false;
-  }
-
-  const segments = trimmed.split("/");
-  const lastSegment = segments[segments.length - 1];
-  const hasSlash = trimmed.includes("/");
-  const hasDotInLastSegment = lastSegment.includes(".");
-
-  if (KNOWN_FILE_SCOPE_ROOT_FILES.has(lastSegment.toLowerCase())) {
-    return true;
-  }
-
-  if (trimmed.includes("**") || trimmed.endsWith("/*") || (lastSegment.includes("*") && hasDotInLastSegment)) {
-    return true;
-  }
-
-  if (hasSlash && hasDotInLastSegment) {
-    return true;
-  }
-
-  return false;
-}
-
-function extractFileScopeTokens(content: string): string[] {
-  const headingMatch = content.match(/^##\s+File\s+Scope\s*$/m);
-  if (!headingMatch) return [];
-
-  const startIdx = headingMatch.index! + headingMatch[0].length;
-  const rest = content.slice(startIdx);
-  const nextHeading = rest.search(/\n##?\s/);
-  const section = nextHeading === -1 ? rest : rest.slice(0, nextHeading);
-  const tokens: string[] = [];
-  const backtickRegex = /`([^`]+)`/g;
-  let match;
-  while ((match = backtickRegex.exec(section)) !== null) {
-    tokens.push(match[1]);
-  }
-
-  return tokens;
-}
 
 function validateFileScopeInPromptContent(prompt: string): { valid: string[]; invalid: string[] } {
   const tokens = extractFileScopeTokens(prompt);
@@ -10834,8 +10764,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
 
     const content = await readFile(promptPath, "utf-8");
 
-    const paths = extractFileScopeTokens(content);
-    return paths.filter((path) => isValidFileScopeEntry(path));
+    return extractEffectiveWriteScopeFromPrompt(content);
   }
 
   private makeSyntheticDeleteRunId(taskId: string): string {

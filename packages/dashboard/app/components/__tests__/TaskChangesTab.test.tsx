@@ -201,6 +201,44 @@ describe("TaskChangesTab — worktree-backed (non-done tasks)", () => {
   });
 });
 
+// FNXC:Workspace 2026-06-25-00:40: a workspace task has no singular `worktree` — its changes come
+// from the backend's per-sub-repo aggregation (repo-prefixed paths). It must render those instead of
+// the single-repo "No worktree available" empty state.
+describe("TaskChangesTab — workspace tasks", () => {
+  it("renders aggregated repo-prefixed files for a workspace task (no singular worktree)", async () => {
+    mockFetchTaskDiff.mockResolvedValue({
+      files: [
+        { path: "openvide/src/a.ts", status: "added", additions: 2, deletions: 0, patch: "@@ -0,0 +1,2 @@\n+a\n+aa" },
+        { path: "swarmclaw/lib/b.ts", status: "modified", additions: 1, deletions: 1, patch: "@@ -1 +1 @@\n+b\n-old" },
+      ],
+      stats: { filesChanged: 2, additions: 3, deletions: 1 },
+    });
+
+    render(
+      <TaskChangesTab taskId="MULT-002" worktree={undefined} column={"in-review" as Column} isWorkspace />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("openvide/src/a.ts")).toBeTruthy();
+    });
+    expect(screen.getByText("swarmclaw/lib/b.ts")).toBeTruthy();
+    expect(screen.queryByText("No worktree available for this task.")).toBeNull();
+  });
+
+  it("does NOT show 'No worktree available' for an empty workspace task", async () => {
+    mockFetchTaskDiff.mockResolvedValue({ files: [], stats: { filesChanged: 0, additions: 0, deletions: 0 } });
+
+    render(
+      <TaskChangesTab taskId="MULT-002" worktree={undefined} column={"in-review" as Column} isWorkspace />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("No files modified.")).toBeTruthy();
+    });
+    expect(screen.queryByText("No worktree available for this task.")).toBeNull();
+  });
+});
+
 describe("TaskChangesTab — commit-backed (done tasks)", () => {
   it("loads diff from fetchTaskDiff for done task with commitSha", async () => {
     mockFetchTaskDiff.mockResolvedValue(DONE_TASK_DIFF);

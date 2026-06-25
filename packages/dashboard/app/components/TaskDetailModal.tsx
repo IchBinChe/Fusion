@@ -3399,7 +3399,7 @@ export function TaskDetailContent({
               )}
             </div>
           ) : activeTab === "changes" ? (
-            <TaskChangesTab taskId={task.id} worktree={task.worktree} projectId={projectId} column={task.column} mergeDetails={task.mergeDetails} modifiedFiles={task.modifiedFiles} />
+            <TaskChangesTab taskId={task.id} worktree={task.worktree} projectId={projectId} column={task.column} mergeDetails={task.mergeDetails} modifiedFiles={task.modifiedFiles} isWorkspace={isWorkspaceTask(workingTask)} />
           ) : activeTab === "review" ? (
             <TaskReviewTab
               task={task}

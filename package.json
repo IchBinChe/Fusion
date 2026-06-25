@@ -63,7 +63,7 @@
     "changeset": "changeset",
     "version": "changeset version",
     "release": "node scripts/release.mjs",
-    "release:version": "changeset version && node scripts/sync-workspace-version.mjs",
+    "release:version": "changeset version && node scripts/sync-workspace-version.mjs && node scripts/run-ci-distill.mjs",
     "mobile:build": "pnpm --filter @fusion/dashboard build && pnpm --filter @fusion/mobile cap sync",
     "mobile:ios": "pnpm mobile:build && pnpm --filter @fusion/mobile cap open ios",
     "mobile:android": "pnpm mobile:build && pnpm --filter @fusion/mobile cap open android",

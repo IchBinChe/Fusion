@@ -392,10 +392,34 @@ jobs:
 
       # Only create the release if at least one artifact exists. A failed build leg
       # yields a partial release rather than none; a total wipeout fails loudly.
+      # FNXC:Changelog 2026-06-24-17:45:
+      # Use the curated root CHANGELOG notes for the GitHub Release body instead
+      # of GitHub's auto-generated notes. Extracts the version section and passes
+      # it via --notes-file so the release body matches the distilled CHANGELOG.
+      - name: Extract release notes from CHANGELOG
+        if: ${{ steps.collect.outputs.count != '0' }}
+        id: notes
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          NOTES=$(node -e "
+            const fs = require('fs');
+            const content = fs.readFileSync('CHANGELOG.md', 'utf8');
+            const lines = content.split(/\r?\n/);
+            const header = '## ' + '${VERSION}';
+            const start = lines.findIndex(l => l.trim() === header);
+            if (start === -1) { console.log('Release v${VERSION}'); process.exit(0); }
+            let end = lines.length;
+            for (let i = start + 1; i < lines.length; i++) {
+              if (lines[i].startsWith('## ')) { end = i; break; }
+            }
+            console.log(lines.slice(start + 1, end).join('\n').trim() || 'Release v${VERSION}');
+          ")
+          echo "$NOTES" > /tmp/release-notes.md
+
       - name: Create GitHub Release
         if: ${{ steps.collect.outputs.count != '0' }}
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: /tmp/release-notes.md
           fail_on_unmatched_files: true
           files: release-files/*

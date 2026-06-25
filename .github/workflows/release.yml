@@ -373,6 +373,18 @@ jobs:
       contents: write
 
     steps:
+      # FNXC:Changelog 2026-06-25-09:30:
+      # The release-notes step reads root CHANGELOG.md, so this job needs the repo
+      # tree — not just downloaded artifacts. Without this checkout the notes step
+      # threw `ENOENT: CHANGELOG.md` and failed the whole job, publishing zero
+      # binaries on v0.47.0 even though every bun build leg succeeded. Sparse-checkout
+      # only CHANGELOG.md to keep the job lean; no submodules or full history needed.
+      - name: Checkout CHANGELOG for release notes
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: CHANGELOG.md
+          sparse-checkout-cone-mode: false
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -401,18 +413,25 @@ jobs:
         id: notes
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
+          # FNXC:Changelog 2026-06-25-09:30:
+          # Never let release-note extraction fail the publish. A missing/unreadable
+          # CHANGELOG or absent version section falls back to a plain "Release vX.Y.Z"
+          # body so binaries still ship — matching the job's "partial over none" intent.
           NOTES=$(node -e "
             const fs = require('fs');
-            const content = fs.readFileSync('CHANGELOG.md', 'utf8');
+            const fallback = 'Release v${VERSION}';
+            let content = '';
+            try { content = fs.readFileSync('CHANGELOG.md', 'utf8'); }
+            catch (e) { console.log(fallback); process.exit(0); }
             const lines = content.split(/\r?\n/);
             const header = '## ' + '${VERSION}';
             const start = lines.findIndex(l => l.trim() === header);
-            if (start === -1) { console.log('Release v${VERSION}'); process.exit(0); }
+            if (start === -1) { console.log(fallback); process.exit(0); }
             let end = lines.length;
             for (let i = start + 1; i < lines.length; i++) {
               if (lines[i].startsWith('## ')) { end = i; break; }
             }
-            console.log(lines.slice(start + 1, end).join('\n').trim() || 'Release v${VERSION}');
+            console.log(lines.slice(start + 1, end).join('\n').trim() || fallback);
           ")
           echo "$NOTES" > /tmp/release-notes.md
 

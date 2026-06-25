@@ -10888,8 +10888,12 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
 
     const taskScope = await getScope(task.id);
     if (blocker) {
+      const blockerHoldsActiveLease = !blocker.paused
+        && !blocker.userPaused
+        && blocker.status !== "failed"
+        && (blocker.column === "in-progress" || (blocker.column === "in-review" && Boolean(blocker.worktree)));
       const blockerScope = await getScope(blocker.id);
-      if (repairScopesOverlap(taskScope, blockerScope)) {
+      if (blockerHoldsActiveLease && repairScopesOverlap(taskScope, blockerScope)) {
         return {
           taskId: id,
           dryRun,

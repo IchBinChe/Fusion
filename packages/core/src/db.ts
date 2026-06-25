@@ -162,7 +162,7 @@ export function isFts5CorruptionError(error: unknown): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 128;
+const SCHEMA_VERSION = 129;
 
 const TASKS_FTS_AUTOMERGE = 8;
 const TASKS_FTS_CRISISMERGE = 16;
@@ -347,7 +347,11 @@ CREATE TABLE IF NOT EXISTS tasks (
   deletedAt TEXT,
   allowResurrection INTEGER DEFAULT 0,
   transitionPending TEXT,
-  customFields TEXT DEFAULT '{}'
+  customFields TEXT DEFAULT '{}',
+  -- FNXC:Workspace 2026-06-24-15:30: per-sub-repo worktree map (JSON) for workspace-mode tasks.
+  -- Source of truth for getSchemaCompatibilityTableSchemas(), so existing DBs are backfilled by
+  -- ensureSchemaCompatibility() at boot and fresh DBs get it here. See store.ts TaskRow note.
+  workspaceWorktrees TEXT
 );
 
 -- Config table (single row with project settings)
@@ -5286,6 +5290,16 @@ export class Database {
           );
           CREATE INDEX IF NOT EXISTS idx_workflow_prompt_overrides_project ON workflow_prompt_overrides(projectId);
         `);
+      });
+    }
+
+    if (version < 129) {
+      // FNXC:Workspace 2026-06-24-15:30: add the workspaceWorktrees column so workspace-mode tasks
+      // can durably persist their per-sub-repo worktree map. Backfill is also covered by
+      // ensureSchemaCompatibility() (SCHEMA_SQL is its source of truth); this versioned migration keeps
+      // migrated and fresh-from-SCHEMA_SQL DBs converged.
+      this.applyMigration(129, () => {
+        this.addColumnIfMissing("tasks", "workspaceWorktrees", "TEXT");
       });
     }
 

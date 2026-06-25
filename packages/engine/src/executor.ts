@@ -1620,9 +1620,31 @@ export class TaskExecutor {
     this.completionFinalizedTaskIds.delete(taskId);
   }
 
+  /*
+  FNXC:Workspace 2026-06-24-15:45 (concurrent workspace tasks — shared browse-root collision):
+  In workspace mode `this.rootDir` is the SHARED browse-only (non-git) workspace root, and EVERY
+  workspace task runs its agent session rooted there (per-sub-repo worktrees are acquired on demand).
+  The session registrations below are keyed in the GLOBAL path-keyed activeSessionRegistry, whose
+  foreign-task guard rejects a second task registering a path already held by a different task. With
+  the bare root as the key, the second concurrent workspace task fails with "active-session path
+  <root> is held by task <other>; task <self> may not overwrite it" — so only ONE task per workspace
+  could ever run. Per-task session liveness does NOT require path-exclusivity on the shared root
+  (real per-sub-repo exclusivity is enforced separately by the workspace-repo-acquire lease in
+  worktree-acquisition.ts, keyed by sub-repo path). Give each task a task-scoped synthetic session
+  key so the registry stays per-task. The in-memory activeWorktrees Set still holds the REAL root, so
+  getActiveWorktreePaths() consumers that cd into a path are unaffected; only the registry key changes.
+  Non-workspace tasks (unique worktree path != rootDir) are returned unchanged.
+  */
+  private sessionRegistryPath(taskId: string, worktreePath: string): string {
+    if (this.workspaceConfig && worktreePath === this.rootDir) {
+      return `${worktreePath}#session:${taskId}`;
+    }
+    return worktreePath;
+  }
+
   private setActiveSession(taskId: string, sessionState: ActiveExecutorSessionState, worktreePath: string): void {
     this.activeSessions.set(taskId, sessionState);
-    activeSessionRegistry.registerPath(worktreePath, { taskId, kind: "executor", ownerKey: taskId });
+    activeSessionRegistry.registerPath(this.sessionRegistryPath(taskId, worktreePath), { taskId, kind: "executor", ownerKey: taskId });
   }
 
   private markGraphExecuteSelfRequeued(taskId: string): void {
@@ -1638,14 +1660,17 @@ export class TaskExecutor {
     // FNXC:Workspace 2026-06-21-12:00: KTD2 — when no explicit path is given, unregister EVERY worktree path the task holds (a workspace task holds N sub-repo paths); single-repo tasks resolve a one-element set.
     const resolvedWorktreePaths = worktreePath ? [worktreePath] : this.getActiveWorktreePaths(taskId);
     for (const path of resolvedWorktreePaths) {
-      activeSessionRegistry.unregisterPath(path);
+      // FNXC:Workspace 2026-06-24-15:45: map through sessionRegistryPath so the task-scoped synthetic
+      // session key registered for the shared workspace browse-root is the one we unregister (the
+      // in-memory Set holds the REAL root). Non-workspace/sub-repo paths pass through unchanged.
+      activeSessionRegistry.unregisterPath(this.sessionRegistryPath(taskId, path));
     }
   }
 
   private setActiveStepExecutor(taskId: string, stepExecutor: StepSessionExecutor, worktreePath: string, seenSteeringIds = new Set<string>()): void {
     this.activeStepExecutors.set(taskId, stepExecutor);
     this.activeStepExecutorSeenSteeringIds.set(taskId, seenSteeringIds);
-    activeSessionRegistry.registerPath(worktreePath, { taskId, kind: "step-session", ownerKey: `${taskId}#step-session` });
+    activeSessionRegistry.registerPath(this.sessionRegistryPath(taskId, worktreePath), { taskId, kind: "step-session", ownerKey: `${taskId}#step-session` });
   }
 
   private deleteActiveStepExecutor(taskId: string, worktreePath?: string): void {
@@ -1656,14 +1681,17 @@ export class TaskExecutor {
     // FNXC:Workspace 2026-06-21-12:00: KTD2 — unregister every held worktree path (Set), not one.
     const resolvedWorktreePaths = worktreePath ? [worktreePath] : this.getActiveWorktreePaths(taskId);
     for (const path of resolvedWorktreePaths) {
-      activeSessionRegistry.unregisterPath(path);
+      // FNXC:Workspace 2026-06-24-15:45: map through sessionRegistryPath so the task-scoped synthetic
+      // session key registered for the shared workspace browse-root is the one we unregister (the
+      // in-memory Set holds the REAL root). Non-workspace/sub-repo paths pass through unchanged.
+      activeSessionRegistry.unregisterPath(this.sessionRegistryPath(taskId, path));
     }
   }
 
   private setActiveWorkflowStepSession(taskId: string, session: AgentSession, worktreePath: string, seenSteeringIds = new Set<string>()): void {
     this.activeWorkflowStepSessions.set(taskId, session);
     this.activeWorkflowStepSessionSeenSteeringIds.set(taskId, seenSteeringIds);
-    activeSessionRegistry.registerPath(worktreePath, { taskId, kind: "workflow-step", ownerKey: `${taskId}#workflow-step` });
+    activeSessionRegistry.registerPath(this.sessionRegistryPath(taskId, worktreePath), { taskId, kind: "workflow-step", ownerKey: `${taskId}#workflow-step` });
   }
 
   private deleteActiveWorkflowStepSession(taskId: string, worktreePath?: string): void {
@@ -1672,7 +1700,10 @@ export class TaskExecutor {
     // FNXC:Workspace 2026-06-21-12:00: KTD2 — unregister every held worktree path (Set), not one.
     const resolvedWorktreePaths = worktreePath ? [worktreePath] : this.getActiveWorktreePaths(taskId);
     for (const path of resolvedWorktreePaths) {
-      activeSessionRegistry.unregisterPath(path);
+      // FNXC:Workspace 2026-06-24-15:45: map through sessionRegistryPath so the task-scoped synthetic
+      // session key registered for the shared workspace browse-root is the one we unregister (the
+      // in-memory Set holds the REAL root). Non-workspace/sub-repo paths pass through unchanged.
+      activeSessionRegistry.unregisterPath(this.sessionRegistryPath(taskId, path));
     }
   }
 

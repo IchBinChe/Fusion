@@ -96,6 +96,9 @@ The authoritative task lifecycle runtime. It resolves a Task to workflow IR, wal
 ### Engine Singleton Lock
 A per-machine mutual-exclusion guard ensuring only one fusion process runs the engine for a given project, combining a lockfile in the project's `.fusion/` directory with a per-project loopback socket. Failure to acquire it (`EngineAlreadyRunningError`) is **positive proof an engine is already running** for that project elsewhere on the machine — not an error to swallow and not "no engine." A process refused the lock keeps that as a fact: it reports the engine as available (so UI surfaces don't claim it's down) while reconciliation keeps retrying, so it takes over if the current owner exits.
 
+### Active-session lease
+A path-keyed, in-memory claim that a given worktree path is held by a specific Task's running session (executor, step, workflow-step, AI-merge, or a workspace sub-repo acquire/land). It serves two jobs at once: mutual exclusion (a second Task may not register a path already held by a different Task — the foreign-task guard) and liveness (self-healing treats a held path as proof the Task is actively running and must not be rebounded). The key is the path, so the registry is only as correct as the path chosen: a path uniquely owned by one Task gives real exclusivity, but a path shared across Tasks (e.g. a workspace's browse-only root) must be made Task-scoped before registration or the guard will reject every concurrent sibling. Re-registration by the same Task is idempotent; cleanup must unregister the exact key that was registered.
+
 ### ACP Ask Path
 A one-turn read-only model ask routed through the ACP runtime rather than a CLI print mode. The runner accumulates streamed prose, may recover a trailing JSON object for structured seams, and treats abnormal ACP stop reasons as incomplete answers for validator use.
 

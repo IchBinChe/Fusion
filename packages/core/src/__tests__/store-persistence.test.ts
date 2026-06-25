@@ -59,6 +59,78 @@ describe("TaskStore", () => {
     });
   });
 
+  // FNXC:Workspace 2026-06-24-15:30 (multiworkspace fn_task_done regression):
+  // task.workspaceWorktrees previously had NO SQLite column / no rowToTask mapping, so
+  // fn_acquire_repo_worktree's updateTask({workspaceWorktrees}) set it only in memory and the very
+  // next getTask (SQLite round-trip) dropped it. fn_task_done's scope verifier then read `{}` and
+  // refused with "acquired no sub-repo worktrees", and every isWorkspaceTask() consumer misfired.
+  // The invariant: the per-sub-repo worktree map survives write→read across ALL surfaces —
+  // getTask, listTasks, AND a full store reopen (SQLite + task.json + reconcile).
+  describe("workspaceWorktrees persistence", () => {
+    const sampleMap = {
+      swarmclaw: { worktreePath: "/ws/swarmclaw/.worktrees/ivory-raven", branch: "fusion/mult-002", baseCommitSha: "a327402" },
+      OpenVide: { worktreePath: "/ws/OpenVide/.worktrees/light-ember", branch: "fusion/mult-001" },
+    };
+
+    it("round-trips the per-sub-repo worktree map through write and getTask", async () => {
+      const task = await harness.store().createTask({ description: "Workspace task" });
+
+      const updated = await harness.store().updateTask(task.id, { workspaceWorktrees: sampleMap });
+      expect(updated.workspaceWorktrees).toEqual(sampleMap);
+
+      // The smoking-gun assertion: getTask reads back from SQLite (rowToTask), not the in-memory
+      // mutation. Before the fix this returned undefined because no column persisted the map.
+      const detail = await harness.store().getTask(task.id);
+      expect(detail.workspaceWorktrees).toEqual(sampleMap);
+    });
+
+    it("returns the map from listTasks", async () => {
+      const task = await harness.store().createTask({ description: "Workspace task in list" });
+      await harness.store().updateTask(task.id, { workspaceWorktrees: sampleMap });
+
+      const listed = (await harness.store().listTasks()).find((t) => t.id === task.id);
+      expect(listed?.workspaceWorktrees).toEqual(sampleMap);
+    });
+
+    it("survives a full store reopen (SQLite + task.json + reconcile)", async () => {
+      const task = await harness.store().createTask({ description: "Workspace task across reopen" });
+      await harness.store().updateTask(task.id, { workspaceWorktrees: sampleMap });
+
+      await harness.reopenDiskBackedStore();
+
+      const detail = await harness.store().getTask(task.id);
+      expect(detail.workspaceWorktrees).toEqual(sampleMap);
+    });
+
+    // Surface enumeration (PR #1747 review): rowToTask reads row.workspaceWorktrees, but the
+    // explicit slim and activity-log-limited SELECT lists are separate from `*` — if the column is
+    // omitted there, slim/limited reads silently drop the field even though getTask("*") works.
+    it("survives the activity-log-limited read (explicit limited SELECT clause)", async () => {
+      const task = await harness.store().createTask({ description: "Workspace task limited read" });
+      await harness.store().updateTask(task.id, { workspaceWorktrees: sampleMap });
+
+      const detail = await harness.store().getTask(task.id, { activityLogLimit: 1 });
+      expect(detail.workspaceWorktrees).toEqual(sampleMap);
+    });
+
+    it("survives the slim search read (explicit slim SELECT clause)", async () => {
+      const task = await harness.store().createTask({ description: "Workspace slimsearchmarker task" });
+      await harness.store().updateTask(task.id, { workspaceWorktrees: sampleMap });
+
+      const found = (await harness.store().searchTasks("slimsearchmarker", { slim: true })).find((t) => t.id === task.id);
+      expect(found?.workspaceWorktrees).toEqual(sampleMap);
+    });
+
+    it("normalizes an empty map to undefined so isWorkspaceTask stays false", async () => {
+      const task = await harness.store().createTask({ description: "Empty workspace map" });
+      const updated = await harness.store().updateTask(task.id, { workspaceWorktrees: {} });
+      expect(updated.workspaceWorktrees ?? {}).toEqual({});
+
+      const detail = await harness.store().getTask(task.id);
+      expect(detail.workspaceWorktrees).toBeUndefined();
+    });
+  });
+
   describe("tokenUsage persistence", () => {
     it("round-trips per-model token buckets through write and read", async () => {
       const task = await harness.store().createTask({ description: "Per-model token task" });

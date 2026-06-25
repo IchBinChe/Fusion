@@ -226,10 +226,11 @@ async function migrateTasks(fusionDir: string, db: Database): Promise<void> {
       columnMovedAt, dependencies, steps, log, attachments, steeringComments,
       comments, workflowStepResults, prInfo, issueInfo,
       sourceIssueProvider, sourceIssueRepository, sourceIssueExternalIssueId, sourceIssueNumber, sourceIssueUrl, sourceIssueClosedAt,
-      mergeDetails, breakIntoSubtasks, noCommitsExpected, enabledWorkflowSteps, modifiedFiles, sliceId
+      mergeDetails, breakIntoSubtasks, noCommitsExpected, enabledWorkflowSteps, modifiedFiles, sliceId,
+      workspaceWorktrees
     ) VALUES (
       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     )
   `);
 
@@ -300,6 +301,9 @@ async function migrateTasks(fusionDir: string, db: Database): Promise<void> {
         toJson(task.enabledWorkflowSteps || []),
         toJson(task.modifiedFiles || []),
         task.sliceId ?? null,
+        // FNXC:Workspace 2026-06-24-15:30: carry the per-sub-repo worktree map through the legacy
+        // task.json→SQLite rebuild so a workspace task migrated from disk keeps its acquired worktrees.
+        toJsonNullable(task.workspaceWorktrees),
       );
       migrated++;
     } catch (err) {

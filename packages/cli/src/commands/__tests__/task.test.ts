@@ -96,8 +96,11 @@ vi.mock("@fusion/core", async (importActual) => {
 });
 
 // Mock @fusion/engine
-const { runAiMergeMock } = vi.hoisted(() => ({ runAiMergeMock: vi.fn() }));
-vi.mock("@fusion/engine", () => ({ runAiMerge: runAiMergeMock, aiMergeTask: runAiMergeMock }));
+vi.mock("@fusion/engine", () => ({
+  aiMergeTask: vi.fn(),
+  runAiMerge: vi.fn(),
+  landWorkspaceTask: vi.fn(),
+}));
 
 // Mock @fusion/dashboard
 vi.mock("@fusion/dashboard", () => ({
@@ -156,7 +159,7 @@ import {
 import { GitHubClient, generatePrMetadata } from "@fusion/dashboard";
 import { createSession, submitResponse } from "@fusion/dashboard/planning";
 import { resolveProject } from "../../project-context.js";
-import { runAiMerge } from "@fusion/engine";
+import { aiMergeTask, runAiMerge, landWorkspaceTask } from "@fusion/engine";
 
 const mockedExec = vi.mocked(exec);
 
@@ -1229,6 +1232,7 @@ describe("project-aware task command behavior", () => {
       isRegistered: true,
       store: resolvedStore,
     });
+    // FNXC:MergerUnification 2026-06-24-22:58: CLI `fn task merge` normal-task tests must exercise the unified runAiMerge entrypoint; aiMergeTask remains deprecated and should not mask stale mocks.
     vi.mocked(runAiMerge).mockResolvedValue({
       merged: true,
       task: makeTask({ id: "FN-123" }),
@@ -1236,16 +1240,26 @@ describe("project-aware task command behavior", () => {
       worktreeRemoved: true,
       branchDeleted: true,
     } as never);
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation((((code?: number) => {
+      throw new Error(`process.exit:${code}`);
+    }) as unknown) as (code?: string | number | null | undefined) => never);
 
-    await runTaskUpdate("FN-123", "0", "done", "demo-project");
-    await runTaskLog("FN-123", "hello", undefined, "demo-project");
-    await runTaskMerge("FN-123", "demo-project");
-    await runTaskDuplicate("FN-123", "demo-project");
-    await runTaskRefine("FN-123", "more tests", "demo-project");
+    try {
+      await runTaskUpdate("FN-123", "0", "done", "demo-project");
+      await runTaskLog("FN-123", "hello", undefined, "demo-project");
+      await runTaskMerge("FN-123", "demo-project");
+      await runTaskDuplicate("FN-123", "demo-project");
+      await runTaskRefine("FN-123", "more tests", "demo-project");
+    } finally {
+      exitSpy.mockRestore();
+    }
 
     expect(updateStep).toHaveBeenCalled();
     expect(logEntry).toHaveBeenCalled();
     expect(runAiMerge).toHaveBeenCalledWith(resolvedStore, "/test", "FN-123", expect.any(Object));
+    expect(landWorkspaceTask).not.toHaveBeenCalled();
+    expect(aiMergeTask).not.toHaveBeenCalled();
+    expect(exitSpy).not.toHaveBeenCalled();
     expect(duplicateTask).toHaveBeenCalledWith("FN-123");
     expect(refineTask).toHaveBeenCalledWith("FN-123", "more tests");
   });

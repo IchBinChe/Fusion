@@ -412,6 +412,8 @@ vi.mock("@fusion/engine", async (importOriginal) => {
     createFollowUpTask: vi.fn().mockResolvedValue(undefined),
   }));
   const aiMergeTask = vi.fn().mockImplementation(() => Promise.resolve({ merged: true }));
+  const runAiMerge = vi.fn().mockImplementation(() => Promise.resolve({ merged: true }));
+  const landWorkspaceTask = vi.fn().mockImplementation(() => Promise.resolve({ allLanded: true, repos: [] }));
   const CronRunner = makeConstructibleMock(() => ({
     start: vi.fn(),
     stop: vi.fn(),
@@ -756,7 +758,8 @@ vi.mock("@fusion/engine", async (importOriginal) => {
     PrMonitor,
     PrCommentHandler,
     aiMergeTask,
-    runAiMerge: aiMergeTask,
+    runAiMerge,
+    landWorkspaceTask,
     CronRunner,
     createAiPromptExecutor,
     SelfHealingManager,
@@ -3159,7 +3162,7 @@ describe("runDashboard — merge stream sink routing", () => {
     resetGitHubMocks();
     process.env.FUSION_DASHBOARD_TOKEN = "fn_test_dashboard_token";
     const { TaskStore, AutomationStore, AgentStore, PluginStore, PluginLoader, CentralCore } = await import("@fusion/core");
-    const { aiMergeTask, createFusionAuthStorage } = await import("@fusion/engine");
+    const { runAiMerge, createFusionAuthStorage } = await import("@fusion/engine");
     const { createServer } = await import("@fusion/dashboard");
     const { DefaultPackageManager, ModelRegistry, discoverAndLoadExtensions, createExtensionRuntime } = await import("@earendil-works/pi-coding-agent");
 
@@ -3211,7 +3214,8 @@ describe("runDashboard — merge stream sink routing", () => {
     const stdoutWriteSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-    (aiMergeTask as ReturnType<typeof vi.fn>).mockImplementationOnce(
+    // FNXC:MergerUnification 2026-06-24-23:04: UI-only dashboard manual merges stream through runAiMerge's onAgentText callback; the test must assert line-buffered merge logs instead of deprecated aiMergeTask or raw stdout writes.
+    (runAiMerge as ReturnType<typeof vi.fn>).mockImplementationOnce(
       async (_store: unknown, _cwd: string, _taskId: string, opts: { onAgentText?: (delta: string) => void }) => {
         opts.onAgentText?.("Hel");
         opts.onAgentText?.("lo");
@@ -3221,24 +3225,29 @@ describe("runDashboard — merge stream sink routing", () => {
       },
     );
 
-    await runDashboard(0, { open: false, noEngine: true });
-    consoleLogSpy.mockClear();
-    stdoutWriteSpy.mockClear();
+    try {
+      await runDashboard(0, { open: false, noEngine: true });
+      consoleLogSpy.mockClear();
+      stdoutWriteSpy.mockClear();
 
-    const createServerCall = (createServer as ReturnType<typeof vi.fn>).mock.calls[0];
-    const serverOpts = createServerCall[1] as { onMerge: (taskId: string) => Promise<unknown> };
+      const createServerCall = (createServer as ReturnType<typeof vi.fn>).mock.calls[0];
+      const serverOpts = createServerCall[1] as { onMerge: (taskId: string) => Promise<unknown> };
 
-    await serverOpts.onMerge("FN-TEST");
+      await serverOpts.onMerge("FN-TEST");
 
-    expect(stdoutWriteSpy).not.toHaveBeenCalled();
-    expect(consoleLogSpy).toHaveBeenCalledWith("[merge] Hello");
-    expect(consoleLogSpy).toHaveBeenCalledWith("[merge] World!");
-    expect(consoleLogSpy).toHaveBeenCalledWith("[merge] Tail");
-    expect(consoleLogSpy).not.toHaveBeenCalledWith("[merge] H");
-
-    stdoutWriteSpy.mockRestore();
-    consoleLogSpy.mockRestore();
-    delete process.env.FUSION_DASHBOARD_TOKEN;
+      expect(runAiMerge).toHaveBeenCalledWith(expect.anything(), expect.any(String), "FN-TEST", expect.objectContaining({
+        onAgentText: expect.any(Function),
+      }));
+      expect(stdoutWriteSpy).not.toHaveBeenCalled();
+      expect(consoleLogSpy).toHaveBeenCalledWith("[merge] Hello");
+      expect(consoleLogSpy).toHaveBeenCalledWith("[merge] World!");
+      expect(consoleLogSpy).toHaveBeenCalledWith("[merge] Tail");
+      expect(consoleLogSpy).not.toHaveBeenCalledWith("[merge] H");
+    } finally {
+      stdoutWriteSpy.mockRestore();
+      consoleLogSpy.mockRestore();
+      delete process.env.FUSION_DASHBOARD_TOKEN;
+    }
   });
 });
 

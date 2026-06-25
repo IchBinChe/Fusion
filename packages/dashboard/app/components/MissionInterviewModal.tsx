@@ -19,6 +19,7 @@ import {
   type MissionPlanFeature,
   type MissionWithHierarchy,
   type ModelInfo,
+  type AiSessionDetail,
 } from "../api";
 import {
   saveMissionGoal,
@@ -133,6 +134,7 @@ export function MissionInterviewModal({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const streamConnectionRef = useRef<{ close: () => void; isConnected: () => boolean } | null>(null);
   const currentSessionIdRef = useRef<string | null>(null);
+  const streamErrorRecoverySeqRef = useRef(0);
   const trackedLockSessionRef = useRef<string | null>(null);
   const [lockSessionId, setLockSessionId] = useState<string | null>(resumeSessionId ?? null);
   const sessionTabId = useMemo(() => getSessionTabId(), []);
@@ -276,24 +278,121 @@ export function MissionInterviewModal({
         },
         onError: (message) => {
           const errorMessage = message || t("missions.interviewErrorDefault", "Session failed while contacting the AI.");
-          setIsReconnecting(false);
-          setIsRetrying(false);
-          setError(null);
-          setView({ type: "error", sessionId, errorMessage });
-          setStreamingOutput("");
-          setHasProgress(true);
-          currentSessionIdRef.current = sessionId;
 
-          broadcastUpdate({
-            sessionId,
-            status: "error",
-            needsInput: false,
-            owningTabId: sessionTabId,
-            type: "mission_interview",
-            title: missionGoal.trim() || undefined,
-            projectId: projectId ?? null,
-          });
-          broadcastCompleted({ sessionId, status: "error" });
+          if (currentSessionIdRef.current && currentSessionIdRef.current !== sessionId) {
+            return;
+          }
+
+          const recoverySeq = streamErrorRecoverySeqRef.current + 1;
+          streamErrorRecoverySeqRef.current = recoverySeq;
+
+          /*
+          FNXC:MissionInterview 2026-06-24-21:43:
+          Mission interview SSE errors can be transient while the server-side AI session remains recoverable.
+          Refetch persisted session state before showing the permanent Retry/Dismiss panel so issue #1745 cannot strand users on a literal Stream error.
+          */
+          setIsReconnecting(true);
+          (async () => {
+            let terminalErrorMessage = errorMessage;
+
+            const isCurrentRecovery = () =>
+              streamErrorRecoverySeqRef.current === recoverySeq &&
+              (!currentSessionIdRef.current || currentSessionIdRef.current === sessionId);
+
+            const restoreHistoryFromSession = (session: AiSessionDetail) => {
+              const parsedHistory = parseConversationHistory(session.conversationHistory);
+              setConversationHistory(parsedHistory);
+              setResponseHistory(
+                parsedHistory
+                  .map((entry) => entry.response)
+                  .filter((response): response is QuestionResponse =>
+                    Boolean(response && typeof response === "object" && !Array.isArray(response)),
+                  ),
+              );
+            };
+
+            try {
+              const session = await fetchAiSession(sessionId);
+              if (!isCurrentRecovery()) return;
+
+              if (session?.type === "mission_interview") {
+                restoreHistoryFromSession(session);
+                currentSessionIdRef.current = session.id;
+                setLockSessionId(session.id);
+                setHasProgress(true);
+
+                if (session.status === "generating") {
+                  if (session.thinkingOutput) {
+                    setStreamingOutput(session.thinkingOutput);
+                  }
+                  connectToMissionInterviewStream(session.id);
+                  return;
+                }
+
+                if (session.status === "awaiting_input") {
+                  if (!session.currentQuestion) {
+                    throw new Error("Interview session is awaiting input but has no current question.");
+                  }
+                  const question = JSON.parse(session.currentQuestion) as PlanningQuestion;
+                  clearMissionGoal(projectId);
+                  setView({ type: "question", sessionId: session.id, question });
+                  connectToMissionInterviewStream(session.id);
+                  return;
+                }
+
+                if (session.status === "complete") {
+                  if (!session.result) {
+                    throw new Error("Interview session is complete but has no result.");
+                  }
+                  const summary = JSON.parse(session.result) as MissionPlanSummary;
+                  clearMissionGoal(projectId);
+                  setEditedSummary(summary);
+                  setView({ type: "summary", sessionId: session.id, summary });
+                  setStreamingOutput("");
+                  setIsReconnecting(false);
+                  setIsRetrying(false);
+                  broadcastUpdate({
+                    sessionId: session.id,
+                    status: "complete",
+                    needsInput: false,
+                    owningTabId: sessionTabId,
+                    type: "mission_interview",
+                    title: missionGoal.trim() || undefined,
+                    projectId: projectId ?? null,
+                  });
+                  broadcastCompleted({ sessionId: session.id, status: "complete" });
+                  return;
+                }
+
+                if (session.status === "error") {
+                  terminalErrorMessage = session.error ?? t("missions.sessionEncounteredError", "The session encountered an error.");
+                }
+              }
+            } catch {
+              if (!isCurrentRecovery()) return;
+            }
+
+            if (!isCurrentRecovery()) return;
+
+            setIsReconnecting(false);
+            setIsRetrying(false);
+            setError(null);
+            setView({ type: "error", sessionId, errorMessage: terminalErrorMessage });
+            setStreamingOutput("");
+            setHasProgress(true);
+            currentSessionIdRef.current = sessionId;
+
+            broadcastUpdate({
+              sessionId,
+              status: "error",
+              needsInput: false,
+              owningTabId: sessionTabId,
+              type: "mission_interview",
+              title: missionGoal.trim() || undefined,
+              projectId: projectId ?? null,
+            });
+            broadcastCompleted({ sessionId, status: "error" });
+          })();
         },
         onComplete: () => {
           setIsReconnecting(false);

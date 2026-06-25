@@ -51,6 +51,57 @@ const SAMPLE_QUESTION = {
   ],
 };
 
+const SECOND_QUESTION = {
+  id: "platform",
+  type: "text" as const,
+  question: "Which platforms should this mission cover?",
+  description: "List the product surfaces that need support.",
+};
+
+const SAMPLE_SUMMARY = {
+  missionTitle: "Resilient mission planning",
+  missionDescription: "Recover mission AI planning after transient stream interruptions.",
+  milestones: [
+    {
+      title: "Recovery milestone",
+      description: "Keep the interview usable after reconnecting.",
+      slices: [
+        {
+          title: "Stream recovery",
+          description: "Reconnect recoverable mission interviews.",
+          features: [
+            {
+              title: "Continue interview",
+              description: "The modal resumes from the next streamed state.",
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+function buildMissionSession(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "mission-session-1",
+    type: "mission_interview",
+    status: "generating",
+    title: "Build a mission planning workflow",
+    inputPayload: JSON.stringify({ goal: "Build a mission planning workflow" }),
+    conversationHistory: "[]",
+    currentQuestion: null,
+    result: null,
+    thinkingOutput: "Continuing...",
+    error: null,
+    projectId: null,
+    lockedByTab: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    lockedAt: null,
+    ...overrides,
+  };
+}
+
 describe("MissionInterviewModal", () => {
   let streamHandlers: any;
 
@@ -188,7 +239,54 @@ describe("MissionInterviewModal", () => {
     expect(screen.getByText("Analyzing mission goals...")).toBeInTheDocument();
   });
 
-  it("shows error panel with retry action when stream fails", async () => {
+  it("recovers a generating mission interview after a transient Stream error", async () => {
+    mockFetchAiSession.mockResolvedValueOnce(buildMissionSession({ status: "generating" }));
+
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("What do you want to build?"), {
+      target: { value: "Build a mission planning workflow" },
+    });
+    fireEvent.click(screen.getByText("Start Interview"));
+
+    await waitFor(() => {
+      expect(streamHandlers).toBeDefined();
+    });
+
+    await act(async () => {
+      streamHandlers.onError?.("Stream error");
+    });
+
+    expect(await screen.findByText("Reconnecting…")).toBeInTheDocument();
+    expect(screen.queryByText("Stream error")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(mockFetchAiSession).toHaveBeenCalledWith("mission-session-1");
+      expect(mockConnectMissionInterviewStream).toHaveBeenCalledTimes(2);
+    });
+
+    act(() => {
+      streamHandlers.onQuestion?.(SECOND_QUESTION);
+    });
+
+    expect(await screen.findByText("Which platforms should this mission cover?")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByText("Reconnecting…")).not.toBeInTheDocument();
+    });
+    expect(screen.queryByText("Stream error")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
+  it("preserves an awaiting-input question while recovering a transient Stream error", async () => {
+    mockFetchAiSession.mockResolvedValueOnce(
+      buildMissionSession({
+        status: "awaiting_input",
+        currentQuestion: JSON.stringify(SAMPLE_QUESTION),
+        thinkingOutput: "",
+      }),
+    );
+
     renderModal();
 
     fireEvent.change(screen.getByLabelText("What do you want to build?"), {
@@ -201,10 +299,110 @@ describe("MissionInterviewModal", () => {
     });
 
     act(() => {
+      streamHandlers.onQuestion?.(SAMPLE_QUESTION);
+    });
+
+    expect(await screen.findByText("What is the target scope?")).toBeInTheDocument();
+
+    await act(async () => {
+      streamHandlers.onError?.("Stream error");
+    });
+
+    expect(await screen.findByText("Reconnecting…")).toBeInTheDocument();
+    expect(screen.getByText("What is the target scope?")).toBeInTheDocument();
+    expect(screen.queryByText("Stream error")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(mockFetchAiSession).toHaveBeenCalledWith("mission-session-1");
+      expect(mockConnectMissionInterviewStream).toHaveBeenCalledTimes(2);
+    });
+
+    act(() => {
+      streamHandlers.onSummary?.(SAMPLE_SUMMARY);
+    });
+
+    expect(await screen.findByDisplayValue("Resilient mission planning")).toBeInTheDocument();
+    expect(screen.queryByText("Reconnecting…")).not.toBeInTheDocument();
+    expect(screen.queryByText("Stream error")).not.toBeInTheDocument();
+  });
+
+  it("renders a completed mission summary instead of Stream error after recovery finds completion", async () => {
+    mockFetchAiSession.mockResolvedValueOnce(
+      buildMissionSession({
+        status: "complete",
+        result: JSON.stringify(SAMPLE_SUMMARY),
+        thinkingOutput: "",
+      }),
+    );
+
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("What do you want to build?"), {
+      target: { value: "Build a mission planning workflow" },
+    });
+    fireEvent.click(screen.getByText("Start Interview"));
+
+    await waitFor(() => {
+      expect(streamHandlers).toBeDefined();
+    });
+
+    await act(async () => {
+      streamHandlers.onError?.("Stream error");
+    });
+
+    expect(await screen.findByDisplayValue("Resilient mission planning")).toBeInTheDocument();
+    expect(screen.queryByText("Stream error")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+  });
+
+  it("shows error panel with retry action when stream recovery cannot refresh the session", async () => {
+    mockFetchAiSession.mockRejectedValueOnce(new Error("refresh failed"));
+
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("What do you want to build?"), {
+      target: { value: "Build a mission planning workflow" },
+    });
+    fireEvent.click(screen.getByText("Start Interview"));
+
+    await waitFor(() => {
+      expect(streamHandlers).toBeDefined();
+    });
+
+    await act(async () => {
       streamHandlers.onError?.("Temporary outage");
     });
 
     expect(await screen.findByText("Temporary outage")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("shows persisted mission interview errors after stream recovery refreshes the session", async () => {
+    mockFetchAiSession.mockResolvedValueOnce(
+      buildMissionSession({
+        status: "error",
+        error: "The mission interview failed permanently.",
+        thinkingOutput: "",
+      }),
+    );
+
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("What do you want to build?"), {
+      target: { value: "Build a mission planning workflow" },
+    });
+    fireEvent.click(screen.getByText("Start Interview"));
+
+    await waitFor(() => {
+      expect(streamHandlers).toBeDefined();
+    });
+
+    await act(async () => {
+      streamHandlers.onError?.("Stream error");
+    });
+
+    expect(await screen.findByText("The mission interview failed permanently.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
@@ -246,7 +444,7 @@ describe("MissionInterviewModal", () => {
     expect(mockConnectMissionInterviewStream).toHaveBeenCalledTimes(2);
   });
 
-  it("recovers retry from connection-loss when interview session is still generating", async () => {
+  it("recovers connection-loss directly when interview session is still generating", async () => {
     let attempt = 0;
     mockConnectMissionInterviewStream.mockImplementation((_sessionId, _projectId, handlers) => {
       streamHandlers = handlers;
@@ -260,26 +458,7 @@ describe("MissionInterviewModal", () => {
       };
     });
 
-    mockRetryMissionInterviewSession.mockRejectedValueOnce(
-      new Error("Mission interview session mission-session-1 is not in an error state"),
-    );
-    mockFetchAiSession.mockResolvedValueOnce({
-      id: "mission-session-1",
-      type: "mission_interview",
-      status: "generating",
-      title: "Build a mission planning workflow",
-      inputPayload: JSON.stringify({ goal: "Build a mission planning workflow" }),
-      conversationHistory: "[]",
-      currentQuestion: null,
-      result: null,
-      thinkingOutput: "Continuing...",
-      error: null,
-      projectId: null,
-      lockedByTab: null,
-      createdAt: "2026-01-01T00:00:00.000Z",
-      updatedAt: "2026-01-01T00:00:00.000Z",
-      lockedAt: null,
-    });
+    mockFetchAiSession.mockResolvedValueOnce(buildMissionSession({ status: "generating" }));
 
     renderModal();
 
@@ -289,19 +468,15 @@ describe("MissionInterviewModal", () => {
     fireEvent.click(screen.getByText("Start Interview"));
 
     await waitFor(() => {
-      expect(screen.getByText("Connection lost")).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-
-    await waitFor(() => {
-      expect(mockRetryMissionInterviewSession).toHaveBeenCalledWith("mission-session-1", undefined, expect.any(String));
       expect(mockFetchAiSession).toHaveBeenCalledWith("mission-session-1");
+      expect(mockConnectMissionInterviewStream).toHaveBeenCalledTimes(2);
     });
 
     expect(await screen.findByText("AI is thinking...")).toBeInTheDocument();
     expect(screen.getByText("Continuing...")).toBeInTheDocument();
-    expect(mockConnectMissionInterviewStream).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("Connection lost")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(mockRetryMissionInterviewSession).not.toHaveBeenCalled();
   });
 
   it("shows comment textarea and submits _comment for non-text questions", async () => {

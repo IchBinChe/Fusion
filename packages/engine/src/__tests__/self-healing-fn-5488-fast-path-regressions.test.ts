@@ -46,6 +46,12 @@ function makeStore(tasksInput: Task[]) {
       return all.filter((task) => task.column === opts.column);
     }),
     getTask: vi.fn().mockImplementation(async (id: string) => tasks.get(id) ?? null),
+    /*
+    FNXC:OverlapSelfHealing 2026-06-26-12:52:
+    The FN-5488 overlap path calls every TaskStore seam in clearStaleBlockedBy(), and these fakes must stay complete so full-suite shard ordering cannot turn overlap-preservation invariants into fake drift. Use a non-empty shared scope so hasActiveFileScopeOverlapBlocker reaches pathsOverlap instead of short-circuiting before the branch this file guards.
+    */
+    parseFileScopeFromPrompt: vi.fn().mockResolvedValue(["packages/engine/src/self-healing.ts"]),
+    getCompletionHandoffAcceptedMarker: vi.fn().mockReturnValue(null),
     updateTask: vi.fn().mockImplementation(async (id: string, patch: Partial<Task>) => {
       const current = tasks.get(id);
       if (!current) throw new Error(`Task ${id} missing`);

@@ -40,6 +40,13 @@ describe("SelfHealingManager in-review merge stall deadlock recovery (FN-5488)",
         if (!opts?.column) return all;
         return all.filter((task) => task.column === opts.column);
       }),
+      getTask: vi.fn().mockImplementation(async (id: string) => tasks.get(id) ?? null),
+      /*
+      FNXC:OverlapSelfHealing 2026-06-26-12:53:
+      The FN-5488 stale-blockedBy sweep now reads overlap scopes, soft-deleted blockers, and completion-handoff markers through TaskStore. Keep this fake in lockstep with every clearStaleBlockedBy() store seam so the merge-stall recovery counts stay deterministic across isolated and full-suite shard runs.
+      */
+      parseFileScopeFromPrompt: vi.fn().mockResolvedValue(["packages/engine/src/self-healing.ts"]),
+      getCompletionHandoffAcceptedMarker: vi.fn().mockReturnValue(null),
       updateTask: vi.fn().mockImplementation(async (id: string, patch: Partial<Task>) => {
         const current = tasks.get(id);
         if (!current) throw new Error(`Task ${id} missing`);

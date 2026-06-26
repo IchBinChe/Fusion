@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { SettingsModal } from "../SettingsModal";
 
 const mockFetchSettings = vi.fn();
@@ -94,7 +93,7 @@ describe("SettingsModal worktrunk install affordance", () => {
     }
 
     const button = screen.getByRole("button", { name: scenario.button });
-    await userEvent.click(button);
+    fireEvent.click(button);
 
     if (scenario.action === "request") {
       expect(requestInstall).toHaveBeenCalledTimes(1);

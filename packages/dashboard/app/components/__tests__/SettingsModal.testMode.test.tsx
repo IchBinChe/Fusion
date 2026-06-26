@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { SettingsModal } from "../SettingsModal";
 
 const mockFetchSettings = vi.fn();
@@ -87,7 +86,7 @@ describe("SettingsModal testMode toggle", () => {
     const toggle = await screen.findByLabelText("Enable test mode");
     expect(toggle).toBeChecked();
 
-    await userEvent.click(toggle);
+    fireEvent.click(toggle);
 
     await waitFor(() => {
       expect(toggle).not.toBeChecked();

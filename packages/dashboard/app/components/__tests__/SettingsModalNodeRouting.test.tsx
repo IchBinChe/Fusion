@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { SettingsModal } from "../SettingsModal";
 
 const mockFetchSettings = vi.fn();
@@ -125,7 +124,7 @@ async function ready() {
 
 async function openNodeRouting() {
   await ready();
-  await userEvent.click(screen.getAllByText("Node Routing")[0]);
+  fireEvent.click(screen.getAllByText("Node Routing")[0]);
 }
 
 describe("SettingsModal Node Routing section", () => {
@@ -219,7 +218,7 @@ describe("SettingsModal Node Routing section", () => {
     fireEvent.change(screen.getByLabelText("Default Execution Node"), { target: { value: "node-remote-1" } });
     fireEvent.change(screen.getByLabelText("Unavailable Node Policy"), { target: { value: "fallback-local" } });
 
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(mockUpdateSettings).toHaveBeenCalledTimes(1));
     const payload = mockUpdateSettings.mock.calls[0][0];
@@ -241,7 +240,7 @@ describe("SettingsModal Node Routing section", () => {
   it("removes routing controls from scheduling section", async () => {
     renderModal();
     await ready();
-    await userEvent.click(screen.getByRole("button", { name: "Scheduling & Capacity" }));
+    fireEvent.click(screen.getByRole("button", { name: "Scheduling & Capacity" }));
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Scheduling" })).toBeInTheDocument();
     });

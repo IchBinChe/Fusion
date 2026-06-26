@@ -1,6 +1,6 @@
 import { vi, beforeEach, afterEach, expect } from "vitest";
 import type { ComponentProps } from "react";
-import { render, screen, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, cleanup, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import fs from "fs";
 import path from "path";
@@ -131,10 +131,15 @@ export function renderModal(props: Partial<ComponentProps<typeof SettingsModal>>
 }
 
 export async function waitForSettingsModalReady() {
-  await screen.findByRole("button", { name: /^Save$/i });
-  expect(mockFetchSettings).toHaveBeenCalled();
+  await waitFor(() => expect(mockFetchSettings).toHaveBeenCalled());
   expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
 }
+
+/*
+FNXC:SettingsModalTests 2026-06-25-06:45:
+The split SettingsModal files remain the dashboard's slowest feedback-loop tests when they use default user-event delays. Keep one no-delay user instance per test and skip repeated pointer-events tree walks so interaction coverage stays intact without artificial timer overhead.
+*/
+export let settingsModalUser: ReturnType<typeof userEvent.setup>;
 
 export const MODEL_FIXTURE = [
   { provider: "anthropic", id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", reasoning: true, contextWindow: 200000 },
@@ -151,25 +156,24 @@ export type PersistSettingInput = {
 };
 
 export async function expectSettingPersists({ section, label, kind, value, scope, expectedKey }: PersistSettingInput) {
-  const user = userEvent.setup({ delay: null });
   renderModal();
   await waitForSettingsModalReady();
-  await user.click(screen.getByRole("button", { name: new RegExp(`^${section}$`, "i") }));
+  fireEvent.click(screen.getByRole("button", { name: new RegExp(`^${section}$`, "i") }));
 
   const control = await screen.findByLabelText(label);
   if (kind === "checkbox") {
     const shouldBeChecked = Boolean(value);
     if ((control as HTMLInputElement).checked !== shouldBeChecked) {
-      await user.click(control);
+      fireEvent.click(control);
     }
   } else if (kind === "select") {
-    await user.selectOptions(control, String(value));
+    fireEvent.change(control, { target: { value: String(value) } });
   } else {
-    await user.clear(control);
-    await user.type(control, String(value));
+    fireEvent.change(control, { target: { value: "" } });
+    fireEvent.change(control, { target: { value: String(value) } });
   }
 
-  await user.click(screen.getByRole("button", { name: /^Save$/i }));
+  fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
 
   if (scope === "global") {
     await waitFor(() => expect(mockUpdateGlobalSettings).toHaveBeenCalled());
@@ -186,13 +190,12 @@ export async function expectSettingPersists({ section, label, kind, value, scope
 }
 
 export async function assertProjectModelSavePayload(provider: string, modelId: string, expectedKeys: string[]) {
-  const user = userEvent.setup({ delay: null });
   renderModal({ initialSection: "project-models" });
   await waitForSettingsModalReady();
 
-  await user.selectOptions(screen.getByLabelText("Default Provider"), provider);
-  await user.selectOptions(screen.getByLabelText("Default Model"), modelId);
-  await user.click(screen.getByRole("button", { name: /^Save$/i }));
+  fireEvent.change(screen.getByLabelText("Default Provider"), { target: { value: provider } });
+  fireEvent.change(screen.getByLabelText("Default Model"), { target: { value: modelId } });
+  fireEvent.click(screen.getByRole("button", { name: /^Save$/i }));
 
   await waitFor(() => {
     expect(mockUpdateSettings).toHaveBeenCalledWith(
@@ -213,6 +216,7 @@ export function forEachProvider<T>(providers: T[], fn: (provider: T) => void) {
 export function installSettingsModalEnv() {
   beforeEach(() => {
     vi.useRealTimers();
+    settingsModalUser = userEvent.setup({ delay: null, pointerEventsCheck: 0 });
     vi.resetAllMocks();
     localStorage.clear();
     sessionStorage.clear();

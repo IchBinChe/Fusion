@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { EditorView } from "@codemirror/view";
 import path from "path";
 import { SettingsModal } from "../SettingsModal";
@@ -69,6 +68,7 @@ import {
   defaultSettings,
   renderModal,
   waitForSettingsModalReady,
+  settingsModalUser,
   installSettingsModalEnv,
 } from "./SettingsModal.test-harness";
 
@@ -229,9 +229,9 @@ describe("SettingsModal", () => {
 
       fireEvent.click(screen.getByText("Scheduling & Capacity"));
 
-      await userEvent.click(screen.getByLabelText(/ignore hidden dot paths in overlap checks/i));
-      await userEvent.type(screen.getByPlaceholderText("docs/"), "generated/*");
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.click(screen.getByLabelText(/ignore hidden dot paths in overlap checks/i));
+      await settingsModalUser.type(screen.getByPlaceholderText("docs/"), "generated/*");
+      await settingsModalUser.click(screen.getByText("Save"));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
@@ -254,8 +254,8 @@ describe("SettingsModal", () => {
 
       fireEvent.click(screen.getByText("Scheduling & Capacity"));
 
-      await userEvent.click(screen.getByLabelText(/ignore hidden dot paths in overlap checks/i));
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.click(screen.getByLabelText(/ignore hidden dot paths in overlap checks/i));
+      await settingsModalUser.click(screen.getByText("Save"));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
@@ -284,10 +284,10 @@ describe("SettingsModal", () => {
 
       fireEvent.click(screen.getByText("Scheduling & Capacity"));
 
-      await userEvent.click(screen.getByRole("button", { name: /browse path for ignored overlap entry 1/i }));
+      await settingsModalUser.click(screen.getByRole("button", { name: /browse path for ignored overlap entry 1/i }));
 
       expect(await screen.findByRole("dialog", { name: /browse workspace path/i })).toBeInTheDocument();
-      await userEvent.click(screen.getByRole("button", { name: "Select README.md" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Select README.md" }));
 
       expect(screen.getByDisplayValue("README.md")).toBeInTheDocument();
     });
@@ -298,14 +298,14 @@ describe("SettingsModal", () => {
 
       fireEvent.click(screen.getByText("Scheduling & Capacity"));
 
-      await userEvent.click(screen.getByRole("button", { name: /browse path for ignored overlap entry 1/i }));
-      await userEvent.click(await screen.findByRole("button", { name: "Select README.md" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: /browse path for ignored overlap entry 1/i }));
+      await settingsModalUser.click(await screen.findByRole("button", { name: "Select README.md" }));
 
-      await userEvent.click(screen.getByRole("button", { name: /add ignored path/i }));
+      await settingsModalUser.click(screen.getByRole("button", { name: /add ignored path/i }));
       const inputs = screen.getAllByPlaceholderText("docs/");
-      await userEvent.type(inputs[1], "generated/*");
+      await settingsModalUser.type(inputs[1], "generated/*");
 
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.click(screen.getByText("Save"));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
@@ -329,8 +329,8 @@ describe("SettingsModal", () => {
       const select = screen.getByLabelText("Heartbeat Scope Discipline") as HTMLSelectElement;
       expect(select.value).toBe("lite");
 
-      await userEvent.selectOptions(select, "off");
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.selectOptions(select, "off");
+      await settingsModalUser.click(screen.getByText("Save"));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
@@ -371,8 +371,8 @@ describe("SettingsModal", () => {
 
       const toggle = screen.getByLabelText("Let engineer agents auto-claim backlog tasks") as HTMLInputElement;
       expect(toggle.checked).toBe(false);
-      await userEvent.click(toggle);
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.click(toggle);
+      await settingsModalUser.click(screen.getByText("Save"));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
@@ -395,8 +395,8 @@ describe("SettingsModal", () => {
 
       const toggle = screen.getByLabelText("Let engineer agents auto-claim backlog tasks") as HTMLInputElement;
       expect(toggle.checked).toBe(true);
-      await userEvent.click(toggle);
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.click(toggle);
+      await settingsModalUser.click(screen.getByText("Save"));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
@@ -420,7 +420,7 @@ describe("SettingsModal", () => {
       await waitFor(() => expect(input).not.toBeDisabled());
 
       // Clear the input - the input should be empty, not show "0"
-      await userEvent.clear(input);
+      await settingsModalUser.clear(input);
       expect(input.value).toBe("");
     });
 
@@ -436,7 +436,7 @@ describe("SettingsModal", () => {
       await waitFor(() => expect(input).not.toBeDisabled());
 
       // Clear the input - the input should be empty, not show "0"
-      await userEvent.clear(input);
+      await settingsModalUser.clear(input);
       expect(input.value).toBe("");
     });
 
@@ -451,7 +451,7 @@ describe("SettingsModal", () => {
       expect(input).toBeDefined();
 
       // Clear the input - the input should be empty, not show "0"
-      await userEvent.clear(input);
+      await settingsModalUser.clear(input);
       expect(input.value).toBe("");
     });
 
@@ -463,8 +463,8 @@ describe("SettingsModal", () => {
 
       const input = screen.getByLabelText("Stale High Fan-out Escalation (hours)") as HTMLInputElement;
       expect(input).toBeDefined();
-      await userEvent.clear(input);
-      await userEvent.type(input, "3");
+      await settingsModalUser.clear(input);
+      await settingsModalUser.type(input, "3");
       expect(input.value).toBe("3");
     });
 
@@ -476,7 +476,7 @@ describe("SettingsModal", () => {
       const input = screen.getByLabelText("Worktrees Directory") as HTMLInputElement;
       fireEvent.change(input, { target: { value: "~/.fn-worktrees/{repo}" } });
 
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => expect(mockUpdateSettings).toHaveBeenCalled());
       const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
@@ -497,17 +497,17 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
 
       expect(screen.getByDisplayValue(".env")).toBeInTheDocument();
-      await userEvent.click(screen.getByRole("button", { name: "Add file" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Add file" }));
       const inputs = screen.getAllByLabelText("File to copy into new worktrees") as HTMLInputElement[];
-      await userEvent.type(inputs[1], "  .env  ");
-      await userEvent.click(screen.getAllByRole("button", { name: "Browse file to copy into new worktrees" })[1]);
+      await settingsModalUser.type(inputs[1], "  .env  ");
+      await settingsModalUser.click(screen.getAllByRole("button", { name: "Browse file to copy into new worktrees" })[1]);
       expect(await screen.findByRole("dialog", { name: "Browse file to copy into new worktrees" })).toBeInTheDocument();
-      await userEvent.click(screen.getByRole("button", { name: "Select README.md" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Select README.md" }));
 
-      await userEvent.click(screen.getByRole("button", { name: "Add file" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Add file" }));
       const updatedInputs = screen.getAllByLabelText("File to copy into new worktrees") as HTMLInputElement[];
-      await userEvent.type(updatedInputs[2], " README.md ");
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.type(updatedInputs[2], " README.md ");
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => expect(mockUpdateSettings).toHaveBeenCalled());
       const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
@@ -527,8 +527,8 @@ describe("SettingsModal", () => {
       renderModal({ initialSection: "worktrees" });
       await waitForSettingsModalReady();
 
-      await userEvent.click(screen.getByRole("button", { name: "Remove copied worktree file" }));
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Remove copied worktree file" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => expect(mockUpdateSettings).toHaveBeenCalled());
       const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
@@ -565,7 +565,7 @@ describe("SettingsModal", () => {
       expect(sectionPicker).toBeInTheDocument();
       expect(sectionPicker.querySelector('option[value="worktrees"]')).toHaveTextContent("Worktrees");
 
-      await userEvent.selectOptions(sectionPicker, "worktrees");
+      await settingsModalUser.selectOptions(sectionPicker, "worktrees");
 
       expect(screen.getByText("Files to copy into new worktrees")).toBeInTheDocument();
       expect(screen.getByDisplayValue(".env.local")).toBeInTheDocument();
@@ -583,7 +583,7 @@ describe("SettingsModal", () => {
       expect(input).toBeDefined();
 
       // Clear the input - the input should be empty, not show "0"
-      await userEvent.clear(input);
+      await settingsModalUser.clear(input);
       expect(input.value).toBe("");
     });
   });
@@ -595,7 +595,7 @@ describe("SettingsModal", () => {
 
       expect(screen.queryByLabelText("Enable worktrunk integration")).not.toBeInTheDocument();
 
-      await userEvent.click(screen.getByText("Worktrees"));
+      await settingsModalUser.click(screen.getByText("Worktrees"));
 
       expect(screen.getByRole("heading", { name: "Worktrunk integration" })).toBeInTheDocument();
       expect(screen.getByLabelText("Enable worktrunk integration")).toBeInTheDocument();
@@ -644,7 +644,7 @@ describe("SettingsModal", () => {
 
       renderModal();
       await waitForSettingsModalReady();
-      await userEvent.click(screen.getByText("Worktrees"));
+      await settingsModalUser.click(screen.getByText("Worktrees"));
 
       const enabledToggle = screen.getByLabelText("Enable worktrunk integration") as HTMLInputElement;
       const binaryPathInput = screen.getByLabelText("Worktrunk binary path") as HTMLInputElement;
@@ -658,7 +658,7 @@ describe("SettingsModal", () => {
       expect(worktreesDirInput).not.toBeDisabled();
       expect(browseButton).not.toBeDisabled();
 
-      await userEvent.click(enabledToggle);
+      await settingsModalUser.click(enabledToggle);
 
       expect(binaryPathInput).not.toBeDisabled();
       expect(onFailureSelect).not.toBeDisabled();
@@ -694,7 +694,7 @@ describe("SettingsModal", () => {
       }
 
       const button = screen.getByRole("button", { name: scenario.button });
-      await userEvent.click(button);
+      await settingsModalUser.click(button);
 
       if (scenario.action === "request") {
         expect(requestInstall).toHaveBeenCalledTimes(1);
@@ -793,7 +793,7 @@ describe("SettingsModal", () => {
 
       renderModal({ initialSection: "worktrees" });
       await waitForSettingsModalReady();
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => expect(mockUpdateSettings).toHaveBeenCalled());
       const payload = mockUpdateSettings.mock.calls[0][0] as {
@@ -814,17 +814,17 @@ describe("SettingsModal", () => {
       });
       renderModal();
       await waitForSettingsModalReady();
-      await userEvent.click(screen.getByText("Worktrees"));
+      await settingsModalUser.click(screen.getByText("Worktrees"));
 
       const enabledToggle = screen.getByLabelText("Enable worktrunk integration");
-      await userEvent.click(enabledToggle);
+      await settingsModalUser.click(enabledToggle);
 
       const onFailureSelect = screen.getByLabelText("Worktrunk failure behavior") as HTMLSelectElement;
       if (onFailure !== "fail") {
-        await userEvent.selectOptions(onFailureSelect, onFailure);
+        await settingsModalUser.selectOptions(onFailureSelect, onFailure);
       }
 
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => expect(mockUpdateSettings).toHaveBeenCalled());
       const payload = mockUpdateSettings.mock.calls[0][0] as {
@@ -861,10 +861,10 @@ describe("SettingsModal", () => {
         const checkbox = screen.getByRole("checkbox", { name: /enable memory tools/i });
         expect(checkbox).toBeChecked();
 
-        await userEvent.click(checkbox);
+        await settingsModalUser.click(checkbox);
         expect(checkbox).not.toBeChecked();
 
-        await userEvent.click(checkbox);
+        await settingsModalUser.click(checkbox);
         expect(checkbox).toBeChecked();
       });
 
@@ -892,7 +892,7 @@ describe("SettingsModal", () => {
       });
 
       // Click the Memory section in the sidebar
-      await userEvent.click(await screen.findByText("Memory"));
+      await settingsModalUser.click(await screen.findByText("Memory"));
 
       const checkbox = screen.getByRole("checkbox", { name: /enable memory tools/i });
       expect(checkbox).toBeDefined();
@@ -917,7 +917,7 @@ describe("SettingsModal", () => {
       await waitFor(() => {
         expect(mockFetchSettings).toHaveBeenCalled();
       });
-      await userEvent.click(await screen.findByText("Memory"));
+      await settingsModalUser.click(await screen.findByText("Memory"));
 
       const option = await screen.findByRole("option", { name: /Long-term memory/ });
       expect(option.textContent).toContain("…");
@@ -959,7 +959,7 @@ describe("SettingsModal", () => {
       await waitFor(() => {
         expect(mockFetchSettings).toHaveBeenCalled();
       });
-      await userEvent.click(await screen.findByText("Memory"));
+      await settingsModalUser.click(await screen.findByText("Memory"));
 
       expect(screen.getByText("Checking memory write access...")).toBeInTheDocument();
       expect(screen.queryByText(/qmd is not installed\. Search will use local files\./i)).not.toBeInTheDocument();
@@ -1000,7 +1000,7 @@ describe("SettingsModal", () => {
       await waitFor(() => {
         expect(mockFetchSettings).toHaveBeenCalled();
       });
-      await userEvent.click(await screen.findByText("Memory"));
+      await settingsModalUser.click(await screen.findByText("Memory"));
 
       expect(screen.getByText(/Memory is configured with a read-only backend\./i)).toBeInTheDocument();
     });
@@ -1041,9 +1041,9 @@ describe("SettingsModal", () => {
       await waitFor(() => {
         expect(mockFetchSettings).toHaveBeenCalled();
       });
-      await userEvent.click(await screen.findByText("Memory"));
+      await settingsModalUser.click(await screen.findByText("Memory"));
 
-      await userEvent.click(await screen.findByRole("button", { name: "Install qmd" }));
+      await settingsModalUser.click(await screen.findByRole("button", { name: "Install qmd" }));
 
       await waitFor(() => {
         expect(mockInstallQmd).toHaveBeenCalledWith(undefined);
@@ -1075,7 +1075,7 @@ describe("SettingsModal", () => {
         expect(mockFetchSettings).toHaveBeenCalled();
       });
 
-      await userEvent.click(await screen.findByText("Memory"));
+      await settingsModalUser.click(await screen.findByText("Memory"));
 
       expect(screen.getByText("Loading memory…")).toBeDefined();
 
@@ -1092,21 +1092,21 @@ describe("SettingsModal", () => {
         expect(mockFetchSettings).toHaveBeenCalled();
       });
 
-      await userEvent.click(await screen.findByText("Memory"));
+      await settingsModalUser.click(await screen.findByText("Memory"));
 
       await waitFor(() => {
         expect(mockFetchMemoryFile).toHaveBeenCalledWith(".fusion/memory/DREAMS.md", undefined);
       });
 
       const select = await screen.findByLabelText("Memory File");
-      await userEvent.selectOptions(select, ".fusion/memory/MEMORY.md");
+      await settingsModalUser.selectOptions(select, ".fusion/memory/MEMORY.md");
 
       await screen.findByLabelText("Editor for .fusion/memory/MEMORY.md");
       const view = getMemoryEditorView(".fusion/memory/MEMORY.md");
       view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: "# Updated memory\n- Reusable learning" } });
 
       const saveButton = await screen.findByRole("button", { name: "Save Memory" });
-      await userEvent.click(saveButton);
+      await settingsModalUser.click(saveButton);
 
       await waitFor(() => {
         expect(mockSaveMemoryFile).toHaveBeenCalledWith(
@@ -1126,10 +1126,10 @@ describe("SettingsModal", () => {
         expect(mockFetchSettings).toHaveBeenCalled();
       });
 
-      await userEvent.click(await screen.findByText("Memory"));
+      await settingsModalUser.click(await screen.findByText("Memory"));
 
       const compactButton = await screen.findByRole("button", { name: "Compact Selected File" });
-      await userEvent.click(compactButton);
+      await settingsModalUser.click(compactButton);
 
       await waitFor(() => {
         expect(mockCompactMemory).toHaveBeenCalledWith(".fusion/memory/DREAMS.md", undefined);
@@ -1148,7 +1148,7 @@ describe("SettingsModal", () => {
         expect(mockFetchSettings).toHaveBeenCalled();
       });
 
-      await userEvent.click(await screen.findByText("Memory"));
+      await settingsModalUser.click(await screen.findByText("Memory"));
 
       await screen.findByLabelText("Editor for .fusion/memory/DREAMS.md");
       expect(getMemoryEditorView(".fusion/memory/DREAMS.md").state.doc.toString()).toBe("");
@@ -1168,10 +1168,10 @@ describe("SettingsModal", () => {
         expect(mockFetchSettings).toHaveBeenCalled();
       });
 
-      await userEvent.click(await screen.findByText("Memory"));
+      await settingsModalUser.click(await screen.findByText("Memory"));
 
       const select = await screen.findByLabelText("Memory File");
-      await userEvent.selectOptions(select, ".fusion/memory/DREAMS.md");
+      await settingsModalUser.selectOptions(select, ".fusion/memory/DREAMS.md");
 
       await waitFor(() => {
         expect(mockFetchMemoryFile).toHaveBeenCalledWith(".fusion/memory/DREAMS.md", undefined);
@@ -1208,7 +1208,7 @@ describe("SettingsModal", () => {
 
       it("merge option descriptions are revealed when clicking More details", async () => {
         const moreDetailsSummaries = screen.getAllByText("More details");
-        await userEvent.click(moreDetailsSummaries[0]);
+        await settingsModalUser.click(moreDetailsSummaries[0]);
 
         expect(screen.getByText(/When enabled, tasks that pass review are automatically merged/i)).toBeVisible();
       });
@@ -1230,7 +1230,7 @@ describe("SettingsModal", () => {
       });
 
       it("shows Push Remote input when push-after-merge is enabled", async () => {
-        await userEvent.click(
+        await settingsModalUser.click(
           screen.getByRole("checkbox", { name: /push to remote after merge/i }),
         );
 
@@ -1239,15 +1239,15 @@ describe("SettingsModal", () => {
       });
 
       it("includes pushAfterMerge and pushRemote in the save payload", async () => {
-        await userEvent.click(
+        await settingsModalUser.click(
           screen.getByRole("checkbox", { name: /push to remote after merge/i }),
         );
 
         const pushRemoteInput = screen.getByLabelText("Push Remote");
-        await userEvent.clear(pushRemoteInput);
-        await userEvent.type(pushRemoteInput, "upstream main");
+        await settingsModalUser.clear(pushRemoteInput);
+        await settingsModalUser.type(pushRemoteInput, "upstream main");
 
-        await userEvent.click(screen.getByText("Save"));
+        await settingsModalUser.click(screen.getByText("Save"));
 
         await waitFor(() => {
           expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
@@ -1273,7 +1273,7 @@ describe("SettingsModal", () => {
         renderModal({ initialSection: "merge" });
         await waitForSettingsModalReady();
 
-        await userEvent.click(screen.getByRole("button", { name: "Save" }));
+        await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
         await waitFor(() => {
           expect(mockUpdateSettings).toHaveBeenCalled();
@@ -1289,7 +1289,7 @@ describe("SettingsModal", () => {
         await waitForSettingsModalReady();
 
         const buttons = screen.getAllByRole("button", { name: "Open workflow settings" });
-        await userEvent.click(buttons[0]);
+        await settingsModalUser.click(buttons[0]);
         expect(onOpenWorkflowSettings).toHaveBeenCalled();
       });
     });
@@ -1306,9 +1306,9 @@ describe("SettingsModal", () => {
       expect(authModeSelect.value).toBe("gh-cli");
       expect(screen.queryByLabelText("GitHub personal access token")).not.toBeInTheDocument();
 
-      await userEvent.selectOptions(authModeSelect, "token");
-      await userEvent.type(screen.getByLabelText("GitHub personal access token"), "ghp_test_token");
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.selectOptions(authModeSelect, "token");
+      await settingsModalUser.type(screen.getByLabelText("GitHub personal access token"), "ghp_test_token");
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalled();
@@ -1323,7 +1323,7 @@ describe("SettingsModal", () => {
   describe("Experimental Features section", () => {
     const openExperimentalFeaturesSection = async () => {
       const sectionLabel = await screen.findByText("Experimental Features");
-      await userEvent.click(sectionLabel);
+      await settingsModalUser.click(sectionLabel);
     };
 
     it("renders the Experimental Features section in the sidebar", async () => {
@@ -1527,10 +1527,10 @@ describe("SettingsModal", () => {
       const devServerToggle = screen.getByLabelText("Dev Server") as HTMLInputElement;
       expect(devServerToggle).toBeChecked();
 
-      await userEvent.click(devServerToggle);
+      await settingsModalUser.click(devServerToggle);
       expect(devServerToggle).not.toBeChecked();
 
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.click(screen.getByText("Save"));
 
       await waitFor(() => {
         expect(mockUpdateGlobalSettings).toHaveBeenCalledTimes(1);
@@ -1549,9 +1549,9 @@ describe("SettingsModal", () => {
       renderModal();
 
       await openExperimentalFeaturesSection();
-      await userEvent.click(screen.getByLabelText("my-feature"));
+      await settingsModalUser.click(screen.getByLabelText("my-feature"));
 
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.click(screen.getByText("Save"));
 
       await waitFor(() => {
         expect(mockUpdateGlobalSettings).toHaveBeenCalledTimes(1);
@@ -1583,9 +1583,9 @@ describe("SettingsModal", () => {
       expect(screen.queryByText(/dual-observe parity/i)).not.toBeInTheDocument();
       expect(screen.queryByText("Insights")).not.toBeInTheDocument();
 
-      await userEvent.click(screen.getByLabelText("my-feature"));
+      await settingsModalUser.click(screen.getByLabelText("my-feature"));
 
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.click(screen.getByText("Save"));
 
       await waitFor(() => {
         expect(mockUpdateGlobalSettings).toHaveBeenCalledTimes(1);
@@ -1630,10 +1630,10 @@ describe("SettingsModal", () => {
       const leftSidebarToggle = screen.getByLabelText("Left Sidebar Navigation") as HTMLInputElement;
       expect(leftSidebarToggle).toBeChecked();
 
-      await userEvent.click(leftSidebarToggle);
+      await settingsModalUser.click(leftSidebarToggle);
       expect(leftSidebarToggle).not.toBeChecked();
 
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.click(screen.getByText("Save"));
 
       await waitFor(() => {
         expect(mockUpdateGlobalSettings).toHaveBeenCalledTimes(1);
@@ -1699,7 +1699,7 @@ describe("SettingsModal", () => {
       expect(checkbox.checked).toBe(false);
 
       // Toggle it
-      await userEvent.click(checkbox);
+      await settingsModalUser.click(checkbox);
       expect(checkbox.checked).toBe(true);
     });
 
@@ -1715,10 +1715,10 @@ describe("SettingsModal", () => {
 
       // Toggle the feature
       const checkbox = screen.getByLabelText("my-feature") as HTMLInputElement;
-      await userEvent.click(checkbox);
+      await settingsModalUser.click(checkbox);
 
       // Save
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.click(screen.getByText("Save"));
 
       await waitFor(() => {
         expect(mockUpdateGlobalSettings).toHaveBeenCalledTimes(1);
@@ -1765,10 +1765,10 @@ describe("SettingsModal", () => {
 
       // Toggle feature-b to true
       const checkboxB = screen.getByLabelText("feature-b") as HTMLInputElement;
-      await userEvent.click(checkboxB);
+      await settingsModalUser.click(checkboxB);
 
       // Save
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.click(screen.getByText("Save"));
 
       await waitFor(() => {
         expect(mockUpdateGlobalSettings).toHaveBeenCalledTimes(1);

@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type { ComponentProps } from "react";
 import { render, screen, fireEvent, waitFor, within, act, cleanup } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import path from "path";
 import { SettingsModal } from "../SettingsModal";
 import type { SettingsExportData, UpdateCheckResponse } from "../../api";
@@ -73,6 +72,7 @@ import {
   MODEL_FIXTURE,
   renderModal,
   waitForSettingsModalReady,
+  settingsModalUser,
   expectSettingPersists,
   installSettingsModalEnv,
 } from "./SettingsModal.test-harness";
@@ -227,14 +227,14 @@ describe("SettingsModal", () => {
       renderModal();
       await waitForSettingsModalReady();
 
-      await userEvent.click(screen.getByRole("button", { name: "Models" }));
-      await userEvent.click(screen.getByText("OpenRouter advanced"));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Models" }));
+      await settingsModalUser.click(screen.getByText("OpenRouter advanced"));
 
       expect(screen.getByLabelText("OpenRouter HTTP-Referer")).toBeInTheDocument();
       expect(screen.getByLabelText("OpenRouter X-Title")).toBeInTheDocument();
 
-      await userEvent.type(screen.getByLabelText("OpenRouter HTTP-Referer"), "https://example.app");
-      await userEvent.type(screen.getByLabelText("OpenRouter X-Title"), "Example App");
+      await settingsModalUser.type(screen.getByLabelText("OpenRouter HTTP-Referer"), "https://example.app");
+      await settingsModalUser.type(screen.getByLabelText("OpenRouter X-Title"), "Example App");
       fireEvent.change(screen.getByLabelText("OpenRouter supported_parameters filter"), {
         target: { value: "tools, structured_outputs" },
       });
@@ -242,11 +242,11 @@ describe("SettingsModal", () => {
       fireEvent.change(screen.getByLabelText("OpenRouter routing order"), { target: { value: "openai, anthropic" } });
       fireEvent.change(screen.getByLabelText("OpenRouter routing ignore"), { target: { value: "provider-x" } });
       fireEvent.change(screen.getByLabelText("OpenRouter routing only"), { target: { value: "provider-y" } });
-      await userEvent.selectOptions(screen.getByLabelText("OpenRouter allow fallbacks"), "deny");
-      await userEvent.selectOptions(screen.getByLabelText("OpenRouter routing sort"), "latency");
-      await userEvent.click(screen.getByLabelText("Require parameters"));
+      await settingsModalUser.selectOptions(screen.getByLabelText("OpenRouter allow fallbacks"), "deny");
+      await settingsModalUser.selectOptions(screen.getByLabelText("OpenRouter routing sort"), "latency");
+      await settingsModalUser.click(screen.getByLabelText("Require parameters"));
 
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateGlobalSettings).toHaveBeenCalled();
@@ -294,7 +294,7 @@ describe("SettingsModal", () => {
       renderModal();
       await waitForSettingsModalReady();
 
-      await userEvent.click(screen.getByRole("button", { name: "Project Models" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Project Models" }));
 
       expect(screen.getByText(/The Project Default Model is the fallback for this project/i)).toBeInTheDocument();
 
@@ -326,10 +326,10 @@ describe("SettingsModal", () => {
       renderModal();
       await waitForSettingsModalReady();
 
-      await userEvent.click(screen.getByRole("button", { name: "Project Models" }));
-      await userEvent.click(screen.getByLabelText("Project Default Model"));
-      await userEvent.click(screen.getByText("GPT-4o"));
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Project Models" }));
+      await settingsModalUser.click(screen.getByLabelText("Project Default Model"));
+      await settingsModalUser.click(screen.getByText("GPT-4o"));
+      await settingsModalUser.click(screen.getByText("Save"));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
@@ -457,9 +457,9 @@ describe("SettingsModal", () => {
       const onClose = vi.fn();
       await setupWorkflowModelLaneTest({ renderProps: { onClose } });
 
-      await userEvent.click(screen.getByLabelText(laneLabel));
-      await userEvent.click(await screen.findByText("GPT-4o"));
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.click(screen.getByLabelText(laneLabel));
+      await settingsModalUser.click(await screen.findByText("GPT-4o"));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateWorkflowSettingValues).toHaveBeenCalledWith(
@@ -502,9 +502,9 @@ describe("SettingsModal", () => {
       const onClose = vi.fn();
       await setupWorkflowModelLaneTest({ renderProps: { onClose } });
 
-      await userEvent.click(screen.getByLabelText("Planning Fallback Model"));
-      await userEvent.click(await screen.findByText("GPT-4o"));
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.click(screen.getByLabelText("Planning Fallback Model"));
+      await settingsModalUser.click(await screen.findByText("GPT-4o"));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateWorkflowSettingValues).toHaveBeenCalledWith(
@@ -524,8 +524,8 @@ describe("SettingsModal", () => {
 
       const lane = screen.getByTestId("workflow-model-lane-validator-fallback");
       expect(within(lane).getByText("Override (Project)")).toBeInTheDocument();
-      await userEvent.click(within(lane).getByRole("button", { name: "Reset" }));
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.click(within(lane).getByRole("button", { name: "Reset" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateWorkflowSettingValues).toHaveBeenCalledWith(
@@ -548,7 +548,7 @@ describe("SettingsModal", () => {
       const onClose = vi.fn();
       await setupWorkflowModelLaneTest({ renderProps: { onClose } });
 
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(onClose).toHaveBeenCalled();
@@ -563,8 +563,8 @@ describe("SettingsModal", () => {
       });
 
       const lane = screen.getByTestId("workflow-model-lane-execution");
-      await userEvent.click(within(lane).getByRole("button", { name: "Reset" }));
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.click(within(lane).getByRole("button", { name: "Reset" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateWorkflowSettingValues).toHaveBeenCalledWith(
@@ -590,9 +590,9 @@ describe("SettingsModal", () => {
         expect(mockFetchWorkflowSettingValues).toHaveBeenLastCalledWith("builtin:coding", "proj-1");
       });
 
-      await userEvent.click(screen.getByLabelText("Plan/Triage Model"));
-      await userEvent.click(await screen.findByText("GPT-4o"));
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.click(screen.getByLabelText("Plan/Triage Model"));
+      await settingsModalUser.click(await screen.findByText("GPT-4o"));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateWorkflowSettingValues).toHaveBeenCalledWith(
@@ -613,9 +613,9 @@ describe("SettingsModal", () => {
       );
       await setupWorkflowModelLaneTest({ renderProps: { addToast, onClose } });
 
-      await userEvent.click(screen.getByLabelText("Plan/Triage Model"));
-      await userEvent.click(await screen.findByText("GPT-4o"));
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.click(screen.getByLabelText("Plan/Triage Model"));
+      await settingsModalUser.click(await screen.findByText("GPT-4o"));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(screen.getByTestId("workflow-model-lane-error-planning")).toHaveTextContent("planningProvider is not declared");
@@ -647,7 +647,7 @@ describe("SettingsModal", () => {
       expect(mockFetchWorkflowSettingValues).not.toHaveBeenCalled();
       expect(screen.queryByTestId("save-workflow-model-lanes")).not.toBeInTheDocument();
 
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
       expect(mockUpdateWorkflowSettingValues).not.toHaveBeenCalled();
     });
   });
@@ -706,7 +706,7 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
 
       expect(screen.queryByText(/^Version\s+/)).not.toBeInTheDocument();
-      await userEvent.click(screen.getByText("Scheduling & Capacity"));
+      await settingsModalUser.click(screen.getByText("Scheduling & Capacity"));
       expect(await screen.findByLabelText("Max Concurrent Tasks")).toBeInTheDocument();
       expect(addToast).not.toHaveBeenCalled();
     });
@@ -721,7 +721,7 @@ describe("SettingsModal", () => {
       renderModal();
       await waitForSettingsModalReady();
 
-      await userEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Check for updates" }));
 
       expect(await screen.findByText("You're up to date ✓")).toBeInTheDocument();
     });
@@ -736,7 +736,7 @@ describe("SettingsModal", () => {
       renderModal();
       await waitForSettingsModalReady();
 
-      await userEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Check for updates" }));
 
       expect(await screen.findByText(/v2.0.0 available/i)).toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Learn more" })).toHaveAttribute("href", "https://runfusion.ai");
@@ -752,7 +752,7 @@ describe("SettingsModal", () => {
 
       const { unmount } = renderModal();
       await waitForSettingsModalReady();
-      await userEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Check for updates" }));
       expect(await screen.findByText("You're up to date ✓")).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Update now" })).not.toBeInTheDocument();
 
@@ -766,7 +766,7 @@ describe("SettingsModal", () => {
 
       renderModal();
       await waitForSettingsModalReady();
-      await userEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Check for updates" }));
       expect(await screen.findByText("registry unavailable")).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Update now" })).not.toBeInTheDocument();
     });
@@ -781,8 +781,8 @@ describe("SettingsModal", () => {
 
       renderModal();
       await waitForSettingsModalReady();
-      await userEvent.click(screen.getByRole("button", { name: "Check for updates" }));
-      await userEvent.click(await screen.findByRole("button", { name: "Update now" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Check for updates" }));
+      await settingsModalUser.click(await screen.findByRole("button", { name: "Update now" }));
 
       await waitFor(() => expect(mockInstallUpdate).toHaveBeenCalledTimes(1));
       expect(await screen.findByText("Updated to v2.0.0 — restart Fusion to apply")).toBeInTheDocument();
@@ -802,7 +802,7 @@ describe("SettingsModal", () => {
 
       renderModal();
       await waitForSettingsModalReady();
-      await userEvent.click(screen.getByRole("button", { name: "Check for updates" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Check for updates" }));
 
       const updateNow = await screen.findByRole("button", { name: "Update now" });
       fireEvent.click(updateNow);
@@ -860,7 +860,7 @@ describe("SettingsModal", () => {
       const inlineButton = screen.getByRole("button", { name: "Check for updates" });
       expect(within(inlineButton).getByText("Version 1.2.3")).toBeInTheDocument();
 
-      await userEvent.click(within(inlineButton).getByText("Version 1.2.3"));
+      await settingsModalUser.click(within(inlineButton).getByText("Version 1.2.3"));
 
       await waitFor(() => {
         expect(mockCheckForUpdates).toHaveBeenCalledTimes(1);
@@ -1056,7 +1056,7 @@ describe("SettingsModal", () => {
         writable: true,
       });
 
-      await userEvent.click(screen.getByRole("button", { name: "Login" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Login" }));
 
       await waitFor(() => {
         expect(scrollToSpy).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
@@ -1075,7 +1075,7 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
 
       const anthropicCard = screen.getByTestId("auth-provider-icon-anthropic").closest(".auth-provider-card") as HTMLElement;
-      await userEvent.click(within(anthropicCard).getByRole("button", { name: "Login" }));
+      await settingsModalUser.click(within(anthropicCard).getByRole("button", { name: "Login" }));
 
       await waitFor(() => {
         expect(mockConfirm).toHaveBeenCalledWith({
@@ -1101,7 +1101,7 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
 
       const anthropicCard = screen.getByTestId("auth-provider-icon-anthropic").closest(".auth-provider-card") as HTMLElement;
-      await userEvent.click(within(anthropicCard).getByRole("button", { name: "Login" }));
+      await settingsModalUser.click(within(anthropicCard).getByRole("button", { name: "Login" }));
 
       await waitFor(() => {
         expect(mockConfirm).toHaveBeenCalled();
@@ -1120,7 +1120,7 @@ describe("SettingsModal", () => {
       renderModal();
       await waitForSettingsModalReady();
 
-      await userEvent.click(screen.getByRole("button", { name: "Login" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Login" }));
 
       await waitFor(() => {
         expect(mockConfirm).not.toHaveBeenCalled();
@@ -1147,11 +1147,11 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
 
       const anthropicCard = screen.getByTestId("auth-provider-icon-anthropic").closest(".auth-provider-card") as HTMLElement;
-      await userEvent.click(within(anthropicCard).getByRole("button", { name: "Login" }));
+      await settingsModalUser.click(within(anthropicCard).getByRole("button", { name: "Login" }));
 
       expect(await within(anthropicCard).findByText("Paste the final redirect URL or authorization code")).toBeInTheDocument();
-      await userEvent.type(within(anthropicCard).getByRole("textbox"), "anthropic-code");
-      await userEvent.click(within(anthropicCard).getByRole("button", { name: "Submit code" }));
+      await settingsModalUser.type(within(anthropicCard).getByRole("textbox"), "anthropic-code");
+      await settingsModalUser.click(within(anthropicCard).getByRole("button", { name: "Submit code" }));
 
       await waitFor(() => {
         expect(mockSubmitProviderManualCode).toHaveBeenCalledWith("anthropic", "anthropic-code");
@@ -1194,7 +1194,7 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
 
       const anthropicCard = screen.getByTestId("auth-provider-icon-anthropic").closest(".auth-provider-card") as HTMLElement;
-      await userEvent.click(within(anthropicCard).getByRole("button", { name: "Login" }));
+      await settingsModalUser.click(within(anthropicCard).getByRole("button", { name: "Login" }));
 
       const textarea = await within(anthropicCard).findByRole("textbox");
       const scrollIntoView = vi.fn();
@@ -1221,7 +1221,7 @@ describe("SettingsModal", () => {
 
       const copilotCard = screen.getByTestId("auth-provider-icon-github-copilot").closest(".auth-provider-card") as HTMLElement;
       expect(within(copilotCard).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
-      await userEvent.click(within(copilotCard).getByRole("button", { name: "Cancel" }));
+      await settingsModalUser.click(within(copilotCard).getByRole("button", { name: "Cancel" }));
 
       await waitFor(() => {
         expect(mockCancelProviderLogin).toHaveBeenCalledWith("github-copilot");
@@ -1258,7 +1258,7 @@ describe("SettingsModal", () => {
 
       render(<SettingsModal onClose={noop} addToast={addToast} />);
       await waitForSettingsModalReady();
-      await userEvent.click(screen.getByRole("button", { name: "Authentication" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Authentication" }));
 
       vi.useFakeTimers();
 
@@ -1317,12 +1317,12 @@ describe("SettingsModal", () => {
       });
 
       render(<SettingsModal onClose={noop} addToast={addToast} />);
-      await userEvent.click(await screen.findByRole("button", { name: "Authentication" }));
+      await settingsModalUser.click(await screen.findByRole("button", { name: "Authentication" }));
       const copilotCard = (await screen.findByTestId("auth-provider-icon-github-copilot")).closest(".auth-provider-card") as HTMLElement;
-      await userEvent.click(within(copilotCard).getByRole("button", { name: "Login" }));
+      await settingsModalUser.click(within(copilotCard).getByRole("button", { name: "Login" }));
       await within(copilotCard).findByText("ABCD-1234");
 
-      await userEvent.click(within(copilotCard).getByRole("button", { name: "Copy code" }));
+      await settingsModalUser.click(within(copilotCard).getByRole("button", { name: "Copy code" }));
       expect(execSpy).toHaveBeenCalledWith("copy");
       expect(addToast).toHaveBeenCalledWith(expect.stringContaining("Copied"), "success");
     });
@@ -1347,12 +1347,12 @@ describe("SettingsModal", () => {
       });
 
       render(<SettingsModal onClose={noop} addToast={addToast} />);
-      await userEvent.click(await screen.findByRole("button", { name: "Authentication" }));
+      await settingsModalUser.click(await screen.findByRole("button", { name: "Authentication" }));
       const copilotCard = (await screen.findByTestId("auth-provider-icon-github-copilot")).closest(".auth-provider-card") as HTMLElement;
-      await userEvent.click(within(copilotCard).getByRole("button", { name: "Login" }));
+      await settingsModalUser.click(within(copilotCard).getByRole("button", { name: "Login" }));
       await within(copilotCard).findByText("ABCD-1234");
 
-      await userEvent.click(within(copilotCard).getByRole("button", { name: "Copy code" }));
+      await settingsModalUser.click(within(copilotCard).getByRole("button", { name: "Copy code" }));
       expect(addToast).toHaveBeenCalledWith(expect.stringContaining("manually"), "error");
     });
 
@@ -1376,8 +1376,8 @@ describe("SettingsModal", () => {
       });
 
       const openAiCard = screen.getByTestId("auth-provider-icon-openai").closest(".auth-provider-card") as HTMLElement;
-      await userEvent.type(within(openAiCard).getByPlaceholderText("Enter API key"), "sk-test-key");
-      await userEvent.click(within(openAiCard).getByRole("button", { name: "Save" }));
+      await settingsModalUser.type(within(openAiCard).getByPlaceholderText("Enter API key"), "sk-test-key");
+      await settingsModalUser.click(within(openAiCard).getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockSaveApiKey).toHaveBeenCalledWith("openai", "sk-test-key");
@@ -1397,8 +1397,8 @@ describe("SettingsModal", () => {
       Object.defineProperty(settingsContent, "scrollTo", { value: vi.fn(), writable: true });
 
       const card = screen.getByTestId("auth-provider-icon-opencode-go").closest(".auth-provider-card") as HTMLElement;
-      await userEvent.type(within(card).getByPlaceholderText("Enter API key"), "opencode-key");
-      await userEvent.click(within(card).getByRole("button", { name: "Save" }));
+      await settingsModalUser.type(within(card).getByPlaceholderText("Enter API key"), "opencode-key");
+      await settingsModalUser.click(within(card).getByRole("button", { name: "Save" }));
 
       expect(await within(card).findByText("Refreshed 4 opencode-go models.")).toBeInTheDocument();
     });
@@ -1415,8 +1415,8 @@ describe("SettingsModal", () => {
       Object.defineProperty(settingsContent, "scrollTo", { value: vi.fn(), writable: true });
 
       const card = screen.getByTestId("auth-provider-icon-opencode-go").closest(".auth-provider-card") as HTMLElement;
-      await userEvent.type(within(card).getByPlaceholderText("Enter API key"), "opencode-key");
-      await userEvent.click(within(card).getByRole("button", { name: "Save" }));
+      await settingsModalUser.type(within(card).getByPlaceholderText("Enter API key"), "opencode-key");
+      await settingsModalUser.click(within(card).getByRole("button", { name: "Save" }));
 
       expect(await within(card).findByText(/returned no models/i)).toBeInTheDocument();
     });
@@ -1433,8 +1433,8 @@ describe("SettingsModal", () => {
       Object.defineProperty(settingsContent, "scrollTo", { value: vi.fn(), writable: true });
 
       const card = screen.getByTestId("auth-provider-icon-opencode-go").closest(".auth-provider-card") as HTMLElement;
-      await userEvent.type(within(card).getByPlaceholderText("Enter API key"), "opencode-key");
-      await userEvent.click(within(card).getByRole("button", { name: "Save" }));
+      await settingsModalUser.type(within(card).getByPlaceholderText("Enter API key"), "opencode-key");
+      await settingsModalUser.click(within(card).getByRole("button", { name: "Save" }));
 
       expect(await within(card).findByText(/model refresh failed: spawn opencode ENOENT/i)).toBeInTheDocument();
     });
@@ -1556,7 +1556,7 @@ describe("SettingsModal", () => {
       renderModal();
       await waitForSettingsModalReady();
 
-      await userEvent.click(await screen.findByRole("button", { name: /Plugins$/ }));
+      await settingsModalUser.click(await screen.findByRole("button", { name: /Plugins$/ }));
 
       const tablist = await screen.findByRole("tablist", { name: "Plugin manager type" });
       const fusionTab = within(tablist).getByRole("tab", { name: "Fusion Plugins" });
@@ -1572,12 +1572,12 @@ describe("SettingsModal", () => {
       renderModal();
       await waitForSettingsModalReady();
 
-      await userEvent.click(await screen.findByRole("button", { name: /Plugins$/ }));
+      await settingsModalUser.click(await screen.findByRole("button", { name: /Plugins$/ }));
 
       expect(await screen.findByTestId("plugin-manager")).toBeInTheDocument();
       expect(screen.queryByTestId("pi-extensions-manager")).not.toBeInTheDocument();
 
-      await userEvent.click(screen.getByRole("tab", { name: "Pi Extensions" }));
+      await settingsModalUser.click(screen.getByRole("tab", { name: "Pi Extensions" }));
 
       expect(await screen.findByTestId("pi-extensions-manager")).toBeInTheDocument();
       expect(screen.queryByTestId("plugin-manager")).not.toBeInTheDocument();

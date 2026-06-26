@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, within, cleanup } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import path from "path";
 import { SettingsModal } from "../SettingsModal";
 import {
@@ -70,6 +69,7 @@ import {
   defaultSettings,
   renderModal,
   waitForSettingsModalReady,
+  settingsModalUser,
   expectSettingPersists,
   installSettingsModalEnv,
 } from "./SettingsModal.test-harness";
@@ -300,7 +300,7 @@ describe("SettingsModal", () => {
     renderModal();
     await waitForSettingsModalReady();
 
-    await userEvent.click(screen.getByRole("button", { name: "Secrets" }));
+    await settingsModalUser.click(screen.getByRole("button", { name: "Secrets" }));
 
     expect(await screen.findByRole("button", { name: "Add Secret" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Manage secrets" })).not.toBeInTheDocument();
@@ -316,11 +316,11 @@ describe("SettingsModal", () => {
     renderModal();
     await waitForSettingsModalReady();
 
-    await userEvent.click(screen.getByRole("button", { name: /^Merge$/ }));
-    await userEvent.selectOptions(screen.getByLabelText("AI merge"), "deterministic");
+    await settingsModalUser.click(screen.getByRole("button", { name: /^Merge$/ }));
+    await settingsModalUser.selectOptions(screen.getByLabelText("AI merge"), "deterministic");
     expect(screen.getByLabelText("Direct merge commit routing")).toHaveValue("auto");
 
-    await userEvent.selectOptions(screen.getByLabelText("Auto-completion mode"), "pull-request");
+    await settingsModalUser.selectOptions(screen.getByLabelText("Auto-completion mode"), "pull-request");
     expect(screen.queryByLabelText("Direct merge commit routing")).not.toBeInTheDocument();
   });
 
@@ -339,7 +339,7 @@ describe("SettingsModal", () => {
     renderModal({ initialSection: "merge" });
     await waitForSettingsModalReady();
 
-    await userEvent.selectOptions(screen.getByLabelText("AI merge"), "deterministic");
+    await settingsModalUser.selectOptions(screen.getByLabelText("AI merge"), "deterministic");
     expect(screen.getByLabelText("Integration worktree")).toHaveValue("reuse-task-worktree");
   });
 
@@ -353,9 +353,9 @@ describe("SettingsModal", () => {
     renderModal({ initialSection: "merge" });
     await waitForSettingsModalReady();
 
-    await userEvent.selectOptions(screen.getByLabelText("AI merge"), "deterministic");
-    await userEvent.selectOptions(screen.getByLabelText("Integration worktree"), "cwd-main");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await settingsModalUser.selectOptions(screen.getByLabelText("AI merge"), "deterministic");
+    await settingsModalUser.selectOptions(screen.getByLabelText("Integration worktree"), "cwd-main");
+    await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
@@ -388,8 +388,8 @@ describe("SettingsModal", () => {
     renderModal({ initialSection: "merge" });
     await waitForSettingsModalReady();
 
-    await userEvent.selectOptions(screen.getByLabelText("AI merge"), "deterministic");
-    await userEvent.selectOptions(screen.getByLabelText("Integration worktree"), "cwd-main");
+    await settingsModalUser.selectOptions(screen.getByLabelText("AI merge"), "deterministic");
+    await settingsModalUser.selectOptions(screen.getByLabelText("Integration worktree"), "cwd-main");
 
     const warning = screen.getByTestId("merge-integration-worktree-warning");
     expect(warning).toBeInTheDocument();
@@ -413,10 +413,10 @@ describe("SettingsModal", () => {
     renderModal({ initialSection: "merge" });
     await waitForSettingsModalReady();
 
-    await userEvent.selectOptions(screen.getByLabelText("AI merge"), "deterministic");
+    await settingsModalUser.selectOptions(screen.getByLabelText("AI merge"), "deterministic");
     expect(screen.getByTestId("merge-integration-worktree-warning")).toBeInTheDocument();
 
-    await userEvent.selectOptions(screen.getByLabelText("Integration worktree"), "reuse-task-worktree");
+    await settingsModalUser.selectOptions(screen.getByLabelText("Integration worktree"), "reuse-task-worktree");
 
     expect(screen.queryByTestId("merge-integration-worktree-warning")).toBeNull();
   });
@@ -425,13 +425,13 @@ describe("SettingsModal", () => {
     renderModal();
     await waitForSettingsModalReady();
 
-    await userEvent.click(screen.getByRole("button", { name: /^Worktrees$/ }));
+    await settingsModalUser.click(screen.getByRole("button", { name: /^Worktrees$/ }));
 
     const checkbox = screen.getByRole("checkbox", { name: "Allow silent sibling branch rename during executor conflicts" });
     expect(checkbox).not.toBeChecked();
 
-    await userEvent.click(checkbox);
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await settingsModalUser.click(checkbox);
+    await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       expect(mockUpdateSettings).toHaveBeenCalledWith(
@@ -449,7 +449,7 @@ describe("SettingsModal", () => {
 
       expect(mockFetchGlobalConcurrency).not.toHaveBeenCalled();
 
-      await userEvent.click(screen.getByRole("button", { name: /Scheduling/ }));
+      await settingsModalUser.click(screen.getByRole("button", { name: /Scheduling/ }));
 
       await waitFor(() => {
         expect(mockFetchGlobalConcurrency).toHaveBeenCalledTimes(1);
@@ -461,7 +461,7 @@ describe("SettingsModal", () => {
       renderModal();
       await waitForSettingsModalReady();
 
-      await userEvent.click(screen.getByRole("button", { name: /Scheduling/ }));
+      await settingsModalUser.click(screen.getByRole("button", { name: /Scheduling/ }));
 
       expect(screen.getByLabelText("Global Max Concurrent")).toBeDisabled();
       expect(screen.getByLabelText("Max Concurrent Tasks")).toBeDisabled();
@@ -478,7 +478,7 @@ describe("SettingsModal", () => {
       );
       expect(initialCallHasDisabled).toBe(true);
 
-      await userEvent.click(screen.getByRole("button", { name: /Memory/ }));
+      await settingsModalUser.click(screen.getByRole("button", { name: /Memory/ }));
 
       await waitFor(() => {
         const enabledCallSeen = mockUseMemoryBackendStatus.mock.calls.some(
@@ -569,8 +569,8 @@ describe("SettingsModal", () => {
       renderModal({ initialSection: "global-general" });
       await waitForSettingsModalReady();
 
-      await userEvent.click(screen.getByRole("checkbox", { name: "Save tool output in agent logs" }));
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.click(screen.getByRole("checkbox", { name: "Save tool output in agent logs" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateGlobalSettings).toHaveBeenCalled();
@@ -588,9 +588,9 @@ describe("SettingsModal", () => {
       renderModal({ initialSection: "global-general" });
       await waitForSettingsModalReady();
 
-      await userEvent.click(screen.getByRole("checkbox", { name: "Save AI thinking for permanent agents" }));
-      await userEvent.click(screen.getByRole("checkbox", { name: "Save AI thinking for ephemeral / task-worker agents" }));
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.click(screen.getByRole("checkbox", { name: "Save AI thinking for permanent agents" }));
+      await settingsModalUser.click(screen.getByRole("checkbox", { name: "Save AI thinking for ephemeral / task-worker agents" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateGlobalSettings).toHaveBeenCalled();
@@ -619,8 +619,8 @@ describe("SettingsModal", () => {
         expect(screen.getByRole("combobox", { name: "Global default tracking repo" })).toHaveValue("__custom__");
       });
 
-      await userEvent.selectOptions(screen.getByRole("combobox", { name: "Global default tracking repo" }), "octo/global-default");
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.selectOptions(screen.getByRole("combobox", { name: "Global default tracking repo" }), "octo/global-default");
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateGlobalSettings).toHaveBeenCalled();
@@ -645,7 +645,7 @@ describe("SettingsModal", () => {
       const control = screen.getByRole("combobox", { name: "Global default tracking repo" });
       expect(screen.getByRole("option", { name: "Custom…" })).toBeInTheDocument();
 
-      await userEvent.selectOptions(control, "__custom__");
+      await settingsModalUser.selectOptions(control, "__custom__");
       expect(screen.getByPlaceholderText("owner/repo")).toBeInTheDocument();
     });
   });
@@ -656,8 +656,8 @@ describe("SettingsModal", () => {
 
     expect(screen.getByRole("heading", { name: "Agent Provisioning Approvals" })).toBeInTheDocument();
 
-    await userEvent.selectOptions(screen.getByLabelText("Approval mode"), "always");
-    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    await settingsModalUser.selectOptions(screen.getByLabelText("Approval mode"), "always");
+    await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => {
       expect(mockUpdateSettings).toHaveBeenCalled();
@@ -686,7 +686,7 @@ describe("SettingsModal", () => {
       renderModal({ initialSection: "general", onQuickChatButtonModeChange });
       await waitForSettingsModalReady();
 
-      await userEvent.selectOptions(screen.getByLabelText("Quick Chat launcher"), "footer");
+      await settingsModalUser.selectOptions(screen.getByLabelText("Quick Chat launcher"), "footer");
 
       expect(onQuickChatButtonModeChange).toHaveBeenCalledWith("footer");
     });
@@ -727,8 +727,8 @@ describe("SettingsModal", () => {
       const ephemeralToggle = screen.getByLabelText("Use ephemeral task-worker agents") as HTMLInputElement;
       expect(ephemeralToggle.checked).toBe(true);
 
-      await userEvent.click(ephemeralToggle);
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.click(ephemeralToggle);
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalled();
@@ -742,7 +742,7 @@ describe("SettingsModal", () => {
       renderModal();
       await waitForSettingsModalReady();
 
-      await userEvent.click(screen.getByRole("button", { name: "Project General" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Project General" }));
 
       const ephemeralToggle = screen.getByLabelText("Use ephemeral task-worker agents") as HTMLInputElement;
       expect(ephemeralToggle).toBeInTheDocument();
@@ -773,7 +773,7 @@ describe("SettingsModal", () => {
       expect(projectGeneralOption).toBeInTheDocument();
       expect(projectGeneralOption).toHaveTextContent("Project General");
 
-      await userEvent.selectOptions(sectionPicker, "general");
+      await settingsModalUser.selectOptions(sectionPicker, "general");
 
       const ephemeralToggle = screen.getByLabelText("Use ephemeral task-worker agents") as HTMLInputElement;
       expect(ephemeralToggle).toBeInTheDocument();
@@ -821,8 +821,8 @@ describe("SettingsModal", () => {
       const mailCleanupSelect = screen.getByLabelText("Auto-prune old mail") as HTMLSelectElement;
       expect(mailCleanupSelect.value).toBe("0");
 
-      await userEvent.selectOptions(mailCleanupSelect, "7");
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.selectOptions(mailCleanupSelect, "7");
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalled();
@@ -833,8 +833,8 @@ describe("SettingsModal", () => {
 
       mockUpdateSettings.mockClear();
 
-      await userEvent.selectOptions(mailCleanupSelect, "0");
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.selectOptions(mailCleanupSelect, "0");
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalled();
@@ -858,10 +858,10 @@ describe("SettingsModal", () => {
       expect(fetchLimitInput.placeholder).toBe("200");
       expect(summaryMaxInput.placeholder).toBe("3000");
 
-      await userEvent.type(recentInput, "7");
-      await userEvent.type(fetchLimitInput, "60");
-      await userEvent.type(summaryMaxInput, "900");
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.type(recentInput, "7");
+      await settingsModalUser.type(fetchLimitInput, "60");
+      await settingsModalUser.type(summaryMaxInput, "900");
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalled();
@@ -884,9 +884,9 @@ describe("SettingsModal", () => {
       expect(modeSelect.value).toBe("off");
       expect(repoSelect.value).toBe("__custom__");
 
-      await userEvent.selectOptions(modeSelect, "new-tasks");
-      await userEvent.type(screen.getByPlaceholderText("owner/repo"), "octo/repo");
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.selectOptions(modeSelect, "new-tasks");
+      await settingsModalUser.type(screen.getByPlaceholderText("owner/repo"), "octo/repo");
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalled();
@@ -918,9 +918,9 @@ describe("SettingsModal", () => {
       expect(modeSelect.value).toBe("new-tasks");
       expect(repoSelect.value).toBe("__custom__");
 
-      await userEvent.selectOptions(modeSelect, "off");
-      await userEvent.clear(screen.getByPlaceholderText("owner/repo"));
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.selectOptions(modeSelect, "off");
+      await settingsModalUser.clear(screen.getByPlaceholderText("owner/repo"));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalled();
@@ -964,8 +964,8 @@ describe("SettingsModal", () => {
         "Search the tracking repo for likely duplicates before opening a new issue",
       ) as HTMLInputElement;
 
-      await userEvent.click(dedupToggle);
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.click(dedupToggle);
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalled();
@@ -976,8 +976,8 @@ describe("SettingsModal", () => {
 
       mockUpdateSettings.mockClear();
 
-      await userEvent.click(dedupToggle);
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.click(dedupToggle);
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalled();
@@ -991,7 +991,7 @@ describe("SettingsModal", () => {
       renderModal({ initialSection: "models" });
       await waitForSettingsModalReady();
 
-      await userEvent.click(screen.getByRole("button", { name: "Project Models" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Project Models" }));
 
       expect(screen.queryByText("Title, commit message, and GitHub tracking issue summarization model")).not.toBeInTheDocument();
     });
@@ -1005,7 +1005,7 @@ describe("SettingsModal", () => {
       renderModal({ initialSection: "models" });
       await waitForSettingsModalReady();
 
-      await userEvent.click(screen.getByRole("button", { name: "Project Models" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Project Models" }));
 
       expect(screen.queryByText(/model used for summarization now lives on the workflow/i)).not.toBeInTheDocument();
       expect(screen.getByText(/per-phase model lanes \(execution, planning, reviewer, and their fallbacks\) now live on the workflow/i)).toBeInTheDocument();
@@ -1022,8 +1022,8 @@ describe("SettingsModal", () => {
       const repoSelect = screen.getByRole("combobox", { name: "Project default tracking repo" }) as HTMLSelectElement;
       expect(await within(repoSelect).findByRole("option", { name: "octo/repo" })).toBeInTheDocument();
 
-      await userEvent.selectOptions(repoSelect, "octo/repo");
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.selectOptions(repoSelect, "octo/repo");
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalled();
@@ -1041,7 +1041,7 @@ describe("SettingsModal", () => {
 
       expect(await screen.findByText(/Could not load detected remotes/i)).toBeInTheDocument();
       const control = screen.getByRole("combobox", { name: "Project default tracking repo" });
-      await userEvent.selectOptions(control, "__custom__");
+      await settingsModalUser.selectOptions(control, "__custom__");
       expect(screen.getByPlaceholderText("owner/repo")).toBeInTheDocument();
     });
 
@@ -1061,12 +1061,12 @@ describe("SettingsModal", () => {
       renderModal({ dashboardFontScalePct: 110, onDashboardFontScaleChange });
       await waitForSettingsModalReady();
 
-      await userEvent.click(screen.getByRole("button", { name: /Appearance/ }));
+      await settingsModalUser.click(screen.getByRole("button", { name: /Appearance/ }));
 
       const largeButton = screen.getByRole("button", { name: "Large" });
       expect(largeButton).toHaveAttribute("aria-pressed", "true");
 
-      await userEvent.click(screen.getByRole("button", { name: "Small" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Small" }));
       expect(onDashboardFontScaleChange).toHaveBeenCalledWith(90);
     });
 
@@ -1074,9 +1074,9 @@ describe("SettingsModal", () => {
       renderModal({ dashboardFontScalePct: 100 });
       await waitForSettingsModalReady();
 
-      await userEvent.click(screen.getByRole("button", { name: /Appearance/ }));
-      await userEvent.click(screen.getByRole("button", { name: "Largest" }));
-      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: /Appearance/ }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Largest" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => {
         expect(mockUpdateGlobalSettings).toHaveBeenCalled();

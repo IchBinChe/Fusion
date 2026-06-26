@@ -69,6 +69,7 @@ import {
   defaultSettings,
   renderModal,
   waitForSettingsModalReady,
+  settingsModalUser,
   installSettingsModalEnv,
 } from "./SettingsModal.test-harness";
 
@@ -198,7 +199,7 @@ describe("SettingsModal", () => {
     let user: ReturnType<typeof userEvent.setup>;
 
     beforeEach(() => {
-      user = userEvent.setup({ delay: null });
+      user = userEvent.setup({ delay: null, pointerEventsCheck: 0 });
     });
 
     beforeEach(() => {
@@ -613,7 +614,7 @@ describe("SettingsModal", () => {
     let user: ReturnType<typeof userEvent.setup>;
 
     beforeEach(() => {
-      user = userEvent.setup({ delay: null });
+      user = userEvent.setup({ delay: null, pointerEventsCheck: 0 });
     });
 
     const openNotificationsSection = async () => {
@@ -975,7 +976,7 @@ describe("SettingsModal", () => {
 
   describe("scheduled eval settings section", () => {
     const openScheduledEvalsSection = async () => {
-      await userEvent.click(await screen.findByRole("button", { name: /Scheduled Evals/i }));
+      await settingsModalUser.click(await screen.findByRole("button", { name: /Scheduled Evals/i }));
     };
 
     it("renders controls and disables interval controls when evals are disabled", async () => {
@@ -1019,11 +1020,11 @@ describe("SettingsModal", () => {
       await openScheduledEvalsSection();
 
       fireEvent.change(screen.getByLabelText("Interval (ms)"), { target: { value: "120000" } });
-      await userEvent.type(screen.getByLabelText("Evaluator Provider"), "openai");
-      await userEvent.type(screen.getByLabelText("Evaluator Model"), "gpt-5");
-      await userEvent.selectOptions(screen.getByLabelText("Follow-up Policy"), "auto-create");
+      await settingsModalUser.type(screen.getByLabelText("Evaluator Provider"), "openai");
+      await settingsModalUser.type(screen.getByLabelText("Evaluator Model"), "gpt-5");
+      await settingsModalUser.selectOptions(screen.getByLabelText("Follow-up Policy"), "auto-create");
       fireEvent.change(screen.getByLabelText("Retention (days)"), { target: { value: "14" } });
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.click(screen.getByText("Save"));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalledWith(
@@ -1060,9 +1061,9 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
       await openScheduledEvalsSection();
 
-      await userEvent.clear(screen.getByLabelText("Evaluator Provider"));
-      await userEvent.clear(screen.getByLabelText("Evaluator Model"));
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.clear(screen.getByLabelText("Evaluator Provider"));
+      await settingsModalUser.clear(screen.getByLabelText("Evaluator Model"));
+      await settingsModalUser.click(screen.getByText("Save"));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalledWith(
@@ -1089,12 +1090,12 @@ describe("SettingsModal", () => {
       expect(screen.getByLabelText("Memory Backup Directory")).toHaveValue(".fusion/backups/memory");
       expect(screen.getByLabelText("Memory Backup Scope")).toHaveValue("all");
 
-      await userEvent.click(screen.getByLabelText("Enable automatic memory backups"));
+      await settingsModalUser.click(screen.getByLabelText("Enable automatic memory backups"));
       fireEvent.change(screen.getByLabelText("Memory Backup Schedule (Cron)"), { target: { value: "0 5 * * *" } });
       fireEvent.change(screen.getByLabelText("Memory Retention Count"), { target: { value: "21" } });
       fireEvent.change(screen.getByLabelText("Memory Backup Directory"), { target: { value: ".fusion/backups/custom-memory" } });
-      await userEvent.selectOptions(screen.getByLabelText("Memory Backup Scope"), "agents");
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.selectOptions(screen.getByLabelText("Memory Backup Scope"), "agents");
+      await settingsModalUser.click(screen.getByText("Save"));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalledWith(
@@ -1120,11 +1121,11 @@ describe("SettingsModal", () => {
     });
 
     const openResearchGlobalSection = async () => {
-      await userEvent.click(await screen.findByRole("button", { name: /Research Defaults/i }));
+      await settingsModalUser.click(await screen.findByRole("button", { name: /Research Defaults/i }));
     };
 
     const openResearchProjectSection = async () => {
-      await userEvent.click(await screen.findByRole("button", { name: /^Research$/i }));
+      await settingsModalUser.click(await screen.findByRole("button", { name: /^Research$/i }));
     };
 
     it("renders global research defaults fields with expected default values", async () => {
@@ -1146,7 +1147,7 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
       await openResearchGlobalSection();
 
-      await userEvent.click(screen.getByText(/Advanced — external search providers/i));
+      await settingsModalUser.click(screen.getByText(/Advanced — external search providers/i));
       const providerSelect = await screen.findByLabelText("Search Provider");
       fireEvent.change(providerSelect, { target: { value: "tavily" } });
       fireEvent.change(screen.getByLabelText("Default Max Concurrent Runs"), { target: { value: "4" } });
@@ -1154,9 +1155,9 @@ describe("SettingsModal", () => {
       fireEvent.change(screen.getByLabelText("Default Max Duration (ms)"), { target: { value: "240000" } });
       fireEvent.change(screen.getByLabelText("Request Timeout (ms)"), { target: { value: "45000" } });
       fireEvent.change(screen.getByLabelText("Max Synthesis Rounds"), { target: { value: "3" } });
-      await userEvent.click(screen.getByRole("checkbox", { name: /^GitHub$/i }));
-      await userEvent.click(screen.getByRole("checkbox", { name: /^Local Docs$/i }));
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.click(screen.getByRole("checkbox", { name: /^GitHub$/i }));
+      await settingsModalUser.click(screen.getByRole("checkbox", { name: /^Local Docs$/i }));
+      await settingsModalUser.click(screen.getByText("Save"));
 
       await waitFor(() => {
         expect(mockUpdateGlobalSettings).toHaveBeenCalledWith(
@@ -1212,11 +1213,11 @@ describe("SettingsModal", () => {
 
       const webSearch = await screen.findByRole("checkbox", { name: /Web Search/i });
       expect(webSearch).toBeChecked();
-      await userEvent.click(webSearch);
+      await settingsModalUser.click(webSearch);
       expect(webSearch).toBeChecked();
 
-      await userEvent.click(screen.getByRole("checkbox", { name: "Page Fetch" }));
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.click(screen.getByRole("checkbox", { name: "Page Fetch" }));
+      await settingsModalUser.click(screen.getByText("Save"));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalledWith(
@@ -1238,10 +1239,10 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
       await openResearchProjectSection();
 
-      await userEvent.click(screen.getByLabelText("Enable research in this project"));
+      await settingsModalUser.click(screen.getByLabelText("Enable research in this project"));
       const maxConcurrent = await screen.findByLabelText("Max Concurrent Runs");
       fireEvent.change(maxConcurrent, { target: { value: "4" } });
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.click(screen.getByText("Save"));
 
       await waitFor(() => {
         expect(mockUpdateSettings).toHaveBeenCalledWith(
@@ -1266,7 +1267,7 @@ describe("SettingsModal", () => {
 
       const maxConcurrent = await screen.findByLabelText("Max Concurrent Runs");
       fireEvent.change(maxConcurrent, { target: { value: "0" } });
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.click(screen.getByText("Save"));
 
       expect(await screen.findByText("Research max concurrent runs must be at least 1.")).toBeInTheDocument();
     });
@@ -1299,7 +1300,7 @@ describe("SettingsModal", () => {
       const details = screen.getByText(/Advanced — external search providers/i).closest("details");
       expect(details).not.toHaveAttribute("open");
 
-      await userEvent.click(screen.getByText(/Advanced — external search providers/i));
+      await settingsModalUser.click(screen.getByText(/Advanced — external search providers/i));
       expect(details).toHaveAttribute("open");
       expect(await screen.findByLabelText("SearXNG URL")).toBeInTheDocument();
       expect(screen.getByText(/Open Authentication Settings/i)).toBeInTheDocument();
@@ -1405,7 +1406,7 @@ describe("SettingsModal", () => {
       expect(screen.getByRole("checkbox", { name: "LLM Synthesis" }).closest(".settings-research-source-grid")).toBe(sourceGrid);
 
       fireEvent.change(maxConcurrent, { target: { value: "0" } });
-      await userEvent.click(screen.getByText("Save"));
+      await settingsModalUser.click(screen.getByText("Save"));
       expect(await screen.findByText("Research max concurrent runs must be at least 1.")).toBeInTheDocument();
     });
 
@@ -1429,7 +1430,7 @@ describe("SettingsModal", () => {
       await openResearchGlobalSection();
 
       expect(await screen.findByText(/Missing credentials for the selected research provider/i)).toBeInTheDocument();
-      await userEvent.click(screen.getByRole("button", { name: "Open Authentication" }));
+      await settingsModalUser.click(screen.getByRole("button", { name: "Open Authentication" }));
       expect(await screen.findByRole("heading", { name: "Authentication" })).toBeInTheDocument();
     });
 
@@ -1443,7 +1444,7 @@ describe("SettingsModal", () => {
   describe("memory dream trigger", () => {
     const openMemorySection = async () => {
       const [memorySectionButton] = await screen.findAllByRole("button", { name: /^Memory$/i });
-      await userEvent.click(memorySectionButton);
+      await settingsModalUser.click(memorySectionButton);
     };
 
     it("shows Dream Now button when dreams are enabled", async () => {
@@ -1474,7 +1475,7 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
       await openMemorySection();
 
-      await userEvent.click(await screen.findByRole("button", { name: "Dream Now" }));
+      await settingsModalUser.click(await screen.findByRole("button", { name: "Dream Now" }));
 
       await waitFor(() => {
         expect(mockTriggerMemoryDreams).toHaveBeenCalledWith(undefined);

@@ -54,9 +54,10 @@ function createStore(seed: Task[]): { store: Store; tasks: Map<string, Task> } {
         .filter((task) => (opts?.includeDeleted ? true : !task.deletedAt))
         .map((task) => ({ ...task }));
     }),
-    getTask: vi.fn(async (id: string) => {
+    getTask: vi.fn(async (id: string, opts?: { includeDeleted?: boolean }) => {
       const task = tasks.get(id);
-      return task ? { ...task } : undefined;
+      if (!task || (task.deletedAt && !opts?.includeDeleted)) return undefined;
+      return { ...task };
     }),
     updateTask: vi.fn(async (id: string, patch: Partial<Task>) => {
       const current = tasks.get(id);
@@ -81,6 +82,12 @@ function createStore(seed: Task[]): { store: Store; tasks: Map<string, Task> } {
       tasks.set(id, next);
     }),
     recordRunAuditEvent: vi.fn(async () => undefined),
+    /*
+    FNXC:OverlapSelfHealing 2026-06-26-12:00:
+    Policy-convergence fakes must satisfy clearStaleBlockedBy's full TaskStore seam, including future overlap and completion-handoff branches, without changing the retry-exhausted assertions.
+    */
+    parseFileScopeFromPrompt: vi.fn().mockResolvedValue([]),
+    getCompletionHandoffAcceptedMarker: vi.fn().mockReturnValue(null),
   } as unknown as Store;
 
   return { store, tasks };

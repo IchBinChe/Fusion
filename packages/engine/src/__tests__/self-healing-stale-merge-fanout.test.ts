@@ -45,6 +45,13 @@ describe("SelfHealingManager stale merge fanout recovery (FN-4241)", () => {
         tasks.set(id, { ...current, ...patch });
       }),
       logEntry: vi.fn().mockResolvedValue(undefined),
+      /*
+      FNXC:OverlapSelfHealing 2026-06-26-12:00:
+      clearStaleBlockedBy fakes must expose every store method its file-scope-overlap path can call so recovery-count assertions stay deterministic across shard order.
+      */
+      getTask: vi.fn().mockImplementation(async (id: string) => tasks.get(id) ?? null),
+      parseFileScopeFromPrompt: vi.fn().mockResolvedValue([]),
+      getCompletionHandoffAcceptedMarker: vi.fn().mockReturnValue(null),
     } as unknown as TaskStore;
 
     const blocker = createTask("FN-4241-BLOCKER", {

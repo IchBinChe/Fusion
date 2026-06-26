@@ -53,6 +53,12 @@ function createStore(tasks: TestTask[], leakDeleted = false) {
     updateTask: vi.fn(async () => ({})),
     moveTask: vi.fn(async () => ({})),
     logEntry: vi.fn(async () => ({})),
+    /*
+    FNXC:OverlapSelfHealing 2026-06-26-12:00:
+    Soft-delete recovery tests already cover getTask(includeDeleted); keep the same fake complete for clearStaleBlockedBy overlap and handoff branches so branch reachability cannot change counts by throwing.
+    */
+    parseFileScopeFromPrompt: vi.fn().mockResolvedValue([]),
+    getCompletionHandoffAcceptedMarker: vi.fn().mockReturnValue(null),
     recordRunAuditEvent: vi.fn(async () => ({})),
   };
   return store as any;

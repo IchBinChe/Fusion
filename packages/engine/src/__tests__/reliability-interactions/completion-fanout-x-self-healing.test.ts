@@ -47,6 +47,12 @@ function storeWith(tasks: Task[]): TaskStore & EventEmitter {
       return map.get(id);
     }),
     logEntry: vi.fn(async () => undefined),
+    /*
+    FNXC:OverlapSelfHealing 2026-06-26-12:00:
+    Completion fan-out tests reuse a hand-rolled TaskStore; keep clearStaleBlockedBy's overlap-path methods present so fan-out count checks do not depend on an incomplete fake.
+    */
+    parseFileScopeFromPrompt: vi.fn().mockResolvedValue([]),
+    getCompletionHandoffAcceptedMarker: vi.fn().mockReturnValue(null),
   }) as unknown as TaskStore & EventEmitter;
 }
 

@@ -33,12 +33,16 @@ function createStore(tasks: Task[], settingsOverrides: Partial<Settings> = {}): 
   const emitter = new EventEmitter();
   return Object.assign(emitter, {
     getSettings: vi.fn(async () => settings),
-    listTasks: vi.fn(async (opts?: { column?: string }) => {
-      const all = [...map.values()];
+    listTasks: vi.fn(async (opts?: { column?: string; includeDeleted?: boolean }) => {
+      const all = [...map.values()].filter((task) => opts?.includeDeleted || !task.deletedAt);
       if (!opts?.column) return all;
       return all.filter((t) => t.column === opts.column);
     }),
-    getTask: vi.fn(async (id: string) => map.get(id)),
+    getTask: vi.fn(async (id: string, opts?: { includeDeleted?: boolean }) => {
+      const task = map.get(id);
+      if (!task || (task.deletedAt && !opts?.includeDeleted)) return null;
+      return task;
+    }),
     updateTask: vi.fn(async (id: string, updates: Partial<Task>) => {
       const cur = map.get(id)!;
       map.set(id, { ...cur, ...updates } as Task);
@@ -49,6 +53,12 @@ function createStore(tasks: Task[], settingsOverrides: Partial<Settings> = {}): 
       map.set(id, { ...cur, column } as Task);
     }),
     logEntry: vi.fn(async () => undefined),
+    /*
+    FNXC:OverlapSelfHealing 2026-06-26-12:00:
+    clearStaleBlockedBy object stores must include the overlap-path TaskStore seam, including soft-deleted getTask reads, so stale-blocker recovery invariants do not depend on which branch a test reaches.
+    */
+    parseFileScopeFromPrompt: vi.fn().mockResolvedValue([]),
+    getCompletionHandoffAcceptedMarker: vi.fn().mockReturnValue(null),
   }) as unknown as TaskStore & EventEmitter;
 }
 

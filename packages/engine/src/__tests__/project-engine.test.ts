@@ -225,6 +225,12 @@ function createMockStore(initialSettings: Record<string, unknown>) {
       return structuredClone(settings);
     }),
     logEntry: vi.fn(async () => undefined),
+    /*
+    FNXC:OverlapSelfHealing 2026-06-26-12:00:
+    ProjectEngine's broad TaskStore fake is shared by maintenance wiring tests, so it carries clearStaleBlockedBy's overlap-path seam even when individual cases only exercise merge orchestration.
+    */
+    parseFileScopeFromPrompt: vi.fn().mockResolvedValue([]),
+    getCompletionHandoffAcceptedMarker: vi.fn().mockReturnValue(null),
     emit: vi.fn(),
     addTaskComment: vi.fn(async () => undefined),
     getActiveMergingTask: vi.fn(() => null),

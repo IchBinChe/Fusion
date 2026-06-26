@@ -29,6 +29,12 @@ function makeStore(tasks: Map<string, Task>): TaskStore & EventEmitter {
     updateTask: vi.fn(async (id: string, updates: Partial<Task>) => { tasks.set(id, { ...tasks.get(id)!, ...updates } as Task); return tasks.get(id); }),
     moveTask: vi.fn(async (id: string, column: Task["column"]) => { tasks.set(id, { ...tasks.get(id)!, column } as Task); }),
     logEntry: vi.fn(async () => undefined),
+    /*
+    FNXC:OverlapSelfHealing 2026-06-26-12:00:
+    Reliability interaction object fakes must provide clearStaleBlockedBy's overlap-path store methods; real TaskStore fixture cases inherit the production implementation and stay untouched.
+    */
+    parseFileScopeFromPrompt: vi.fn().mockResolvedValue([]),
+    getCompletionHandoffAcceptedMarker: vi.fn().mockReturnValue(null),
     walCheckpoint: vi.fn(() => ({ busy: 0, log: 0, checkpointed: 0 })),
     archiveTaskAndCleanup: vi.fn(async () => ({})),
     clearStaleExecutionStartBranchReferences: vi.fn(() => []),

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -29,6 +29,12 @@ function makeStore(tasks: Task[], events: unknown[] = [], settings?: Partial<Set
     },
     logEntry: async () => undefined,
     getTask: async (id: string) => tasks.find((candidate) => candidate.id === id) ?? null,
+    /*
+    FNXC:OverlapSelfHealing 2026-06-26-12:00:
+    This real-git interaction uses an object TaskStore fake, so it must mirror clearStaleBlockedBy's overlap-path seam instead of relying on unrelated real repository setup.
+    */
+    parseFileScopeFromPrompt: vi.fn().mockResolvedValue([]),
+    getCompletionHandoffAcceptedMarker: vi.fn().mockReturnValue(null),
     walCheckpoint: () => ({ busy: 0, log: 0, checkpointed: 0 }),
     archiveTaskAndCleanup: async () => ({}),
     clearStaleExecutionStartBranchReferences: () => [],

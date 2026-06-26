@@ -52,6 +52,18 @@ export const CLASS_BUDGET_BANDS = {
   the two values are not coupled and may diverge.
   */
   shard: { floor: 15 * MINUTE, ceiling: 30 * MINUTE },
+  /*
+  FNXC:TestInfrastructure 2026-06-26-14:10:
+  The `changed` ceiling stays 20min (general bound). The narrower requirement —
+  that a per-task scoped-affected lane fails BEFORE the engine's 15min workspace
+  verification kill (VERIFICATION_TIMEOUT_WORKSPACE_MS=900_000) so the engine
+  doesn't SIGKILL + restart the task — is handled surgically in
+  `deriveScopedAffectedBudgetMs` (test-changed.mjs), which caps the scoped lane at
+  SCOPED_AFFECTED_BUDGET_CEILING_MS (14min) via Math.min. That keeps the global
+  changed band generous for other callers while bounding only the lane that was
+  timing out. (An earlier revision lowered this whole band to 13min; superseded by
+  the scoped cap merged from main.)
+  */
   // One local changed-file package invocation.
   changed: { floor: 2 * MINUTE, ceiling: 20 * MINUTE },
   // One dashboard quality lane (heap-managed). Matches the historical 15min.

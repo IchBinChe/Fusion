@@ -45,6 +45,14 @@ import {
   partitionScopedAffectedPackages,
   isTestFilePath,
   changedSourceFilesAffectingPackage,
+  existingChangedTestFilesInPackage,
+  resolveRepoRoot,
+  GATE_COVERED_MEMORY_ENVELOPE_PACKAGES,
+  SCOPED_AFFECTED_MEMORY_ENVELOPES,
+  CORE_SCOPED_AFFECTED_PACKAGE,
+  CORE_SCOPED_AFFECTED_HEAP_MB,
+  CORE_SCOPED_AFFECTED_WORKERS,
+  createScopedAffectedMemoryEnvelopeEnv,
   deriveScopedAffectedBudgetMs,
   SCOPED_AFFECTED_BUDGET_CEILING_MS,
 } from "../test-changed.mjs";
@@ -289,7 +297,7 @@ function assertScopedAffectedEnv(env, { heapMb, workers }) {
   assert.equal(env.HOME, "/tmp/fusion-home");
 }
 
-test("partitionScopedAffectedPackages: isolates dashboard and engine into separate envelope groups", () => {
+test("partitionScopedAffectedPackages: isolates core, dashboard, and engine into separate envelope groups", () => {
   assert.deepEqual(summarizeScopedAffectedGroups([DASHBOARD_SCOPED_AFFECTED_PACKAGE]), [
     {
       packages: [DASHBOARD_SCOPED_AFFECTED_PACKAGE],
@@ -298,19 +306,30 @@ test("partitionScopedAffectedPackages: isolates dashboard and engine into separa
     },
   ]);
 
-  assert.deepEqual(summarizeScopedAffectedGroups(["@fusion/core", DASHBOARD_SCOPED_AFFECTED_PACKAGE]), [
-    { packages: ["@fusion/core"], engineMemoryEnvelope: false, memoryEnvelopePackage: null },
+  // FNXC:TestInfrastructure 2026-06-26-12:40: @fusion/core is now its own
+  // memory-envelope group (no longer a regular package), so the wide-fan-out
+  // guard and bounded heap/worker env apply. Group order follows
+  // SCOPED_AFFECTED_MEMORY_ENVELOPES key order: engine, dashboard, core.
+  assert.deepEqual(summarizeScopedAffectedGroups([CORE_SCOPED_AFFECTED_PACKAGE, DASHBOARD_SCOPED_AFFECTED_PACKAGE]), [
     {
       packages: [DASHBOARD_SCOPED_AFFECTED_PACKAGE],
       engineMemoryEnvelope: false,
       memoryEnvelopePackage: DASHBOARD_SCOPED_AFFECTED_PACKAGE,
     },
+    {
+      packages: [CORE_SCOPED_AFFECTED_PACKAGE],
+      engineMemoryEnvelope: false,
+      memoryEnvelopePackage: CORE_SCOPED_AFFECTED_PACKAGE,
+    },
   ]);
 
   assert.deepEqual(
-    summarizeScopedAffectedGroups(["@fusion/core", DASHBOARD_SCOPED_AFFECTED_PACKAGE, ENGINE_SCOPED_AFFECTED_PACKAGE]),
+    summarizeScopedAffectedGroups([
+      CORE_SCOPED_AFFECTED_PACKAGE,
+      DASHBOARD_SCOPED_AFFECTED_PACKAGE,
+      ENGINE_SCOPED_AFFECTED_PACKAGE,
+    ]),
     [
-      { packages: ["@fusion/core"], engineMemoryEnvelope: false, memoryEnvelopePackage: null },
       {
         packages: [ENGINE_SCOPED_AFFECTED_PACKAGE],
         engineMemoryEnvelope: true,
@@ -321,12 +340,45 @@ test("partitionScopedAffectedPackages: isolates dashboard and engine into separa
         engineMemoryEnvelope: false,
         memoryEnvelopePackage: DASHBOARD_SCOPED_AFFECTED_PACKAGE,
       },
+      {
+        packages: [CORE_SCOPED_AFFECTED_PACKAGE],
+        engineMemoryEnvelope: false,
+        memoryEnvelopePackage: CORE_SCOPED_AFFECTED_PACKAGE,
+      },
     ],
   );
 
-  assert.deepEqual(summarizeScopedAffectedGroups(["@fusion/core", "@runfusion/fusion"]), [
-    { packages: ["@fusion/core", "@runfusion/fusion"], engineMemoryEnvelope: false, memoryEnvelopePackage: null },
+  // A genuinely regular package stays in the shared regular group; core splits out.
+  assert.deepEqual(summarizeScopedAffectedGroups([CORE_SCOPED_AFFECTED_PACKAGE, "@runfusion/fusion"]), [
+    { packages: ["@runfusion/fusion"], engineMemoryEnvelope: false, memoryEnvelopePackage: null },
+    {
+      packages: [CORE_SCOPED_AFFECTED_PACKAGE],
+      engineMemoryEnvelope: false,
+      memoryEnvelopePackage: CORE_SCOPED_AFFECTED_PACKAGE,
+    },
   ]);
+});
+
+test("@fusion/core is a wide-fan-out memory-envelope package but is NOT gate-covered", () => {
+  // It must be bounded (guard applies) ...
+  assert.ok(
+    Object.keys(SCOPED_AFFECTED_MEMORY_ENVELOPES).includes(CORE_SCOPED_AFFECTED_PACKAGE),
+    "core must be a memory-envelope package so the wide-fan-out guard runs only directly-changed core tests",
+  );
+  // ... yet must NOT claim gate coverage (the merge gate runs no core suite),
+  // so a delegated core lane warns loudly instead of reporting a false green.
+  assert.ok(
+    !GATE_COVERED_MEMORY_ENVELOPE_PACKAGES.has(CORE_SCOPED_AFFECTED_PACKAGE),
+    "core is not covered by the merge gate; delegation must warn, not reassure",
+  );
+});
+
+test("core scoped-affected env applies the bounded heap and worker envelope", () => {
+  const env = createScopedAffectedMemoryEnvelopeEnv(CORE_SCOPED_AFFECTED_PACKAGE, {
+    NODE_OPTIONS: "--trace-warnings",
+    HOME: "/tmp/fusion-home",
+  });
+  assertScopedAffectedEnv(env, { heapMb: CORE_SCOPED_AFFECTED_HEAP_MB, workers: CORE_SCOPED_AFFECTED_WORKERS });
 });
 
 test("createDashboardScopedAffectedEnv: caps heap, preserves env, lowers workers, and leaves watchdog finite", () => {
@@ -1914,4 +1966,97 @@ test("changedSourceFilesAffectingPackage: out-of-graph and irrelevant paths stay
     ),
     [],
   );
+});
+
+// FNXC:TestInfrastructure 2026-06-26-09:15: `git diff --name-only` lists deleted /
+// renamed-away `.test` paths; those must NOT reach the positional `vitest run <file>`
+// call (they would fail the bounded lane on a missing file). Regression for the P2
+// deletion case: filter the directly-changed test files to ones still on disk, and
+// an all-deletions diff must yield [] so the caller delegates to the gate.
+test("existingChangedTestFilesInPackage: keeps live in-package test files, drops deleted ones", () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "fusion-changed-tests-"));
+  try {
+    const liveRel = "packages/engine/src/__tests__/live.test.ts";
+    const deletedRel = "packages/engine/src/__tests__/deleted.test.ts";
+    mkdirSync(path.join(tmp, "packages/engine/src/__tests__"), { recursive: true });
+    writeFileSync(path.join(tmp, liveRel), "// live\n");
+    // deletedRel intentionally NOT written to disk (simulates a removed test)
+    assert.deepEqual(
+      existingChangedTestFilesInPackage([deletedRel, liveRel], "packages/engine", { projectRoot: tmp }),
+      [liveRel],
+    );
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("existingChangedTestFilesInPackage: all-deletions diff yields empty (delegate-to-gate path)", () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "fusion-changed-tests-"));
+  try {
+    // No test files written: every changed test path was a deletion.
+    assert.deepEqual(
+      existingChangedTestFilesInPackage(
+        ["packages/engine/src/__tests__/gone-a.test.ts", "packages/engine/src/__tests__/gone-b.test.ts"],
+        "packages/engine",
+        { projectRoot: tmp },
+      ),
+      [],
+    );
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("existingChangedTestFilesInPackage: excludes non-test and out-of-package paths", () => {
+  const tmp = mkdtempSync(path.join(tmpdir(), "fusion-changed-tests-"));
+  try {
+    const inPkgSource = "packages/engine/src/self-healing.ts";
+    const otherPkgTest = "packages/dashboard/src/__tests__/x.test.ts";
+    mkdirSync(path.join(tmp, "packages/engine/src"), { recursive: true });
+    mkdirSync(path.join(tmp, "packages/dashboard/src/__tests__"), { recursive: true });
+    writeFileSync(path.join(tmp, inPkgSource), "// src\n");
+    writeFileSync(path.join(tmp, otherPkgTest), "// other\n");
+    assert.deepEqual(
+      existingChangedTestFilesInPackage([inPkgSource, otherPkgTest], "packages/engine", { projectRoot: tmp }),
+      [],
+    );
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// FNXC:TestInfrastructure 2026-06-26-13:40: regression for the doubled-path subdir
+// bug — with NO projectRoot passed, the existence root must resolve to the git repo
+// root (not cwd), so a real repo-relative test path is found from any cwd.
+test("existingChangedTestFilesInPackage: default existence root anchors at the git repo root", () => {
+  const selfRel = "scripts/__tests__/test-changed.test.mjs"; // this very file — guaranteed on disk
+  assert.deepEqual(existingChangedTestFilesInPackage([selfRel], "scripts"), [selfRel]);
+});
+
+// FNXC:TestInfrastructure 2026-06-26-14:40: regression for the "subdirectory runs
+// skip" bug — rootDir (which drives ALL workspace discovery) must resolve to the
+// git toplevel, not process.cwd(), so a run launched from a package subdir without
+// FUSION_PROJECT_DIR still finds the workspace instead of exiting through the gate.
+test("resolveRepoRoot: honors FUSION_PROJECT_DIR else resolves the git toplevel (cwd-independent)", () => {
+  const saved = process.env.FUSION_PROJECT_DIR;
+  try {
+    process.env.FUSION_PROJECT_DIR = path.join(path.sep, "explicit", "root");
+    assert.equal(resolveRepoRoot(), path.resolve(path.join(path.sep, "explicit", "root")));
+    delete process.env.FUSION_PROJECT_DIR;
+    const top = resolveRepoRoot();
+    assert.ok(path.isAbsolute(top), "toplevel must be absolute");
+    // The resolved root must contain this workspace (cwd-independent), not a subdir.
+    assert.ok(existsSync(path.join(top, "scripts/test-changed.mjs")), "resolved root must be the repo root");
+  } finally {
+    if (saved === undefined) delete process.env.FUSION_PROJECT_DIR;
+    else process.env.FUSION_PROJECT_DIR = saved;
+  }
+});
+
+// FNXC:TestInfrastructure 2026-06-26-09:15: the merge gate re-covers a delegated
+// engine lane (curated engine-core subset) but runs NO dashboard tests. Lock that
+// asymmetry so the delegation messaging never overclaims dashboard gate coverage.
+test("GATE_COVERED_MEMORY_ENVELOPE_PACKAGES: engine covered, dashboard not", () => {
+  assert.equal(GATE_COVERED_MEMORY_ENVELOPE_PACKAGES.has(ENGINE_SCOPED_AFFECTED_PACKAGE), true);
+  assert.equal(GATE_COVERED_MEMORY_ENVELOPE_PACKAGES.has(DASHBOARD_SCOPED_AFFECTED_PACKAGE), false);
 });

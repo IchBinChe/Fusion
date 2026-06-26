@@ -45,6 +45,8 @@ import {
   partitionScopedAffectedPackages,
   isTestFilePath,
   changedSourceFilesAffectingPackage,
+  deriveScopedAffectedBudgetMs,
+  SCOPED_AFFECTED_BUDGET_CEILING_MS,
 } from "../test-changed.mjs";
 
 import { deriveBudgetMs } from "../lib/run-vitest-watchdog.mjs";
@@ -380,6 +382,18 @@ test("createEngineScopedAffectedEnv: preserves existing engine envelope contract
   assert.equal(budgetMs > 0, true);
 });
 
+test("deriveScopedAffectedBudgetMs: scoped affected lanes fail before workspace verification timeout", () => {
+  const workspaceVerificationTimeoutMs = 900_000;
+
+  assert.equal(deriveBudgetMs({ klass: "changed" }), 1_200_000);
+  assert.equal(deriveScopedAffectedBudgetMs(), SCOPED_AFFECTED_BUDGET_CEILING_MS);
+  assert.equal(deriveScopedAffectedBudgetMs() < workspaceVerificationTimeoutMs, true);
+  assert.equal(deriveScopedAffectedBudgetMs() < deriveBudgetMs({ klass: "changed" }), true);
+
+  const freshTightBudget = deriveScopedAffectedBudgetMs({ expectedDurationMs: 10_000, timingsFresh: true });
+  assert.equal(freshTightBudget, deriveBudgetMs({ klass: "changed", expectedDurationMs: 10_000, timingsFresh: true }));
+});
+
 // ---------------------------------------------------------------------------
 // decideExecutionPlan
 // ---------------------------------------------------------------------------
@@ -474,6 +488,40 @@ test("decideExecutionPlan: only package files changed → changed mode", () => {
   });
   assert.equal(plan.mode, "changed");
   assert.deepEqual(plan.packages, ["@fusion/engine"]);
+});
+
+test("decideExecutionPlan: dashboard test-only diff does not select engine scoped lane", () => {
+  const packageNameByDir = pkgMap([
+    ["packages/dashboard", "@fusion/dashboard"],
+    ["packages/engine", "@fusion/engine"],
+    ["packages/cli", "@runfusion/fusion"],
+    ["packages/desktop", "@fusion/desktop"],
+    ["plugins/reports", "@fusion-plugin-examples/reports"],
+  ]);
+  const reverseDependencyMap = new Map([
+    ["@fusion/dashboard", ["@runfusion/fusion", "@fusion/desktop", "@fusion-plugin-examples/reports"]],
+    ["@runfusion/fusion", []],
+    ["@fusion/desktop", []],
+    ["@fusion-plugin-examples/reports", []],
+    ["@fusion/engine", []],
+  ]);
+
+  const plan = decideExecutionPlan({
+    forceFullSuite: false,
+    comparisonBase: "abc123",
+    changedFiles: ["packages/dashboard/app/components/__tests__/SettingsModal.test.tsx"],
+    packageNameByDir,
+    reverseDependencyMap,
+  });
+
+  assert.equal(plan.mode, "changed");
+  assert.deepEqual(plan.packages, [
+    "@fusion/dashboard",
+    "@runfusion/fusion",
+    "@fusion/desktop",
+    "@fusion-plugin-examples/reports",
+  ]);
+  assert.equal(plan.packages.includes("@fusion/engine"), false);
 });
 
 test("decideExecutionPlan: expands changed packages with reverse dependents", () => {

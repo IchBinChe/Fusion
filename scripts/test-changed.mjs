@@ -15,6 +15,16 @@ import { deriveBudgetMs, runWithWatchdog } from "./lib/run-vitest-watchdog.mjs";
 /** Generous local full-suite budget (60min): far above a real full run, far below an infinite hang. */
 const FULL_SUITE_BUDGET_MS = 60 * 60 * 1000;
 
+/*
+FNXC:TestInfrastructure 2026-06-25-18:58:
+Scoped affected memory-envelope lanes run inside Fusion's root `pnpm test` verification command, whose workspace default timeout is 15min. Keep their own watchdog below that outer timeout so a broad `vitest --changed` engine/dashboard lane fails with script diagnostics instead of being killed by the executor and restarted from the beginning.
+*/
+export const SCOPED_AFFECTED_BUDGET_CEILING_MS = 14 * 60 * 1000;
+
+export function deriveScopedAffectedBudgetMs(options = {}) {
+  return Math.min(deriveBudgetMs({ klass: "changed", ...options }), SCOPED_AFFECTED_BUDGET_CEILING_MS);
+}
+
 const currentFilePath = fileURLToPath(import.meta.url);
 const scriptDir = path.dirname(currentFilePath);
 const checkIsolationScript = path.join(scriptDir, "check-test-isolation.mjs");
@@ -1745,10 +1755,10 @@ export async function main(argv = process.argv.slice(2)) {
         ? createScopedAffectedMemoryEnvelopeEnv(memoryEnvelopePackage, isolatedHomeEnv)
         : isolatedHomeEnv,
       onBeforeAfterCheck: cleanupIsolatedHome,
-      // Scoped runs are proportional to the diff, so the tight "changed" ceiling
-      // applies; a hang fails fast instead of blocking the 60-min full backstop.
-      // Full fallback runs keep the generous backstop.
-      budgetMs: mode === "scoped" ? deriveBudgetMs({ klass: "changed" }) : FULL_SUITE_BUDGET_MS,
+      // Scoped runs are proportional to the diff, so the scoped affected ceiling
+      // stays below the executor's default workspace verification timeout. Full
+      // fallback runs keep the generous backstop.
+      budgetMs: mode === "scoped" ? deriveScopedAffectedBudgetMs() : FULL_SUITE_BUDGET_MS,
       label: `affected (${mode}): ${packages.join(", ")}`,
     });
   }

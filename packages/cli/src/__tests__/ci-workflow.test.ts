@@ -33,7 +33,10 @@ describe("Merge gate (.github/workflows/pr-checks.yml)", () => {
   let compositeAction: any;
   let contributingContent: string;
   let readmeContent: string;
+  let rootPackageJson: any;
+  let enginePackageJson: any;
   let cliPackageJsonContent: string;
+  let engineVitestConfigContent: string;
   let extensionSuiteContent: string;
   let agentExportSuiteContent: string;
   let buildExeSuiteContent: string;
@@ -45,7 +48,10 @@ describe("Merge gate (.github/workflows/pr-checks.yml)", () => {
     compositeAction = loadYamlFile(".github", "actions", "setup-node-pnpm", "action.yml").parsed;
     contributingContent = readFileSync(join(workspaceRoot, "docs", "contributing.md"), "utf-8");
     readmeContent = readFileSync(join(workspaceRoot, "README.md"), "utf-8");
+    rootPackageJson = JSON.parse(readFileSync(join(workspaceRoot, "package.json"), "utf-8"));
+    enginePackageJson = JSON.parse(readFileSync(join(workspaceRoot, "packages", "engine", "package.json"), "utf-8"));
     cliPackageJsonContent = readFileSync(join(workspaceRoot, "packages", "cli", "package.json"), "utf-8");
+    engineVitestConfigContent = readFileSync(join(workspaceRoot, "packages", "engine", "vitest.config.ts"), "utf-8");
     extensionSuiteContent = readFileSync(
       join(workspaceRoot, "packages", "cli", "src", "__tests__", "extension-integration.test.ts"),
       "utf-8",
@@ -99,6 +105,26 @@ describe("Merge gate (.github/workflows/pr-checks.yml)", () => {
         (step: any) => typeof step.run === "string" && step.run.includes("pnpm test:gate"),
       ),
     ).toBe(true);
+  });
+
+  /*
+  FNXC:CITestGate 2026-06-26-06:40:
+  The merge gate is the thin trusted CI surface. ci-workflow.test.ts must pin not only that the Gate job invokes `pnpm test:gate`, but also test:gate's internal composition (guards + engine test:core + cli test:ci-shape) and that engine test:core references the engine-core vitest project — otherwise a rename could hollow the gate while this CI-shape test stays green (FN-7059).
+  */
+  it("pins test:gate to the audited guard scripts and curated suites", () => {
+    const testGateScript = rootPackageJson.scripts?.["test:gate"] ?? "";
+
+    expect(testGateScript).toContain("node scripts/check-no-nohup.mjs");
+    expect(testGateScript).toContain("node scripts/check-no-kill-4040.mjs");
+    expect(testGateScript).toContain("node scripts/check-no-test-timeout-appeasement.mjs");
+    expect(testGateScript).toContain("node scripts/check-changeset-format.mjs");
+    expect(testGateScript).toContain("pnpm --filter @fusion/engine test:core");
+    expect(testGateScript).toContain("pnpm --filter @runfusion/fusion test:ci-shape");
+  });
+
+  it("pins engine test:core to the engine-core vitest project", () => {
+    expect(enginePackageJson.scripts?.["test:core"] ?? "").toContain("--project=engine-core");
+    expect(engineVitestConfigContent).toContain('name: "engine-core"');
   });
 
   it("pins dependency bootstrap to frozen lockfile in every job", () => {

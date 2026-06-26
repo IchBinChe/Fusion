@@ -5,7 +5,7 @@ import { getUnifiedTaskProgress } from "../taskProgress";
 /*
 FNXC:WorkflowSteps 2026-06-25-00:00 — graph-native progress model (plan U3).
 These tests pin the render-state contract that the progress bar / Workflow tab rely on:
-- names resolve from result.workflowStepName (no DB-row name lookup), with a raw-id fallback;
+- names resolve from result.workflowStepName (no DB-row name lookup), with a humanized node-id fallback;
 - a "pending" result with a startedAt and no completedAt is the `running` state, vs bare `pending`;
 - advisory_failure (non-blocking) is distinct from failed (blocking) and counts as completed;
 - disabled optional steps (absent from enabledWorkflowSteps) never appear in the counter/bar.
@@ -49,9 +49,23 @@ describe("getUnifiedTaskProgress", () => {
     );
 
     const item = progress.items.find((i) => i.id === "workflow-code-review");
-    expect(item?.name).toBe("code-review");
+    // Enabled-but-not-run has no recorded name → humanize the node id to proper casing,
+    // never render the raw lowercase id.
+    expect(item?.name).toBe("Code Review");
     // Enabled but never run → pending.
     expect(item?.status).toBe("pending");
+  });
+
+  it("humanizes the node id to proper casing for an enabled-but-not-run step", () => {
+    const progress = getUnifiedTaskProgress(
+      makeTask({
+        enabledWorkflowSteps: ["browser-verification", "frontend-ux-design", "code-review"],
+        workflowStepResults: [],
+      }),
+    );
+    expect(progress.items.find((i) => i.id === "workflow-browser-verification")?.name).toBe("Browser Verification");
+    expect(progress.items.find((i) => i.id === "workflow-frontend-ux-design")?.name).toBe("Frontend UX Design");
+    expect(progress.items.find((i) => i.id === "workflow-code-review")?.name).toBe("Code Review");
   });
 
   it("distinguishes running (started, not completed) from pending (not started)", () => {

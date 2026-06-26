@@ -59,12 +59,32 @@ function isCompleted(status: UnifiedTaskProgressStatus): boolean {
   return status === "done" || status === "skipped" || status === "advisory_failure";
 }
 
+/*
+FNXC:WorkflowStepResults 2026-06-26-16:30:
+An enabled-but-not-yet-run workflow step has no recorded result yet, so there is no
+`workflowStepName` to show. Rather than render the raw graph node id (e.g. `code-review`,
+`browser-verification`), humanize it into a Title Case label ("Code Review",
+"Browser Verification"). Once the graph records the step it carries the workflow's exact
+`config.name`, which always wins; humanization is only the pre-run fallback. The UI must
+show proper casing for workflow steps (e.g. "Code Review"), never the lowercase hyphenated id.
+*/
+function humanizeWorkflowStepId(workflowStepId: string): string {
+  const words = workflowStepId
+    .replace(/^plugin:/, "")
+    .split(/[-_:\s]+/)
+    .filter(Boolean);
+  if (words.length === 0) return workflowStepId;
+  return words
+    .map((w) => (/^(ux|ui|qa|ai|api|pr|id)$/i.test(w) ? w.toUpperCase() : w.charAt(0).toUpperCase() + w.slice(1)))
+    .join(" ");
+}
+
 function resolveWorkflowStepName(workflowStepId: string, result: WorkflowStepResult | undefined): string {
   const resultName = result?.workflowStepName?.trim();
   if (resultName) {
     return resultName;
   }
-  return workflowStepId;
+  return humanizeWorkflowStepId(workflowStepId);
 }
 
 export function getUnifiedTaskProgress(

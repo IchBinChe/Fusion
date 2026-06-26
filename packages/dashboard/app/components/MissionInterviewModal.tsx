@@ -47,6 +47,7 @@ import {
 } from "lucide-react";
 import { ConversationHistory } from "./ConversationHistory";
 import { CustomModelDropdown } from "./CustomModelDropdown";
+import { FloatingWindow } from "./FloatingWindow";
 import { useSessionLock } from "../hooks/useSessionLock";
 import { useAiSessionSync } from "../hooks/useAiSessionSync";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
@@ -125,7 +126,6 @@ export function MissionInterviewModal({
   const [editedSummary, setEditedSummary] = useState<MissionPlanSummary | null>(null);
   const [_hasProgress, setHasProgress] = useState(false);
   const hasAutoStartedRef = useRef(false);
-  const overlayMouseDownOnSelfRef = useRef(false);
   const [streamingOutput, setStreamingOutput] = useState("");
   const [showThinking, setShowThinking] = useState(true);
   const [isReconnecting, setIsReconnecting] = useState(false);
@@ -631,7 +631,6 @@ export function MissionInterviewModal({
 
     streamConnectionRef.current?.close();
     streamConnectionRef.current = null;
-    overlayMouseDownOnSelfRef.current = false;
     setIsReconnecting(false);
     setIsRetrying(false);
     setIsCreating(false);
@@ -641,7 +640,6 @@ export function MissionInterviewModal({
   const handleSendToBackground = useCallback(() => {
     streamConnectionRef.current?.close();
     streamConnectionRef.current = null;
-    overlayMouseDownOnSelfRef.current = false;
     setIsReconnecting(false);
     setIsRetrying(false);
     setIsCreating(false);
@@ -838,22 +836,23 @@ export function MissionInterviewModal({
   if (!isOpen) return null;
 
   return (
-    <div
-      className="modal-overlay open"
-      onMouseDown={(e) => {
-        overlayMouseDownOnSelfRef.current = e.target === e.currentTarget;
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget && overlayMouseDownOnSelfRef.current) {
-          handleClose();
-        }
-        overlayMouseDownOnSelfRef.current = false;
-      }}
-      role="dialog"
-      aria-modal="true"
+    <FloatingWindow
+      windowKey="mission-interview"
+      title={t("missions.planTitle", "Plan Mission with AI")}
+      onClose={handleClose}
+      hideHeader
+      dragHandleSelector=".mission-interview-modal__drag-handle"
+      className="floating-window--mission-interview"
+      defaultSize={{ width: 760, height: 680 }}
+      minSize={{ width: 560, height: 420 }}
+      persistGeometryKey="floating-window:mission-interview"
     >
-      <div className="modal modal-lg planning-modal">
-        <div className="modal-header">
+      {/*
+        FNXC:MissionInterviewModal 2026-06-24-00:00:
+        The Plan Mission with AI workspace must be draggable and resizable on desktop by delegating geometry to FloatingWindow, while mobile keeps the existing full-screen/sheet-like mission interview flow. Keep one embedded mission header so close/send-to-background/session-lock controls do not duplicate FloatingWindow chrome.
+      */}
+      <div className="modal modal-lg planning-modal mission-interview-modal">
+        <div className="modal-header mission-interview-modal__drag-handle">
           <div className="detail-title-row">
             <Target size={20} className="icon-triage" />
             <h3>{t("missions.planTitle", "Plan Mission with AI")}</h3>
@@ -1112,7 +1111,7 @@ export function MissionInterviewModal({
           )}
         </div>
       </div>
-    </div>
+    </FloatingWindow>
   );
 }
 

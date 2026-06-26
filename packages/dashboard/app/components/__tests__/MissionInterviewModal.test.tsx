@@ -1,7 +1,10 @@
 import type React from "react";
+import { readFileSync } from "node:fs";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MissionInterviewModal } from "../MissionInterviewModal";
+
+const missionInterviewCss = readFileSync("app/components/MissionInterviewModal.css", "utf8");
 
 const mockStartMissionInterview = vi.fn();
 const mockRespondToMissionInterview = vi.fn();
@@ -133,6 +136,12 @@ describe("MissionInterviewModal", () => {
     mockReleaseSessionLock.mockResolvedValue(undefined);
     mockForceAcquireSessionLock.mockResolvedValue({ acquired: true, currentHolder: null });
     mockFetchModels.mockResolvedValue({ models: [], favoriteProviders: [], favoriteModels: [] });
+    localStorage.removeItem("floating-window:mission-interview");
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined);
   });
 
   function renderModal(props: Partial<React.ComponentProps<typeof MissionInterviewModal>> = {}) {
@@ -150,6 +159,79 @@ describe("MissionInterviewModal", () => {
       ),
     };
   }
+
+  function setViewport(width: number, height: number) {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
+  }
+
+  function stubPointerCapture(element: HTMLElement) {
+    Object.defineProperty(element, "setPointerCapture", { configurable: true, value: vi.fn() });
+    Object.defineProperty(element, "releasePointerCapture", { configurable: true, value: vi.fn() });
+  }
+
+  it("renders mission interview inside a floating desktop workspace", () => {
+    setViewport(1200, 900);
+
+    renderModal();
+
+    const panel = screen.getByTestId("floating-window-mission-interview");
+    expect(panel).toHaveClass("floating-window--mission-interview");
+    expect(panel).toHaveClass("floating-window--headerless");
+    expect(panel.style.width).toBe("760px");
+    expect(panel.style.height).toBe("680px");
+    expect(screen.queryByTestId("floating-window-drag-handle-mission-interview")).toBeNull();
+    expect(screen.getByText("Plan Mission with AI").closest(".mission-interview-modal__drag-handle")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Close" })).toHaveLength(1);
+  });
+
+  it("drags and resizes the desktop mission floating window while clamping geometry", async () => {
+    setViewport(1200, 1000);
+
+    renderModal();
+
+    const panel = screen.getByTestId("floating-window-mission-interview");
+    const header = screen.getByText("Plan Mission with AI").closest(".mission-interview-modal__drag-handle") as HTMLElement;
+    stubPointerCapture(panel);
+
+    const initialLeft = Number.parseFloat(panel.style.left);
+    const initialTop = Number.parseFloat(panel.style.top);
+
+    act(() => {
+      fireEvent.pointerDown(header, { pointerId: 7, clientX: 120, clientY: 80 });
+      fireEvent.pointerMove(panel, { pointerId: 7, clientX: 220, clientY: 140 });
+      fireEvent.pointerUp(panel, { pointerId: 7, clientX: 220, clientY: 140 });
+    });
+
+    await waitFor(() => {
+      expect(Number.parseFloat(panel.style.left)).toBeGreaterThan(initialLeft);
+      expect(Number.parseFloat(panel.style.top)).toBeGreaterThan(initialTop);
+    });
+
+    const resizeHandle = screen.getByTestId("floating-window-resize-se") as HTMLElement;
+    stubPointerCapture(resizeHandle);
+
+    act(() => {
+      fireEvent.pointerDown(resizeHandle, { pointerId: 8, clientX: 700, clientY: 600 });
+      fireEvent.pointerMove(resizeHandle, { pointerId: 8, clientX: 3000, clientY: 3000 });
+      fireEvent.pointerUp(resizeHandle, { pointerId: 8, clientX: 3000, clientY: 3000 });
+    });
+
+    expect(Number.parseFloat(panel.style.width)).toBeLessThanOrEqual(1200);
+    expect(Number.parseFloat(panel.style.height)).toBeLessThanOrEqual(1000);
+    expect(Number.parseFloat(panel.style.width)).toBeGreaterThanOrEqual(560);
+    expect(Number.parseFloat(panel.style.height)).toBeGreaterThanOrEqual(420);
+  });
+
+  it("keeps mobile mission planning full-screen and hides resize handles by CSS contract", () => {
+    const mobileBlock = missionInterviewCss.match(/@media\s*\(max-width:\s*768px\)\s*\{[\s\S]*?\.floating-window--mission-interview \.mission-interview-modal\s*\{[\s\S]*?\n\}/)?.[0];
+
+    expect(mobileBlock).toContain(".floating-window--mission-interview");
+    expect(mobileBlock).toContain("width: 100vw !important;");
+    expect(mobileBlock).toContain("height: 100dvh !important;");
+    expect(mobileBlock).toContain(".floating-window--mission-interview .floating-window__resize-handle");
+    expect(mobileBlock).toContain("display: none;");
+  });
 
   it("shows lock overlay and allows take-control", async () => {
     window.sessionStorage.setItem("fusion-tab-id", "tab-self");
@@ -378,6 +460,30 @@ describe("MissionInterviewModal", () => {
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
 
+  it("renders normalized generic stream failures as a recoverable retry state", async () => {
+    mockFetchAiSession.mockRejectedValueOnce(new Error("refresh failed"));
+
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("What do you want to build?"), {
+      target: { value: "Build a mission planning workflow" },
+    });
+    fireEvent.click(screen.getByText("Start Interview"));
+
+    await waitFor(() => {
+      expect(streamHandlers).toBeDefined();
+    });
+
+    await act(async () => {
+      streamHandlers.onError?.("The mission interview stream was interrupted. Please retry the session.");
+    });
+
+    expect(await screen.findByText("The mission interview stream was interrupted. Please retry the session.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+    expect(screen.queryByText("Reconnecting…")).not.toBeInTheDocument();
+    expect(screen.queryByText("AI is thinking...")).not.toBeInTheDocument();
+  });
+
   it("shows persisted mission interview errors after stream recovery refreshes the session", async () => {
     mockFetchAiSession.mockResolvedValueOnce(
       buildMissionSession({
@@ -582,14 +688,14 @@ describe("MissionInterviewModal", () => {
     expect(mockCancelMissionInterview).not.toHaveBeenCalled();
   });
 
-  it("closes from the backdrop after overlay mousedown", () => {
+  it("does not render a blocking backdrop click target around the floating workspace", () => {
     const { onClose } = renderModal();
     const overlay = screen.getByRole("dialog");
 
     fireEvent.mouseDown(overlay);
     fireEvent.click(overlay);
 
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
     expect(mockCancelMissionInterview).not.toHaveBeenCalled();
   });
 

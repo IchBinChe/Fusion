@@ -3975,6 +3975,9 @@ function createResilientEventSource(
       }
 
       source.close();
+      if (eventSource === source) {
+        eventSource = null;
+      }
 
       if (reconnectAttempts >= maxReconnectAttempts) {
         options.onFatalError?.("Connection lost");
@@ -8415,6 +8418,31 @@ export function createMissionFromInterview(
   });
 }
 
+const MISSION_INTERVIEW_STREAM_ERROR_MESSAGE = "The mission interview stream was interrupted. Please retry the session.";
+
+function normalizeMissionInterviewStreamError(data: string | undefined): string {
+  const raw = data?.trim() ?? "";
+  if (!raw) return MISSION_INTERVIEW_STREAM_ERROR_MESSAGE;
+
+  const normalizeMessage = (value: unknown): string => {
+    if (typeof value !== "string") return MISSION_INTERVIEW_STREAM_ERROR_MESSAGE;
+    const message = value.trim();
+    if (!message || message === "Stream error") return MISSION_INTERVIEW_STREAM_ERROR_MESSAGE;
+    return message;
+  };
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const message = (parsed as { message?: unknown; error?: unknown }).message ?? (parsed as { error?: unknown }).error;
+      return normalizeMessage(message);
+    }
+    return normalizeMessage(parsed);
+  } catch {
+    return normalizeMessage(raw);
+  }
+}
+
 /** Connect to mission interview SSE stream and handle events */
 export function connectMissionInterviewStream(
   sessionId: string,
@@ -8432,10 +8460,30 @@ export function connectMissionInterviewStream(
   const url = buildApiUrl(withProjectId(`/missions/interview/${encodeURIComponent(sessionId)}/stream`, projectId));
   let keepAlive: { stop: () => void } | null = null;
   let connection: { close: () => void; isConnected: () => boolean } | null = null;
+  let terminalEventHandled = false;
 
   const stopKeepAlive = () => {
     keepAlive?.stop();
     keepAlive = null;
+  };
+
+  const closeTerminalConnection = () => {
+    stopKeepAlive();
+    connection?.close();
+  };
+
+  const notifyTerminalError = (message: string) => {
+    if (terminalEventHandled) return;
+    terminalEventHandled = true;
+    closeTerminalConnection();
+    handlers.onError?.(message);
+  };
+
+  const notifyTerminalComplete = () => {
+    if (terminalEventHandled) return;
+    terminalEventHandled = true;
+    closeTerminalConnection();
+    handlers.onComplete?.();
   };
 
   const resilient = createResilientEventSource(
@@ -8471,17 +8519,14 @@ export function connectMissionInterviewStream(
           }
         },
         error: (event) => {
-          try {
-            const parsed = JSON.parse(event.data);
-            handlers.onError?.(parsed.message || parsed);
-          } catch {
-            handlers.onError?.(event.data || "Stream error");
-          }
-          connection?.close();
+          /*
+          FNXC:MissionInterviewStream 2026-06-24-00:00:
+          Mission interview stream failures are terminal for the current EventSource. Normalize malformed/empty/generic payloads, close keepalive + SSE once, and ignore duplicate late error/complete events so the modal can show one recoverable Retry state instead of a stale spinner or raw stream failure.
+          */
+          notifyTerminalError(normalizeMissionInterviewStreamError(event.data));
         },
         complete: () => {
-          handlers.onComplete?.();
-          connection?.close();
+          notifyTerminalComplete();
         },
       },
     },
@@ -8489,8 +8534,7 @@ export function connectMissionInterviewStream(
       maxReconnectAttempts: options?.maxReconnectAttempts,
       onConnectionStateChange: handlers.onConnectionStateChange,
       onFatalError: (message) => {
-        stopKeepAlive();
-        handlers.onError?.(message);
+        notifyTerminalError(normalizeMissionInterviewStreamError(message));
       },
     },
   );

@@ -22,6 +22,9 @@ FN-6871 corrects the stale premise that line-count drift blocks `pnpm test`: FN-
 
 FNXC:CI 2026-06-21-23:53:
 FN-6917 re-confirms the `pnpm test`-blocking premise is stale because FN-5048 left this guard opt-in under `check:line-count` only. Twenty files were re-ratcheted after organic feature/test growth; `TerminalModal.tsx` was grandfathered after crossing the hard cap as a long-existing file, with focused split follow-up FN-6918. Wholesale god-file shrink/refactor remains the long-term direction and stays deferred to dedicated follow-ups.
+
+FNXC:CI 2026-06-25-00:00:
+FN-7013 re-confirms the `pnpm test`-blocking premise is stale: FN-5048 removed this guard from pretest and left it opt-in under `check:line-count` only. Sixty-one current violations were re-ratcheted after organic feature/test growth and eight stale baseline entries were tightened or pruned. `AgentLogViewer.test.tsx` and `merger-ai.ts` were temporarily grandfathered after crossing the hard cap as long-existing files, with focused split follow-ups FN-7028 and FN-7029. Wholesale god-file shrink/refactor remains the long-term direction and stays deferred to dedicated follow-ups.
 */
 // Repo-wide guard: hand-written source files may not exceed a hard line-count
 // cap (MAX_LINES). This stops the next god-file from being born while leaving

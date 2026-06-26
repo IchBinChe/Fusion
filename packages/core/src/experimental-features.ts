@@ -11,7 +11,18 @@ workflowGraphExecutor and workflowColumns graduated from Experimental. Runtime g
 FNXC:WorkflowSettings 2026-06-23-21:55:
 workflowInterpreterDualObserve is no longer user-controllable in Settings. Treat stale persisted true values as inert so upgraded users do not keep running hidden diagnostic shadow observation with no visible off switch.
 */
-const DEFAULT_ON_EXPERIMENTAL_FEATURES = new Set<string>();
+/*
+FNXC:WorkflowPostMerge 2026-06-26-12:00:
+U7b cutover — `graphNativePostMerge` is now DEFAULT-ON. The graph is the single owner
+of post-merge execution: a successful merge lets traversal continue to post-merge graph
+nodes (optional-group nodes wired off a merge-region success, plus the plain post-merge
+nodes that follow a `seam:"merge"` prompt node — e.g. compound-engineering's `document`
+step). When this flag is on the legacy merger post-merge path (`runPostMergeWorkflowSteps`
+/ `hasEnabledPostMergeWorkflowSteps` in engine/merger.ts) is INERT so post-merge work runs
+exactly once via the graph and never double-runs. The flag is retained (not removed) as an
+explicit opt-out back to the legacy merger path until U7c deletes the legacy code + table.
+*/
+const DEFAULT_ON_EXPERIMENTAL_FEATURES = new Set<string>(["graphNativePostMerge"]);
 const RETIRED_EXPERIMENTAL_FEATURES = new Set<string>([
   "workflowInterpreterDualObserve",
 ]);

@@ -132,20 +132,46 @@ describe("WorkflowGraphExecutor graph-native post-merge steps", () => {
     expect(recorder.results[0].status).toBe("advisory_failure");
   });
 
-  it("flag OFF (default): the post-merge node is NOT run via the graph and records nothing", async () => {
+  it("flag explicitly OFF (opt-out): the post-merge node is NOT run via the graph and records nothing", async () => {
     const recorder = makeRecorder();
     const executor = new WorkflowGraphExecutor({
       handlers: { prompt: handler("APPROVE") },
       recordWorkflowStepResult: recorder.record,
     });
 
-    // No experimentalFeatures at all → flag defaults OFF.
-    const result = await executor.run(taskWith([POST_MERGE_ID]), {}, postMergeIr());
+    // FNXC:WorkflowPostMerge 2026-06-26-12:00: U7b cutover flipped the DEFAULT to ON, so the
+    // OFF path is now an explicit opt-out (graphNativePostMerge:false), not the default.
+    const result = await executor.run(
+      taskWith([POST_MERGE_ID]),
+      { experimentalFeatures: { graphNativePostMerge: false } },
+      postMergeIr(),
+    );
 
     expect(result.outcome).toBe("success");
     expect(result.visitedNodeIds).toContain("merge");
     // The merge region stays collapsed; the post-merge node is never traversed.
     expect(result.visitedNodeIds).not.toContain(POST_MERGE_ID);
     expect(recorder.results).toHaveLength(0);
+  });
+
+  it("flag DEFAULT (no experimentalFeatures): runs the post-merge node via the graph (default-ON, U7b)", async () => {
+    const recorder = makeRecorder();
+    const executor = new WorkflowGraphExecutor({
+      handlers: { prompt: handler("APPROVE") },
+      recordWorkflowStepResult: recorder.record,
+    });
+
+    // No experimentalFeatures at all → flag now defaults ON after the U7b cutover.
+    const result = await executor.run(taskWith([POST_MERGE_ID]), {}, postMergeIr());
+
+    expect(result.outcome).toBe("success");
+    expect(result.visitedNodeIds).toContain("merge");
+    // Default-ON: the post-merge node IS traversed after the collapsed merge seam.
+    expect(result.visitedNodeIds.indexOf(POST_MERGE_ID)).toBeGreaterThan(
+      result.visitedNodeIds.indexOf("merge"),
+    );
+    expect(recorder.results).toHaveLength(1);
+    expect(recorder.results[0].phase).toBe("post-merge");
+    expect(recorder.results[0].status).toBe("passed");
   });
 });

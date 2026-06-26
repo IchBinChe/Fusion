@@ -107,6 +107,8 @@ import {
   type AutostashOrphanRecord,
   normalizeMergeAdvanceAutoSyncMode,
   isMergeRequestContractShadowEnabled,
+  isExperimentalFeatureEnabled,
+  GRAPH_NATIVE_POST_MERGE_FLAG,
 } from "@fusion/core";
 import { evaluateAutoMergeFactProviders } from "./auto-merge-fact-providers.js";
 import { resolveMergePolicy, type MergeFileScopeMode } from "./merge-trait.js";
@@ -10814,8 +10816,12 @@ export async function aiMergeTask(
   }
 
   // 7. Run post-merge workflow steps (in temporary worktree for isolation)
+  // FNXC:WorkflowPostMerge 2026-06-26-12:00: U7b cutover — when graph-native post-merge
+  // is active (now default-ON) the GRAPH is the sole post-merge runner; this legacy merger
+  // path is inert so post-merge steps never double-run. `settings` (project-resolved) gates
+  // the no-op; an explicit opt-out (`graphNativePostMerge: false`) restores the legacy path.
   throwIfAborted(options.signal, taskId);
-  const hasPostMergeSteps = await hasEnabledPostMergeWorkflowSteps(store, taskId, task.enabledWorkflowSteps);
+  const hasPostMergeSteps = await hasEnabledPostMergeWorkflowSteps(store, taskId, task.enabledWorkflowSteps, settings);
   if (hasPostMergeSteps) {
     const postMergeWorktree = await createPostMergeWorktree(rootDir, taskId, settings);
     const postMergeCwd = postMergeWorktree || rootDir;
@@ -12459,7 +12465,12 @@ async function hasEnabledPostMergeWorkflowSteps(
   store: TaskStore,
   taskId: string,
   enabledWorkflowSteps: string[] | undefined,
+  settings?: Settings,
 ): Promise<boolean> {
+  // FNXC:WorkflowPostMerge 2026-06-26-12:00: U7b cutover — graph owns post-merge when the
+  // flag is on (default). Report "no post-merge steps" so the merger skips worktree creation
+  // and execution; the graph runs the equivalent post-merge graph node exactly once.
+  if (isExperimentalFeatureEnabled(settings, GRAPH_NATIVE_POST_MERGE_FLAG)) return false;
   if (!enabledWorkflowSteps?.length) return false;
 
   for (const wsId of enabledWorkflowSteps) {
@@ -12495,6 +12506,11 @@ async function runPostMergeWorkflowSteps(
   auditor?: RunAuditor,
 ): Promise<void> {
   throwIfAborted(mergeOptions.signal, taskId);
+  // FNXC:WorkflowPostMerge 2026-06-26-12:00: U7b cutover — defensive no-op (the call site's
+  // hasEnabledPostMergeWorkflowSteps already gates entry). When graph-native post-merge is
+  // active the graph is the sole runner; never execute legacy post-merge steps here to avoid
+  // double-running. Removed entirely in U7c.
+  if (isExperimentalFeatureEnabled(settings, GRAPH_NATIVE_POST_MERGE_FLAG)) return;
   const task = await store.getTask(taskId);
   if (!task.enabledWorkflowSteps?.length) return;
 

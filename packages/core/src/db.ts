@@ -17,6 +17,11 @@ import { DEFAULT_PROJECT_SETTINGS } from "./types.js";
 import type { PluginOnSchemaInit } from "./plugin-types.js";
 import type { SteeringComment, TaskComment } from "./types.js";
 import { hasTitleIdDrift, normalizeTitleForTaskId } from "./task-title-id-drift.js";
+// FNXC:WorkflowPostMerge 2026-06-26-12:00: built-in optional-group node ids — the stable
+// per-task enable keys on the graph. Migration 130 rewrites legacy WS-row ids whose
+// templateId is one of these to the node id so the graph enables the right optional group.
+import { BROWSER_VERIFICATION_GROUP_ID } from "./builtin-browser-verification-group.js";
+import { CODE_REVIEW_GROUP_ID } from "./builtin-code-review-group.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -162,7 +167,7 @@ export function isFts5CorruptionError(error: unknown): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 129;
+const SCHEMA_VERSION = 130;
 
 const TASKS_FTS_AUTOMERGE = 8;
 const TASKS_FTS_CRISISMERGE = 16;
@@ -5336,6 +5341,77 @@ export class Database {
       // migrated and fresh-from-SCHEMA_SQL DBs converged.
       this.applyMigration(129, () => {
         this.addColumnIfMissing("tasks", "workspaceWorktrees", "TEXT");
+      });
+    }
+
+    // Migration 130: post-merge graph-native cutover (U7b) — legacy enable-id normalization.
+    // FNXC:WorkflowPostMerge 2026-06-26-12:00:
+    // Graph-native post-merge is now default-ON and the graph is the single post-merge owner.
+    // A task's `enabledWorkflowSteps` must reference GRAPH node ids so the graph enables the
+    // right optional-group node. Legacy data may still hold compiled `workflow_steps` row ids
+    // (WS-xxx) whose `templateId` is a built-in optional-group node id (e.g. `browser-verification`,
+    // `code-review`). Rewrite each such entry to that node id. Entries that are already node ids,
+    // compiled-workflow materialization rows (templateId `workflow:*`), and custom rows are left
+    // untouched. Data DML, so wrapped in a transaction; identity-stable + idempotent (a second
+    // run finds node ids already in place and no WS-row left to rewrite). The `workflow_steps`
+    // table is intentionally KEPT (dropped in U7c once all readers are gone).
+    if (version < 130) {
+      this.applyMigration(130, () => {
+        const optionalGroupNodeIds = new Set<string>([
+          BROWSER_VERIFICATION_GROUP_ID,
+          CODE_REVIEW_GROUP_ID,
+        ]);
+        // Map every workflow_steps row id → templateId, but only retain rows whose templateId
+        // is a built-in optional-group node id (the only legacy ids we rewrite).
+        const wsRows = this.db
+          .prepare("SELECT id, templateId FROM workflow_steps WHERE templateId IS NOT NULL")
+          .all() as Array<{ id: string; templateId: string | null }>;
+        const wsIdToNodeId = new Map<string, string>();
+        for (const row of wsRows) {
+          if (row.templateId && optionalGroupNodeIds.has(row.templateId)) {
+            wsIdToNodeId.set(row.id, row.templateId);
+          }
+        }
+        if (wsIdToNodeId.size === 0) return; // nothing legacy to rewrite
+
+        const taskRows = this.db
+          .prepare("SELECT id, enabledWorkflowSteps FROM tasks WHERE enabledWorkflowSteps IS NOT NULL AND enabledWorkflowSteps NOT IN ('', '[]')")
+          .all() as Array<{ id: string; enabledWorkflowSteps: string | null }>;
+        const update = this.db.prepare("UPDATE tasks SET enabledWorkflowSteps = ? WHERE id = ?");
+
+        this.db.exec("BEGIN");
+        try {
+          for (const task of taskRows) {
+            let parsed: unknown;
+            try {
+              parsed = JSON.parse(task.enabledWorkflowSteps ?? "[]");
+            } catch {
+              continue; // corrupt JSON: leave untouched
+            }
+            if (!Array.isArray(parsed)) continue;
+            let changed = false;
+            const seen = new Set<string>();
+            const rewritten: string[] = [];
+            for (const entry of parsed) {
+              if (typeof entry !== "string") continue;
+              const mapped = wsIdToNodeId.get(entry);
+              const next = mapped ?? entry;
+              if (mapped) changed = true;
+              if (seen.has(next)) {
+                // De-dup: rewriting WS-xxx → node id can collide with an already-present node id.
+                changed = true;
+                continue;
+              }
+              seen.add(next);
+              rewritten.push(next);
+            }
+            if (changed) update.run(JSON.stringify(rewritten), task.id);
+          }
+          this.db.exec("COMMIT");
+        } catch (err) {
+          this.db.exec("ROLLBACK");
+          throw err;
+        }
       });
     }
 

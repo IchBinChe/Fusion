@@ -186,9 +186,14 @@ function createMockStore(taskOverrides: Partial<Task> = {}, allTasks: Task[] = [
     logEntry: vi.fn().mockResolvedValue(undefined),
     appendAgentLog: vi.fn().mockResolvedValue(undefined),
     updateSettings: vi.fn().mockResolvedValue({}),
+    // FNXC:WorkflowPostMerge 2026-06-26-12:00: U7b flipped graphNativePostMerge DEFAULT-ON,
+    // which makes the legacy merger post-merge path inert. These legacy-path tests opt OUT
+    // (flag:false) to keep exercising that code until U7c deletes it. The no-double-run test
+    // below asserts the default-ON behavior (merger skips post-merge entirely).
     getSettings: vi.fn().mockResolvedValue({
       ...DEFAULT_SETTINGS,
       mergeIntegrationWorktree: "cwd-main" as const,
+      experimentalFeatures: { graphNativePostMerge: false },
     }),
     getActiveMergingTask: vi.fn().mockReturnValue(null),
     emit: vi.fn(),
@@ -482,6 +487,7 @@ describe("aiMergeTask — post-merge workflow steps", () => {
     (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...DEFAULT_SETTINGS,
       mergeIntegrationWorktree: "cwd-main" as const,
+      experimentalFeatures: { graphNativePostMerge: false },
       defaultProviderOverride: "openai",
       defaultModelIdOverride: "gpt-4o-mini",
       defaultProvider: "anthropic",
@@ -695,6 +701,7 @@ describe("aiMergeTask — post-merge workflow steps", () => {
     (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...DEFAULT_SETTINGS,
       mergeIntegrationWorktree: "cwd-main" as const,
+      experimentalFeatures: { graphNativePostMerge: false },
       scripts: { build: "pnpm build" },
     });
 
@@ -783,6 +790,7 @@ describe("aiMergeTask — post-merge workflow steps", () => {
     (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...DEFAULT_SETTINGS,
       mergeIntegrationWorktree: "cwd-main" as const,
+      experimentalFeatures: { graphNativePostMerge: false },
       worktreeInitCommand: "pnpm install",
     });
     store.getTask = vi.fn().mockResolvedValue({
@@ -869,6 +877,7 @@ describe("aiMergeTask — post-merge workflow steps", () => {
     (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...DEFAULT_SETTINGS,
       mergeIntegrationWorktree: "cwd-main" as const,
+      experimentalFeatures: { graphNativePostMerge: false },
       worktreeInitCommand: "pnpm install",
     });
     store.getTask = vi.fn().mockResolvedValue({
@@ -1065,6 +1074,68 @@ describe("aiMergeTask — post-merge workflow steps", () => {
       String(call[0]).includes("git worktree add") && String(call[0]).includes("post-merge-FN-050-"),
     );
     expect(worktreeAddCall).toBeUndefined();
+  });
+
+  /*
+  FNXC:WorkflowPostMerge 2026-06-26-12:00:
+  U7b cutover — graph is the SOLE post-merge owner. With graphNativePostMerge default-ON
+  (no explicit experimentalFeatures, i.e. exactly what production resolves), the merger must
+  NOT run any post-merge workflow step, create a post-merge worktree, or invoke a post-merge
+  agent — otherwise the step would DOUBLE-RUN (once here, once via the graph node). This is the
+  no-double-run proof.
+  */
+  it("graph-native default-ON: merger does NOT run post-merge steps (no double-run)", async () => {
+    const store = createMockStore();
+    // Default-ON: getSettings returns no experimentalFeatures override → flag resolves ON.
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "cwd-main" as const,
+    });
+    const getWorkflowStep = vi.fn().mockResolvedValue({
+      id: "WS-001",
+      name: "Post-merge Notify",
+      description: "Send notifications after merge",
+      prompt: "Check the merged code and confirm all is well.",
+      phase: "post-merge",
+      mode: "prompt",
+      enabled: true,
+      toolMode: "coding",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    (store as any).getWorkflowStep = getWorkflowStep;
+
+    const baseTask = {
+      id: "FN-050",
+      title: "Test task",
+      description: "Test",
+      column: "in-review",
+      dependencies: [],
+      worktree: "/tmp/root/.worktrees/KB-050",
+      steps: [],
+      currentStep: 0,
+      log: [],
+      enabledWorkflowSteps: ["WS-001"],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    store.getTask = vi.fn().mockResolvedValue({ ...baseTask, prompt: "# test" });
+
+    const result = await aiMergeTask(store, "/tmp/root", "FN-050");
+
+    // Merge still succeeds and the task completes.
+    expect(result.merged).toBe(true);
+    expect(store.moveTask).toHaveBeenCalledWith("FN-050", "done");
+
+    // The legacy post-merge path is fully inert: no post-merge worktree, no post-merge agent.
+    const worktreeAddCall = mockedExec.mock.calls.find((call: any) =>
+      String(call[0]).includes("git worktree add") && String(call[0]).includes("post-merge-FN-050-"),
+    );
+    expect(worktreeAddCall).toBeUndefined();
+    const postMergeAgentCall = mockedCreateFnAgent.mock.calls.find(
+      (c: any) => c[0]?.systemPrompt?.includes("post-merge"),
+    );
+    expect(postMergeAgentCall).toBeUndefined();
   });
 });
 

@@ -364,7 +364,7 @@ Desktop packaging is configured in `electron-builder.yml`.
   - Windows: x64 + arm64 outputs (NSIS + portable), matching `.exe.sha256` sidecars, and `.blockmap` files.
   - macOS: `Fusion-<version>-mac-arm64.dmg`, `Fusion-<version>-mac-x64.dmg`, matching `.zip` variants, `.sha256` sidecars, and `.blockmap` files.
   - Linux: `Fusion-<version>-linux-x64.AppImage` and `Fusion-<version>-linux-arm64.AppImage` with matching `.sha256` sidecars, plus best-effort `.deb` and `.tar.gz` outputs per arch (`Fusion-<version>-linux-x64.{deb,tar.gz}` / `Fusion-<version>-linux-arm64.{deb,tar.gz}`) and sidecars when available on the runner image.
-  - Android: `fusion-android.apk` and `fusion-android.apk.sha256` from the Capacitor/Gradle debug APK build.
+  - Android: when Android signing secrets are configured, `fusion-android-release.apk`, `fusion-android-release.apk.sha256`, `fusion-android-release.aab`, and `fusion-android-release.aab.sha256`; otherwise the secret-free fallback publishes `fusion-android.apk` and `fusion-android.apk.sha256` from the Capacitor/Gradle debug APK build.
 - Tag-less release rehearsal workflow (`.github/workflows/test-release.yml`) mirrors that artifact collection path without publishing a real GitHub Release.
 - Linux ARM64 artifacts are cross-built from the `ubuntu-latest` x64 runner by passing `electron-builder --linux --x64 --arm64`; running/validating arm64 installers still requires an arm64 Linux device or emulator.
 - Linux desktop artifacts can include detached GPG signature sidecars (`*.AppImage.asc`, `*.deb.asc`, `*.tar.gz.asc`) when Linux signing secrets are configured in CI; full Linux desktop code-signing rollout remains tracked in FN-5605.

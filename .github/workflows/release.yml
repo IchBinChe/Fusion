@@ -359,16 +359,28 @@ jobs:
             packages/desktop/dist-electron/latest-linux.yml
 
 
-  # ── Build Android APK artifact ───────────────────────────────────────
+  # ── Build Android APK/AAB artifacts ──────────────────────────────────
   # FNXC:Release 2026-06-25-12:00:
   # Android release assets used to be limited to the manual mobile workflow's
   # short-lived CI artifacts. Tagged binary releases now build the Capacitor
   # Android shell in this workflow so the public GitHub Release includes a
   # stable APK and checksum beside desktop and CLI binaries.
+  # FNXC:Release 2026-06-25-18:10:
+  # Android signing is optional and secret-gated on ANDROID_KEYSTORE_BASE64,
+  # ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and ANDROID_KEY_PASSWORD.
+  # The Capacitor Android project is gitignored/regenerated, so CI injects
+  # signing with android.injected.signing.* Gradle properties instead of
+  # committing native build.gradle edits. When the keystore is absent, keep the
+  # FN-7014 unsigned debug APK fallback; Play Store upload remains out of scope
+  # and is tracked separately from sideload release artifacts.
   build-android:
-    name: Build Android APK
+    name: Build Android APK/AAB
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Job-level env mirrors the desktop signing pattern: step `if:` conditions
+    # can inspect env values, but cannot read secrets.* directly.
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
 
     steps:
       - name: Checkout
@@ -407,18 +419,67 @@ jobs:
           fi
           pnpm --filter @fusion/mobile cap sync android
 
-      - name: Build Android APK
+      - name: Decode Android signing keystore
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/fusion-release.keystore"
+
+      - name: Build signed Android release APK and AAB
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          cd packages/mobile/android
+          chmod +x gradlew
+          ./gradlew assembleRelease bundleRelease \
+            -Pandroid.injected.signing.store.file="$RUNNER_TEMP/fusion-release.keystore" \
+            -Pandroid.injected.signing.store.password="$ANDROID_KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$ANDROID_KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$ANDROID_KEY_PASSWORD"
+
+      - name: Normalize signed Android release assets
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: |
+          APK="packages/mobile/android/app/build/outputs/apk/release/app-release.apk"
+          AAB="packages/mobile/android/app/build/outputs/bundle/release/app-release.aab"
+          if [ ! -f "$APK" ]; then
+            echo "::error::Expected signed Android APK missing at $APK" >&2
+            exit 1
+          fi
+          if [ ! -f "$AAB" ]; then
+            echo "::error::Expected signed Android AAB missing at $AAB" >&2
+            exit 1
+          fi
+          mkdir -p packages/mobile/dist
+          cp "$APK" packages/mobile/dist/fusion-android-release.apk
+          cp "$AAB" packages/mobile/dist/fusion-android-release.aab
+
+      - name: Verify signed Android APK signature
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
+        run: |
+          APK="packages/mobile/dist/fusion-android-release.apk"
+          APKSIGNER=""
+          if [ -n "${ANDROID_SDK_ROOT:-}" ] && [ -d "$ANDROID_SDK_ROOT/build-tools" ]; then
+            APKSIGNER=$(find "$ANDROID_SDK_ROOT/build-tools" -maxdepth 2 -type f -name apksigner | sort -V | tail -n 1 || true)
+          fi
+          if [ -n "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --verbose "$APK"
+          else
+            jarsigner -verify -strict "$APK"
+          fi
+
+      - name: Build unsigned Android debug APK
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 == '' }}
         run: |
           cd packages/mobile/android
           chmod +x gradlew
           ./gradlew assembleDebug
 
-      - name: Normalize Android APK asset
+      - name: Normalize unsigned Android APK asset
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 == '' }}
         run: |
-          # FNXC:Release 2026-06-25-12:00:
-          # Ship the secret-free debug APK because this repo has no Android
-          # signing keystore configured; signed release APK/AAB distribution is a
-          # separate product task, not a binary-release plumbing prerequisite.
           APK="packages/mobile/android/app/build/outputs/apk/debug/app-debug.apk"
           if [ ! -f "$APK" ]; then
             echo "::error::Expected Android APK missing at $APK" >&2
@@ -427,18 +488,23 @@ jobs:
           mkdir -p packages/mobile/dist
           cp "$APK" packages/mobile/dist/fusion-android.apk
 
-      - name: Generate Android APK checksum
+      - name: Generate Android artifact checksums
         run: |
           cd packages/mobile/dist
-          sha256sum fusion-android.apk > fusion-android.apk.sha256
+          for file in fusion-android*.apk fusion-android-release.aab; do
+            [ -f "$file" ] || continue
+            sha256sum "$file" > "$file.sha256"
+          done
 
-      - name: Upload Android APK artifact
+      - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
           name: fusion-android-apk
           path: |
-            packages/mobile/dist/fusion-android.apk
-            packages/mobile/dist/fusion-android.apk.sha256
+            packages/mobile/dist/fusion-android*.apk
+            packages/mobile/dist/fusion-android*.apk.sha256
+            packages/mobile/dist/fusion-android-release.aab
+            packages/mobile/dist/fusion-android-release.aab.sha256
 
   # ── Create GitHub Release ─────────────────────────────────────────────
   github-release:
@@ -476,7 +542,7 @@ jobs:
         id: collect
         run: |
           mkdir release-files
-          find artifacts -type f \( -name "fn-*" -o -name "*.sha256" -o -name "*.asc" -o -name "*.exe" -o -name "*.exe.sha256" -o -name "*.blockmap" -o -name "*.dmg" -o -name "*.dmg.sha256" -o -name "*.zip" -o -name "*.zip.sha256" -o -name "*.apk" -o -name "*.AppImage" -o -name "*.AppImage.sha256" -o -name "*.deb" -o -name "*.deb.sha256" -o -name "*.tar.gz" -o -name "*.tar.gz.sha256" -o -name "latest*.yml" \) -exec cp {} release-files/ \;
+          find artifacts -type f \( -name "fn-*" -o -name "*.sha256" -o -name "*.asc" -o -name "*.exe" -o -name "*.exe.sha256" -o -name "*.blockmap" -o -name "*.dmg" -o -name "*.dmg.sha256" -o -name "*.zip" -o -name "*.zip.sha256" -o -name "*.apk" -o -name "*.aab" -o -name "*.AppImage" -o -name "*.AppImage.sha256" -o -name "*.deb" -o -name "*.deb.sha256" -o -name "*.tar.gz" -o -name "*.tar.gz.sha256" -o -name "latest*.yml" \) -exec cp {} release-files/ \;
           ls -la release-files/
           count=$(find release-files -type f | wc -l | tr -d ' ')
           echo "count=$count" >> "$GITHUB_OUTPUT"

@@ -57,17 +57,17 @@ When you merge the Version Packages PR:
 - It creates a git tag `v{version}` based on the `kb` CLI package version
 - The tag push triggers `release.yml`, which:
   - Builds platform-specific binaries for Linux x64, macOS x64, macOS arm64, and Windows x64
-  - Builds the Android APK as `fusion-android.apk`
-  - Signs macOS binaries (codesign + notarization) and Windows binaries (Authenticode)
-  - Generates SHA256 checksums for all binaries and the Android APK
-  - Creates a **GitHub Release** with all binaries, the Android APK, and checksums attached
+  - Builds Android release assets: signed `fusion-android-release.apk` + `fusion-android-release.aab` when Android signing secrets are configured, otherwise unsigned debug `fusion-android.apk`
+  - Signs macOS binaries (codesign + notarization), Windows binaries (Authenticode), and Android release artifacts when keystore secrets are available
+  - Generates SHA256 checksums for all binaries and Android artifacts
+  - Creates a **GitHub Release** with all binaries, Android artifacts, and checksums attached
 
 ## Release channels
 
 | Channel | Workflow | Trigger | Output |
 |---------|----------|---------|--------|
 | npm | `version.yml` | Push to `main` | npm packages with provenance |
-| GitHub Release | `release.yml` | Version tag (`v*`) | Signed platform binaries, Android APK + checksums |
+| GitHub Release | `release.yml` | Version tag (`v*`) | Signed platform binaries, Android APK/AAB + checksums |
 
 ## Platform binaries
 
@@ -76,16 +76,36 @@ When you merge the Version Packages PR:
 | Linux x64 | `fusion-linux-x64` | — |
 | macOS arm64 | `fusion-darwin-arm64` | ✓ (codesign + notarization) |
 | Windows x64 | `fusion-windows-x64.exe` | ✓ (Authenticode) |
-| Android | `fusion-android.apk` | — (debug/unsigned APK) |
+| Android | `fusion-android-release.apk`, `fusion-android-release.aab` | ✓ when Android keystore secrets are configured |
+| Android fallback | `fusion-android.apk` | — (debug/unsigned APK when Android keystore secrets are absent) |
 
 > macOS Intel (`darwin-x64`) is intentionally not shipped: the CLI is Apple-Silicon-only because `macos-13` GitHub runners are too scarce to build reliably. The desktop macOS DMG/ZIP remains universal.
+
+## Android release signing
+
+`release.yml` and the tag-less `test-release.yml` rehearsal workflow publish signed Android release artifacts when all Android signing secrets are configured:
+
+- `ANDROID_KEYSTORE_BASE64` — base64-encoded `.jks` / `.keystore` file
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
+
+Encode the keystore before saving it as a GitHub Actions secret:
+
+```bash
+base64 -w0 release.keystore
+```
+
+The Android native project under `packages/mobile/android/` is generated and gitignored, so CI does not commit signing configuration into Gradle files. Instead, the release job injects signing at build time with Android Gradle Plugin `android.injected.signing.*` properties, builds `assembleRelease` and `bundleRelease`, verifies the APK signature, and uploads `fusion-android-release.apk`, `fusion-android-release.aab`, and matching `.sha256` files. If `ANDROID_KEYSTORE_BASE64` is absent, the workflow preserves the secret-free path by building the unsigned debug APK as `fusion-android.apk` with `fusion-android.apk.sha256`.
+
+Automated Play Store / Play Console upload is intentionally out of scope for the release pipeline right now. It needs a Google service-account JSON secret, a published Play listing, and fastlane or `r0adkll/upload-google-play` wiring; that work is tracked separately in FN-7043 while Fusion remains sideload-first for pre-1.0 Android distribution.
 
 ## Testing binary builds
 
 Use the **Test Release** workflow (`test-release.yml`) to manually test binary builds without creating a real release:
 
 1. Go to **Actions** → **Test Release** → **Run workflow**
-2. The workflow builds all 4 platform binaries plus the Android APK, runs smoke tests, and uploads artifacts
+2. The workflow builds all 4 platform binaries plus the Android APK/AAB path (signed when Android signing secrets are available, unsigned debug APK otherwise), runs smoke tests, and uploads artifacts
 3. Download the `all-binaries` artifact to inspect the output
 
 ## Manual release (fallback)

@@ -68,7 +68,7 @@ describe("desktop release workflow wiring", () => {
     expect(testRelease).toContain('-name "latest*.yml"');
   });
 
-  it("adds Android APK build and aggregation wiring to release workflows", async () => {
+  it("adds signed Android APK/AAB build and aggregation wiring to release workflows", async () => {
     const release = await readRepoFile(".github/workflows/release.yml");
     const testRelease = await readRepoFile(".github/workflows/test-release.yml");
 
@@ -79,12 +79,32 @@ describe("desktop release workflow wiring", () => {
       expect(workflow).toContain('java-version: "17"');
       expect(workflow).toContain("pnpm --filter @fusion/mobile cap add android");
       expect(workflow).toContain("pnpm --filter @fusion/mobile cap sync android");
+      expect(workflow).toContain("ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}");
+      expect(workflow).toContain("ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}");
+      expect(workflow).toContain("ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}");
+      expect(workflow).toContain("ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}");
+      expect(workflow).toContain("env.ANDROID_KEYSTORE_BASE64 != ''");
+      expect(workflow).toContain("env.ANDROID_KEYSTORE_BASE64 == ''");
+      expect(workflow).toContain("./gradlew assembleRelease bundleRelease");
+      expect(workflow).toContain("android.injected.signing.store.file");
+      expect(workflow).toContain("android.injected.signing.store.password");
+      expect(workflow).toContain("android.injected.signing.key.alias");
+      expect(workflow).toContain("android.injected.signing.key.password");
       expect(workflow).toContain("./gradlew assembleDebug");
       expect(workflow).toContain("packages/mobile/android/app/build/outputs/apk/debug/app-debug.apk");
+      expect(workflow).toContain("packages/mobile/android/app/build/outputs/apk/release/app-release.apk");
+      expect(workflow).toContain("packages/mobile/android/app/build/outputs/bundle/release/app-release.aab");
       expect(workflow).toContain("packages/mobile/dist/fusion-android.apk");
-      expect(workflow).toContain("sha256sum fusion-android.apk > fusion-android.apk.sha256");
+      expect(workflow).toContain("packages/mobile/dist/fusion-android-release.apk");
+      expect(workflow).toContain("packages/mobile/dist/fusion-android-release.aab");
+      expect(workflow).toContain("apksigner");
+      expect(workflow).toContain("jarsigner -verify -strict");
+      expect(workflow).toContain("sha256sum \"$file\" > \"$file.sha256\"");
       expect(workflow).toContain("name: fusion-android-apk");
+      expect(workflow).toContain("fusion-android-release.apk");
+      expect(workflow).toContain("fusion-android-release.aab");
       expect(workflow).toContain('-name "*.apk"');
+      expect(workflow).toContain('-name "*.aab"');
     }
   });
 });

@@ -418,6 +418,18 @@ describe("Binary release workflow (.github/workflows/release.yml)", () => {
     expect(workflow.jobs["github-release"].needs).toContain("build-binaries");
     expect(workflow.jobs["github-release"].needs).toContain("build-android");
   });
+
+  it("wires signed Android AAB artifacts into release aggregation", () => {
+    const androidJob = workflow.jobs["build-android"];
+    const collectStep = workflow.jobs["github-release"].steps.find((step: any) => step.name === "Collect release files");
+
+    expect(androidJob.env.ANDROID_KEYSTORE_BASE64).toBe("${{ secrets.ANDROID_KEYSTORE_BASE64 }}");
+    expect(content).toContain("./gradlew assembleRelease bundleRelease");
+    expect(content).toContain("fusion-android-release.aab");
+    expect(collectStep.run).toContain('-name "*.apk"');
+    expect(collectStep.run).toContain('-name "*.aab"');
+    expect(collectStep.run).toContain('-name "*.sha256"');
+  });
 });
 
 describe("Test-release workflow (.github/workflows/test-release.yml)", () => {
@@ -484,6 +496,18 @@ describe("Test-release workflow (.github/workflows/test-release.yml)", () => {
     expect(workflow.jobs.collect.needs).toContain("build-binaries");
     expect(workflow.jobs.collect.needs).toContain("build-android");
     expect(content).toContain("all-binaries");
+  });
+
+  it("wires signed Android AAB artifacts into rehearsal aggregation", () => {
+    const androidJob = workflow.jobs["build-android"];
+    const combineStep = workflow.jobs.collect.steps.find((step: any) => step.name === "Combine artifacts");
+
+    expect(androidJob.env.ANDROID_KEYSTORE_BASE64).toBe("${{ secrets.ANDROID_KEYSTORE_BASE64 }}");
+    expect(content).toContain("./gradlew assembleRelease bundleRelease");
+    expect(content).toContain("fusion-android-release.aab");
+    expect(combineStep.run).toContain('-name "*.apk"');
+    expect(combineStep.run).toContain('-name "*.aab"');
+    expect(combineStep.run).toContain('-name "*.sha256"');
   });
 });
 

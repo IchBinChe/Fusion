@@ -111,7 +111,23 @@ Mobile CI is defined in `.github/workflows/mobile.yml`.
   - `build-ios` (sync/build iOS when `packages/mobile/ios/` exists)
   - `build-android` (sync/build Android when `packages/mobile/android/` exists)
 
-Artifacts from the Mobile Builds workflow are retained for 30 days. Tagged binary releases also run the Android build leg in `.github/workflows/release.yml` and publish `fusion-android.apk` plus `fusion-android.apk.sha256` as GitHub Release assets; `.github/workflows/test-release.yml` mirrors that path in its tag-less rehearsal artifact.
+Artifacts from the Mobile Builds workflow are retained for 30 days. Tagged binary releases also run the Android build leg in `.github/workflows/release.yml`; `.github/workflows/test-release.yml` mirrors that path in its tag-less rehearsal artifact.
+
+When the repository has Android signing secrets configured (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`), the release pipeline publishes signed `fusion-android-release.apk` and `fusion-android-release.aab` assets plus `.sha256` checksums. Without those secrets, the pipeline preserves the secret-free fallback and publishes the unsigned debug APK as `fusion-android.apk` plus `fusion-android.apk.sha256`.
+
+Install the signed APK by enabling **Install unknown apps** for the transfer source on the device, then sideloading it:
+
+```bash
+adb install fusion-android-release.apk
+```
+
+Verify the APK signer before distribution when Android SDK build-tools are available:
+
+```bash
+apksigner verify --print-certs fusion-android-release.apk
+```
+
+The `.aab` file is for Play distribution and is not directly sideloadable with `adb install`. Automated Play Store / Play Console upload remains out of scope for now because it needs a Google service-account JSON secret, a published Play listing, and fastlane or `r0adkll/upload-google-play` wiring; that work is tracked separately in FN-7043 from the sideload-first release assets.
 
 ## Replacing PWA Icons
 

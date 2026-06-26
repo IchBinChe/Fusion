@@ -40,6 +40,7 @@ vi.mock("@fusion/core", async () => {
 
 // Import after mocking
 import { browseDirectory } from "../../app/api.js";
+import { CentralCore } from "@fusion/core";
 
 function mockFetchResponse(
   ok: boolean,
@@ -71,9 +72,9 @@ class MockStoreForRoutes extends EventEmitter {
     return "/tmp/fn-944/.fusion";
   }
 
-  // FNXC:GlobalDirGuard 2026-06-25-23:10: Routes resolve the global central dir via getGlobalSettingsDir(); mock mirrors getFusionDir() (CentralCore is mocked) so route behavior matches pre-change.
+  // FNXC:GlobalDirGuard 2026-06-26-06:25: Return a global dir DISTINCT from getFusionDir() so the regression test can assert the route constructs CentralCore with the global dir — a future revert to getFusionDir() then fails the CentralCore-constructor assertion below instead of silently passing.
   getGlobalSettingsDir(): string {
-    return this.getFusionDir();
+    return "/tmp/fn-944/.fusion-global";
   }
 
   getDatabase() {
@@ -154,6 +155,8 @@ describe("GET /api/browse-directory route handler", () => {
       expect(mockListNodes).toHaveBeenCalled();
       expect(mockClose).toHaveBeenCalled();
       expect(globalThis.fetch).not.toHaveBeenCalled();
+      // FNXC:GlobalDirGuard 2026-06-26-06:25: The node-aware route must build CentralCore from the GLOBAL dir, never the project `.fusion/`. Asserting the distinct global path makes a revert to getFusionDir() ("/tmp/fn-944/.fusion") fail here.
+      expect(vi.mocked(CentralCore)).toHaveBeenCalledWith("/tmp/fn-944/.fusion-global");
     });
   });
 

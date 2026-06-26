@@ -14,9 +14,9 @@
  */
 
 import { homedir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { mkdir, readFile, writeFile, rename, chmod } from "node:fs/promises";
-import { existsSync, mkdirSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, realpathSync, renameSync } from "node:fs";
 import type { GlobalSettings } from "./types.js";
 import { DEFAULT_GLOBAL_SETTINGS } from "./types.js";
 import { sanitizeCliAgentsSettings } from "./settings-schema.js";
@@ -98,20 +98,32 @@ export function resolveGlobalDir(dir?: string): string {
 
     FNXC:GlobalDirGuard 2026-06-25-22:55:
     The heuristic is intentionally conservative but can't perfectly distinguish a project `.fusion` from a legitimately version-controlled custom global dir (e.g. a dotfiles repo with `~/dotfiles/.fusion` + `.git`). To avoid hard-crashing that rare setup, honor an explicit opt-out env var `FUSION_ALLOW_PROJECT_LOCAL_GLOBAL_DIR=true`. This is not reachable via normal production call sites (they resolve to ~/.fusion); it only matters for operators who deliberately configure a custom global dir inside a repo.
+
+    FNXC:GlobalDirGuard 2026-06-26-06:25:
+    Order matters and the home-dir comparison must be normalized:
+    - Run the CHEAP, read-only checks first (basename is `.fusion` AND its parent contains a `.git`). Only if both hold do we call `resolveGlobalDirForHome()` — which can perform a one-time legacy-dir rename — so we never trigger that filesystem side effect on the hot path (every explicit-dir call, e.g. getGlobalSettingsDir() in dashboard routes, previously hit it).
+    - Compare against the home global dir using normalized real paths (realpathSync when the path exists, else resolve()), so a trailing slash, doubled separator, or symlinked home dir doesn't make the legitimate home global dir look like a foreign project dir and trip the guard.
     */
     if (process.env.VITEST !== "true" && process.env.FUSION_ALLOW_PROJECT_LOCAL_GLOBAL_DIR !== "true") {
-      const homeGlobalDir = resolveGlobalDirForHome(getHomeDir());
-      const looksLikeProjectFusionDir =
-        dir !== homeGlobalDir &&
-        basename(dir) === ".fusion" &&
-        existsSync(join(dirname(dir), ".git"));
-      if (looksLikeProjectFusionDir) {
-        throw new Error(
-          `resolveGlobalDir(): refusing project-local '.fusion' directory '${dir}' for the central/global store. ` +
-            "This would create a stray per-project central database seeded with default global settings and silently reset them. " +
-            "Pass the resolved global dir (or omit the argument so it defaults to ~/.fusion); see TaskStore.getGlobalSettingsDir(). " +
-            "If this really is your intended global dir (e.g. a version-controlled dotfiles repo), set FUSION_ALLOW_PROJECT_LOCAL_GLOBAL_DIR=true to override.",
-        );
+      const isFusionDirInsideRepo =
+        basename(dir) === ".fusion" && existsSync(join(dirname(dir), ".git"));
+      if (isFusionDirInsideRepo) {
+        const homeGlobalDir = resolveGlobalDirForHome(getHomeDir());
+        const normalize = (p: string): string => {
+          try {
+            return realpathSync.native(p);
+          } catch {
+            return resolve(p);
+          }
+        };
+        if (normalize(dir) !== normalize(homeGlobalDir)) {
+          throw new Error(
+            `resolveGlobalDir(): refusing project-local '.fusion' directory '${dir}' for the central/global store. ` +
+              "This would create a stray per-project central database seeded with default global settings and silently reset them. " +
+              "Pass the resolved global dir (or omit the argument so it defaults to ~/.fusion); see TaskStore.getGlobalSettingsDir(). " +
+              "If this really is your intended global dir (e.g. a version-controlled dotfiles repo), set FUSION_ALLOW_PROJECT_LOCAL_GLOBAL_DIR=true to override.",
+          );
+        }
       }
     }
     return dir;

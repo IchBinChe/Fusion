@@ -17,7 +17,7 @@ const execAsync = promisify(exec);
 import { existsSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import type { AgentStore, MessageStore, PermanentAgentGatingContext, TaskDetail, Settings, SteeringComment, TaskStore } from "@fusion/core";
+import type { AgentStore, MessageStore, PermanentAgentGatingContext, ResolvedMcpServerDefinition, TaskDetail, Settings, SteeringComment, TaskStore } from "@fusion/core";
 import { resolvePersistAgentThinkingLog } from "@fusion/core";
 
 import {
@@ -127,6 +127,8 @@ export interface StepSessionExecutorOptions {
   actionGateContext?: AgentActionGateContext;
   /** Optional permanent-agent action gating context. */
   permanentAgentGating?: PermanentAgentGatingContext;
+  /** Optional resolved MCP servers to forward into workflow step sessions. */
+  mcpServers?: ResolvedMcpServerDefinition[];
   /** Task-scoped environment injected into non-git subprocesses. */
   taskEnv?: NodeJS.ProcessEnv;
   /**
@@ -1131,6 +1133,8 @@ Follow instructions precisely and avoid unrelated changes.`,
               source: "step-session-executor",
             }),
             settings,
+            // FNXC:McpConfig 2026-06-25-23:02: Workflow model-node step sessions receive the same resolved, secret-materialized MCP server set as the parent executor; runtime support is still enforced inside the pi session seam without logging server contents.
+            mcpServers: this.options.mcpServers,
             customTools: [
               ...pluginTools,
               ...documentTools,

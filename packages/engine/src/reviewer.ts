@@ -35,6 +35,7 @@ import { createFallbackModelObserver } from "./fallback-model-observer.js";
 import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
 import { createMemoryGetTool, createMemorySearchTool, createWebFetchTool } from "./agent-tools.js";
 import { buildUserCommentsPromptSection } from "./agent-user-comments.js";
+import { resolveMcpServersForStore } from "./mcp-resolution.js";
 
 export type ReviewType = "plan" | "code" | "spec";
 export type ReviewVerdict = "APPROVE" | "REVISE" | "RETHINK" | "UNAVAILABLE";
@@ -362,6 +363,8 @@ export async function reviewStep(
       ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
       taskId: options.taskId,
       taskTitle: options.taskTitle,
+      // FNXC:McpConfig 2026-06-25-22:45: Reviewer and validator sessions resolve the same trusted MCP server set as executor lanes at session creation; secret values are passed only in memory to the runtime guard.
+      mcpServers: options.store ? (await resolveMcpServersForStore(options.store, { agentId: options.agentId })).servers : undefined,
       onFallbackModelUsed: createFallbackModelObserver({
         agent: "reviewer",
         label: "reviewer",

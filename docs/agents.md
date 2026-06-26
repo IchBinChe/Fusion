@@ -570,6 +570,8 @@ Assignment-triggered heartbeats are completion-resilient: if an `agent:assigned`
 
 Self-healing also covers abnormal run/session loss for assigned `in-progress` work. If the task remains assigned but the durable agent has no active heartbeat run and no active executor session after the orphan grace window, `reattach-orphaned-assigned-executions` re-dispatches the task forward via `executor.resumeTaskForAgent(agentId)` without pausing, failing, or moving the task backward.
 
+Agent runtime sessions receive the project/global effective MCP server set when the selected runtime supports MCP (pi/Claude/ACP-compatible runtimes). Mock and unsupported runtimes skip MCP forwarding with content-free structured logs. MCP secret references are materialized only at session creation and are never stored on the agent or written to logs.
+
 Heartbeat values are validated and minimum-clamped to 5 minutes (300,000 ms).
 Project setting `heartbeatMultiplier` (default `1`) scales resolved heartbeat timing globally: both the heartbeat interval (`pollIntervalMs`) and unresponsive timeout base (`heartbeatTimeoutMs`) are multiplied. Per-agent `heartbeatIntervalMs`/`heartbeatTimeoutMs` remain base values before multiplier scaling. This setting is configured from the **Agents** screen's **Controls** popup under "Heartbeat Speed".
 

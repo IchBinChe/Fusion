@@ -13,7 +13,7 @@ import * as nodeFs from "node:fs";
 import os from "node:os";
 import v8 from "node:v8";
 
-import type { TaskStore, ScheduleType, ActivityEventType, ModelPreset, RoutineTriggerType, WorkflowStepTemplate } from "@fusion/core";
+import type { TaskStore, ScheduleType, ActivityEventType, ModelPreset, RoutineTriggerType, WorkflowStepTemplate, McpServerDefinition } from "@fusion/core";
 import {
   type Task,
   type PiExtensionEntry,
@@ -34,6 +34,7 @@ import {
   resolveExecutionSettingsModel,
   resolveTitleSummarizerSettingsModel,
   writeAgentMemoryFile,
+  validateMcpServerDefinitionDetailed,
 } from "@fusion/core";
 import type { ServerOptions } from "./server.js";
 import { verifyWebhookSignature } from "./github-webhooks.js";
@@ -373,7 +374,78 @@ import {
   promptWithFallback as enginePromptWithFallback,
   reloadExemptTools as engineReloadExemptTools,
   resolveIntegrationBranch,
+  resolveMcpServersForRuntime,
+  resolveMcpServersForStore,
+  validateMcpServer,
 } from "@fusion/engine";
+
+interface McpValidateRequestBody {
+  name?: unknown;
+  server?: unknown;
+  definition?: unknown;
+  timeoutMs?: unknown;
+}
+
+function parseMcpValidationTimeout(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    throw badRequest("timeoutMs must be a positive number when provided");
+  }
+  return Math.min(value, 30_000);
+}
+
+function parseMcpValidationBody(body: unknown): { name?: string; definition?: McpServerDefinition; timeoutMs?: number } {
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw badRequest("Request body must be an object");
+  }
+
+  const input = body as McpValidateRequestBody;
+  const name = typeof input.name === "string" ? input.name.trim() : undefined;
+  const rawDefinition = input.server ?? input.definition;
+  if (!name && rawDefinition === undefined) {
+    throw badRequest("Provide either name or server");
+  }
+  if (input.name !== undefined && !name) {
+    throw badRequest("name must be a non-empty string when provided");
+  }
+
+  let definition: McpServerDefinition | undefined;
+  if (rawDefinition !== undefined) {
+    const parsed = validateMcpServerDefinitionDetailed(rawDefinition, "server");
+    if (!parsed.value) {
+      throw badRequest("Invalid MCP server definition", { errors: parsed.errors.map((error) => error.message) });
+    }
+    definition = parsed.value;
+  }
+
+  return { name, definition, timeoutMs: parseMcpValidationTimeout(input.timeoutMs) };
+}
+
+async function resolveMcpServerForValidation(
+  scopedStore: TaskStore,
+  request: { name?: string; definition?: McpServerDefinition },
+) {
+  if (request.definition) {
+    const secrets = await scopedStore.getSecretsStore();
+    const resolved = await resolveMcpServersForRuntime({
+      globalSettings: { mcpServers: { enabled: true, servers: [request.definition] } },
+      projectSettings: undefined,
+      secrets,
+      reader: {},
+    });
+    if (resolved.errors.length > 0 || resolved.servers.length === 0) {
+      throw badRequest("Unable to resolve MCP server secrets", { errors: resolved.errors.map((error) => ({ serverName: error.serverName, path: error.path, message: error.message })) });
+    }
+    return resolved.servers[0];
+  }
+
+  const resolved = await resolveMcpServersForStore(scopedStore);
+  const server = resolved.servers.find((candidate) => candidate.name === request.name);
+  if (!server) {
+    throw badRequest("MCP server was not found or could not be resolved");
+  }
+  return server;
+}
 
 // Test-injectable override; defaults to the statically imported engine binding.
 let createFnAgentForRefine: typeof import("@fusion/engine").createFnAgent | undefined = engineCreateFnAgentForRefine;
@@ -1273,6 +1345,22 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     } catch {
       const { store: scopedStore } = await getProjectContext(req);
       res.json({ maxConcurrent: options?.maxConcurrent ?? 2, maxTriageConcurrent: options?.maxConcurrent ?? 2, maxWorktrees: 4, rootDir: scopedStore.getRootDir() });
+    }
+  });
+
+  router.post("/mcp/validate", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const request = parseMcpValidationBody(req.body);
+      const server = await resolveMcpServerForValidation(scopedStore, request);
+      // FNXC:McpConfig 2026-06-25-23:38: The validation API materializes MCP secrets only for the bounded probe and returns only status metadata, never resolved env/header values.
+      const result = await validateMcpServer(server, {
+        timeoutMs: request.timeoutMs,
+        cwd: scopedStore.getRootDir(),
+      });
+      res.json(result);
+    } catch (error) {
+      rethrowAsApiError(error, "Failed to validate MCP server");
     }
   });
 

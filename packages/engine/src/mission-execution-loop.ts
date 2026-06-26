@@ -33,6 +33,7 @@ import {
 } from "./agent-session-helpers.js";
 import { createLogger } from "./logger.js";
 import { createFallbackModelObserver } from "./fallback-model-observer.js";
+import { resolveMcpServersForStore } from "./mcp-resolution.js";
 import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
 
 /** Logger for the mission execution loop subsystem. */
@@ -564,6 +565,8 @@ export class MissionExecutionLoop extends EventEmitter {
         defaultThinkingLevel: "medium",
         runAuditor,
         settings,
+        // FNXC:McpConfig 2026-06-25-23:19: Mission validation is a validator lane and receives the store-resolved MCP set at session creation; runtime gating and content-free skip logging remain centralized in pi.
+        mcpServers: (await resolveMcpServersForStore(this.taskStore)).servers,
         onText: (_delta) => {
           // Could stream this to a log entry if needed
         },

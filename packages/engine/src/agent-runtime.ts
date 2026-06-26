@@ -15,7 +15,7 @@
  */
 
 import type { AgentSession, SessionManager, ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { PermanentAgentGatingContext } from "@fusion/core";
+import type { PermanentAgentGatingContext, ResolvedMcpServerDefinition } from "@fusion/core";
 import type { SkillSelectionContext } from "./skill-resolver.js";
 import type { FallbackModelUsedPayload } from "./pi.js";
 import type { AgentActionGateContext } from "./agent-action-gate.js";
@@ -42,6 +42,24 @@ export interface AgentMcpServerConfig {
   command: string;
   args: string[];
   env: { name: string; value: string }[];
+}
+
+export type AgentRuntimeMcpServerConfig = ResolvedMcpServerDefinition | AgentMcpServerConfig;
+
+export function normalizeAgentRuntimeMcpServers(
+  servers: AgentRuntimeMcpServerConfig[] | undefined,
+): ResolvedMcpServerDefinition[] | undefined {
+  if (!servers || servers.length === 0) return undefined;
+  return servers.map((server) => {
+    if ("transport" in server) return server;
+    return {
+      name: server.name,
+      transport: "stdio",
+      command: server.command,
+      args: server.args,
+      env: Object.fromEntries(server.env.map((entry) => [entry.name, entry.value])),
+    };
+  });
 }
 
 export interface AgentRuntimeOptions {
@@ -97,12 +115,18 @@ export interface AgentRuntimeOptions {
   /** Runtime-facing context for non-pi runtimes that cannot consume JS ToolDefinition objects directly. */
   runtimeContext?: AgentRuntimeContext;
   /**
-   * MCP servers to forward to the runtime's agent session (U10 — Route A ACP).
-   * Consumed by runtimes that speak MCP (e.g. the ACP runtime forwards them on
-   * `session/new`); ignored by runtimes that don't. Tool calls still route
-   * through the runtime's permission floor.
+   * MCP servers to forward to the runtime's agent session. New callers pass the
+   * FN-7022 resolved/materialized three-transport shape; the legacy U10 Route A
+   * stdio-only ACP shape remains accepted as a subset/adapter.
+   *
+   * FNXC:McpConfig 2026-06-25-21:55:
+   * All AI lanes share this runtime option so executor, reviewer, validator,
+   * merger, workflow-node, summarization, evaluator, planning, and chat sessions
+   * receive the same trusted MCP server set when their selected runtime supports
+   * MCP. Runtime implementations that cannot consume MCP must skip it without
+   * logging server contents.
    */
-  mcpServers?: AgentMcpServerConfig[];
+  mcpServers?: AgentRuntimeMcpServerConfig[];
   /** Optional task-scoped environment variables for session-local subprocesses. */
   taskEnv?: NodeJS.ProcessEnv;
   /**

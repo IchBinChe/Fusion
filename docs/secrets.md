@@ -39,6 +39,7 @@ Threat-model baseline:
 - Ciphertext + nonce are persisted; plaintext exists only in process memory during create/reveal.
 - Secret values must never be logged.
 - MCP server settings store only secret references for sensitive env/header/token fields; imports surface plaintext as secret-creation descriptors instead of persisting it in settings.
+- MCP server secret references are materialized only at session/probe creation time for MCP-capable AI lanes and `POST /api/mcp/validate`; responses and structured logs include status/count metadata only, never resolved env/header values.
 
 See also: [Storage](./storage.md), [Multi-project](./multi-project.md), [Architecture](./architecture.md), [Settings reference](./settings-reference.md).
 

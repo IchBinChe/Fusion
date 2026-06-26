@@ -160,7 +160,11 @@ Each server is named and uses one transport:
 
 Resolution uses project-over-global precedence by server name. The project-level `enabled` flag overrides the global flag when set; if the effective flag is false, no MCP servers are active. When enabled, global servers are loaded first, project servers with the same `name` replace them, and a project server with `enabled:false` removes the inherited server.
 
-Secret rule: `env` and `headers` maps are sensitive. Values must be Fusion secret references such as `{ "secretRef": "sec_...", "scope": "project" }` or `{ "secretRef": "sec_...", "scope": "global" }`. Write-boundary sanitizers and validators reject plaintext strings in these fields. Claude Desktop-style imports return `secretsToCreate` descriptors for plaintext env/header values and replace those values with secret refs in the imported definitions.
+Enabled MCP servers are trusted once configured. Fusion materializes the effective server set at AI session creation and forwards it to every MCP-capable AI lane, including chat/planning, executor, reviewer, validator, merger, workflow model nodes, summarization, evaluator, research, cron/automation, mission, and reflection paths. Runtime support is guarded: Claude/pi/ACP-compatible runtimes receive MCP servers, while mock or unsupported runtimes skip forwarding and emit only a structured count/provider/runtime log entry, never server definitions or secret values.
+
+Secret rule: `env` and `headers` maps are sensitive. Values must be Fusion secret references such as `{ "secretRef": "sec_...", "scope": "project" }` or `{ "secretRef": "sec_...", "scope": "global" }`. Write-boundary sanitizers and validators reject plaintext strings in these fields. Claude Desktop-style imports return `secretsToCreate` descriptors for plaintext env/header values and replace those values with secret refs in the imported definitions. At runtime, secret references are revealed through the scoped secrets store immediately before forwarding or validation, kept only in memory, and never echoed in API responses.
+
+`POST /api/mcp/validate` validates an MCP server definition or configured server name against the current project context. The route resolves and materializes the target server with the same secret rules, then performs a bounded reachability probe (`stdio` supervised spawn, `sse`/`streamable-http` bounded fetch) and returns only `{ status, message? }` without resolved env/header contents.
 
 ### Notification providers (pluggable)
 

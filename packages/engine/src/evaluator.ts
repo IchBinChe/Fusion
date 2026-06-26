@@ -19,6 +19,7 @@ import { collectTaskEvaluationEvidence } from "./evaluator-evidence.js";
 import { materializeEvalFollowUps, normalizeEvalFollowUps, resolveEvalFollowUpPolicyMode } from "./eval-followups.js";
 import { createFnAgent, promptWithFallback } from "./pi.js";
 import { createLogger } from "./logger.js";
+import { resolveMcpServersForStore } from "./mcp-resolution.js";
 
 const log = createLogger("evaluator");
 
@@ -149,12 +150,14 @@ export class HybridEvaluatorService {
     }
 
     let text = "";
+    // FNXC:McpConfig 2026-06-25-23:05: Evaluator sessions are an AI lane and receive the store-resolved MCP set at session creation; createFnAgent applies runtime support gating without logging plaintext env/header secrets.
     const { session } = await createFnAgent({
       cwd: this.deps.cwd,
       systemPrompt: "You are a strict evaluator. Reply with JSON only.",
       tools: "readonly",
       defaultProvider: provider,
       defaultModelId: modelId,
+      mcpServers: this.deps.store ? (await resolveMcpServersForStore(this.deps.store)).servers : undefined,
       onText: (delta) => {
         text += delta;
       },

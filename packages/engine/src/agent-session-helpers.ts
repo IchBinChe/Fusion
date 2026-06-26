@@ -308,6 +308,8 @@ export async function createResolvedAgentSession(
     ...runtimeOptionsRaw,
     ...(mergedSkillNames.length > 0 ? { skills: mergedSkillNames } : {}),
   };
+  // FNXC:McpConfig 2026-06-25-22:06:
+  // createResolvedAgentSession is the common lane helper for executor, reviewer, validator, workflow model-node, summarization, and merger-adjacent paths that pass MCP through this seam. Preserve `mcpServers` verbatim here; runtime-resolution/pi own support-gated forwarding and content-free skip logging.
 
   const useMockRuntime = isMockProviderId(runtimeOptions.defaultProvider);
   const effectiveRuntimeOptions = useMockRuntime

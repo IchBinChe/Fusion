@@ -70,6 +70,7 @@ import { createLogger } from "./logger.js";
 import { captureSingleCommitLandedMetadata, type MergerOptions } from "./merger.js";
 import { installWorktreeDependencies } from "./merge-dependency-sync.js";
 import { activeSessionRegistry } from "./active-session-registry.js";
+import { resolveMcpServersForStore } from "./mcp-resolution.js";
 /*
 FNXC:Workspace 2026-06-22-14:10 (Phase D review G — cycle dissolved):
 `isRepoLanded` + `FUSION_TASK_ID_TRAILER_KEY` moved to the dependency-free `workspace-land-predicate`
@@ -255,6 +256,8 @@ function makeMutatingAgent(store: TaskStore, settings: Settings, taskId: string,
       defaultThinkingLevel: settings.defaultThinkingLevel,
       runAuditor: audit,
       settings,
+      // FNXC:McpConfig 2026-06-25-22:48: merger-ai is the production merge path, so the mutating agent resolves enabled MCP servers at session creation and relies on the shared runtime guard for unsupported providers.
+      mcpServers: (await resolveMcpServersForStore(store)).servers,
       taskId,
     });
     options.onSession?.(session);
@@ -312,6 +315,8 @@ function makeReviewAgent(store: TaskStore, settings: Settings, taskId: string, o
       defaultThinkingLevel: settings.defaultThinkingLevel,
       runAuditor: audit,
       settings,
+      // FNXC:McpConfig 2026-06-25-22:48: The production merge reviewer receives the same materialized MCP set as the mutating merge agent, preserving all-lane forwarding without logging server contents.
+      mcpServers: (await resolveMcpServersForStore(store)).servers,
       taskId,
     });
     options.onSession?.(session);

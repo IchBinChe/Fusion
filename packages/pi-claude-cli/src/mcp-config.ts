@@ -92,6 +92,39 @@ export function toolsFromContext(
     }));
 }
 
+export interface UserMcpServerSpec {
+  name: string;
+  enabled?: boolean;
+  transport?: "stdio" | "sse" | "streamable-http";
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+}
+
+function userServerToConfig(server: UserMcpServerSpec): Record<string, unknown> | undefined {
+  if (server.enabled === false) return undefined;
+  if (server.transport === "sse" || server.transport === "streamable-http") {
+    if (!server.url) return undefined;
+    return {
+      transport: server.transport,
+      url: server.url,
+      ...(server.headers ? { headers: server.headers } : {}),
+    };
+  }
+  if (!server.command) return undefined;
+  return {
+    command: server.command,
+    ...(server.args ? { args: server.args } : {}),
+    ...(server.env ? { env: server.env } : {}),
+  };
+}
+
+/**
+ * FNXC:McpConfig 2026-06-25-22:12:
+ * The Claude CLI MCP config combines Fusion's schema-only custom-tools server with operator-enabled user MCP servers. User env/header values are already secret-materialized by the engine, so this module must write them only to the transient MCP config and never log server contents.
+ */
 /**
  * Write MCP config and tool schemas to temp files.
  *
@@ -108,6 +141,7 @@ export function toolsFromContext(
 export function writeMcpConfig(
   toolDefs: McpToolDef[],
   cacheKey?: string,
+  userMcpServers: UserMcpServerSpec[] = [],
 ): string {
   const suffix = cacheKey ? `${process.pid}-${cacheKey}` : `${process.pid}`;
 
@@ -124,14 +158,17 @@ export function writeMcpConfig(
   const serverPath = join(__dirname, "mcp-schema-server.cjs");
 
   // Build MCP config
-  const config = {
-    mcpServers: {
-      "custom-tools": {
-        command: "node",
-        args: [serverPath, schemaFilePath],
-      },
+  const mcpServers: Record<string, unknown> = {
+    "custom-tools": {
+      command: "node",
+      args: [serverPath, schemaFilePath],
     },
   };
+  for (const server of userMcpServers) {
+    const config = userServerToConfig(server);
+    if (config) mcpServers[server.name] = config;
+  }
+  const config = { mcpServers };
 
   // Write config to temp file
   const configFilePath = join(
@@ -151,6 +188,16 @@ export interface AcpMcpServerSpec {
   env: { name: string; value: string }[];
 }
 
+function userServerToAcp(server: UserMcpServerSpec): AcpMcpServerSpec | undefined {
+  if (server.enabled === false || (server.transport && server.transport !== "stdio") || !server.command) return undefined;
+  return {
+    name: server.name,
+    command: server.command,
+    args: server.args ?? [],
+    env: Object.entries(server.env ?? {}).map(([name, value]) => ({ name, value })),
+  };
+}
+
 /**
  * Build the ACP `mcpServers` spec for the same schema-only `custom-tools` server
  * `writeMcpConfig` produces for `--mcp-config` — but as the inline ACP shape
@@ -161,13 +208,17 @@ export interface AcpMcpServerSpec {
 export function buildAcpMcpServers(
   toolDefs: McpToolDef[],
   cacheKey?: string,
+  userMcpServers: UserMcpServerSpec[] = [],
 ): AcpMcpServerSpec[] {
-  if (toolDefs.length === 0) return [];
+  if (toolDefs.length === 0) {
+    return userMcpServers.map(userServerToAcp).filter((server): server is AcpMcpServerSpec => Boolean(server));
+  }
   const suffix = cacheKey ? `${process.pid}-${cacheKey}` : `${process.pid}`;
   const schemaFilePath = join(tmpdir(), `pi-claude-mcp-schemas-${suffix}.json`);
   writeFileSync(schemaFilePath, JSON.stringify(toolDefs));
   const serverPath = join(dirname(fileURLToPath(import.meta.url)), "mcp-schema-server.cjs");
   return [
     { name: "custom-tools", command: "node", args: [serverPath, schemaFilePath], env: [] },
+    ...userMcpServers.map(userServerToAcp).filter((server): server is AcpMcpServerSpec => Boolean(server)),
   ];
 }

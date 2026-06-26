@@ -115,6 +115,7 @@ import { accumulateSessionTokenUsage } from "./session-token-usage.js";
 import { createResolvedAgentSession, extractRuntimeHint, resolveMergerSessionModel } from "./agent-session-helpers.js";
 import { createFallbackModelObserver } from "./fallback-model-observer.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
+import { resolveMcpServersForStore } from "./mcp-resolution.js";
 import { classifyTaskWorktree, getRegisteredWorktreeBranches, isRepoRootPath, RemovalReason, removeWorktree, type WorktreePool } from "./worktree-pool.js";
 import { activeSessionRegistry } from "./active-session-registry.js";
 import { AgentLogger } from "./agent-logger.js";
@@ -160,6 +161,12 @@ import { appendAutoWidenedScopeToPrompt, evaluateScopeAutoWiden } from "./merger
 
 export { DiffVolumeRegressionError } from "./merger-diff-volume-gate.js";
 export { IntegrationBranchConcurrentAdvanceError } from "./merger-ref-update-advance.js";
+
+async function resolveMergerMcpServers(store?: TaskStore, agentId?: string | null) {
+  // FNXC:McpConfig 2026-06-25-22:27:
+  // Merger-owned sessions resolve enabled MCP servers at session creation for conflict resolution, verification fixes, autostash recovery, and post-merge workflow nodes. Secret material stays in memory and is forwarded only through the shared runtime guard.
+  return store ? (await resolveMcpServersForStore(store, { agentId: agentId ?? undefined })).servers : undefined;
+}
 
 /**
  * After `advanceIntegrationBranchRef` ff-updates `refs/heads/<integrationBranch>`,
@@ -2012,6 +2019,7 @@ Do not refactor, rename broadly, or make opportunistic improvements.
         source: "merger",
       }),
       settings,
+      mcpServers: await resolveMergerMcpServers(store, assignedAgent?.id),
       // Skill selection: use assigned agent skills if available, otherwise role fallback
       ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
       taskId,
@@ -3205,6 +3213,7 @@ ${fileList}
       source: "merger",
     }),
     settings,
+    mcpServers: await resolveMergerMcpServers(store, assignedAgent?.id),
     ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
     taskId,
     taskTitle: taskForSkillContext?.title,
@@ -3621,6 +3630,7 @@ ${fileList}
       source: "merger",
     }),
     settings,
+    mcpServers: await resolveMergerMcpServers(store, assignedAgent?.id),
     ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
     taskId,
     taskTitle: taskForSkillContext?.title,
@@ -7117,6 +7127,7 @@ You are assisting with a paused \`git pull --rebase\`.
       source: "merger",
     }),
     settings,
+    mcpServers: await resolveMergerMcpServers(store),
     taskId,
     onFallbackModelUsed: createFallbackModelObserver({
       agent: "merger",
@@ -12120,6 +12131,8 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
       source: "merger",
     }),
     settings,
+    // FNXC:McpConfig 2026-06-25-23:04: The primary merge-authoring agent is part of the merger lane and receives the resolved MCP set under the shared runtime-support guard, matching conflict/verification merge sessions without exposing secret material.
+    mcpServers: await resolveMergerMcpServers(store, assignedAgent?.id),
     // Skill selection: use assigned agent skills if available, otherwise role fallback
     ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
     taskId,
@@ -12815,6 +12828,7 @@ If issues are found that need attention, describe them clearly and include concr
         source: "merger",
       }),
       settings,
+      mcpServers: await resolveMergerMcpServers(store),
       // Skill selection: use assigned agent skills if available, otherwise role fallback
       ...(postMergeSkillContext?.skillSelectionContext ? { skillSelection: postMergeSkillContext.skillSelectionContext } : {}),
       ...(readonlyCustomTools.allowed.length > 0 ? { customTools: readonlyCustomTools.allowed } : {}),

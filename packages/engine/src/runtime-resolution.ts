@@ -8,6 +8,7 @@
  */
 
 import type { AgentRuntime, AgentRuntimeOptions, AgentSessionResult } from "./agent-runtime.js";
+import { normalizeAgentRuntimeMcpServers } from "./agent-runtime.js";
 import type { PluginRunner } from "./plugin-runner.js";
 import * as fusionCore from "@fusion/core";
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
@@ -93,7 +94,12 @@ export class DefaultPiRuntime implements AgentRuntime {
   readonly name = "Default PI Runtime";
 
   async createSession(options: AgentRuntimeOptions): Promise<AgentSessionResult> {
-    return createFnAgent(options);
+    // FNXC:McpConfig 2026-06-25-22:04:
+    // DefaultPiRuntime is the typed bridge from shared AgentRuntimeOptions into createFnAgent. Normalize the legacy stdio ACP shape here so all lanes can pass the FN-7022 three-transport shape without breaking older Route A callers.
+    return createFnAgent({
+      ...options,
+      mcpServers: normalizeAgentRuntimeMcpServers(options.mcpServers),
+    });
   }
 
   async promptWithFallback(session: AgentSession, prompt: string, options?: unknown): Promise<void> {

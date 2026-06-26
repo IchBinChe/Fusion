@@ -14,6 +14,7 @@ import type {
 } from "@fusion/core";
 import { createLogger } from "./logger.js";
 import { createFnAgent, promptWithFallback } from "./pi.js";
+import { resolveMcpServersForStore } from "./mcp-resolution.js";
 
 const reflectionLog = createLogger("reflection");
 
@@ -102,12 +103,14 @@ export class AgentReflectionService {
       }
 
       let responseText = "";
+      // FNXC:McpConfig 2026-06-25-23:05: Agent-reflection sessions receive the resolved MCP set for the reflected agent identity while preserving the no-secret-logging contract at the runtime forwarding seam.
       const { session } = await createFnAgent({
         cwd: this.rootDir,
         systemPrompt: REFLECTION_SYSTEM_PROMPT,
         tools: "readonly",
         defaultProvider: this.modelProvider,
         defaultModelId: this.modelId,
+        mcpServers: (await resolveMcpServersForStore(this.taskStore, { agentId })).servers,
         onText: (delta: string) => {
           responseText += delta;
         },

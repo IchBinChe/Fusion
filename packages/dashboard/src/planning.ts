@@ -37,6 +37,7 @@ import {
   createChatTaskDocumentTools,
   createFnAgent as engineCreateFnAgent,
   createWorkflowAuthoringTools,
+  resolveMcpServersForStore,
 } from "@fusion/engine";
 import * as engineModule from "@fusion/engine";
 import { createPlanningBoardTools } from "./planning-board-tools.js";
@@ -939,6 +940,8 @@ export async function createSession(
     tools: "readonly",
     ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
     builtinToolsAllowlist: [...PLANNING_BUILTIN_WEB_TOOLS],
+    // FNXC:McpConfig 2026-06-25-22:31: Planning/chat session creation resolves trusted MCP servers through the dashboard-scoped store and forwards only the materialized in-memory set to the engine runtime guard.
+    mcpServers: (await resolveMcpServersForStore(store)).servers,
     customTools: [
       ...createPlanningBoardTools(store),
       ...createWorkflowAuthoringTools(store, PLANNING_NO_AMBIENT_TASK_ID, { stripApprovalFlags: true }),
@@ -1537,6 +1540,8 @@ async function createPlanningAgent(
     tools: "readonly",
     ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
     builtinToolsAllowlist: [...PLANNING_BUILTIN_WEB_TOOLS],
+    // FNXC:McpConfig 2026-06-25-22:31: Streaming planning uses the same dashboard-scoped MCP resolution seam as non-streaming planning so no planning lane silently drops enabled servers.
+    mcpServers: (await resolveMcpServersForStore(store)).servers,
     customTools: [
       ...createPlanningBoardTools(store),
       ...createWorkflowAuthoringTools(store, PLANNING_NO_AMBIENT_TASK_ID, { stripApprovalFlags: true }),

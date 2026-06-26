@@ -48,6 +48,7 @@ import {
   createChatArtifactTools,
   createChatTaskDocumentTools,
   createWorkflowAuthoringTools,
+  resolveMcpServersForStore,
 } from "@fusion/engine";
 import * as engineModule from "@fusion/engine";
 
@@ -1932,6 +1933,8 @@ export class ChatManager {
         Regular chat and QuickChat must request bound-agent skills plus enabled plugin skills so dashboard chat loads capabilities such as ce-debug instead of creating skill-less sessions.
         */
         ...(mergedChatSkillSelection ? { skillSelection: mergedChatSkillSelection } : {}),
+        // FNXC:McpConfig 2026-06-25-22:36: Dashboard chat/QuickChat reuses the scoped task store when available to resolve trusted MCP servers at session creation without persisting materialized secrets.
+        ...(this.taskStore ? { mcpServers: (await resolveMcpServersForStore(this.taskStore, { agentId: agent?.id })).servers } : {}),
         ...sessionOptions,
       });
       this.activeGenerations.set(sessionId, { abortController, agentResult, generationId });

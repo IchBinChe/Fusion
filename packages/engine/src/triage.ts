@@ -94,6 +94,7 @@ import {
 import { buildPromptLayers, collapsePromptLayers } from "./prompt-layers.js";
 import { createFallbackModelObserver } from "./fallback-model-observer.js";
 import { planLog, reviewerLog, formatError } from "./logger.js";
+import { resolveMcpServersForStore } from "./mcp-resolution.js";
 import {
   isUsageLimitError,
   checkSessionError,
@@ -931,6 +932,8 @@ export class TriageProcessor {
           defaultThinkingLevel: settings.defaultThinkingLevel,
           runAuditor,
           settings,
+          // FNXC:McpConfig 2026-06-25-23:17: Primary triage planning is an AI lane, so it receives the store-resolved MCP set while the pi runtime-support guard decides whether to forward it without logging secret material.
+          mcpServers: (await resolveMcpServersForStore(this.store)).servers,
           // Skill selection: use assigned agent skills if available, otherwise role fallback
           ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
           taskId: task.id,
@@ -1161,6 +1164,8 @@ export class TriageProcessor {
               defaultThinkingLevel: settings.defaultThinkingLevel,
               runAuditor,
               settings,
+              // FNXC:McpConfig 2026-06-25-23:18: Fallback triage uses the same resolved MCP forwarding contract as the primary planning session so model fallback does not silently drop configured servers.
+              mcpServers: (await resolveMcpServersForStore(this.store)).servers,
               ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
               taskId: task.id,
               taskTitle: task.title,

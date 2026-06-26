@@ -714,6 +714,71 @@ describe("session failure diagnostics", () => {
     expect(sessionWithThinking.setThinkingLevel).toHaveBeenCalledWith("xhigh");
   });
 
+  it("forwards materialized MCP servers into session creation and prompt options for supported providers", async () => {
+    const createAgentSessionMock = vi.mocked(createAgentSession);
+    const session = {
+      model: { provider: "test", id: "primary-model" },
+      prompt: vi.fn(),
+      subscribe: vi.fn(),
+      dispose: vi.fn(),
+      sessionFile: undefined,
+    } as unknown as AgentSession;
+    const mcpServers = [
+      { name: "docs", transport: "stdio" as const, command: "node", args: ["server.js"], env: { API_KEY: "SECRET" } },
+    ];
+
+    createAgentSessionMock.mockReset();
+    createAgentSessionMock.mockResolvedValueOnce({ session } as any);
+
+    const created = await createFnAgent({
+      cwd: "/test/project",
+      systemPrompt: "Test MCP forwarding",
+      defaultProvider: "anthropic",
+      defaultModelId: "primary-model",
+      mcpServers,
+    });
+    await (created.session as any).promptWithFallback("Use docs");
+
+    expect(createAgentSessionMock).toHaveBeenCalledWith(expect.objectContaining({ mcpServers }));
+    expect(session.prompt).toHaveBeenCalledWith("Use docs", expect.objectContaining({ mcpServers }));
+  });
+
+  it("skips MCP forwarding for unsupported mock provider and emits a content-free skip log", async () => {
+    const createAgentSessionMock = vi.mocked(createAgentSession);
+    const session = {
+      model: { provider: "test", id: "primary-model" },
+      prompt: vi.fn(),
+      subscribe: vi.fn(),
+      dispose: vi.fn(),
+      sessionFile: undefined,
+    } as unknown as AgentSession;
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    createAgentSessionMock.mockReset();
+    createAgentSessionMock.mockResolvedValueOnce({ session } as any);
+
+    try {
+      const created = await createFnAgent({
+        cwd: "/test/project",
+        systemPrompt: "Test MCP skip",
+        defaultProvider: "mock",
+        defaultModelId: "scripted",
+        mcpServers: [{ name: "docs", transport: "stdio", command: "node", env: { TOKEN: "SECRET" } }],
+      });
+      await (created.session as any).promptWithFallback("Use docs");
+
+      expect(createAgentSessionMock.mock.calls[0]?.[0]).not.toHaveProperty("mcpServers");
+      expect(session.prompt).toHaveBeenCalledWith("Use docs");
+      const skipLog = consoleErrorSpy.mock.calls.find(([message]) => String(message).includes("mcp.forwarding.skipped"));
+      expect(skipLog?.[0]).toContain('"skippedCount":1');
+      expect(skipLog?.[0]).toContain('"provider":"mock"');
+      expect(skipLog?.[0]).not.toContain("SECRET");
+      expect(skipLog?.[0]).not.toContain("docs");
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
   it("retries prompt on thinking/reasoning conflict without switching fallback models", async () => {
     const createAgentSessionMock = vi.mocked(createAgentSession);
 

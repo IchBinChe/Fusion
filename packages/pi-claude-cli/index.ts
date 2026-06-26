@@ -21,6 +21,7 @@ import {
   writeMcpConfig,
   buildAcpMcpServers,
   type McpToolDef,
+  type UserMcpServerSpec,
 } from "./src/mcp-config.js";
 
 /**
@@ -83,6 +84,11 @@ function debugMcp(message: string): void {
   console.error(`[pi-claude-cli] ${message}`);
 }
 
+function getUserMcpServers(options: unknown): UserMcpServerSpec[] {
+  const servers = (options as { mcpServers?: unknown } | undefined)?.mcpServers;
+  return Array.isArray(servers) ? servers.filter((server): server is UserMcpServerSpec => Boolean(server && typeof server === "object" && "name" in server)) : [];
+}
+
 /**
  * Resolve the MCP config path for the current request, regenerating it when
  * the set of custom tools changes.
@@ -113,6 +119,7 @@ function ensureMcpConfig(
     description: string;
     parameters: Record<string, unknown>;
   }>,
+  userMcpServers: UserMcpServerSpec[] = [],
 ): string | undefined {
   try {
     let toolDefs: McpToolDef[] = toolsFromContext(contextTools);
@@ -132,13 +139,13 @@ function ensureMcpConfig(
       toolDefs = getCustomToolDefs(pi);
     }
 
-    if (toolDefs.length === 0) {
+    if (toolDefs.length === 0 && userMcpServers.length === 0) {
       cachedMcpConfig = undefined;
       return undefined;
     }
 
     const hash = createHash("sha1")
-      .update(JSON.stringify(toolDefs))
+      .update(JSON.stringify({ toolDefs, userMcpServerNames: userMcpServers.map((server) => server.name) }))
       .digest("hex")
       .slice(0, 12);
 
@@ -147,7 +154,7 @@ function ensureMcpConfig(
       return cachedMcpConfig.configPath;
     }
 
-    const configPath = writeMcpConfig(toolDefs, hash);
+    const configPath = writeMcpConfig(toolDefs, hash, userMcpServers);
     cachedMcpConfig = { hash, configPath };
     const toolNames = toolDefs.map((t) => t.name).join(", ");
     debugMcp(
@@ -255,18 +262,19 @@ export default function (pi: ExtensionAPI) {
         const bridgePath = resolveAcpBridgePath();
         if (bridgePath) {
           const toolDefs = resolveToolDefs(pi, contextTools);
-          const hash = createHash("sha1").update(JSON.stringify(toolDefs)).digest("hex").slice(0, 12);
+          const userMcpServers = getUserMcpServers(options);
+          const hash = createHash("sha1").update(JSON.stringify({ toolDefs, userMcpServerNames: userMcpServers.map((server) => server.name) })).digest("hex").slice(0, 12);
           return streamViaAcp(model, context, {
             ...options,
             bridgePath,
-            mcpServers: buildAcpMcpServers(toolDefs, hash),
+            mcpServers: buildAcpMcpServers(toolDefs, hash, userMcpServers),
             // Forward only HOME/PATH so the bridged `claude` authenticates from the
             // login/keychain session (R17); never inherited process.env or API keys.
             bridgeEnv: { HOME: process.env.HOME, PATH: process.env.PATH },
           });
         }
 
-        const configPath = ensureMcpConfig(pi, contextTools);
+        const configPath = ensureMcpConfig(pi, contextTools, getUserMcpServers(options));
         return streamViaCli(model, context, {
           ...options,
           mcpConfigPath: configPath,

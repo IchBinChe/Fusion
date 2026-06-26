@@ -1409,6 +1409,22 @@ describe("SettingsModal", () => {
         expect(await screen.findByRole("button", { name: /Remote Access/i })).toBeInTheDocument();
       });
 
+      it("labels the remote nav entry independently from the standalone Node Sync entry", async () => {
+        mockFetchSettings.mockResolvedValue({
+          ...defaultSettings,
+          experimentalFeatures: {},
+        });
+
+        renderModal();
+        await waitForSettingsModalReady();
+
+        // Desktop and mobile settings navs share SETTINGS_SECTIONS, so this single render guards the shared label source.
+        expect(screen.getByRole("button", { name: "Remote Access" })).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /Remote Access & Node Sync/i })).not.toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /& Node Sync/i })).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Node Sync" })).toBeInTheDocument();
+      });
+
       it.each([
         ["experimentalFeatures undefined", undefined],
         ["experimentalFeatures empty", {}],

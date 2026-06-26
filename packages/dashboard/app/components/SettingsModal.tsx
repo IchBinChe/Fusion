@@ -235,7 +235,11 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "global-mcp", label: "MCP Servers", labelKey: "settings.nav.globalMcp", scope: "global" },
   { id: "cli-agents", label: "CLI Agents", labelKey: "settings.nav.cliAgents", scope: "global" },
   { id: "research-global", label: "Research Defaults", labelKey: "settings.nav.researchGlobal", scope: "global" },
-  { id: "remote", label: "Remote Access & Node Sync", labelKey: "settings.nav.remote", scope: "global" },
+  /*
+  FNXC:SettingsNavigation 2026-06-26-09:20:
+  FN-7062 requires the remote settings nav entry to read "Remote Access" only. The stale "& Node Sync" suffix belongs to the separate Node Sync settings section, while this section body already uses the Remote Access heading.
+  */
+  { id: "remote", label: "Remote Access", labelKey: "settings.nav.remote", scope: "global" },
   { id: "experimental", label: "Experimental Features", labelKey: "settings.nav.experimental", scope: "global" },
 
   // Runtimes group (plugin runtimes with their own settings)

@@ -56,6 +56,77 @@ type BundlePluginEntryOptions = {
   withMcpAsset?: boolean;
 };
 
+type PackageManifest = {
+  name?: string;
+  version?: string;
+  type?: string;
+  exports?: unknown;
+  main?: string;
+  pi?: unknown;
+  private?: boolean;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
+};
+
+const dependencyMapKeys = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"] as const;
+
+function isDependencyMap(value: unknown): value is Record<string, string> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.values(value).every((specifier) => typeof specifier === "string")
+  );
+}
+
+function sanitizeDependencyMap(dependencyMap: unknown): Record<string, string> | undefined {
+  if (!isDependencyMap(dependencyMap)) {
+    return undefined;
+  }
+
+  const sanitized = Object.fromEntries(
+    Object.entries(dependencyMap).filter(
+      ([name, specifier]) => !name.startsWith("@fusion/") && !specifier.includes("workspace:"),
+    ),
+  );
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+}
+
+/*
+ * FNXC:Packaging 2026-06-26-08:40:
+ * Copied source manifests in the published CLI must be install-safe outside the workspace. Private @fusion/* dependencies and workspace: specifiers make package managers resolve unpublished packages during npm/npx installs, producing the FN-7060 missing fusion core failure, so raw-src plugin and pi-extension manifests are rewritten while preserving loadable entry metadata and real third-party deps.
+ */
+function writeSanitizedCopiedManifest(srcPkgPath: string, destPkgPath: string) {
+  const srcPkg = JSON.parse(readFileSync(srcPkgPath, "utf-8")) as PackageManifest;
+  const destPkg: PackageManifest = {
+    name: srcPkg.name,
+    version: srcPkg.version,
+    type: srcPkg.type,
+    private: true,
+  };
+
+  if (srcPkg.exports !== undefined) {
+    destPkg.exports = srcPkg.exports;
+  }
+  if (srcPkg.main !== undefined) {
+    destPkg.main = srcPkg.main;
+  }
+  if (srcPkg.pi !== undefined) {
+    destPkg.pi = srcPkg.pi;
+  }
+
+  for (const dependencyMapKey of dependencyMapKeys) {
+    const sanitizedDependencyMap = sanitizeDependencyMap(srcPkg[dependencyMapKey]);
+    if (sanitizedDependencyMap) {
+      destPkg[dependencyMapKey] = sanitizedDependencyMap;
+    }
+  }
+
+  writeFileSync(destPkgPath, JSON.stringify(destPkg, null, 2));
+}
+
 async function bundlePluginEntry({ pluginId, srcDir, destDir, withMcpAsset = false }: BundlePluginEntryOptions) {
   if (existsSync(destDir)) {
     rmSync(destDir, { recursive: true, force: true });
@@ -184,7 +255,7 @@ const cliBuildConfig = {
       mkdirSync(piClaudeCliDest, { recursive: true });
       cpSync(join(piClaudeCliSrc, "index.ts"), join(piClaudeCliDest, "index.ts"));
       cpSync(join(piClaudeCliSrc, "src"), join(piClaudeCliDest, "src"), { recursive: true });
-      cpSync(join(piClaudeCliSrc, "package.json"), join(piClaudeCliDest, "package.json"));
+      writeSanitizedCopiedManifest(join(piClaudeCliSrc, "package.json"), join(piClaudeCliDest, "package.json"));
       console.log("Copied pi-claude-cli extension to dist/pi-claude-cli/");
     } else {
       console.warn(
@@ -205,7 +276,7 @@ const cliBuildConfig = {
       mkdirSync(droidCliDest, { recursive: true });
       cpSync(join(droidCliSrc, "index.ts"), join(droidCliDest, "index.ts"));
       cpSync(join(droidCliSrc, "src"), join(droidCliDest, "src"), { recursive: true });
-      cpSync(join(droidCliSrc, "package.json"), join(droidCliDest, "package.json"));
+      writeSanitizedCopiedManifest(join(droidCliSrc, "package.json"), join(droidCliDest, "package.json"));
       console.log("Copied droid-cli extension to dist/droid-cli/");
     } else {
       console.warn(
@@ -220,7 +291,7 @@ const cliBuildConfig = {
       mkdirSync(llamaCppDest, { recursive: true });
       cpSync(join(llamaCppSrc, "index.ts"), join(llamaCppDest, "index.ts"));
       cpSync(join(llamaCppSrc, "src"), join(llamaCppDest, "src"), { recursive: true });
-      cpSync(join(llamaCppSrc, "package.json"), join(llamaCppDest, "package.json"));
+      writeSanitizedCopiedManifest(join(llamaCppSrc, "package.json"), join(llamaCppDest, "package.json"));
       console.log("Copied pi-llama-cpp extension to dist/pi-llama-cpp/");
     } else {
       console.warn(
@@ -240,7 +311,7 @@ const cliBuildConfig = {
     if (existsSync(whatsappChatPluginSrc)) {
       mkdirSync(whatsappChatPluginDest, { recursive: true });
       cpSync(join(whatsappChatPluginSrc, "manifest.json"), join(whatsappChatPluginDest, "manifest.json"));
-      cpSync(join(whatsappChatPluginSrc, "package.json"), join(whatsappChatPluginDest, "package.json"));
+      writeSanitizedCopiedManifest(join(whatsappChatPluginSrc, "package.json"), join(whatsappChatPluginDest, "package.json"));
       cpSync(join(whatsappChatPluginSrc, "src"), join(whatsappChatPluginDest, "src"), { recursive: true });
       console.log("Copied WhatsApp chat plugin to dist/plugins/fusion-plugin-whatsapp-chat/");
     } else {
@@ -267,7 +338,7 @@ const cliBuildConfig = {
     if (existsSync(reportsPluginSrc)) {
       mkdirSync(reportsPluginDest, { recursive: true });
       cpSync(join(reportsPluginSrc, "manifest.json"), join(reportsPluginDest, "manifest.json"));
-      cpSync(join(reportsPluginSrc, "package.json"), join(reportsPluginDest, "package.json"));
+      writeSanitizedCopiedManifest(join(reportsPluginSrc, "package.json"), join(reportsPluginDest, "package.json"));
       cpSync(join(reportsPluginSrc, "src"), join(reportsPluginDest, "src"), { recursive: true });
       console.log("Copied reports plugin to dist/plugins/fusion-plugin-reports/");
     } else {
@@ -282,7 +353,7 @@ const cliBuildConfig = {
     if (existsSync(cliPrintingPressPluginSrc)) {
       mkdirSync(cliPrintingPressPluginDest, { recursive: true });
       cpSync(join(cliPrintingPressPluginSrc, "manifest.json"), join(cliPrintingPressPluginDest, "manifest.json"));
-      cpSync(join(cliPrintingPressPluginSrc, "package.json"), join(cliPrintingPressPluginDest, "package.json"));
+      writeSanitizedCopiedManifest(join(cliPrintingPressPluginSrc, "package.json"), join(cliPrintingPressPluginDest, "package.json"));
       cpSync(join(cliPrintingPressPluginSrc, "src"), join(cliPrintingPressPluginDest, "src"), { recursive: true });
       console.log("Copied cli-printing-press plugin to dist/plugins/fusion-plugin-cli-printing-press/");
     } else {

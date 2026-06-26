@@ -1194,6 +1194,8 @@ For end-to-end standalone packaging, `pnpm pack`, and installing on another mach
 
 ### Package Requirements
 
+<!-- FNXC:Packaging 2026-06-26-08:55: Published plugin packages must not declare private @fusion/* or workspace:* dependencies; those names only resolve inside the monorepo and cause off-workspace package-manager installs to fail. -->
+
 ```json
 {
   "name": "fusion-plugin-my-plugin",
@@ -1201,12 +1203,12 @@ For end-to-end standalone packaging, `pnpm pack`, and installing on another mach
   "keywords": ["fusion-plugin"],
   "exports": {
     ".": {
-      "types": "./src/index.ts",
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
   },
-  "peerDependencies": {
-    "@fusion/core": "workspace:*"
+  "dependencies": {
+    "@runfusion/fusion": "^0.48.0"
   }
 }
 ```

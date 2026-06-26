@@ -37,29 +37,25 @@
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { isAbsolute, join, relative } from "node:path";
+import { realpathSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
+import { join } from "node:path";
 import {
   assertNotWorkspaceTaskMerge,
   buildTaskLineageTrailer,
   evaluateNoCommitsNoOpFinalize,
   getPrimaryPrInfo,
   getTaskMergeBlocker,
-  resolveAgentPrompt,
   resolvePersistAgentThinkingLog,
   resolveTaskMergeTarget,
   resolveValidatorSettingsModel,
-  type AgentPromptsConfig,
   type MergeDetails,
   type MergeResult,
   type Settings,
   type Task,
-  type TaskComment,
   type TaskStore,
 } from "@fusion/core";
-import { buildUserCommentsPromptSection, selectUserCommentsForAgentContext } from "./agent-user-comments.js";
+import { selectUserCommentsForAgentContext } from "./agent-user-comments.js";
 import { resolveTaskWorkingBranch } from "./worktree-names.js";
 import { resolveIntegrationBranch } from "./integration-branch.js";
 import { advanceIntegrationBranchRef } from "./merger-ref-update-advance.js";
@@ -74,16 +70,28 @@ import { createLogger } from "./logger.js";
 import { captureSingleCommitLandedMetadata, type MergerOptions } from "./merger.js";
 import { installWorktreeDependencies } from "./merge-dependency-sync.js";
 import { activeSessionRegistry } from "./active-session-registry.js";
-import { MIN_TEMP_WORKTREE_REAP_AGE_MS } from "./self-healing.js";
-import { resolveAiMergeRootPath, resolveLegacyAiMergeRootPath } from "./worktree-paths.js";
 /*
 FNXC:Workspace 2026-06-22-14:10 (Phase D review G — cycle dissolved):
 `isRepoLanded` + `FUSION_TASK_ID_TRAILER_KEY` moved to the dependency-free `workspace-land-predicate`
 module so self-healing can import the predicate without re-entering the self-healing ↔ merger-ai
-import cycle (merger-ai already imports `MIN_TEMP_WORKTREE_REAP_AGE_MS` from self-healing).
+import cycle (merger-ai-worktree imports `MIN_TEMP_WORKTREE_REAP_AGE_MS` from self-healing).
 */
 import { isRepoLanded, FUSION_TASK_ID_TRAILER_KEY } from "./workspace-land-predicate.js";
 import { finalizeProvenAutoMergeTask } from "./auto-merge-finalization.js";
+import {
+  cleanupAiMergeWorktree,
+  pruneExistingAiMergeWorktrees,
+  resolveAiMergeRoot,
+} from "./merger-ai-worktree.js";
+import {
+  buildMergePrompt,
+  buildMergeSystemPrompt,
+  buildReviewPrompt,
+  buildReviewSystemPrompt,
+  buildStashResolvePrompt,
+  buildStashResolveSystemPrompt,
+  parseReviewVerdict,
+} from "./merger-ai-prompts.js";
 
 const execFileAsync = promisify(execFile);
 const aiMergeLog = createLogger("merger-ai");
@@ -113,257 +121,16 @@ function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function getErrorStringProperty(err: unknown, key: "stderr" | "code"): string | undefined {
-  if (!err || typeof err !== "object" || !(key in err)) return undefined;
-  const value = (err as Record<string, unknown>)[key];
-  return typeof value === "string" && value.trim() ? value : undefined;
+function short(sha: string): string {
+  return /^[0-9a-f]{7,40}$/i.test(sha) ? sha.slice(0, 8) : sha;
 }
 
-function describeCleanupError(err: unknown): string {
-  const stderr = getErrorStringProperty(err, "stderr");
-  const message = getErrorMessage(err);
-  return stderr ? `${message}: ${stderr.trim()}` : message;
-}
-
-export function isBenignAbsentWorktreeError(err: unknown): boolean {
-  const code = getErrorStringProperty(err, "code");
-  if (code === "ENOENT") return true;
-  const description = describeCleanupError(err);
-  return /is not a working tree|No such file or directory|spawn\s+.*\bENOENT\b/i.test(description);
-}
-
-function ensureAiMergeRootIgnored(projectRootDir: string, settings?: Settings): void {
-  const excludePath = join(projectRootDir, ".git", "info", "exclude");
-  if (!existsSync(excludePath)) return;
-  try {
-    const current = readFileSync(excludePath, "utf-8");
-    const legacyAiMergeRoot = resolveLegacyAiMergeRootPath(projectRootDir);
-    const legacyRelativeAiMergeRoot = relative(projectRootDir, legacyAiMergeRoot);
-    const entries = [`${legacyRelativeAiMergeRoot.replaceAll("\\", "/")}/`];
-    const aiMergeRoot = resolveAiMergeRootPath(projectRootDir, settings);
-    const relativeAiMergeRoot = relative(projectRootDir, aiMergeRoot);
-    if (relativeAiMergeRoot && !relativeAiMergeRoot.startsWith("..") && !isAbsolute(relativeAiMergeRoot)) {
-      entries.push(`${relativeAiMergeRoot.replaceAll("\\", "/")}/`);
-    }
-
-    const missing = entries.filter((entry) => !current.split(/\r?\n/).includes(entry));
-    if (missing.length > 0) {
-      appendFileSync(excludePath, `${current.endsWith("\n") ? "" : "\n"}${missing.join("\n")}\n`);
-    }
-  } catch {
-    // Best effort only: cleanup still removes the root contents, and existing
-    // projects generally ignore .fusion already.
-  }
-}
-
-export function resolveAiMergeRoot(projectRootDir: string, settings?: Settings): string {
-  const root = resolveAiMergeRootPath(projectRootDir, settings);
-  mkdirSync(root, { recursive: true });
-  ensureAiMergeRootIgnored(projectRootDir, settings);
-  return root;
-}
-
-function getAiMergeTempSearchRoots(projectRootDir: string, settings?: Settings): string[] {
-  const roots = [resolveAiMergeRoot(projectRootDir, settings), resolveLegacyAiMergeRootPath(projectRootDir), tmpdir()];
-  const testWorkerRoot = process.env.FUSION_TEST_WORKER_ROOT;
-  if (testWorkerRoot) {
-    try {
-      for (const entry of readdirSync(testWorkerRoot)) {
-        if (entry.startsWith("redir-")) roots.push(join(testWorkerRoot, entry));
-      }
-    } catch {
-      // Best effort for the test harness' bounded temp-dir redirection root.
-    }
-  }
-  return Array.from(new Set(roots));
-}
-
-export async function pruneExistingAiMergeWorktrees(
-  taskId: string,
-  projectRootDir: string,
-  audit: RunAuditor,
-  log: (message: string) => Promise<void>,
-  settings?: Settings,
-): Promise<number> {
-  const prefix = `fusion-ai-merge-${taskId.toLowerCase()}-`;
-  const tempRoots = getAiMergeTempSearchRoots(projectRootDir, settings);
-
-  let pruned = 0;
-  let cleanupAttempted = false;
-  for (const tempRoot of tempRoots) {
-    let entries: string[];
-    try {
-      entries = readdirSync(tempRoot).filter((entry) => entry.startsWith(prefix));
-    } catch (err: unknown) {
-      /*
-      FNXC:AiMerge 2026-06-24-23:10:
-      An absent ai-merge search root is the NORMAL case, not an error: the clean-room directory
-      (e.g. `<repo>/.fusion/ai-merge`) is created lazily only when an AI-merge worktree is made, so a
-      workspace sub-repo that has never been AI-merged has no such dir. ENOENT therefore means
-      "nothing to prune" — skip it silently rather than emitting an alarming warning on every merge.
-      Only non-ENOENT failures are surfaced, and only a non-ENOENT failure on the system tmpdir
-      (which always exists) remains fatal.
-      */
-      if ((err as NodeJS.ErrnoException)?.code === "ENOENT") continue;
-      await log(`AI merge pre-merge prune: failed to read ${tempRoot}: ${getErrorMessage(err)}`);
-      if (tempRoot === tmpdir()) throw err;
-      continue;
-    }
-
-    for (const entry of entries) {
-      const candidatePath = join(tempRoot, entry);
-      let canonicalPath = candidatePath;
-      try {
-        canonicalPath = realpathSync(candidatePath);
-      } catch {
-        canonicalPath = candidatePath;
-      }
-
-      if (activeSessionRegistry.isPathActive(canonicalPath) || activeSessionRegistry.isPathActive(candidatePath)) {
-        await log(`AI merge pre-merge prune: skipping active worktree ${canonicalPath}`);
-        continue;
-      }
-
-      try {
-        const stat = statSync(canonicalPath);
-        const ageMs = Date.now() - stat.mtimeMs;
-        if (ageMs < MIN_TEMP_WORKTREE_REAP_AGE_MS) {
-          await log(`AI merge pre-merge prune: skipping too-new worktree ${canonicalPath} (age ${Math.max(0, Math.round(ageMs))}ms)`);
-          continue;
-        }
-      } catch (err: unknown) {
-        await log(`AI merge pre-merge prune: failed to stat ${canonicalPath}: ${getErrorMessage(err)} — skipping candidate`);
-        continue;
-      }
-
-      let alreadyAbsent = false;
-      try {
-        cleanupAttempted = true;
-        await execFileAsync("git", ["worktree", "remove", "--force", canonicalPath], {
-          cwd: projectRootDir,
-          timeout: 30_000,
-        });
-      } catch (err: unknown) {
-        if (isBenignAbsentWorktreeError(err)) {
-          alreadyAbsent = true;
-          await log(`AI merge pre-merge prune: worktree ${canonicalPath} was already absent/de-registered; treating cleanup as idempotent`);
-        } else {
-          await log(`AI merge pre-merge prune: git worktree remove failed for ${canonicalPath}: ${describeCleanupError(err)} — falling back to filesystem removal`);
-        }
-      }
-
-      try {
-        cleanupAttempted = true;
-        rmSync(canonicalPath, { recursive: true, force: true });
-        await audit.git({ type: "merge:ai-worktree-cleanup", target: canonicalPath, metadata: { taskId, mergeRoot: canonicalPath, phase: "pre-merge-prune", success: true, ...(alreadyAbsent ? { alreadyAbsent: true, idempotent: true } : {}) } });
-        pruned++;
-      } catch (err: unknown) {
-        if (isBenignAbsentWorktreeError(err)) {
-          await log(`AI merge pre-merge prune: worktree ${canonicalPath} was already absent during filesystem cleanup; treating cleanup as idempotent`);
-          await audit.git({ type: "merge:ai-worktree-cleanup", target: canonicalPath, metadata: { taskId, mergeRoot: canonicalPath, phase: "pre-merge-prune", success: true, alreadyAbsent: true, idempotent: true } });
-          pruned++;
-          continue;
-        }
-        const error = getErrorMessage(err);
-        const code = getErrorStringProperty(err, "code");
-        await log(`AI merge pre-merge prune: filesystem rm failed for ${canonicalPath}${code ? ` (${code})` : ""}: ${error}`);
-        await audit.git({ type: "merge:ai-worktree-cleanup", target: canonicalPath, metadata: { taskId, mergeRoot: canonicalPath, phase: "pre-merge-prune", success: false, error, ...(code ? { code } : {}) } });
-      }
-    }
-  }
-
-  if (cleanupAttempted) {
-    try {
-      await execFileAsync("git", ["worktree", "prune"], { cwd: projectRootDir, timeout: 30_000 });
-    } catch (err: unknown) {
-      await log(`AI merge pre-merge prune: git worktree prune failed: ${describeCleanupError(err)}`);
-    }
-  }
-
-  return pruned;
-}
-
-export async function cleanupAiMergeWorktree(input: {
-  taskId: string;
-  mergeRoot: string;
-  projectRootDir: string;
-  worktreeAdded: boolean;
-  audit: RunAuditor;
-  log: (message: string) => Promise<void>;
-  gitRunner?: typeof git;
-  rmRunner?: typeof rm;
-}): Promise<void> {
-  const { taskId, mergeRoot, projectRootDir, worktreeAdded, audit, log, gitRunner = git, rmRunner = rm } = input;
-  let canonicalRoot = mergeRoot;
-  try {
-    canonicalRoot = realpathSync(mergeRoot);
-  } catch {
-    canonicalRoot = mergeRoot;
-  }
-  const removalTargets = canonicalRoot === mergeRoot ? [mergeRoot] : [canonicalRoot, mergeRoot];
-  const cleanupMetadata = { taskId, mergeRoot: canonicalRoot, requestedMergeRoot: mergeRoot };
-  let alreadyAbsent = false;
-
-  if (worktreeAdded) {
-    if (!existsSync(canonicalRoot) && !existsSync(mergeRoot)) {
-      alreadyAbsent = true;
-      await log(`AI merge cleanup: worktree ${canonicalRoot} was already absent before git removal; treating cleanup as idempotent`);
-      await audit.git({ type: "merge:ai-worktree-cleanup", target: canonicalRoot, metadata: { ...cleanupMetadata, phase: "git-remove", success: true, alreadyAbsent: true, idempotent: true, code: "ENOENT" } });
-    } else {
-      try {
-        await gitRunner(["worktree", "remove", "--force", canonicalRoot], projectRootDir);
-        await audit.git({ type: "merge:ai-worktree-cleanup", target: canonicalRoot, metadata: { ...cleanupMetadata, phase: "git-remove", success: true } });
-      } catch (err: unknown) {
-        const error = describeCleanupError(err);
-        const code = getErrorStringProperty(err, "code");
-        if (isBenignAbsentWorktreeError(err)) {
-          alreadyAbsent = true;
-          await log(`AI merge cleanup: worktree ${canonicalRoot} was already absent/de-registered during git removal; treating cleanup as idempotent`);
-          await audit.git({ type: "merge:ai-worktree-cleanup", target: canonicalRoot, metadata: { ...cleanupMetadata, phase: "git-remove", success: true, alreadyAbsent: true, idempotent: true, error, ...(code ? { code } : {}) } });
-        } else {
-          await log(`AI merge cleanup: git worktree remove failed for ${canonicalRoot}${code ? ` (${code})` : ""}: ${error}`);
-          await audit.git({ type: "merge:ai-worktree-cleanup", target: canonicalRoot, metadata: { ...cleanupMetadata, phase: "git-remove", success: false, error, ...(code ? { code } : {}) } });
-        }
-      }
-    }
-  }
-
-  let removedFromFilesystem = false;
-  for (const target of removalTargets) {
-    try {
-      await rmRunner(target, { recursive: true, force: true });
-      await audit.git({ type: "merge:ai-worktree-cleanup", target, metadata: { ...cleanupMetadata, phase: "fs-rm", path: target, success: true, ...(alreadyAbsent ? { alreadyAbsent: true, idempotent: true } : {}) } });
-      removedFromFilesystem = true;
-      break;
-    } catch (err: unknown) {
-      const error = getErrorMessage(err);
-      const code = getErrorStringProperty(err, "code");
-      if (isBenignAbsentWorktreeError(err)) {
-        await log(`AI merge cleanup: worktree ${target} was already absent during filesystem cleanup; treating cleanup as idempotent`);
-        await audit.git({ type: "merge:ai-worktree-cleanup", target, metadata: { ...cleanupMetadata, phase: "fs-rm", path: target, success: true, alreadyAbsent: true, idempotent: true, error, ...(code ? { code } : {}) } });
-        removedFromFilesystem = true;
-        break;
-      }
-      await log(`AI merge cleanup: filesystem rm failed for ${target}${code ? ` (${code})` : ""}: ${error}`);
-      await audit.git({ type: "merge:ai-worktree-cleanup", target, metadata: { ...cleanupMetadata, phase: "fs-rm", path: target, success: false, error, ...(code ? { code } : {}) } });
-    }
-  }
-
-  if (!removedFromFilesystem) {
-    await log(`AI merge cleanup: filesystem cleanup did not remove ${canonicalRoot}; continuing to prune worktree metadata`);
-  }
-
-  try {
-    await gitRunner(["worktree", "prune"], projectRootDir, { timeout: 30_000 });
-    await audit.git({ type: "merge:ai-worktree-cleanup", target: canonicalRoot, metadata: { ...cleanupMetadata, phase: "git-prune", success: true } });
-  } catch (err: unknown) {
-    const error = describeCleanupError(err);
-    const code = getErrorStringProperty(err, "code");
-    await log(`AI merge cleanup: git worktree prune failed after removing ${canonicalRoot}${code ? ` (${code})` : ""}: ${error}`);
-    await audit.git({ type: "merge:ai-worktree-cleanup", target: canonicalRoot, metadata: { ...cleanupMetadata, phase: "git-prune", success: false, error, ...(code ? { code } : {}) } });
-  }
-
-}
+export {
+  cleanupAiMergeWorktree,
+  isBenignAbsentWorktreeError,
+  pruneExistingAiMergeWorktrees,
+  resolveAiMergeRoot,
+} from "./merger-ai-worktree.js";
 
 /** Trailers that associate the squash commit with its board task: the
  *  `Fusion-Task-Id` trailer plus the canonical lineage trailer when available.
@@ -412,263 +179,17 @@ async function ensureCommitTaskMetadata(
 // Pure helpers (unit-tested)
 // ---------------------------------------------------------------------------
 
-export type AiMergeReviewSeverity = "blocking" | "advisory";
-
-export interface AiMergeReviewVerdict {
-  verdict: "approve" | "reject";
-  reasons: string[];
-  severity?: AiMergeReviewSeverity;
-}
-
-export const REVIEW_VERDICT_MARKER = "REVIEW_VERDICT:";
-const VERDICT_LINE_RE = /REVIEW_VERDICT:\s*(approve|reject)\b/i;
-const SEVERITY_LINE_RE = /SEVERITY:\s*(blocking|advisory)\b/i;
-
-/**
- * Parse the reviewer's free-form output. Fail-safe: no/garbled output, or a
- * rejection with no explicit severity, is treated as a BLOCKING reject — an
- * ambiguous reviewer can never wave wrong code through, nor silently downgrade
- * to advisory.
- */
-export function parseReviewVerdict(agentText: string | null | undefined): AiMergeReviewVerdict {
-  const text = (agentText ?? "").trim();
-  if (!text) return { verdict: "reject", reasons: ["reviewer produced no output"], severity: "blocking" };
-
-  const lines = text.split(/\r?\n/);
-  let verdictLineIndex = -1;
-  let decision: "approve" | "reject" | null = null;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const m = lines[i].match(VERDICT_LINE_RE);
-    if (m) {
-      decision = m[1].toLowerCase() as "approve" | "reject";
-      verdictLineIndex = i;
-      break;
-    }
-  }
-  if (!decision) {
-    return {
-      verdict: "reject",
-      reasons: [`reviewer did not emit a "${REVIEW_VERDICT_MARKER} approve|reject" line`],
-      severity: "blocking",
-    };
-  }
-  if (decision === "approve") return { verdict: "approve", reasons: [] };
-
-  const severity: AiMergeReviewSeverity = SEVERITY_LINE_RE.test(text)
-    ? (text.match(SEVERITY_LINE_RE)![1].toLowerCase() as AiMergeReviewSeverity)
-    : "blocking";
-  return { verdict: "reject", reasons: extractRejectReasons(lines, verdictLineIndex), severity };
-}
-
-function extractRejectReasons(lines: string[], verdictLineIndex: number): string[] {
-  const reasons: string[] = [];
-  const inline = lines[verdictLineIndex].replace(VERDICT_LINE_RE, "").replace(/^[\s:–—-]+/, "").trim();
-  if (inline) reasons.push(inline);
-  for (let i = verdictLineIndex + 1; i < lines.length; i++) {
-    if (SEVERITY_LINE_RE.test(lines[i])) continue;
-    const cleaned = lines[i].replace(/^\s*(?:[-*•]|\d+[.)])\s+/, "").trim();
-    if (cleaned) reasons.push(cleaned);
-  }
-  if (reasons.length === 0) reasons.push("reviewer rejected the merge without a stated reason");
-  return reasons;
-}
-
-export function buildMergeSystemPrompt(agentPrompts?: AgentPromptsConfig): string {
-  // Base persona is the editable "merger" agent prompt (Settings → Prompts);
-  // the non-negotiable clean-room / verification / commit-trailer rules below
-  // are always appended so a custom prompt can't drop them.
-  const base = resolveAgentPrompt("merger", agentPrompts).trim();
-  return [
-    base,
-    base ? "" : undefined,
-    "## AI merge — clean room",
-    "You are on a CLEAN, detached checkout at the integration branch's current",
-    "tip. Land the task branch's work as a single commit.",
-    "",
-    "Constraints:",
-    "  - Resolve every conflict in favor of the task branch's intent; never drop",
-    "    the task's changes to make a conflict go away.",
-    "  - Do not make edits unrelated to reconciling the two branches.",
-    "  - Do NOT push, force-push, or run `git update-ref` / `git reset --hard`",
-    "    on any other branch. Only commit on this detached HEAD.",
-    "  - Finish with exactly ONE new commit on HEAD containing the task's work.",
-    "",
-    "Verify before committing:",
-    "  - After resolving the merge, run the project's checks — tests, type-check,",
-    "    and lint (discover them from the project config / package.json scripts,",
-    "    e.g. test / typecheck / lint / build).",
-    "  - FIX any NEW failure the merge or conflict resolution introduced (a check",
-    "    that passed on the task branch or the integration tip but fails on the",
-    "    merged tree). You do not need to fix failures that were already broken on",
-    "    the integration branch beforehand, but never commit a merge that adds new",
-    "    test, type-check, or lint failures.",
-    "",
-    "Commit message:",
-    "  - The subject line must CONCISELY SUMMARIZE the squashed changes in",
-    "    imperative mood (e.g. \"add X\", \"fix Y\") based on the actual diff — do",
-    "    not just restate the task title.",
-    "  - The commit BODY must include:",
-    "      1) one short narrative summary line,",
-    "      2) a bullet list of key changes, and",
-    "      3) a `Files changed:` section populated from `git diff --stat`.",
-    "  - Include the task-id prefix and the trailer lines EXACTLY as given in the",
-    "    task instructions (they associate the commit with the board task).",
-  ].filter((l) => l !== undefined).join("\n");
-}
-
-export function buildMergePrompt(input: {
-  taskId: string;
-  branch: string;
-  integrationBranch: string;
-  tipSha: string;
-  /** Task title — a HINT for the summary, not the literal subject. */
-  taskTitle?: string;
-  /** Whether to prefix the subject with the task id. */
-  includeTaskId: boolean;
-  /** Required trailers to append (board association). */
-  trailers: string[];
-  correctiveReasons?: string[];
-  userComments?: TaskComment[];
-}): string {
-  const subjectShape = input.includeTaskId
-    ? `"${input.taskId}: <concise imperative summary of the squashed changes>"`
-    : `"<concise imperative summary of the squashed changes>"`;
-  const trailerArgs = input.trailers.map((t) => ` -m ${JSON.stringify(t)}`).join("");
-  const lines = [
-    `Merge branch "${input.branch}" into "${input.integrationBranch}" (HEAD is detached at ${short(input.tipSha)}).`,
-    "",
-    "Steps:",
-    `  1. Run: git merge --squash ${input.branch}`,
-    "  2. If there are conflicts, resolve them (favor the task's intent), then `git add` the resolved files.",
-    "  3. Build a merge body from the staged squash diff:",
-    "       - one short narrative summary line",
-    "       - bullet list of key changes",
-    "       - `Files changed:` + the output of `git diff --stat`",
-    "  4. Commit the staged result as a SINGLE commit whose subject summarizes the",
-    `     actual changes${input.taskTitle ? ` (task title hint: ${JSON.stringify(input.taskTitle)})` : ""}, including the body above and required trailers:`,
-    `       git commit -m ${subjectShape} -m "<narrative + bullet list + Files changed: ...>"${trailerArgs}`,
-    "     Keep the trailer line(s) verbatim — they link the commit to the board task.",
-    "  5. Verify `git log --oneline ${tip}..HEAD` shows exactly one new commit and `git status` is clean.".replace("${tip}", short(input.tipSha)),
-    "",
-    "If `git merge --squash` reports the branch is already up to date (nothing to",
-    "merge), do nothing and leave HEAD unchanged.",
-  ];
-  const userCommentsSection = buildUserCommentsPromptSection(input.userComments ?? []);
-  if (userCommentsSection) {
-    lines.push("", userCommentsSection);
-  }
-  if (input.correctiveReasons && input.correctiveReasons.length > 0) {
-    lines.push(
-      "",
-      "A prior attempt was REJECTED by review. Redo the merge from the clean tip",
-      "and address each of these problems:",
-      ...input.correctiveReasons.map((r) => `  - ${r}`),
-    );
-  }
-  return lines.join("\n");
-}
-
-export function buildReviewSystemPrompt(): string {
-  return [
-    "You are an adversarial, read-only merge reviewer. Do NOT edit, stage, commit,",
-    "or run any mutating git command. Audit the squash commit that is about to be",
-    "merged into the integration branch and decide whether it is safe to land.",
-    "",
-    "Investigate with read-only commands (git show, git diff, git log, cat, grep).",
-    "Judge on four axes:",
-    "  1. Completeness — does the squash contain ALL of the task branch's intended",
-    "     changes? Flag any hunk silently dropped during conflict resolution.",
-    "  2. No collateral — does it touch only files within the task's footprint?",
-    "  3. Conflict soundness — were conflicts resolved coherently (both sides'",
-    "     intent preserved), not by blindly discarding one side?",
-    "  4. Commit message — read `git show`'s message: the subject must concisely",
-    "     and ACCURATELY summarize the actual changes (not vague, not a mere",
-    "     restatement of the task title, not misleading). A poor/inaccurate",
-    "     message is an ADVISORY concern (it should be rewritten on retry, but",
-    "     must not block the merge).",
-    "",
-    "Bias toward rejection when uncertain.",
-    "",
-    `End with a single decision line: "${REVIEW_VERDICT_MARKER} approve" or`,
-    `"${REVIEW_VERDICT_MARKER} reject". When rejecting, add a "SEVERITY:" line:`,
-    "  - SEVERITY: blocking — a correctness problem (dropped/lost task changes,",
-    "    incomplete squash, or a conflict resolution that discards intent). The",
-    "    merge must NOT land if this is unfixable.",
-    "  - SEVERITY: advisory — a quality/style concern that does not risk",
-    "    correctness; acceptable to land if unresolved.",
-    "Then list each concrete reason as a bullet.",
-  ].join("\n");
-}
-
-export function buildReviewPrompt(input: {
-  taskId: string;
-  branch: string;
-  integrationBranch: string;
-  tipSha: string;
-  squashSha: string;
-  diffStat: string;
-  priorReasons?: string[];
-  userComments?: TaskComment[];
-}): string {
-  const lines = [
-    `Review the squash merge for task ${input.taskId} (branch ${input.branch} → ${input.integrationBranch}).`,
-    "",
-    `Integration tip: ${short(input.tipSha)}`,
-    `Squash commit:   ${short(input.squashSha)}`,
-    "",
-    "Inspect with:",
-    `  git show ${input.squashSha}`,
-    `  git diff ${input.tipSha}..${input.squashSha}`,
-    "",
-    "Files changed (git diff --stat):",
-    input.diffStat.trim() || "(none reported)",
-  ];
-  const userCommentsSection = buildUserCommentsPromptSection(input.userComments ?? []);
-  if (userCommentsSection) {
-    lines.push("", userCommentsSection);
-  }
-  if (input.priorReasons && input.priorReasons.length > 0) {
-    lines.push(
-      "",
-      "A prior pass rejected an earlier attempt for these reasons — confirm they",
-      "are now resolved:",
-      ...input.priorReasons.map((r) => `  - ${r}`),
-    );
-  }
-  return lines.join("\n");
-}
-
-export function buildStashResolveSystemPrompt(): string {
-  return [
-    "You are resolving a conflict between the user's restored local working-tree",
-    "edits and the freshly-merged integration branch. The user's uncommitted work",
-    "was stashed, the checkout fast-forwarded to the new tip, and re-applying the",
-    "stash produced conflicts.",
-    "",
-    "Resolve every conflict marker so BOTH sides are preserved: keep the user's",
-    "local intent AND the upstream changes that just landed. Stage each resolved",
-    "file with `git add`.",
-    "",
-    "Do NOT commit, stash, reset, checkout a different branch, or run update-ref.",
-    "Leave the resolved changes in the working tree as the user's uncommitted edits.",
-  ].join("\n");
-}
-
-export function buildStashResolvePrompt(conflictedFiles: string[]): string {
-  return [
-    "Re-applying your stashed local changes onto the updated branch conflicted.",
-    "",
-    "Conflicted files:",
-    ...conflictedFiles.map((f) => `  - ${f}`),
-    "",
-    "Resolve each file's conflict markers (preserve both the local edits and the",
-    "upstream changes), then `git add` it. Do not commit.",
-  ].join("\n");
-}
-
-function short(sha: string): string {
-  return /^[0-9a-f]{7,40}$/i.test(sha) ? sha.slice(0, 8) : sha;
-}
+export {
+  REVIEW_VERDICT_MARKER,
+  buildMergePrompt,
+  buildMergeSystemPrompt,
+  buildReviewPrompt,
+  buildReviewSystemPrompt,
+  buildStashResolvePrompt,
+  buildStashResolveSystemPrompt,
+  parseReviewVerdict,
+} from "./merger-ai-prompts.js";
+export type { AiMergeReviewSeverity, AiMergeReviewVerdict } from "./merger-ai-prompts.js";
 
 // ---------------------------------------------------------------------------
 // Errors

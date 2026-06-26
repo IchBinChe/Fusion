@@ -31,6 +31,22 @@ describe("taskTiming helpers", () => {
     expect(runtime).toBeNull();
   });
 
+  it("uses shifted executionStartedAt so the active badge excludes engine-down time", () => {
+    const t0 = Date.parse("2026-06-25T00:00:00.000Z");
+    const runtime = getActiveRuntimeMs(
+      {
+        column: "in-progress",
+        cumulativeActiveMs: undefined,
+        executionStartedAt: new Date(t0 + 60 * 60_000).toISOString(),
+        columnMovedAt: new Date(t0).toISOString(),
+      },
+      t0 + 65 * 60_000,
+    );
+
+    expect(runtime).toBe(5 * 60_000);
+    expect(getActiveRuntimeMs({ column: "in-progress", cumulativeActiveMs: undefined, executionStartedAt: undefined, columnMovedAt: undefined }, t0)).toBeNull();
+  });
+
   it("returns wall-clock runtime since first execution", () => {
     const wallClock = getWallClockSinceFirstExecutionMs(
       "2026-05-15T08:42:00.000Z",

@@ -574,6 +574,7 @@ export class Scheduler {
   private lastStaleTaskReportAt = 0;
   private lastBacklogPressureReportAt = 0;
   private lastUnlinkedMissionsAdvisoryReportAt = 0;
+  private lastHeartbeatWriteMs = 0;
   private idleSemaphoreLeakCandidateSince: number | null = null;
   private readonly lastHighOverlapFanoutWarningKey = new Map<string, string>();
 
@@ -1284,6 +1285,16 @@ export class Scheduler {
         schedulerLog.log("Engine pause cleared — scheduling resumed");
       }
       this.wasEnginePaused = false;
+
+      const heartbeatIntervalMs = Math.max(1, settings.pollIntervalMs ?? 15_000);
+      if (Date.now() - this.lastHeartbeatWriteMs >= heartbeatIntervalMs) {
+        /*
+        FNXC:TaskTiming 2026-06-25-00:00:
+        Persist a throttled engineLastActiveAt heartbeat only while the engine is unpaused so process-down wall-clock can be excluded from in-progress task active time after restart without per-tick DB churn.
+        */
+        await this.store.updateSettings({ engineLastActiveAt: new Date().toISOString() });
+        this.lastHeartbeatWriteMs = Date.now();
+      }
 
       // ── U6: hold/release sweep ─────────────────────────────────────────────
       /*

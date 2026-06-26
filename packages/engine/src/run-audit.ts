@@ -520,6 +520,10 @@ export type DatabaseMutationType =
   | "task:resume-limbo-escalated"
   /** Metadata: { taskId, executionAgeMs, graceMs, staleBindingAgeFloorMs, checkedOutBy, agentPresent, lastActivityMs, hasRecentRunAudit, worktree, branch, worktreeExists, signalReason } */
   | "task:reclaim-phantom-executor-binding"
+  /** Metadata: { shiftedTaskIds: string[], downtimeMs, reason } */
+  | "task:reconcile-engine-downtime-active-timing"
+  /** Metadata: { shiftedTaskIds: [], downtimeMs, reason } */
+  | "task:reconcile-engine-downtime-active-timing-no-action"
   /* FNXC:Workspace 2026-06-22-09:30 (Phase D U1) — workspace-mode self-healing run-audit events. */
   /** Metadata: { taskId, landedRepos: string[], unlandedRepos: string[], failedRepos: string[], action: "re-enqueue" | "park-failed", reason } */
   | "task:reconcile-workspace-partial-land"

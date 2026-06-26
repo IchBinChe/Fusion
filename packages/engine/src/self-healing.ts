@@ -1237,6 +1237,7 @@ export class SelfHealingManager {
       { name: "reconcile-self-defeating-deps", fn: () => this.reconcileSelfDefeatingDependencies().then(() => undefined) },
       { name: "reconcile-dependency-blocking-leases", fn: () => this.reconcileDependencyBlockingLeases().then(() => undefined) },
       { name: "reconcile-in-review-unmet-dependencies", fn: () => this.reconcileInReviewUnmetDependencies().then(() => undefined) },
+      { name: "reconcile-engine-downtime-active-timing", fn: () => this.reconcileEngineDowntimeActiveTiming().then(() => undefined) },
       { name: "reconcile-dependency-cycles", fn: () => this.reconcileDependencyCycles().then(() => undefined) },
       { name: "reclaim-pr-conflicts", fn: () => this.reclaimPrConflicts().then(() => undefined) },
       { name: "reclaim-self-owned-branch-conflicts", fn: () => this.reclaimSelfOwnedBranchConflicts().then(() => undefined) },
@@ -1262,6 +1263,26 @@ export class SelfHealingManager {
       }
       await yieldEventLoop();
     }
+  }
+
+  async reconcileEngineDowntimeActiveTiming(): Promise<{ shiftedTaskIds: string[]; downtimeMs: number }> {
+    const result = await this.store.reconcileActiveTimingForEngineDowntime();
+    const shifted = result.shiftedTaskIds.length > 0;
+    const auditor = createRunAuditor(this.store, {
+      runId: generateSyntheticRunId("reconcile-engine-downtime-active-timing", "global"),
+      agentId: "system:self-healing",
+      phase: "reconcile-engine-downtime-active-timing",
+    });
+    await auditor.database({
+      type: (shifted ? "task:reconcile-engine-downtime-active-timing" : "task:reconcile-engine-downtime-active-timing-no-action") as DatabaseMutationType,
+      target: "global",
+      metadata: {
+        shiftedTaskIds: result.shiftedTaskIds,
+        downtimeMs: result.downtimeMs,
+        reason: shifted ? "shifted-active-segments" : "no-qualifying-active-segments",
+      },
+    });
+    return result;
   }
 
   stop(): void {

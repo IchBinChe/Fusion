@@ -3728,6 +3728,11 @@ export interface ProjectSettings {
    *  effect when {@link globalPause} is also true (hard stop already
    *  covers everything). */
   enginePaused?: boolean;
+  /**
+   * FNXC:TaskTiming 2026-06-25-00:00:
+   * Records the last time the engine process proved it was alive so startup recovery can exclude process-down wall-clock time from active task duration without changing firstExecutionAt.
+   */
+  engineLastActiveAt?: string;
   /** Maximum number of concurrent AI agents across all activity types
    *  (triage specification, task execution, and merge operations). */
   maxConcurrent: number;

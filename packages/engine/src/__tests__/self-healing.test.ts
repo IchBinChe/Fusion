@@ -180,6 +180,7 @@ function createMockStore(overrides: Record<string, unknown> = {}): TaskStore & E
     archiveTaskAndCleanup: vi.fn().mockResolvedValue({} as Task),
     walCheckpoint: vi.fn().mockReturnValue({ busy: 0, log: 5, checkpointed: 5 }),
     listTasks: vi.fn().mockResolvedValue([]),
+    reconcileActiveTimingForEngineDowntime: vi.fn().mockResolvedValue({ shiftedTaskIds: [], downtimeMs: 0 }),
     parseFileScopeFromPrompt: vi.fn().mockResolvedValue([]),
     getCompletionHandoffAcceptedMarker: vi.fn().mockReturnValue(null),
     createTask: vi.fn().mockResolvedValue({ id: "FN-RESCUE", lineageId: "lin-rescue" }),
@@ -820,6 +821,7 @@ describe("SelfHealingManager", () => {
       const surfaceInReviewStalled = vi.spyOn(manager, "surfaceInReviewStalled").mockResolvedValue(1);
       const surfaceStalePausedReviews = vi.spyOn(manager, "surfaceStalePausedReviews").mockResolvedValue(1);
       const surfaceStalePausedTodos = vi.spyOn(manager, "surfaceStalePausedTodos").mockResolvedValue(1);
+      const reconcileEngineDowntimeActiveTiming = vi.spyOn(manager, "reconcileEngineDowntimeActiveTiming").mockResolvedValue({ shiftedTaskIds: [], downtimeMs: 0 });
 
       await manager.runStartupRecovery();
 
@@ -833,6 +835,7 @@ describe("SelfHealingManager", () => {
       expect(recoverOrphanedAgents).toHaveBeenCalledTimes(1);
       expect(recoverAgentsRunningOnInactiveTasks).toHaveBeenCalledTimes(1);
       expect(clearStaleBlockedBy).toHaveBeenCalledTimes(1);
+      expect(reconcileEngineDowntimeActiveTiming).toHaveBeenCalledTimes(1);
       expect(surfaceInReviewStalls).toHaveBeenCalledTimes(1);
       expect(surfaceInReviewStalled).toHaveBeenCalledTimes(1);
       expect(surfaceStalePausedReviews).toHaveBeenCalledTimes(1);
@@ -853,6 +856,26 @@ describe("SelfHealingManager", () => {
 
       expect(store.updateTask).toHaveBeenCalledWith("A", { blockedBy: null, overlapBlockedBy: null, status: null });
       expect(store.logEntry).toHaveBeenCalledWith("A", expect.stringContaining("Auto-recovered (FN-5488): cleared stale blockedBy"));
+    });
+
+    it("runStartupRecovery emits engine downtime timing audit metadata", async () => {
+      const recordRunAuditEvent = vi.fn().mockResolvedValue(undefined);
+      store = createMockStore({
+        getSettings: vi.fn().mockResolvedValue({ globalPause: false, enginePaused: false }),
+        reconcileActiveTimingForEngineDowntime: vi.fn().mockResolvedValue({ shiftedTaskIds: ["FN-7011"], downtimeMs: 3_600_000 }),
+        recordRunAuditEvent,
+      });
+      manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+
+      await manager.reconcileEngineDowntimeActiveTiming();
+
+      expect(store.reconcileActiveTimingForEngineDowntime).toHaveBeenCalledTimes(1);
+      expect(recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        domain: "database",
+        mutationType: "task:reconcile-engine-downtime-active-timing",
+        target: "global",
+        metadata: expect.objectContaining({ shiftedTaskIds: ["FN-7011"], downtimeMs: 3_600_000 }),
+      }));
     });
 
     it("runStartupRecovery skips while enginePaused is active", async () => {

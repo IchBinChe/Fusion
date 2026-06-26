@@ -267,6 +267,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   approvedWorkflowCliCommands: undefined,
   approvedCliAutonomyAdapters: undefined,
   enginePaused: false,
+  engineLastActiveAt: undefined,
   maxConcurrent: 2,
   maxTriageConcurrent: 2,
   globalMaxConcurrent: 4,

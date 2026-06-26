@@ -140,4 +140,55 @@ describe("TaskStore execution timing semantics", () => {
     const reloaded = await store.getTask(task.id);
     expect(reloaded?.columnDwellMs).toEqual(final.columnDwellMs);
   });
+
+  it("reconciles engine-down time without changing firstExecutionAt or accrued active time", async () => {
+    /*
+    FNXC:TaskTiming 2026-06-25-00:00:
+    Surface Enumeration: proves the core downtime helper, completion accrual, multi-task shifts, missing/future/below-threshold no-ops, after-heartbeat task exclusion, repeated restart idempotence, and legacy missing executionStartedAt tolerance.
+    */
+    vi.useFakeTimers();
+    const t0 = new Date("2026-06-25T00:00:00.000Z");
+    vi.setSystemTime(t0);
+
+    const task = await store.createTask({ description: "engine downtime symptom" });
+    await store.moveTask(task.id, "todo");
+    const running = await store.moveTask(task.id, "in-progress");
+    const second = await store.createTask({ description: "second active" });
+    await store.moveTask(second.id, "todo");
+    await store.moveTask(second.id, "in-progress");
+    const legacy = await store.createTask({ description: "legacy active" });
+    await store.moveTask(legacy.id, "todo");
+    await store.moveTask(legacy.id, "in-progress");
+    await store.updateTask(legacy.id, { executionStartedAt: null });
+
+    await store.updateSettings({ engineLastActiveAt: new Date(t0.getTime() + 5 * 60_000).toISOString(), pollIntervalMs: 15_000 });
+    vi.setSystemTime(new Date(t0.getTime() + 65 * 60_000));
+    const result = await store.reconcileActiveTimingForEngineDowntime();
+
+    expect(result.downtimeMs).toBe(60 * 60_000);
+    expect(result.shiftedTaskIds.sort()).toEqual([task.id, second.id].sort());
+    const shifted = await store.getTask(task.id);
+    expect(shifted?.executionStartedAt).toBe(new Date(t0.getTime() + 60 * 60_000).toISOString());
+    expect(shifted?.firstExecutionAt).toBe(running.firstExecutionAt);
+    expect(shifted?.cumulativeActiveMs).toBe(0);
+
+    vi.setSystemTime(new Date(t0.getTime() + 67 * 60_000));
+    const done = await store.moveTask(task.id, "done");
+    expect(done.cumulativeActiveMs).toBe(7 * 60_000);
+
+    await store.updateSettings({ engineLastActiveAt: undefined });
+    expect((await store.reconcileActiveTimingForEngineDowntime()).shiftedTaskIds).toEqual([]);
+    await store.updateSettings({ engineLastActiveAt: new Date(t0.getTime() + 90 * 60_000).toISOString() });
+    expect((await store.reconcileActiveTimingForEngineDowntime()).shiftedTaskIds).toEqual([]);
+    await store.updateSettings({ engineLastActiveAt: new Date(t0.getTime() + 66 * 60_000).toISOString() });
+    expect((await store.reconcileActiveTimingForEngineDowntime()).shiftedTaskIds).toEqual([]);
+
+    await store.moveTask(second.id, "done");
+    await store.updateSettings({ engineLastActiveAt: new Date(t0.getTime() + 65 * 60_000).toISOString() });
+    const afterHeartbeat = await store.createTask({ description: "started after heartbeat" });
+    await store.moveTask(afterHeartbeat.id, "todo");
+    await store.moveTask(afterHeartbeat.id, "in-progress");
+    vi.setSystemTime(new Date(t0.getTime() + 70 * 60_000));
+    expect((await store.reconcileActiveTimingForEngineDowntime()).shiftedTaskIds).toEqual([]);
+  });
 });

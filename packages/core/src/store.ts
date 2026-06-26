@@ -5501,6 +5501,34 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     );
   }
 
+  async reconcileActiveTimingForEngineDowntime(now: Date = new Date()): Promise<{ shiftedTaskIds: string[]; downtimeMs: number }> {
+    const settings = await this.getSettings();
+    const heartbeatMs = Date.parse(settings.engineLastActiveAt ?? "");
+    const nowMs = now.getTime();
+    const thresholdMs = Math.max((settings.pollIntervalMs ?? 15_000) * 2, 60_000);
+    const downtimeMs = Number.isFinite(heartbeatMs) && Number.isFinite(nowMs) ? nowMs - heartbeatMs : 0;
+    if (!settings.engineLastActiveAt || downtimeMs <= thresholdMs) {
+      return { shiftedTaskIds: [], downtimeMs: Math.max(0, downtimeMs) };
+    }
+
+    const shiftedTaskIds: string[] = [];
+    const tasks = await this.listTasks({ column: "in-progress", includeArchived: false, slim: true });
+    for (const task of tasks) {
+      const startedMs = Date.parse(task.executionStartedAt ?? "");
+      if (!Number.isFinite(startedMs) || startedMs > heartbeatMs) continue;
+      const shiftedStartedMs = Math.min(nowMs, startedMs + downtimeMs);
+      if (shiftedStartedMs <= startedMs) continue;
+      /*
+      FNXC:TaskTiming 2026-06-25-00:00:
+      Engine-process downtime is proven only by a stale engineLastActiveAt heartbeat. Advance the current active segment anchor, but preserve firstExecutionAt and cumulativeActiveMs so wall-clock history and already-accrued active work remain intact.
+      */
+      await this.updateTask(task.id, { executionStartedAt: new Date(shiftedStartedMs).toISOString() });
+      shiftedTaskIds.push(task.id);
+    }
+
+    return { shiftedTaskIds, downtimeMs };
+  }
+
   // --- Unified PR entity (PR-lifecycle-as-workflow-nodes, U1) ---
 
   private rowToPrEntity(row: PrEntityRow): PrEntity {

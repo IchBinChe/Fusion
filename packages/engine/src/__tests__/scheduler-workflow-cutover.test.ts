@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeTransitionRejection, TransitionRejectionError, type Task, type TaskStore } from "@fusion/core";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
@@ -42,6 +42,7 @@ function storeWith(tasks: Task[], settings: Record<string, unknown> = {}): TaskS
       experimentalFeatures: { workflowColumns: false },
       ...settings,
     })),
+    updateSettings: vi.fn(async (patch: Record<string, unknown>) => ({ ...settings, ...patch })),
     updateTask: vi.fn(async (id: string, patch: Partial<Task>) => {
       const current = byId.get(id);
       if (current) Object.assign(current, patch);
@@ -71,6 +72,32 @@ describe("Scheduler workflow cutover", () => {
     vi.clearAllMocks();
     vi.mocked(existsSync).mockReturnValue(true);
     vi.mocked(readFile).mockResolvedValue("# Task\nBody");
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("writes the engine active heartbeat at most once per poll interval and skips while paused", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-25T00:00:00.000Z"));
+    const store = storeWith([], { pollIntervalMs: 15_000 });
+    const scheduler = new Scheduler(store, { onSchedule: vi.fn() });
+    (scheduler as unknown as { running: boolean }).running = true;
+
+    await scheduler.schedule();
+    await scheduler.schedule();
+    expect(store.updateSettings).toHaveBeenCalledTimes(1);
+    expect(store.updateSettings).toHaveBeenCalledWith({ engineLastActiveAt: "2026-06-25T00:00:00.000Z" });
+
+    vi.setSystemTime(new Date("2026-06-25T00:00:15.000Z"));
+    await scheduler.schedule();
+    expect(store.updateSettings).toHaveBeenCalledTimes(2);
+
+    vi.mocked(store.getSettings).mockResolvedValue({ maxConcurrent: 2, maxWorktrees: 4, pollIntervalMs: 15_000, enginePaused: true } as any);
+    vi.setSystemTime(new Date("2026-06-25T00:00:30.000Z"));
+    await scheduler.schedule();
+    expect(store.updateSettings).toHaveBeenCalledTimes(2);
   });
 
   it("uses the workflow sweep for todo pickup even when stale workflowColumns=false is persisted", async () => {

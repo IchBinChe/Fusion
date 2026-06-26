@@ -37,6 +37,24 @@ test("deriveBudgetMs: no fresh timing falls back to the per-class ceiling", () =
   );
 });
 
+test("the `changed` ceiling must sit below the engine's 15-min verification kill", () => {
+  // FNXC:TestInfrastructure 2026-06-26-13:05: a stale/missing timings snapshot
+  // makes deriveBudgetMs return the `changed` ceiling. That ceiling MUST stay
+  // under VERIFICATION_TIMEOUT_WORKSPACE_MS (900_000 = 15min in
+  // packages/engine/src/verification-utils.ts) so the script watchdog fails a
+  // runaway local affected lane itself (exit 124, no task restart) instead of
+  // letting the engine SIGKILL `pnpm test` and restart the whole task. If this
+  // assertion ever trips, lower CLASS_BUDGET_BANDS.changed.ceiling — do not
+  // raise the engine kill.
+  const ENGINE_VERIFICATION_KILL_MS = 900_000;
+  const ceiling = deriveBudgetMs({ klass: "changed", expectedDurationMs: 1000, timingsFresh: false });
+  assert.equal(ceiling, CLASS_BUDGET_BANDS.changed.ceiling);
+  assert.ok(
+    CLASS_BUDGET_BANDS.changed.ceiling < ENGINE_VERIFICATION_KILL_MS,
+    `changed ceiling ${CLASS_BUDGET_BANDS.changed.ceiling}ms must be < engine kill ${ENGINE_VERIFICATION_KILL_MS}ms`,
+  );
+});
+
 test("deriveBudgetMs: fresh timing tightens within the band", () => {
   // expected×multiplier between floor and ceiling → use the tightened value.
   // 300s × 3.5 = 1050s, which sits between the shard floor (15min) and

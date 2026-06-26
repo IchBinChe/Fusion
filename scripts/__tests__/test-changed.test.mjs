@@ -47,6 +47,11 @@ import {
   changedSourceFilesAffectingPackage,
   existingChangedTestFilesInPackage,
   GATE_COVERED_MEMORY_ENVELOPE_PACKAGES,
+  SCOPED_AFFECTED_MEMORY_ENVELOPES,
+  CORE_SCOPED_AFFECTED_PACKAGE,
+  CORE_SCOPED_AFFECTED_HEAP_MB,
+  CORE_SCOPED_AFFECTED_WORKERS,
+  createScopedAffectedMemoryEnvelopeEnv,
 } from "../test-changed.mjs";
 
 import { deriveBudgetMs } from "../lib/run-vitest-watchdog.mjs";
@@ -289,7 +294,7 @@ function assertScopedAffectedEnv(env, { heapMb, workers }) {
   assert.equal(env.HOME, "/tmp/fusion-home");
 }
 
-test("partitionScopedAffectedPackages: isolates dashboard and engine into separate envelope groups", () => {
+test("partitionScopedAffectedPackages: isolates core, dashboard, and engine into separate envelope groups", () => {
   assert.deepEqual(summarizeScopedAffectedGroups([DASHBOARD_SCOPED_AFFECTED_PACKAGE]), [
     {
       packages: [DASHBOARD_SCOPED_AFFECTED_PACKAGE],
@@ -298,19 +303,30 @@ test("partitionScopedAffectedPackages: isolates dashboard and engine into separa
     },
   ]);
 
-  assert.deepEqual(summarizeScopedAffectedGroups(["@fusion/core", DASHBOARD_SCOPED_AFFECTED_PACKAGE]), [
-    { packages: ["@fusion/core"], engineMemoryEnvelope: false, memoryEnvelopePackage: null },
+  // FNXC:TestInfrastructure 2026-06-26-12:40: @fusion/core is now its own
+  // memory-envelope group (no longer a regular package), so the wide-fan-out
+  // guard and bounded heap/worker env apply. Group order follows
+  // SCOPED_AFFECTED_MEMORY_ENVELOPES key order: engine, dashboard, core.
+  assert.deepEqual(summarizeScopedAffectedGroups([CORE_SCOPED_AFFECTED_PACKAGE, DASHBOARD_SCOPED_AFFECTED_PACKAGE]), [
     {
       packages: [DASHBOARD_SCOPED_AFFECTED_PACKAGE],
       engineMemoryEnvelope: false,
       memoryEnvelopePackage: DASHBOARD_SCOPED_AFFECTED_PACKAGE,
     },
+    {
+      packages: [CORE_SCOPED_AFFECTED_PACKAGE],
+      engineMemoryEnvelope: false,
+      memoryEnvelopePackage: CORE_SCOPED_AFFECTED_PACKAGE,
+    },
   ]);
 
   assert.deepEqual(
-    summarizeScopedAffectedGroups(["@fusion/core", DASHBOARD_SCOPED_AFFECTED_PACKAGE, ENGINE_SCOPED_AFFECTED_PACKAGE]),
+    summarizeScopedAffectedGroups([
+      CORE_SCOPED_AFFECTED_PACKAGE,
+      DASHBOARD_SCOPED_AFFECTED_PACKAGE,
+      ENGINE_SCOPED_AFFECTED_PACKAGE,
+    ]),
     [
-      { packages: ["@fusion/core"], engineMemoryEnvelope: false, memoryEnvelopePackage: null },
       {
         packages: [ENGINE_SCOPED_AFFECTED_PACKAGE],
         engineMemoryEnvelope: true,
@@ -321,12 +337,45 @@ test("partitionScopedAffectedPackages: isolates dashboard and engine into separa
         engineMemoryEnvelope: false,
         memoryEnvelopePackage: DASHBOARD_SCOPED_AFFECTED_PACKAGE,
       },
+      {
+        packages: [CORE_SCOPED_AFFECTED_PACKAGE],
+        engineMemoryEnvelope: false,
+        memoryEnvelopePackage: CORE_SCOPED_AFFECTED_PACKAGE,
+      },
     ],
   );
 
-  assert.deepEqual(summarizeScopedAffectedGroups(["@fusion/core", "@runfusion/fusion"]), [
-    { packages: ["@fusion/core", "@runfusion/fusion"], engineMemoryEnvelope: false, memoryEnvelopePackage: null },
+  // A genuinely regular package stays in the shared regular group; core splits out.
+  assert.deepEqual(summarizeScopedAffectedGroups([CORE_SCOPED_AFFECTED_PACKAGE, "@runfusion/fusion"]), [
+    { packages: ["@runfusion/fusion"], engineMemoryEnvelope: false, memoryEnvelopePackage: null },
+    {
+      packages: [CORE_SCOPED_AFFECTED_PACKAGE],
+      engineMemoryEnvelope: false,
+      memoryEnvelopePackage: CORE_SCOPED_AFFECTED_PACKAGE,
+    },
   ]);
+});
+
+test("@fusion/core is a wide-fan-out memory-envelope package but is NOT gate-covered", () => {
+  // It must be bounded (guard applies) ...
+  assert.ok(
+    Object.keys(SCOPED_AFFECTED_MEMORY_ENVELOPES).includes(CORE_SCOPED_AFFECTED_PACKAGE),
+    "core must be a memory-envelope package so the wide-fan-out guard runs only directly-changed core tests",
+  );
+  // ... yet must NOT claim gate coverage (the merge gate runs no core suite),
+  // so a delegated core lane warns loudly instead of reporting a false green.
+  assert.ok(
+    !GATE_COVERED_MEMORY_ENVELOPE_PACKAGES.has(CORE_SCOPED_AFFECTED_PACKAGE),
+    "core is not covered by the merge gate; delegation must warn, not reassure",
+  );
+});
+
+test("core scoped-affected env applies the bounded heap and single-worker envelope", () => {
+  const env = createScopedAffectedMemoryEnvelopeEnv(CORE_SCOPED_AFFECTED_PACKAGE, {
+    NODE_OPTIONS: "--trace-warnings",
+    HOME: "/tmp/fusion-home",
+  });
+  assertScopedAffectedEnv(env, { heapMb: CORE_SCOPED_AFFECTED_HEAP_MB, workers: CORE_SCOPED_AFFECTED_WORKERS });
 });
 
 test("createDashboardScopedAffectedEnv: caps heap, preserves env, lowers workers, and leaves watchdog finite", () => {

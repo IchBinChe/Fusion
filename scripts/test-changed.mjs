@@ -1317,13 +1317,45 @@ export function packageHasVitestConfig(pkgDir, projectRoot = rootDir) {
   return VITEST_CONFIG_BASENAMES.some((name) => existsSync(path.join(projectRoot, pkgDir, name)));
 }
 
+/*
+FNXC:TestInfrastructure 2026-06-26-13:05:
+Scoped-affected worker fan-out was raised 1 -> 4 (operator decision). It was 1
+purely for OOM safety (FN-6854/FN-6874: heavy affected lanes OS-OOM-SIGKILLed
+even at concurrency=1). Two things make 4 acceptable now: (1) the wide-fan-out
+guard below bounds each heavy lane to a few directly-changed test files, so the
+hundreds-of-files set that drove the OOM no longer reaches these workers; (2) the
+heap cap stays 6144MB PER WORKER, so this lane can now use up to ~4x6GB ≈ 24GB —
+fine on the 256GB host, but if a RAM-constrained CI runner OOM-SIGKILLs a heavy
+lane again, lower this back toward 1 (or drop the per-worker heap) rather than
+widening timeouts. This intentionally trades the FN-5048 "don't raise worker
+knobs" guidance for throughput, scoped to the bounded affected lanes only.
+*/
 export const ENGINE_SCOPED_AFFECTED_PACKAGE = "@fusion/engine";
 export const ENGINE_SCOPED_AFFECTED_HEAP_MB = "6144";
-export const ENGINE_SCOPED_AFFECTED_WORKERS = "1";
+export const ENGINE_SCOPED_AFFECTED_WORKERS = "4";
 export const DASHBOARD_SCOPED_AFFECTED_PACKAGE = "@fusion/dashboard";
 export const DASHBOARD_SCOPED_AFFECTED_HEAP_MB = "6144";
-export const DASHBOARD_SCOPED_AFFECTED_WORKERS = "1";
+export const DASHBOARD_SCOPED_AFFECTED_WORKERS = "4";
+export const CORE_SCOPED_AFFECTED_PACKAGE = "@fusion/core";
+export const CORE_SCOPED_AFFECTED_HEAP_MB = "6144";
+export const CORE_SCOPED_AFFECTED_WORKERS = "4";
 
+/*
+FNXC:TestInfrastructure 2026-06-26-12:40:
+`@fusion/core` is a memory-envelope/wide-fan-out package too — it was the
+remaining `pnpm test` timeout path after engine/dashboard were bounded. core is
+the hub nearly every package imports and has ~354 test files (db.test 21s,
+mission-store 16s, ...). A non-test core SOURCE edit (e.g. store.ts/db.ts) makes
+`vitest --changed` expand to ~the whole core suite at this real-git +
+sqlite-heavy lane and blow past the engine's 15-min verification kill, which then
+SIGKILLs `pnpm test` and RESTARTS the task — stacked 15-min timeouts. Listing
+core here makes `partitionScopedAffectedPackages` treat it as its own
+memory-envelope group so the wide-fan-out guard (run only directly-changed core
+test files, else delegate) and the bounded heap/worker env both apply. core is
+intentionally NOT in GATE_COVERED_MEMORY_ENVELOPE_PACKAGES (the gate runs no core
+suite), so a delegated core lane emits the loud "not covered by gate; run
+`pnpm test:full`" warning rather than a silent false-green.
+*/
 export const SCOPED_AFFECTED_MEMORY_ENVELOPES = Object.freeze({
   [ENGINE_SCOPED_AFFECTED_PACKAGE]: Object.freeze({
     packageName: ENGINE_SCOPED_AFFECTED_PACKAGE,
@@ -1334,6 +1366,11 @@ export const SCOPED_AFFECTED_MEMORY_ENVELOPES = Object.freeze({
     packageName: DASHBOARD_SCOPED_AFFECTED_PACKAGE,
     heapMb: DASHBOARD_SCOPED_AFFECTED_HEAP_MB,
     workers: DASHBOARD_SCOPED_AFFECTED_WORKERS,
+  }),
+  [CORE_SCOPED_AFFECTED_PACKAGE]: Object.freeze({
+    packageName: CORE_SCOPED_AFFECTED_PACKAGE,
+    heapMb: CORE_SCOPED_AFFECTED_HEAP_MB,
+    workers: CORE_SCOPED_AFFECTED_WORKERS,
   }),
 });
 
@@ -1359,7 +1396,7 @@ export function createScopedAffectedMemoryEnvelopeEnv(packageName, env = process
   if (!envelope) return env;
   /*
   FNXC:TestInfrastructure 2026-06-21-11:24:
-  The engine affected lane can select hundreds of real-git-heavy files when `vitest --changed` sees a widely imported boundary. Run that scoped lane in its own memory envelope: cap Node old-space like the dashboard heap runner and lower Vitest worker fan-out to one process so the lane returns a real pass/fail verdict instead of an OS OOM SIGKILL. Keep watchdog timing outside this env so hangs still fail through `runWithWatchdog`.
+  The engine affected lane can select hundreds of real-git-heavy files when `vitest --changed` sees a widely imported boundary. Run that scoped lane in its own memory envelope: cap Node old-space like the dashboard heap runner and bound Vitest worker fan-out (see SCOPED_AFFECTED_WORKERS) so the lane returns a real pass/fail verdict instead of an OS OOM SIGKILL. Keep watchdog timing outside this env so hangs still fail through `runWithWatchdog`.
 
   FNXC:TestInfrastructure 2026-06-21-16:28:
   FN-6874 showed the dashboard changed-mode affected lane can OOM/SIGKILL even with `FUSION_TEST_CONCURRENCY=1 FUSION_TEST_WORKSPACE_CONCURRENCY=1`, so worker fan-out alone is not the failure mode. Give each heavy scoped package its own bounded heap envelope while preserving caller env and keeping the finite changed-class watchdog outside this env so hangs still fail instead of being masked.

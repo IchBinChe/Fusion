@@ -84,6 +84,10 @@ function expectHorizontalTabScroller(ruleBlock: string, surface: string): void {
   expect(ruleBlock, `${surface} momentum-scroll`).toContain("-webkit-overflow-scrolling: touch;");
 }
 
+function expectTabTouchAction(ruleBlock: string, surface: string): void {
+  expect(ruleBlock, `${surface} touch-action`).toContain("touch-action: pan-x pan-y;");
+}
+
 describe("TaskDetailModal", () => {
   describe("mobile responsive structure", () => {
     it("keeps detail metadata as a single wrapping flex row without mobile column fallbacks", () => {
@@ -157,12 +161,20 @@ describe("TaskDetailModal", () => {
       const embeddedTabsBlock = getExactCssRuleBlock(css, ".task-detail-content--embedded .detail-tabs");
       const detailContentBlock = getCssRuleBlock(css, ".task-detail-content");
       const detailBodyBlock = getCssRuleBlock(css, ".detail-body");
-      const detailTabBlock = getCssRuleBlock(css, ".detail-tab");
+      const baseDetailTabsSection = css.slice(css.indexOf("/* === Detail Tabs === */"));
+      const detailTabBlock = getExactCssRuleBlock(baseDetailTabsSection, ".detail-tab");
+      const mobileTabBlock = getExactCssRuleBlock(mobileBlock, ".detail-tab");
+      const tabletTabBlock = getExactCssRuleBlock(tabletBlock, ".detail-tab");
+      const embeddedTabBlock = getExactCssRuleBlock(css, ".task-detail-content--embedded .detail-tab");
 
       expectHorizontalTabScroller(baseTabsBlock, "base .detail-tabs");
       expectHorizontalTabScroller(mobileTabsBlock, "mobile .detail-tabs");
       expectHorizontalTabScroller(tabletTabsBlock, "tablet .detail-tabs");
       expectHorizontalTabScroller(embeddedTabsBlock, "embedded .detail-tabs");
+      expectTabTouchAction(detailTabBlock, "base .detail-tab");
+      expectTabTouchAction(mobileTabBlock, "mobile .detail-tab");
+      expectTabTouchAction(tabletTabBlock, "tablet .detail-tab");
+      expectTabTouchAction(embeddedTabBlock, "embedded .detail-tab");
       expect(baseTabsBlock).toContain("min-width: 0;");
       expect(mobileTabsBlock).toContain("min-width: 0;");
       expect(detailTabBlock).toContain("flex-shrink: 0;");

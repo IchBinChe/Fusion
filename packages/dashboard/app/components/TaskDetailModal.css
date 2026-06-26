@@ -1025,6 +1025,10 @@ FN-6500 fixes a tablet regression from FN-5599: the task-detail overlay offset a
     touch-action: pan-x pan-y;
     -webkit-overflow-scrolling: touch;
   }
+
+  .detail-tab {
+    touch-action: pan-x pan-y;
+  }
 }
 
 @media (max-width: 768px) {
@@ -1131,6 +1135,10 @@ Embedded in the full-width board-card panel the detail content must be width-bou
   overscroll-behavior-inline: contain;
   touch-action: pan-x pan-y;
   -webkit-overflow-scrolling: touch;
+}
+
+.task-detail-content--embedded .detail-tab {
+  touch-action: pan-x pan-y;
 }
 
 /* The gray header row must wrap (task id left, Back-to-board right) instead of overflowing on narrow panels. */
@@ -1940,6 +1948,9 @@ Remove the divider between the tab selector and the detail area below. Keep the 
 
 FNXC:TaskDetailTabs 2026-06-25-16:55:
 Task-detail tabs must remain reachable as a one-row horizontal scroller on mobile across the Board modal and List embedded pane. The tab strip is the scroller, opts out of the global mobile pan-y lock with pan-x pan-y, and keeps tab children non-shrinking so conditional and plugin tabs overflow-scroll instead of clipping or compressing.
+
+FNXC:TaskDetailTabs 2026-06-26-00:35:
+`touch-action` is not inherited, so the tab buttons must also opt into pan-x because they are the real touch targets. A container-only opt-in leaves touches that start on a `.detail-tab` under the global mobile `* { touch-action: pan-y; }` lock and blocks horizontal swipes.
 */
 .detail-tabs {
   display: flex;
@@ -1958,6 +1969,7 @@ Task-detail tabs must remain reachable as a one-row horizontal scroller on mobil
 
 .detail-tab {
   flex-shrink: 0;
+  touch-action: pan-x pan-y;
   padding: var(--space-sm) var(--space-lg);
   background: none;
   border: none;
@@ -2042,6 +2054,7 @@ Task-detail tabs must remain reachable as a one-row horizontal scroller on mobil
 
   .detail-tab {
     min-height: 36px;
+    touch-action: pan-x pan-y;
   }
 
   .detail-source-grid,
@@ -2150,6 +2163,7 @@ Task-detail tabs must remain reachable as a one-row horizontal scroller on mobil
   }
 
   .detail-tab {
+    touch-action: pan-x pan-y;
     padding: var(--space-sm) var(--space-md);
     font-size: 13px;
   }

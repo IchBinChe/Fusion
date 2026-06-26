@@ -69,13 +69,13 @@ Prompt overrides are stored per `(workflowId, nodeId, projectId)`. At runtime Fu
 1. the stored override for that workflow/node/project, when present and non-empty; otherwise
 2. the shipped prompt text from the built-in workflow IR.
 
-This same overlay is used by the dashboard preview, seam prompt resolution during live task runs, synchronous workflow IR resolution used by lifecycle movement, and workflow-step materialization for non-seam prompt/gate nodes. Empty or whitespace-only prompt edits are treated as reset/delete operations, never as blank prompts.
+This same overlay is used by the dashboard preview, seam prompt resolution during live task runs, synchronous workflow IR resolution used by lifecycle movement, and optional-group gate materialization for non-seam prompt/gate nodes. Empty or whitespace-only prompt edits are treated as reset/delete operations, never as blank prompts.
 
 Use **Reset to default** on an overridden prompt to delete the stored override and return to the shipped built-in prompt. Duplicating a built-in remains the path when you need to change topology, columns, traits, settings declarations, or non-prompt configuration.
 
 ## Workflow IR (v1)
 
-Fusion also defines a separate **Workflow Intermediate Representation (IR)** contract in `@fusion/core` for editor↔interpreter graph exchange. This IR is distinct from the post-implementation quality gates documented on this page (`WorkflowStep` templates and execution policies). For the user-facing visual authoring surface, see the [Workflow Editor guide](./workflow-editor.md).
+Fusion also defines a separate **Workflow Intermediate Representation (IR)** contract in `@fusion/core` for editor↔interpreter graph exchange. The post-implementation quality gates documented on this page are themselves IR constructs now — `optional-group` graph nodes — rather than a separate execution subsystem. For the user-facing visual authoring surface, see the [Workflow Editor guide](./workflow-editor.md).
 
 Workflow IR v1 is a JSON-safe graph document:
 
@@ -105,7 +105,7 @@ The engine remains the substrate for scheduler dispatch, routing claims, persist
 
 The default built-in catalog entry `builtin:coding` is backed by the canonical `BUILTIN_CODING_WORKFLOW_IR`, which is also the resolver/runtime fallback for tasks with no workflow selection or an explicit default selection. Missing/corrupt explicit custom selections fail closed as workflow-resolution failures instead of silently running the default. The built-in IR encodes the legacy lifecycle path as graph stages, with merge represented by workflow-native policy primitives rather than a single linear merge seam:
 
-- `triage/planning` → `execute` → `workflow-step` → `review` → `merge-gate` / branch-group integration / `merge-attempt` / retry or manual hold → `end`
+- `triage/planning` → `execute` → `optional-group` quality gates → `review` → `merge-gate` / branch-group integration / `merge-attempt` / retry or manual hold → post-merge `optional-group` gates → `end`
 
 `builtin:stepwise-coding` is a separate graph variant backed by `BUILTIN_STEPWISE_CODING_WORKFLOW_IR`; it keeps the same lifecycle columns/traits while modeling per-step parse/execute/review/rework as authored graph structure.
 
@@ -132,7 +132,7 @@ FN-5769 evaluated whether those conventions required a `1.1.0` schema bump and r
 
 ### Workflow IR v2 — columns, traits, hold & split/join nodes
 
-The `workflowColumns` track introduces **IR v2** (`version: "v2"`), where a workflow additionally defines its own **columns** (`{ id, name, traits: [{ trait, config }] }`), places nodes in columns (`node.column`), and gains `hold`, `split`, and `join` node kinds. Columns become first-class, workflow-defined task state carrying composable **traits** (declarative flags + lifecycle hooks); this generalizes the fixed pipeline + the `gateMode` semantics documented below into per-column trait configuration. v1 graphs still parse and upgrade by synthesizing default-workflow columns. The column/trait model — the trait vocabulary, the substrate/policy line, the transition authority, and the graduation gate — is documented in **`docs/architecture.md` § 9 "Workflow-defined columns & traits"** and the **Concepts** glossary (column, trait, lane, hold node, split/join, default workflow, `transitionPending`). The whole v2 model is gated behind `experimentalFeatures.workflowColumns`; with the flag off, the v1 IR and the quality-gate `WorkflowStep` model below are unchanged.
+The `workflowColumns` track introduces **IR v2** (`version: "v2"`), where a workflow additionally defines its own **columns** (`{ id, name, traits: [{ trait, config }] }`), places nodes in columns (`node.column`), and gains `hold`, `split`, and `join` node kinds. Columns become first-class, workflow-defined task state carrying composable **traits** (declarative flags + lifecycle hooks); this generalizes the fixed pipeline + the `gateMode` semantics documented below into per-column trait configuration. v1 graphs still parse and upgrade by synthesizing default-workflow columns. The column/trait model — the trait vocabulary, the substrate/policy line, the transition authority, and the graduation gate — is documented in **`docs/architecture.md` § 9 "Workflow-defined columns & traits"** and the **Concepts** glossary (column, trait, lane, hold node, split/join, default workflow, `transitionPending`). The whole v2 model is gated behind `experimentalFeatures.workflowColumns`; with the flag off, the v1 IR and the graph-native quality-gate model below are unchanged.
 
 ### Workflow IR v2 — per-column agent assignment
 
@@ -238,19 +238,32 @@ Notification delivery is intentionally best-effort: a missing/unconfigured notif
 
 Workflows declare typed task fields via IR `fields: [{ id, name, type, required?, default?, options?, render? }]` (`type ∈ string | text | number | boolean | enum | multi-enum | date | url`; `options` for enum kinds; `render.placement ∈ card | detail | detail-section`, `render.widget`, `render.badge`). Values live in `tasks.customFields` and are validated through a single store authority (`updateTaskCustomFields`) with typed rejections (offending `fieldId` + `code`). Editing or switching a workflow **orphans** (never destroys) values for removed/incompatible fields — orphans are retained and shown under a detail disclosure. The task UI renders the schema dynamically (detail-form widgets by type, up to 3 card badges by placement). Agents read/write fields via `fn_task_update`'s `custom_fields` patch; authors set them via `fn_workflow_create/update`. Field values are surfaced in task/session context.
 
-#### Workflow-declared optional steps
+#### Workflow-declared optional steps (`optional-group` nodes)
 
-Workflows can advertise optional workflow-step templates with `optionalSteps: [{ templateId, defaultOn? }]`. This IR facet is execution-inert: the graph executor does not run or route on `optionalSteps` directly. Instead, the create and task-detail workflow UIs resolve each `templateId` against built-in and plugin-contributed `WorkflowStepTemplate` metadata, show toggleable rows, and persist the selected template ids through the existing per-task `enabledWorkflowSteps` contract.
+<!--
+FNXC:WorkflowOptionalGroup 2026-06-26-15:00:
+FN-7039 retired the declaration-based optional-steps model (`WorkflowOptionalStep` / the `optionalSteps` IR field). Optional quality gates are now first-class graph `optional-group` NODES; per-task enablement reuses `enabledWorkflowSteps` keyed by the group NODE ID (not a template id). Docs must describe the node model, not the deleted declaration facet.
+-->
 
-`defaultOn` is optional and seeds the UI toggle when a task is created or edited before the task has made its own selection. Unknown or removed template ids are skipped during resolution so stale declarations do not render blank controls or break workflow loading.
+Optional quality gates are authored directly in the workflow graph as `optional-group` **nodes**. An `optional-group` node is a container (mirroring `foreach`/`loop`) whose `template` subgraph the executor runs **once** when the group is enabled for the task, and passes through (skips) when disabled. There is no iteration and no rework budget — a single pass — and rework edges inside the template are rejected by `validateOptionalGroup`.
 
-Create-time optional-step controls appear in the quick-add action row and the **New Task** dialog inline quick buttons for the active workflow. Workflows with no optional steps render no trigger, and selected ids are submitted through `enabledWorkflowSteps` when the task is created.
+Node config (`WorkflowOptionalGroupConfig`): `{ name?, defaultOn?, phase?: "pre-merge" | "post-merge", template: { nodes, edges } }`.
 
-The built-in coding workflow (`builtin:coding`) declares `browser-verification` as an optional step. It remains opt-in by default, so browser verification only runs for tasks whose `enabledWorkflowSteps` includes `browser-verification`.
+- `defaultOn` seeds the per-task enable set at task creation; operators can still toggle it.
+- `phase` defaults to `"pre-merge"` (the prior, only behavior). `"post-merge"` marks a group the executor runs after a successful merge (see [Execution Phases](#execution-phases)).
+- Enable state lives on the per-task `enabledWorkflowSteps` array, keyed by the **group node id** (for example `browser-verification`, `code-review`). The graph executor runs an optional-group node only when its id is present in `enabledWorkflowSteps`.
+
+Built-in optional gates ship as inlined IR builders, not as a template catalog:
+
+- `builtin:coding` carries the `browser-verification` optional-group node (`builtin-browser-verification-group.ts`), opt-in by default, so browser verification runs only for tasks whose `enabledWorkflowSteps` includes `browser-verification`.
+- The `code-review` optional-group node (`builtin-code-review-group.ts`) is the inlined code-review gate.
+- A workflow (for example compound-engineering) can add a **post-merge** optional-group node via the generic `postMergeOptionalGroupNode(...)` builder (`builtin-post-merge-group.ts`) — e.g. a `document` step that runs after merge.
+
+Create-time optional-step controls appear in the quick-add action row and the **New Task** dialog inline quick buttons for the active workflow. They resolve the workflow's optional-group nodes (plus plugin-contributed palette templates, see [Plugin-Contributed Steps](#plugin-contributed-steps)) into toggleable rows. Workflows with no optional groups render no trigger, and the selected node ids are submitted through `enabledWorkflowSteps` when the task is created. Unknown or removed ids are skipped during resolution so stale selections never render blank controls or break workflow loading.
 
 ## What They Are
 
-A workflow step is a reusable check (AI prompt or script) that can be enabled on tasks.
+A workflow step is a reusable quality gate (AI prompt or script) that can be enabled on tasks. Each gate is an `optional-group` node in the workflow graph; the graph executor runs it and records the outcome onto the task. There is no separate workflow-step execution engine, no `workflow_steps` table, and no step CRUD surface — everything is graph-native.
 
 Common use cases:
 
@@ -263,12 +276,19 @@ Common use cases:
 
 ## Execution Phases
 
-Workflow steps run in one of two phases:
+<!--
+FNXC:WorkflowPostMerge 2026-06-26-15:00:
+FN-7039 (U7b/U7c) made post-merge graph-native and deleted the legacy merger post-merge path (`runPostMergeWorkflowSteps`). `graphNativePostMerge` is DEFAULT-ON; the graph is the SOLE owner of post-merge execution. Docs must not describe a "merger-owned" post-merge path.
+-->
 
-- **Pre-merge** (default): runs before merge/finalization; failure blocks completion
-- **Post-merge**: runs after successful merge; failure is logged but non-blocking
+An `optional-group` node's `phase` config selects one of two phases:
 
-> **Note on Fast Mode:** When a task has `executionMode: "fast"`, pre-merge workflow steps are bypassed entirely during executor completion on both the legacy path and the workflow graph executor path. Custom graph pre-merge prompt/script/gate validation nodes are skipped as the graph equivalent of pre-merge workflow steps. Post-merge workflow steps remain active and run normally (post-merge is merger-owned and unaffected by execution mode).
+- **Pre-merge** (default): runs before merge/finalization; a gate failure blocks completion.
+- **Post-merge**: runs after a successful merge; failure is logged/recorded but non-blocking.
+
+Post-merge runs **graph-native**: after a successful merge the executor continues traversal to any post-merge optional-group node reachable from the merge region (and to plain post-merge nodes that follow a `seam:"merge"` node), running it via the same optional-group execution + recording path with `phase: "post-merge"` and non-blocking failures. This is gated by `experimentalFeatures.graphNativePostMerge`, which is **default-ON** and is now the single owner of post-merge execution — the legacy merger-owned post-merge path was deleted, so there is no fallback and post-merge work runs exactly once via the graph.
+
+> **Note on Fast Mode:** When a task has `executionMode: "fast"`, pre-merge optional-group gates are bypassed entirely during executor completion on the workflow graph executor path (custom pre-merge prompt/script/gate validation nodes are skipped too). Post-merge steps remain active and run normally (post-merge is unaffected by execution mode).
 
 ## Execution Modes
 
@@ -299,75 +319,77 @@ Use `toolMode: "coding"` for any prompt step that must modify files, run shell c
 
 ## Gate Modes
 
-Workflow steps also have a `gateMode`:
+A gate node also has a `gateMode`:
 
 - **`gate`**: failures block merge/completion and follow normal remediation/retry flows.
 - **`advisory`**: failures are recorded as `advisory_failure` and shown as polish feedback, but never block merge.
 
 Defaults:
-- all steps → `advisory` (advisory-by-default per FN-4368; opt in to `gate` per step in **Settings → Workflow Steps**).
+- gates are `advisory` by default (advisory-by-default per FN-4368); opt in to `gate` by setting the node's `gateMode` in the [Workflow Editor](./workflow-editor.md).
 
-## Built-In Templates (7)
+## Built-In Quality Gates
 
-Fusion ships seven templates:
+<!--
+FNXC:WorkflowStepTemplate 2026-06-26-15:00:
+FN-7039 (U6) DELETED the `WORKFLOW_STEP_TEMPLATES` built-in catalog array (the former 7-template value export). Built-in gates are now inlined IR optional-group node builders. Docs keep the conceptual list of gate kinds but must not reference the deleted array/catalog.
+-->
 
-1. Documentation Review
-2. QA Check
-3. Security Audit
-4. Performance Review
-5. Accessibility Check
-6. Browser Verification
-7. Frontend UX Design
+The built-in quality gates ship as inlined `optional-group` node builders in `@fusion/core`, not as a template catalog (the former `WORKFLOW_STEP_TEMPLATES` array was removed):
 
-All seven built-in templates emit the structured `{"verdict":"APPROVE|APPROVE_WITH_NOTES|REVISE","notes":"..."}` envelope introduced in FN-4367 (final line JSON only). The legacy `REQUEST REVISION` prose path remains as a backward-compatible fallback. See [Prompt-mode Structured Verdict Contract](#prompt-mode-structured-verdict-contract).
+- **Browser Verification** (`browser-verification`, `builtin-browser-verification-group.ts`) — browser-automation-style checks for UI validation flows; an optional-group node on `builtin:coding`.
+- **Code Review** (`code-review`, `builtin-code-review-group.ts`) — the inlined code-review gate.
 
-The **Browser Verification** template uses browser automation style checks and is designed for UI validation flows.
+Plugin-contributed gate kinds (documentation review, QA, security audit, performance, accessibility, frontend UX design, etc.) can still be supplied as palette templates; see [Plugin-Contributed Steps](#plugin-contributed-steps).
 
-The **Frontend UX Design** template verifies visual polish and consistency with existing UI patterns and design tokens, including visual hierarchy, spacing/typography consistency, color/token consistency, component reuse, responsive behavior, and fit with existing design language.
-
-> **FN-3906 + FN-4343 auto-skip behavior:** The pre-merge orchestrator auto-skips the built-in `frontend-ux-design` step before pause/defer checks when workflow relevance signals show no frontend/UI scope. It now evaluates both (1) the task diff scope and (2) declared `## File Scope` from `PROMPT.md`. Scope relevance includes extensions (`.tsx`, `.jsx`, `.vue`, `.svelte`, `.astro`, `.html`, `.css`, `.scss`, `.sass`, `.less`, `.styl`), common UI path segments (`/components/`, `/app/components/`, `/dashboard/`, `/frontend/`, `/ui/`, `/styles/`, `/themes/`, `/design-system/`, `/design-tokens/`), and token/theme filenames (`tokens.(ts|js|json|css)`, `theme.(ts|js|json|css)`). If both signals are empty (or capture fails), Fusion preserves legacy behavior and runs the step.
+Built-in gate prompts emit the structured `{"verdict":"APPROVE|APPROVE_WITH_NOTES|REVISE","notes":"..."}` envelope (final line JSON only). The legacy `REQUEST REVISION` prose path remains as a backward-compatible fallback. See [Prompt-mode Structured Verdict Contract](#prompt-mode-structured-verdict-contract).
 
 ## Plugin-Contributed Steps
 
-Installed plugins can also provide **workflow step templates** that you enable from **Settings → Workflow Steps**, just like Fusion’s built-in quality gates.
+Installed plugins can provide **workflow step templates** that act as the workflow editor's optional-group **palette**. `GET /api/workflow-step-templates` now serves **plugin-contributed templates only** (the built-in catalog was removed) and the editor projects each palette template into an `optional-group` node you drop into a workflow graph.
 
-Plugin-contributed templates appear in the same workflow-step chooser/UI as built-ins. In that chooser, plugin entries are labeled/grouped as plugin-contributed (including plugin attribution in the template metadata) so you can distinguish them from Fusion-provided templates.
+Plugin entries are labeled/grouped as plugin-contributed (including plugin attribution in the template metadata) so you can distinguish them from Fusion's inlined built-in gates.
 
-Once added, plugin-contributed workflow steps behave like other steps: they support the same `prompt` or `script` execution modes, `pre-merge` or `post-merge` phases, and `defaultOn` behavior for new tasks.
+A palette template still carries the same `prompt` or `script` mode, `pre-merge` or `post-merge` phase, and `defaultOn` behavior; once projected into a workflow it executes exactly like any other optional-group gate.
 
 For plugin installation and authoring details, see the [Plugin Authoring Guide](./PLUGIN_AUTHORING.md) (Section 16: Registering Workflow Steps).
 
-## Creating Workflow Steps in the Dashboard
+## Authoring a Custom Quality Gate
 
-From **Settings → Workflow Steps**, clicking **Add Workflow Step** now opens a chooser first:
+<!--
+FNXC:WorkflowStepCRUD 2026-06-26-15:00:
+FN-7039 (U5/U6) deleted the Settings → Workflow Steps manager and its CRUD routes. Custom gates are now authored as optional-group graph nodes in the Workflow Editor. Docs must point at the editor, not a Settings form.
+-->
 
-- **Built-in templates** are shown immediately so you can add review/QA steps with one click
-- **Custom workflow step** opens the manual form for fully custom prompt/script steps
+There is no longer a Settings → Workflow Steps manager or step CRUD form. To add a custom quality gate, open the [Workflow Editor](./workflow-editor.md), duplicate a built-in (or edit a custom workflow), and add an `optional-group` node:
 
-The custom path is always available, even while templates are still loading or if template loading fails.
+- Set the node's `name`, `defaultOn`, and `phase` (`pre-merge` / `post-merge`).
+- Author the gate inside the node's `template` subgraph as `prompt`/`script`/`gate` nodes (single pass, no rework edges).
+- Tasks enable the gate by its node id via `enabledWorkflowSteps` (seeded from `defaultOn` and toggled at task creation).
+
+Plugin palette templates (above) can be dropped in as a starting point instead of authoring a node from scratch.
 
 ## Model Overrides for Prompt Steps
 
-A prompt-mode workflow step can set its own model with:
+A prompt-mode gate node can set its own model with:
 
 - `modelProvider`
 - `modelId`
 
-If both are set, step execution uses that model; otherwise it falls back to default model selection. Dashboard node summaries show that unpinned prompt-step state as **Default model**.
+If both are set, node execution uses that model; otherwise it falls back to default model selection. Dashboard node summaries show that unpinned prompt-node state as **Default model**.
 
 ## Default-On Behavior for New Tasks
 
-Workflow step definitions support `defaultOn`.
+`optional-group` nodes support `defaultOn`.
 
-When `defaultOn: true`, the step is preselected automatically for newly created tasks (users can still deselect it).
+When `defaultOn: true`, the gate is preselected automatically for newly created tasks (users can still deselect it).
 
 ## Workflow Step Revision Loop
 
-Workflow steps can request implementation revisions instead of just blocking completion.
+A gate can request implementation revisions instead of just blocking completion. The revision/remediation flow runs through the **graph executor**, which calls the same executor revision primitives described below (the legacy `runWorkflowSteps` loop that previously owned this flow was deleted).
 
 ### How It Works
 
-Prompt-mode workflow step output is parsed in this order:
+Prompt-mode gate output is parsed in this order:
 
 1. Structured JSON verdict (`parseWorkflowStepVerdict`)
 2. Legacy prose fallback (`inferWorkflowStepVerdictFromProse`)
@@ -456,14 +478,18 @@ By default this split-and-fork behavior is enabled through the project setting `
 
 ### End-of-step file-scope invariant for prompt pre-merge steps (FN-4343)
 
-After each successful **prompt-mode pre-merge** workflow step, Fusion runs a scope invariant check on files newly touched by that step (committed delta plus uncommitted working-tree edits):
+<!--
+FNXC:WorkflowScopeLeak 2026-06-26-15:00:
+KNOWN FOLLOW-UP: the FN-4343 per-step end-of-step scope-leak invariant (and its `workflowStepScopeEnforcement` setting) has NOT yet been replicated on the graph-native optional-group execution path. The setting is still declared and round-trips, but the graph executor does not run the per-step invariant. Merge-time File Scope enforcement (`FileScopeViolationError`, squash overlap) is a separate gate and is unaffected.
+-->
 
-- If declared `## File Scope` is empty, the invariant is skipped.
-- If task `scopeOverride === true`, the invariant is bypassed (same semantics as merge-time scope enforcement).
-- If touched files have zero overlap with declared scope, Fusion emits a scope-leak log and applies `workflowStepScopeEnforcement`:
-  - `"block"` (default): mark the workflow step `failed`, request revision, and route through the normal executor revision loop.
-  - `"warn"`: log the violation but allow the step to pass.
-  - `"off"`: disable this pre-merge workflow-step invariant entirely.
+> **Known follow-up (not yet on the graph path):** The original FN-4343 per-step invariant ran after each successful prompt-mode pre-merge workflow step under the legacy `runWorkflowSteps` loop. That loop was deleted in the graph-native cutover, and this per-step invariant has **not yet been replicated** on the optional-group graph path. The `workflowStepScopeEnforcement` setting (`"block"` / `"warn"` / `"off"`, default `"block"`) is still declared and round-trips, but the graph executor does not currently enforce it per step. Merge-time File Scope enforcement (`FileScopeViolationError` and squash/file-scope overlap) is a separate gate and is **unaffected** — off-scope writes are still caught at merge.
+
+The original (legacy) invariant evaluated files newly touched by a prompt-mode pre-merge step (committed delta plus uncommitted working-tree edits):
+
+- If declared `## File Scope` was empty, the invariant was skipped.
+- If task `scopeOverride === true`, it was bypassed (same semantics as merge-time scope enforcement).
+- If touched files had zero overlap with declared scope, it emitted a scope-leak log and applied `workflowStepScopeEnforcement` (`"block"` → mark `failed` + request revision; `"warn"` → log and pass; `"off"` → disable).
 
 ### Executor `fn_task_done` scope-leak guard for Plan-Only tasks (FN-4482)
 
@@ -494,7 +520,7 @@ Not all workflow failures are revision requests:
 
 #### Pre-merge hard failure remediation flow
 
-For pre-merge workflow hard failures, executor behavior is (gate-mode steps):
+For pre-merge gate hard failures, the graph executor drives remediation through the executor primitives (gate-mode nodes):
 
 1. Retry the failing check up to `MAX_WORKFLOW_STEP_RETRIES` within the same execution lifecycle
 2. On retry exhaustion, add a steering comment with failure details and inject a `Workflow Step Failure` section into `PROMPT.md`
@@ -528,15 +554,24 @@ Advisory failures are intentionally excluded from merge blocking and auto-revive
 
 ## Viewing Results
 
+<!--
+FNXC:WorkflowStepResults 2026-06-26-15:00:
+Results now live on `task.workflowStepResults` (written by the graph executor, keyed by optional-group node id). The persisted `status` union is pending/passed/failed/advisory_failure/skipped; the UI derives a `running` display state from a `pending` entry with `startedAt` and no `completedAt`.
+-->
+
+Gate results are recorded on the task's **`workflowStepResults`** field (`WorkflowStepResult[]`), written by the graph executor and keyed by the optional-group node id. Each entry carries `status`, optional `verdict`, `notes`, `output`, and `phase`. The unified progress bar and the Workflow tab read this field directly.
+
+The persisted `status` values are `pending`, `passed`, `failed`, `advisory_failure`, and `skipped`. The verdict→status mapping is: `APPROVE` / `APPROVE_WITH_NOTES` → `passed`; an advisory `REVISE` (success outcome) → `advisory_failure` (non-blocking); a gate `REVISE` or hard failure → `failed`. The UI derives an additional **`running`** display state from a `pending` entry that has a `startedAt` and no `completedAt`. Advisory failures (`advisory_failure`) are shown as polish feedback and never block merge; only `failed` blocks.
+
 Workflow status is visible in multiple places:
 
-- **Task cards**: workflow checks are shown after normal implementation steps in the step list; each workflow row uses the compact `workflow` badge label (while still retaining pre/post-merge styling semantics) and progress counts include both implementation and workflow checks
+- **Task cards**: gate checks are shown after normal implementation steps in the step list; each workflow row uses the compact `workflow` badge label (while still retaining pre/post-merge styling semantics) and progress counts include both implementation and workflow checks
 - **List view (desktop + mobile)**: progress labels/bars use the same unified step model as task cards
 - **Task detail modal**: includes a **Workflow** tab when workflow data exists
 
 In the Workflow tab, you can inspect:
 
-- pass/fail/skipped/running status
+- pending/running/passed/advisory_failure/failed/skipped status
 - outputs/findings
 - timing metadata
 
@@ -576,7 +611,8 @@ Prompt-mode workflow agents should emit a trailing JSON object:
 Workflow graph execution is the task lifecycle runtime. `TaskExecutor` pins `workflowGraphExecutor` for the run and unselected tasks resolve to `builtin:coding`.
 
 Default node dispatch:
-- `prompt` / `script` nodes with `config.seam` dispatch through workflow runtime primitives (`planning`, `execute`, `workflow-step`, `review`, `merge`, `schedule`, `step-execute`)
+- `prompt` / `script` nodes with `config.seam` dispatch through workflow runtime primitives (`planning`, `execute`, `review`, `merge`, `schedule`, `step-execute`). The legacy `workflow-step` seam/primitive was removed in FN-7039 — quality gates are graph nodes now, and an IR node still declaring `config.seam: "workflow-step"` fails loudly rather than silently skipping.
+- `optional-group` nodes run their template subgraph once when enabled for the task (per `enabledWorkflowSteps`) and pass through when disabled; the executor records the outcome onto `task.workflowStepResults`
 - `step-review`, `parse-steps`, `code`, `notify`, and PR nodes use their dedicated primitive/dependency adapters
 - `gate` nodes evaluate context-key expectations or run configured executable checks
 
@@ -594,7 +630,7 @@ Coverage includes lifecycle ordering, primitive invocation, merge/file-scope fai
 
 `TaskExecutor.execute()` gives graph routing first claim. The graph runtime resolves a workflow selection, using `builtin:coding` for unselected/default tasks, failing closed for missing explicit custom workflows, and parking interpreter failures as workflow failures instead of re-running the old imperative lifecycle.
 
-The legacy seam adapter remains as a compatibility layer for older tests and callers, but authoritative node execution uses `WorkflowRuntimePrimitives`. The built-in coding workflow now includes explicit planning and pre-merge workflow-step gates before review/merge.
+Authoritative node execution uses `WorkflowRuntimePrimitives`. The built-in coding workflow includes explicit planning and pre-merge gate nodes (as `optional-group` nodes such as `browser-verification`) before review/merge.
 
 Reliability invariants preserved under authoritative mode:
 - file-scope enforcement including `FileScopeViolationError`
@@ -607,15 +643,19 @@ The interaction backstop lives in `packages/engine/src/__tests__/reliability-int
 
 ## Workflow Step APIs
 
+<!--
+FNXC:WorkflowStepCRUD 2026-06-26-15:00:
+FN-7039 (U5/U6) DELETED the workflow-step CRUD REST surface: `GET/POST/PATCH/DELETE /api/workflow-steps`, `/api/workflow-steps/:id/refine`, `/api/workflow-step-templates/:id/create`, and the `migrateLegacyWorkflowSteps` route are gone (the `workflow_steps` table was dropped in migration 131). Only the plugin-template palette endpoints remain. Do not re-document the removed routes as live.
+-->
+
+The legacy workflow-step CRUD routes were removed — quality gates are graph nodes authored in the [Workflow Editor](./workflow-editor.md), not REST-managed records. Only the plugin-contributed palette endpoints remain:
+
 | Endpoint | Purpose |
 |---|---|
-| `GET /api/workflow-steps` | List workflow steps |
-| `POST /api/workflow-steps` | Create workflow step |
-| `PATCH /api/workflow-steps/:id` | Update step |
-| `DELETE /api/workflow-steps/:id` | Delete step |
-| `POST /api/workflow-steps/:id/refine` | AI-refine prompt |
-| `GET /api/workflow-step-templates` | List built-in templates |
-| `POST /api/workflow-step-templates/:id/create` | Materialize template as workflow step |
+| `GET /api/workflow-step-templates` | List plugin-contributed step templates (the editor's optional-group palette); the built-in catalog was removed, so this serves plugin templates only |
+| `GET /api/plugin-workflow-step-templates` | Same plugin templates with full palette metadata (plugin attribution) |
+
+Per-task gate enablement is not a REST CRUD surface: it is the `enabledWorkflowSteps` array on the task (optional-group node ids), set at create time and via task update.
 
 ## Workflow Settings
 
@@ -647,6 +687,6 @@ Authoring surfaces:
 
 ## Screenshot
 
-![Workflow step manager](./screenshots/workflow-steps.png)
+![Workflow quality-gate results](./screenshots/workflow-steps.png)
 
 See also: [Task Management](./task-management.md) and [Settings Reference](./settings-reference.md).

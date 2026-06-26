@@ -441,7 +441,7 @@ Default notes:
 | `autoResolveConflicts` | `boolean` | `true` | Enable automatic merge conflict resolution. |
 | `smartConflictResolution` | `boolean` | `true` | Alias/preferred flag for smart conflict handling. |
 | `mergerAutostashMaxAgeHours` | `number` | `24` | Maximum autostash age in hours before startup/periodic stale-stash sweep drops `fusion-merger-autostash:*` leftovers (minimum `1`). |
-| `workflowStepScopeEnforcement` | `"block" \| "warn" \| "off"` | `"block"` | Controls pre-merge **prompt-mode workflow-step** file-scope enforcement. `block` requests revision on off-scope writes, `warn` logs and passes, `off` disables the check. Task-level `scopeOverride` bypasses this check. |
+| `workflowStepScopeEnforcement` | `"block" \| "warn" \| "off"` | `"block"` | Intended to control pre-merge **prompt-mode** per-step file-scope enforcement (`block` requests revision on off-scope writes, `warn` logs and passes, `off` disables; `scopeOverride` bypasses). **Known follow-up:** the FN-4343 per-step invariant this setting drove ran under the legacy `runWorkflowSteps` loop, which was deleted in the graph-native cutover — the setting is still declared and round-trips, but the optional-group graph path does not yet enforce it per step. Merge-time File Scope enforcement is a separate gate and is unaffected. See [Workflow Steps → FN-4343](./workflow-steps.md#end-of-step-file-scope-invariant-for-prompt-pre-merge-steps-fn-4343). |
 | `planOnlyScopeLeakEnforcement` | `"off" \| "warn" \| "block"` | `"warn"` | Controls executor-side `fn_task_done` scope-leak handling for **Plan-Only (Review Level 1)** tasks when touched files fall outside declared File Scope. `warn` logs a `[scope-leak]` activity entry and allows completion, `block` refuses `fn_task_done` with remediation guidance, and `off` disables this guard. `task.scopeOverride=true` bypasses enforcement. Review levels `0` and `>=2` stay warn-only telemetry. |
 | `workflowRevisionForkOnScopeMismatch` | `boolean` | `true` | When enabled, workflow revision feedback that explicitly names files outside the task's declared File Scope is forked into a dependent follow-up triage task instead of being appended to the original task's `PROMPT.md`. Set to `false` to keep the legacy append-and-rerun behavior. |
 | `strictScopeEnforcement` | `boolean` | `false` | Block merges on out-of-scope file changes. |
@@ -1308,6 +1308,7 @@ Common built-in dashboard/runtime flags include:
 - `researchView`
 - `evalsView` (gates Evals dashboard view, Settings → Scheduled Evals section, and scheduled-eval cron execution)
 - `workflowGraphExecutor` (enables the workflow-IR interpreter path)
+- `graphNativePostMerge` (**default-ON**; the graph is the sole owner of post-merge `optional-group` steps after a successful merge — the legacy merger-owned post-merge path was deleted. Post-merge failures are non-blocking. See [Workflow Steps → Execution Phases](./workflow-steps.md#execution-phases))
 - `workflowInterpreterDualObserve` (retired/inert; stale persisted `true` values are forced OFF and must not reactivate hidden shadow observation)
 - `workflowInterpreterAuthoritative` (readiness-gated authoritative interpreter lifecycle cutover; requires clean populated parity summary evidence and legacy remains default/fallback when OFF)
 - `remoteAccess`

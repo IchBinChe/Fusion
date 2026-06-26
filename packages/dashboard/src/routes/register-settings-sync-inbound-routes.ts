@@ -74,7 +74,8 @@ export const registerSettingsSyncInboundRoutes: ApiRouteRegistrar = (ctx) => {
   router.post("/settings/sync-receive", async (req, res) => {
     try {
       const { CentralCore } = await import("@fusion/core");
-      const central = new CentralCore(store.getFusionDir());
+      // FNXC:GlobalDirGuard 2026-06-25-22:20: Inbound settings sync writes GLOBAL central state, so it must use the resolved global dir (~/.fusion). Previously this (and the secrets/proxy/node routes) passed store.getFusionDir() — the project `.fusion/` — which created a stray per-project central DB seeded with default global settings, the root cause of intermittent "all my global settings reset". Mirror this requirement on every CentralCore construction in dashboard routes.
+      const central = new CentralCore(store.getGlobalSettingsDir());
       await central.init();
 
       // Validate auth - find local node and check apiKey
@@ -181,7 +182,7 @@ export const registerSettingsSyncInboundRoutes: ApiRouteRegistrar = (ctx) => {
   router.post("/settings/auth-receive", async (req, res) => {
     try {
       const { CentralCore } = await import("@fusion/core");
-      const central = new CentralCore(store.getFusionDir());
+      const central = new CentralCore(store.getGlobalSettingsDir());
       await central.init();
 
       // Validate auth
@@ -278,7 +279,7 @@ export const registerSettingsSyncInboundRoutes: ApiRouteRegistrar = (ctx) => {
   router.get("/settings/auth-export", async (req, res) => {
     try {
       const { CentralCore } = await import("@fusion/core");
-      const central = new CentralCore(store.getFusionDir());
+      const central = new CentralCore(store.getGlobalSettingsDir());
       await central.init();
 
       // Validate auth

@@ -14,7 +14,7 @@
  */
 
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { mkdir, readFile, writeFile, rename, chmod } from "node:fs/promises";
 import { existsSync, mkdirSync, renameSync } from "node:fs";
 import type { GlobalSettings } from "./types.js";
@@ -90,7 +90,28 @@ export function resolveGlobalDir(dir?: string): string {
     );
   }
 
-  if (hasExplicitDir) return dir;
+  if (hasExplicitDir) {
+    /*
+    FNXC:GlobalDirGuard 2026-06-25-22:10:
+    Production code must never point the central/global store at a project's `.fusion/` directory. Doing so silently spins up a stray per-project central DB seeded with DEFAULT global settings (globalMaxConcurrent=4, empty global secrets, default centralSettings), which then shadows the real `~/.fusion/fusion-central.db` and manifests as "all my global settings reset". Root cause was call sites passing `store.getFusionDir()` instead of the resolved global dir.
+    Guard heuristic: a project `.fusion` dir is named `.fusion` and lives inside a git repo (its parent has a `.git` dir or worktree file), whereas the home global dir's parent (the home dir) is not a repo. We only flag dirs that differ from the home-resolved global dir, so legitimately-threaded global dirs and test temp dirs are unaffected. Skipped under VITEST (tests pass explicit temp dirs by design).
+    */
+    if (process.env.VITEST !== "true") {
+      const homeGlobalDir = resolveGlobalDirForHome(getHomeDir());
+      const looksLikeProjectFusionDir =
+        dir !== homeGlobalDir &&
+        basename(dir) === ".fusion" &&
+        existsSync(join(dirname(dir), ".git"));
+      if (looksLikeProjectFusionDir) {
+        throw new Error(
+          `resolveGlobalDir(): refusing project-local '.fusion' directory '${dir}' for the central/global store. ` +
+            "This would create a stray per-project central database seeded with default global settings and silently reset them. " +
+            "Pass the resolved global dir (or omit the argument so it defaults to ~/.fusion); see TaskStore.getGlobalSettingsDir().",
+        );
+      }
+    }
+    return dir;
+  }
 
   return resolveGlobalDirForHome(getHomeDir());
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveGlobalDir } from "../global-settings.js";
@@ -64,6 +64,63 @@ describe("resolveGlobalDir() VITEST guard", () => {
     withVitestEnv(undefined, () => {
       withTempHome((homeDir) => {
         expect(resolveGlobalDir()).toBe(join(homeDir, ".fusion"));
+      });
+    });
+  });
+});
+
+/*
+FNXC:GlobalDirGuard 2026-06-25-22:30:
+Regression for the "all my global settings reset" bug: production code that passed a project's `.fusion/` dir (e.g. store.getFusionDir()) to CentralCore/global stores spun up stray per-project central DBs seeded with default global settings that shadowed ~/.fusion. resolveGlobalDir() must refuse a project-local `.fusion/` dir (named `.fusion` inside a git repo) while still accepting the real home global dir and arbitrary non-repo custom dirs. Guard is intentionally inert under VITEST, so these tests clear VITEST to exercise it.
+*/
+describe("resolveGlobalDir() project-local .fusion guard", () => {
+  it("throws when handed a project-local .fusion dir inside a git repo", () => {
+    withVitestEnv(undefined, () => {
+      withTempHome((homeDir) => {
+        const projectRoot = join(homeDir, "code", "my-project");
+        mkdirSync(join(projectRoot, ".git"), { recursive: true });
+        const projectFusionDir = join(projectRoot, ".fusion");
+        mkdirSync(projectFusionDir, { recursive: true });
+
+        expect(() => resolveGlobalDir(projectFusionDir)).toThrow(
+          /refusing project-local '\.fusion' directory/,
+        );
+      });
+    });
+  });
+
+  it("also catches a git-worktree project (.git file, not dir)", () => {
+    withVitestEnv(undefined, () => {
+      withTempHome((homeDir) => {
+        const worktreeRoot = join(homeDir, "worktrees", "feature");
+        mkdirSync(worktreeRoot, { recursive: true });
+        writeFileSync(join(worktreeRoot, ".git"), "gitdir: /somewhere/.git/worktrees/feature\n");
+        const worktreeFusionDir = join(worktreeRoot, ".fusion");
+        mkdirSync(worktreeFusionDir, { recursive: true });
+
+        expect(() => resolveGlobalDir(worktreeFusionDir)).toThrow(
+          /refusing project-local '\.fusion' directory/,
+        );
+      });
+    });
+  });
+
+  it("allows the real home global dir", () => {
+    withVitestEnv(undefined, () => {
+      withTempHome((homeDir) => {
+        const homeGlobal = join(homeDir, ".fusion");
+        expect(resolveGlobalDir(homeGlobal)).toBe(homeGlobal);
+      });
+    });
+  });
+
+  it("allows a custom non-repo global dir (no .git parent)", () => {
+    withVitestEnv(undefined, () => {
+      withTempHome((homeDir) => {
+        const customDir = join(homeDir, "custom-global", ".fusion");
+        mkdirSync(customDir, { recursive: true });
+        // Parent has no `.git`, so it is not a project worktree.
+        expect(resolveGlobalDir(customDir)).toBe(customDir);
       });
     });
   });

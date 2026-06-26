@@ -16651,6 +16651,14 @@ ${stepsSection}`;
     return this.fusionDir;
   }
 
+  /*
+  FNXC:GlobalDirGuard 2026-06-25-22:12:
+  The resolved GLOBAL settings dir (undefined → ~/.fusion). Distinct from getFusionDir() which is this project's `.fusion/`. Any CentralCore/global-store construction MUST use this, never getFusionDir(); passing the project dir spins up a stray per-project central DB that shadows ~/.fusion and silently resets global settings.
+  */
+  getGlobalSettingsDir(): string | undefined {
+    return this.globalSettingsDir;
+  }
+
   getTasksDir(): string {
     return this.tasksDir;
   }
@@ -16673,7 +16681,8 @@ ${stepsSection}`;
       return this.secretsStore;
     }
 
-    const central = new CentralCore(this.getFusionDir());
+    // FNXC:GlobalDirGuard 2026-06-25-22:13: Secrets live in the GLOBAL central DB (~/.fusion), not this project's `.fusion/`. Use the resolved global dir; passing getFusionDir() created a stray per-project central DB and reset global settings.
+    const central = new CentralCore(this.getGlobalSettingsDir());
     await central.init();
     this.secretsCentralCore = central;
     const centralDb = (central as unknown as { db: import("./central-db.js").CentralDatabase | null }).db;

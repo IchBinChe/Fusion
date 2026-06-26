@@ -4463,7 +4463,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       // Node-aware proxying: route to remote node if nodeId is provided and not local
       if (nodeId) {
         const { CentralCore } = await import("@fusion/core");
-        const central = new CentralCore(store.getFusionDir());
+        const central = new CentralCore(store.getGlobalSettingsDir());
         await central.init();
 
         const localNodes = await central.listNodes();

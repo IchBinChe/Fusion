@@ -92,7 +92,7 @@ export const registerSecretsSyncInboundRoutes: ApiRouteRegistrar = (ctx) => {
   router.post("/secrets/sync-receive", async (req, res) => {
     try {
       const { CentralCore } = await import("@fusion/core");
-      const central = new CentralCore(store.getFusionDir());
+      const central = new CentralCore(store.getGlobalSettingsDir());
       await central.init();
       try {
         // Validate auth
@@ -174,7 +174,7 @@ export const registerSecretsSyncInboundRoutes: ApiRouteRegistrar = (ctx) => {
   router.get("/secrets/sync-export", async (req, res) => {
     try {
       const { CentralCore } = await import("@fusion/core");
-      const central = new CentralCore(store.getFusionDir());
+      const central = new CentralCore(store.getGlobalSettingsDir());
       await central.init();
       try {
         // Validate auth

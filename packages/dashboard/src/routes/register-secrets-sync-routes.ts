@@ -52,7 +52,7 @@ export const registerSecretsSyncRoutes: ApiRouteRegistrar = (ctx) => {
   router.post("/nodes/:id/secrets/push", async (req, res) => {
     try {
       const { CentralCore } = await import("@fusion/core");
-      const central = new CentralCore(store.getFusionDir());
+      const central = new CentralCore(store.getGlobalSettingsDir());
       await central.init();
       try {
         const node = await central.getNode(req.params.id);
@@ -110,7 +110,7 @@ export const registerSecretsSyncRoutes: ApiRouteRegistrar = (ctx) => {
   router.post("/nodes/:id/secrets/pull", async (req, res) => {
     try {
       const { CentralCore } = await import("@fusion/core");
-      const central = new CentralCore(store.getFusionDir());
+      const central = new CentralCore(store.getGlobalSettingsDir());
       await central.init();
       try {
         const node = await central.getNode(req.params.id);

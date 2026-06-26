@@ -1389,6 +1389,69 @@ export function partitionScopedAffectedPackages(packages) {
   return groups;
 }
 
+/**
+ * Fraction of a heavy package's affected-lane work that, once a non-test source
+ * file in its module graph changes, is delegated to the merge gate instead of
+ * run via the unbounded `vitest --changed` graph expansion. See the FNXC note on
+ * `changedSourceFilesAffectingPackage`.
+ */
+export function isTestFilePath(file) {
+  return /\.(test|spec)\.[cm]?[jt]sx?$/.test(file);
+}
+
+/*
+FNXC:TestInfrastructure 2026-06-25-14:30:
+Why this guard exists (root cause of "pnpm test takes >15min and gets killed"):
+A heavy memory-envelope package (@fusion/engine, @fusion/dashboard) runs its
+affected lane at workers=1 for OOM safety (FN-6854/FN-6874). `vitest --changed
+<base>` does UNBOUNDED transitive module-graph expansion: a single hub source
+edit (measured: a `packages/engine/src/self-healing.ts` change selected 8393
+matched test entries, and merely *listing* them took ~79s / 341s CPU). Running
+that near-full suite at one worker blows past the engine's per-task verification
+budget (VERIFICATION_TIMEOUT_WORKSPACE_MS = 900_000 ms / 15 min in
+packages/engine/src/verification-utils.ts). The engine then SIGKILLs `pnpm test`
+mid-run and RESTARTS the whole task, which re-runs the same lane -> stacked
+15-min timeouts (~9 observed in one task, ~2.8h wasted). The script's own 20-min
+`changed`-class watchdog ceiling is looser than that 15-min kill, so it never
+engages: the "bounded/changed-only" contract is silently violated.
+
+The fan-out only happens when a NON-test SOURCE file in the package's module
+graph (its own dir OR any transitive workspace-dependency dir, e.g. @fusion/core
+for engine) changes; a test-file-only diff never expands. So for heavy
+envelope packages we return the list of changed non-test source files affecting
+the package; when non-empty, the caller runs only the directly-changed test
+files (bounded to the diff) and delegates cross-cutting coverage to the
+merge-gate suite that already ran first in changed mode -- the same "delegate to
+the gate" philosophy as the reverse-dependent blast cap. `pnpm test:full`
+remains the explicit full sweep. This keeps the bounded path actually bounded
+without widening any timeout, adding retries, or raising worker/concurrency.
+*/
+export function changedSourceFilesAffectingPackage(
+  packageName,
+  changedFiles,
+  { packageDirByName, forwardDependencyMap },
+) {
+  const graphDirs = new Set();
+  const ownDir = packageDirByName?.get(packageName);
+  if (ownDir) graphDirs.add(ownDir);
+  for (const depName of collectTransitiveDependencies(packageName, forwardDependencyMap ?? new Map())) {
+    const depDir = packageDirByName?.get(depName);
+    if (depDir) graphDirs.add(depDir);
+  }
+  // The shared __test-utils__ tree is imported by virtually every package's
+  // vitest config; a change there also fans out wide, so treat it as in-graph.
+  graphDirs.add("packages/core/src/__test-utils__");
+
+  return (changedFiles ?? []).filter((file) => {
+    if (isTestFilePath(file)) return false;
+    if (isTestIrrelevantRootPath(file)) return false;
+    for (const dir of graphDirs) {
+      if (file === dir || file.startsWith(`${dir}/`)) return true;
+    }
+    return false;
+  });
+}
+
 export function normalizeForwardedArgs(argv) {
   const normalized = [];
 
@@ -1602,12 +1665,60 @@ export async function main(argv = process.argv.slice(2)) {
     : [];
   const fallbackPkgs = activePackages.filter((pkg) => !scopable.includes(pkg));
 
+  // FNXC:TestInfrastructure 2026-06-25-14:30: heavy-package lanes that hit the
+  // wide-fan-out guard (below) are NOT fully tested — they run only their
+  // directly-changed test files or delegate entirely to the gate. Exclude them
+  // from the pass-cache so a later run re-evaluates instead of trusting a
+  // partial pass as a full one.
+  const notFullyTestedPackages = new Set();
+
   for (const { packages, mode, memoryEnvelopePackage = null } of [
     ...partitionScopedAffectedPackages(scopable).map((group) => ({ ...group, mode: "scoped" })),
     { packages: fallbackPkgs, mode: "full" },
   ]) {
     if (packages.length === 0) continue;
+
+    // Wide-fan-out guard: for a heavy memory-envelope package (engine/dashboard,
+    // always its own single-package group), a changed non-test source file in its
+    // module graph would make `vitest --changed` expand to ~the full suite and run
+    // it at workers=1 past the engine's 15-min verification timeout. Run only the
+    // directly-changed test files instead and delegate the rest to the merge gate.
+    let explicitChangedTestFiles = null;
+    if (mode === "scoped" && memoryEnvelopePackage) {
+      const pkg = packages[0];
+      const wideSource = changedSourceFilesAffectingPackage(pkg, changedFiles, {
+        packageDirByName,
+        forwardDependencyMap,
+      });
+      if (wideSource.length > 0) {
+        const pkgDir = packageDirByName.get(pkg) ?? `packages/${pkg.replace(/^@[^/]+\//, "")}`;
+        explicitChangedTestFiles = (changedFiles ?? []).filter(
+          (file) => isTestFilePath(file) && (file === pkgDir || file.startsWith(`${pkgDir}/`)),
+        );
+        notFullyTestedPackages.add(pkg);
+        if (explicitChangedTestFiles.length === 0) {
+          console.log(
+            `[test-changed] ${pkg}: a changed non-test source file (${wideSource[0]}${wideSource.length > 1 ? `, +${wideSource.length - 1} more` : ""}) ` +
+              "would fan `vitest --changed` out to ~the full suite at this heavy 1-worker lane; " +
+              "delegating cross-cutting coverage to the merge-gate suite (ran above). Run `pnpm test:full` for the full sweep.",
+          );
+          continue;
+        }
+        console.log(
+          `[test-changed] ${pkg}: changed non-test source detected; running ONLY the ${explicitChangedTestFiles.length} directly-changed test file(s) ` +
+            "and delegating wider `vitest --changed` coverage to the merge-gate suite (ran above).",
+        );
+      }
+    }
+
     const filterArgs = packages.flatMap((pkg) => ["--filter", pkg]);
+    const pkgDirForScope = memoryEnvelopePackage
+      ? packageDirByName.get(packages[0]) ?? `packages/${packages[0].replace(/^@[^/]+\//, "")}`
+      : null;
+    const scopeSelectorArgs =
+      explicitChangedTestFiles && explicitChangedTestFiles.length > 0
+        ? explicitChangedTestFiles.map((file) => path.relative(pkgDirForScope, file))
+        : ["--changed", comparisonBase];
     const commandArgs =
       mode === "scoped"
         ? [
@@ -1616,8 +1727,7 @@ export async function main(argv = process.argv.slice(2)) {
             "exec",
             "vitest",
             "run",
-            "--changed",
-            comparisonBase,
+            ...scopeSelectorArgs,
             "--passWithNoTests",
             "--silent=passed-only",
             "--reporter=dot",
@@ -1627,7 +1737,7 @@ export async function main(argv = process.argv.slice(2)) {
     const memoryEnvelopeLabel = memoryEnvelopePackage ? ` (${memoryEnvelopePackage} memory envelope)` : "";
     console.log(
       mode === "scoped"
-        ? `[test-changed] scoped (vitest --changed) run for: ${packages.join(", ")}${memoryEnvelopeLabel}`
+        ? `[test-changed] scoped (${explicitChangedTestFiles?.length ? "changed-files" : "vitest --changed"}) run for: ${packages.join(", ")}${memoryEnvelopeLabel}`
         : `[test-changed] full package-suite run for: ${packages.join(", ")} (no vitest config / no base)`,
     );
     await runMaybeIsolated("pnpm", commandArgs, {
@@ -1644,7 +1754,10 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   // Tests passed — record in cache (never cache failures; process.exit on failure above).
-  recordCachePass(activePackages, packageDirByName, {
+  // Skip partially-tested/delegated heavy packages so a partial pass is never
+  // cached as a full one (FNXC:TestInfrastructure 2026-06-25-14:30).
+  const recordablePackages = activePackages.filter((pkg) => !notFullyTestedPackages.has(pkg));
+  recordCachePass(recordablePackages, packageDirByName, {
     noCache,
     forwardDependencyMap,
     memo: hashMemo,

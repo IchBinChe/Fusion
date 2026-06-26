@@ -43,6 +43,8 @@ import {
   ENGINE_SCOPED_AFFECTED_PACKAGE,
   ENGINE_SCOPED_AFFECTED_WORKERS,
   partitionScopedAffectedPackages,
+  isTestFilePath,
+  changedSourceFilesAffectingPackage,
 } from "../test-changed.mjs";
 
 import { deriveBudgetMs } from "../lib/run-vitest-watchdog.mjs";
@@ -1797,4 +1799,71 @@ test("pruneFusionTestWorkers: only targets the fusion-test-workers- prefix", () 
     rmSync(ours, { recursive: true, force: true });
     rmSync(foreign, { recursive: true, force: true });
   }
+});
+
+// FNXC:TestInfrastructure 2026-06-25-14:30: wide `vitest --changed` fan-out guard.
+// A changed non-test source file in a heavy package's module graph (own dir or a
+// transitive workspace dep) must be detected so the affected lane runs only the
+// directly-changed test files and delegates the rest to the merge gate, instead
+// of fanning out to ~the full suite at workers=1 past the 15-min verification kill.
+const __fanoutOpts = {
+  packageDirByName: new Map([
+    ["@fusion/engine", "packages/engine"],
+    ["@fusion/core", "packages/core"],
+    ["@fusion/dashboard", "packages/dashboard"],
+  ]),
+  forwardDependencyMap: new Map([
+    ["@fusion/engine", ["@fusion/core"]],
+    ["@fusion/core", []],
+    ["@fusion/dashboard", ["@fusion/core"]],
+  ]),
+};
+
+test("isTestFilePath: recognizes test/spec files but not plain source", () => {
+  assert.equal(isTestFilePath("packages/engine/src/__tests__/a.test.ts"), true);
+  assert.equal(isTestFilePath("packages/dashboard/src/App.spec.tsx"), true);
+  assert.equal(isTestFilePath("packages/engine/src/self-healing.ts"), false);
+});
+
+test("changedSourceFilesAffectingPackage: test-only diff is narrow (empty)", () => {
+  assert.deepEqual(
+    changedSourceFilesAffectingPackage("@fusion/engine", ["packages/engine/src/__tests__/a.test.ts"], __fanoutOpts),
+    [],
+  );
+});
+
+test("changedSourceFilesAffectingPackage: own hub source flags wide fan-out", () => {
+  assert.deepEqual(
+    changedSourceFilesAffectingPackage("@fusion/engine", ["packages/engine/src/self-healing.ts"], __fanoutOpts),
+    ["packages/engine/src/self-healing.ts"],
+  );
+});
+
+test("changedSourceFilesAffectingPackage: transitive dependency source flags wide fan-out", () => {
+  assert.deepEqual(
+    changedSourceFilesAffectingPackage("@fusion/engine", ["packages/core/src/index.ts"], __fanoutOpts),
+    ["packages/core/src/index.ts"],
+  );
+});
+
+test("changedSourceFilesAffectingPackage: shared __test-utils__ tree flags wide fan-out", () => {
+  assert.deepEqual(
+    changedSourceFilesAffectingPackage(
+      "@fusion/engine",
+      ["packages/core/src/__test-utils__/vitest-setup.ts"],
+      __fanoutOpts,
+    ),
+    ["packages/core/src/__test-utils__/vitest-setup.ts"],
+  );
+});
+
+test("changedSourceFilesAffectingPackage: out-of-graph and irrelevant paths stay narrow", () => {
+  assert.deepEqual(
+    changedSourceFilesAffectingPackage(
+      "@fusion/engine",
+      ["packages/dashboard/src/App.tsx", "docs/testing.md", "README", ".changeset/x.md"],
+      __fanoutOpts,
+    ),
+    [],
+  );
 });

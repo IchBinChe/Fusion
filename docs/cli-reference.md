@@ -988,7 +988,7 @@ fn settings import <file> [--scope global|project|both] [--merge] [--yes]
 
 ## `fn mcp`
 
-Manage Fusion MCP server definitions for stdio, SSE, and streamable HTTP transports.
+Manage Fusion MCP server definitions for stdio, SSE, and streamable HTTP transports. See [MCP](./mcp.md) for the full configuration and usage guide, including dashboard flows and secret-reference behavior.
 
 ```bash
 fn mcp list [--project <name>] [--json]

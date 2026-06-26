@@ -166,6 +166,8 @@ Secret rule: `env` and `headers` maps are sensitive. Values must be Fusion secre
 
 `POST /api/mcp/validate` validates an MCP server definition or configured server name against the current project context. The route resolves and materializes the target server with the same secret rules, then performs a bounded reachability probe (`stdio` supervised spawn, `sse`/`streamable-http` bounded fetch) and returns only `{ status, message? }` without resolved env/header contents.
 
+See [MCP](./mcp.md) for the full configuration and usage guide, including dashboard, CLI, Claude Desktop import, Fusion export, and reachability procedures.
+
 ### Notification providers (pluggable)
 
 Fusion now supports a provider-list notification model via `notificationProviders` while keeping legacy flat ntfy/webhook settings intact.

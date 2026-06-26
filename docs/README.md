@@ -46,6 +46,7 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 | Guide | Description |
 |---|---|
 | [Settings Reference](./settings-reference.md) | Global/project settings, workflow setting values, model/fallback lane hierarchy, defaults, and API endpoints |
+| [MCP](./mcp.md) | Model Context Protocol server configuration, secret references, validation, CLI, dashboard, and import/export workflows |
 | [Agents](./agents.md) | Agent management, presets, prompts, heartbeat behavior, spawning, and mailbox workflows |
 
 ### Architecture & Development

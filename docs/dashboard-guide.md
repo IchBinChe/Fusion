@@ -1512,7 +1512,7 @@ Manage project and global secrets directly inside **Settings → Project → Sec
 
 ### MCP server management in Settings
 
-Manage Model Context Protocol servers from the existing Settings modal; no new top-level dashboard view is introduced.
+Manage Model Context Protocol servers from the existing Settings modal; no new top-level dashboard view is introduced. See [MCP](./mcp.md) for the full setup, validation, CLI, import, and export guide.
 
 - **Settings → Global → MCP Servers** stores global MCP defaults shared by projects.
 - **Settings → Project → MCP Servers** stores project-level MCP settings. Project entries override global servers by matching `name`, and a same-named disabled project entry suppresses the inherited global server. The project list marks inherited, overridden, project-local, and disabled-global states so operators can see which scope owns the effective entry.

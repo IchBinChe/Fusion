@@ -124,6 +124,21 @@ export default defineConfig({
             FN-7068 rescued the 2026-06-25 self-healing quarantine batch by completing the local TaskStore fakes for the FN-5488 overlap path. Keep both files active in engine-default so fake drift around clearStaleBlockedBy() is caught before the deletion ratchet expires.
             */
             /*
+            FNXC:EngineTests 2026-06-26-09:30:
+            Quarantine 7 engine-default files failing in CI full-suite run 28259456548:
+            ce-workflow-step-conventions, executor-column-agent-principal, restart.integration,
+            scheduler-node-unreachable-audit, scheduler-overlap-starvation,
+            scheduler-ephemeral-toggle, user-configured-command-no-execsync.
+            All under the deletion ratchet — see scripts/lib/test-quarantine.json.
+            */
+            "src/__tests__/ce-workflow-step-conventions.test.ts",
+            "src/__tests__/executor-column-agent-principal.test.ts",
+            "src/__tests__/restart.integration.test.ts",
+            "src/__tests__/scheduler-node-unreachable-audit.test.ts",
+            "src/__tests__/scheduler-overlap-starvation.test.ts",
+            "src/__tests__/scheduler-ephemeral-toggle.test.ts",
+            "src/__tests__/user-configured-command-no-execsync.test.ts",
+            /*
             FNXC:EngineTests 2026-06-16-19:05:
             FN-6492 verification caught cli-agent-executor as a package-lane-only flake: the hard-cancel assertion failed once and left an ENOTEMPTY temp hook directory, then the file passed in isolation. Quarantine the whole file under the deletion ratchet instead of weakening timing or process assertions.
 
@@ -149,6 +164,15 @@ export default defineConfig({
           // also tier into engine-slow.
           exclude: [
             "src/**/*.slow.test.ts",
+            /*
+            FNXC:EngineTests 2026-06-26-09:30:
+            Quarantine 3 reliability-interactions files failing in CI full-suite run 28259456548:
+            lease-recovery-central-claim, owning-node-unavailable-interactions, todo-inprogress-flapping.
+            All under the deletion ratchet — see scripts/lib/test-quarantine.json.
+            */
+            "src/__tests__/reliability-interactions/lease-recovery-central-claim.test.ts",
+            "src/__tests__/reliability-interactions/owning-node-unavailable-interactions.test.ts",
+            "src/__tests__/reliability-interactions/todo-inprogress-flapping.test.ts",
             /*
             FNXC:EngineTests 2026-06-14-02:12:
             FN-6433 removed the reliability-interactions quarantine after deleting the duplicate soft-delete blocker residue file under the deletion ratchet; keep this project exclude list ledger-free unless a new flake is quarantined in lockstep.

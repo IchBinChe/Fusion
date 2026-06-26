@@ -144,15 +144,23 @@ describe("TaskStore workflow prompt overrides", () => {
     );
   });
 
-  it("materializes built-in non-seam prompt and gate overrides into WorkflowStep rows", async () => {
+  // FNXC:WorkflowStepCRUD 2026-06-26-14:00: U7c dropped the `workflow_steps` table and the
+  // compilation materializer. Built-in non-seam prompt/gate overrides are no longer baked
+  // into materialized WorkflowStep rows — they overlay the workflow IR the graph runs.
+  // Verify the override through the task's RESOLVED IR (the node config the executor reads).
+  it("overlays built-in non-seam prompt and gate overrides onto the resolved workflow IR", async () => {
     const store = harness.store();
     const projectId = store.getWorkflowSettingsProjectId();
     store.updateWorkflowPromptOverrides("builtin:review-heavy", projectId, { security: "Security materialized override" });
     store.updateWorkflowPromptOverrides("builtin:compound-engineering", projectId, { plan: "Plan materialized override" });
 
+    const nodePrompt = (ir: WorkflowIr, nodeId: string): string | undefined =>
+      ir.nodes.find((node) => node.id === nodeId)?.config?.prompt as string | undefined;
+
     const reviewTask = await store.createTask({ description: "review heavy", workflowId: "builtin:review-heavy" });
-    const reviewSteps = await Promise.all((reviewTask.enabledWorkflowSteps ?? []).map((id) => store.getWorkflowStep(id)));
-    expect(reviewSteps.find((step) => step?.name === "Security review")?.prompt).toBe("Security materialized override");
+    expect(nodePrompt(await resolveWorkflowIrForTask(store, reviewTask.id), "security")).toBe(
+      "Security materialized override",
+    );
 
     const ceIr = getBuiltinWorkflow("builtin:compound-engineering")!.ir;
     const originalPlan = ceIr.nodes.find((node) => node.id === "plan")?.config?.prompt;
@@ -161,9 +169,9 @@ describe("TaskStore workflow prompt overrides", () => {
     // project; the pure overlay test covers CE compilation directly.
     if (ceDef) {
       const ceTask = await store.createTask({ description: "compound", workflowId: "builtin:compound-engineering" });
-      const ceSteps = await Promise.all((ceTask.enabledWorkflowSteps ?? []).map((id) => store.getWorkflowStep(id)));
-      expect(ceSteps.find((step) => step?.name === "Plan")?.prompt).toBe("Plan materialized override");
+      expect(nodePrompt(await resolveWorkflowIrForTask(store, ceTask.id), "plan")).toBe("Plan materialized override");
     }
+    // The shared builtin IR constant is never mutated by the per-project overlay.
     expect(ceIr.nodes.find((node) => node.id === "plan")?.config?.prompt).toBe(originalPlan);
   });
 
@@ -173,9 +181,23 @@ describe("TaskStore workflow prompt overrides", () => {
     const db = store.getDatabase();
     db.prepare("DROP INDEX IF EXISTS idx_workflow_prompt_overrides_project").run();
     db.prepare("DROP TABLE IF EXISTS workflow_prompt_overrides").run();
+    // FNXC:WorkflowStepCRUD 2026-06-26-14:00: U7c removed `workflow_steps` from SCHEMA_SQL,
+    // so a freshly-created DB lacks it. A REAL v127 DB had the table (migration 16). Recreate
+    // it so this downgrade faithfully simulates a real v127 DB — migration 130 reads it and
+    // migration 131 drops it on the way up to the current schema.
+    db.prepare(
+      "CREATE TABLE IF NOT EXISTS workflow_steps (id TEXT PRIMARY KEY, templateId TEXT, name TEXT, description TEXT, mode TEXT, phase TEXT, prompt TEXT, gateMode TEXT, toolMode TEXT, scriptName TEXT, enabled INTEGER, defaultOn INTEGER, modelProvider TEXT, modelId TEXT, migrated_fragment_id TEXT, createdAt TEXT, updatedAt TEXT)",
+    ).run();
     db.prepare("UPDATE __meta SET value = '127' WHERE key = 'schemaVersion'").run();
 
     await harness.reopenDiskBackedStore();
+
+    // The cutover (migration 131) dropped the legacy table on the way back to current.
+    expect(
+      harness.store().getDatabase()
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workflow_steps'")
+        .get(),
+    ).toBeUndefined();
 
     const migratedDb = harness.store().getDatabase();
     const table = migratedDb

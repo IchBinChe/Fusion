@@ -16,7 +16,6 @@ import {
   patchContainsMovedKey,
 } from "./moved-settings.js";
 import { parseWorkflowIr, serializeWorkflowIr, downgradeIrToV1IfPure } from "./workflow-ir.js";
-import { stepsToWorkflowIr, stepToFragmentIr, layoutForIr } from "./workflow-steps-to-ir.js";
 import { resolveAllowedColumns, workflowHasColumn } from "./workflow-transitions.js";
 import { extractEffectiveWriteScopeFromPrompt, extractFileScopeTokens, isValidFileScopeEntry } from "./file-scope-classification.js";
 
@@ -137,9 +136,6 @@ import {
   type WorkflowColumnsGraduationReport,
 } from "./workflow-parity.js";
 
-/** Tags WorkflowStep rows materialized by compiling a workflow so they can be
- *  filtered out of the user-facing step manager and cleaned up on re-selection. */
-const WORKFLOW_COMPILED_STEP_TEMPLATE_PREFIX = "workflow:";
 import { resolveWorktrunkSettings, validateWorktrunkSettings } from "./worktrunk-settings.js";
 import { validateLocale } from "./settings-validation.js";
 import { normalizeTaskPriority } from "./task-priority.js";
@@ -4217,97 +4213,16 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     return `${Date.now()}-${id}-${sanitized}`;
   }
 
-  private toStoredWorkflowStep(row: {
-    id: string;
-    templateId: string | null;
-    name: string;
-    description: string;
-    mode: string;
-    phase: string | null;
-    gateMode: string | null;
-    prompt: string;
-    toolMode: string | null;
-    scriptName: string | null;
-    enabled: number;
-    defaultOn: number | null;
-    modelProvider: string | null;
-    modelId: string | null;
-    migrated_fragment_id?: string | null;
-    createdAt: string;
-    updatedAt: string;
-  }): import("./types.js").WorkflowStep {
-    return {
-      id: row.id,
-      templateId: row.templateId ?? undefined,
-      name: row.name,
-      description: row.description,
-      mode: row.mode === "script" ? "script" : "prompt",
-      phase: row.phase === "post-merge" ? "post-merge" : "pre-merge",
-      gateMode: row.gateMode === "advisory" || row.gateMode === "gate"
-        ? row.gateMode
-        : "advisory",
-      prompt: row.prompt || "",
-      toolMode: row.toolMode === "coding" || row.toolMode === "readonly" ? row.toolMode : undefined,
-      scriptName: row.scriptName ?? undefined,
-      enabled: Boolean(row.enabled),
-      defaultOn: row.defaultOn === null || row.defaultOn === undefined ? undefined : Boolean(row.defaultOn),
-      modelProvider: row.modelProvider ?? undefined,
-      modelId: row.modelId ?? undefined,
-      migratedFragmentId: row.migrated_fragment_id ?? undefined,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    };
-  }
-
-  private getLegacyWorkflowStepSnapshot(id: string, templateId?: string): Record<string, unknown> | undefined {
-    const row = this.db
-      .prepare("SELECT workflowSteps FROM config WHERE id = 1")
-      .get() as { workflowSteps?: string | null } | undefined;
-    const legacySteps = fromJson<Array<Record<string, unknown>>>(row?.workflowSteps);
-    if (!Array.isArray(legacySteps)) {
-      return undefined;
-    }
-
-    return legacySteps.find((legacy) => {
-      if (!legacy || typeof legacy !== "object") return false;
-      if (legacy.id === id) return true;
-      return Boolean(templateId && legacy.templateId === templateId);
-    });
-  }
-
-  private applyLegacyWorkflowStepOverrides(step: import("./types.js").WorkflowStep): import("./types.js").WorkflowStep {
-    const legacy = this.getLegacyWorkflowStepSnapshot(step.id, step.templateId);
-    if (!legacy) {
-      return step;
-    }
-
-    const normalized = { ...step };
-    if (!Object.prototype.hasOwnProperty.call(legacy, "mode")) {
-      normalized.mode = "prompt";
-    }
-    if (!Object.prototype.hasOwnProperty.call(legacy, "phase")) {
-      normalized.phase = undefined;
-    }
-    if (!Object.prototype.hasOwnProperty.call(legacy, "gateMode")) {
-      normalized.gateMode = "advisory";
-    }
-
-    return normalized;
-  }
-
   /*
-  FNXC:WorkflowOptionalGroup 2026-06-25-00:00:
-  U6 deleted the built-in step-template catalog and its template
-  materializer (`getBuiltInWorkflowTemplate`/`ensureWorkflowStepForTemplate`/
-  `toBuiltInWorkflowStep`). `resolveEnabledWorkflowSteps` is now a pure pass-through:
-  enable ids are trimmed + de-duplicated but otherwise pass through UNCHANGED, keeping
-  them identity-stable (KTD-6). There is no longer any built-in template to materialize
-  into a `WS-xxx` row, so the prior `optionalGroupIdSet` collision guard (which kept
-  built-in group ids out of materialization) is no longer needed and was removed — a
-  group id like "browser-verification" now passes straight through, exactly matching the
+  FNXC:WorkflowOptionalGroup 2026-06-26-14:00:
+  U6 deleted the built-in step-template catalog and its template materializer; U7c dropped
+  the `workflow_steps` table and its compiled-step materializer entirely.
+  `resolveEnabledWorkflowSteps` is a pure pass-through: enable ids are trimmed +
+  de-duplicated but otherwise pass through UNCHANGED, keeping them identity-stable (KTD-6).
+  A group id like "browser-verification" passes straight through, matching the
   optional-group node id the executor toggles on `enabledWorkflowSteps.includes(node.id)`.
-  Plugin (`plugin:`-prefixed) ids also pass through. Workflow-compiled step rows are still
-  materialized separately via `materializeWorkflowSteps` (unchanged).
+  Plugin (`plugin:`-prefixed) ids also pass through. There are no longer any materialized
+  `workflow_steps` rows.
   */
   private async resolveEnabledWorkflowSteps(
     stepIds?: string[],
@@ -4516,26 +4431,20 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       resolvedWorkflowSteps = undefined;
     }
 
-    let task: Task;
-    try {
-      task = await this.createTaskWithDistributedReservation(input, {
-        createTaskWithId: async (taskId) => {
-          await this.assertNoDependencyCycle(taskId, input.dependencies ?? [], "createTask");
-          return this._createTaskInternal(
-            input,
-            title,
-            resolvedWorkflowSteps,
-            taskId,
-            { invokeTaskCreatedHook: shouldInvokeTaskCreatedHook && !hasPendingSummarization },
-          );
-        },
-      });
-    } catch (err) {
-      // The task row was never created, so any default-workflow steps we
-      // materialized above would orphan with no task/selection pointing at them.
-      this.cleanupOrphanedMaterializedSteps(pendingWorkflowSelection?.stepIds);
-      throw err;
-    }
+    // U7c: selection seeds are optional-group node ids (not materialized
+    // `workflow_steps` rows), so a failed task creation strands nothing to clean.
+    const task: Task = await this.createTaskWithDistributedReservation(input, {
+      createTaskWithId: async (taskId) => {
+        await this.assertNoDependencyCycle(taskId, input.dependencies ?? [], "createTask");
+        return this._createTaskInternal(
+          input,
+          title,
+          resolvedWorkflowSteps,
+          taskId,
+          { invokeTaskCreatedHook: shouldInvokeTaskCreatedHook && !hasPendingSummarization },
+        );
+      },
+    });
 
     // Record the inherited workflow selection now that the task row exists.
     if (pendingWorkflowSelection) {
@@ -4711,20 +4620,14 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       resolvedWorkflowSteps = undefined;
     }
 
-    let createdTask: Task;
-    try {
-      createdTask = await this._createTaskInternal(input, title, resolvedWorkflowSteps, id, {
-        createdAt: options.createdAt,
-        updatedAt: options.updatedAt,
-        promptOverride: options.prompt,
-        invokeTaskCreatedHook: options.invokeTaskCreatedHook,
-      });
-    } catch (err) {
-      // The task row was never created, so any default-workflow steps we
-      // materialized above would orphan with no task/selection pointing at them.
-      this.cleanupOrphanedMaterializedSteps(pendingWorkflowSelection?.stepIds);
-      throw err;
-    }
+    // U7c: selection seeds are optional-group node ids (not materialized
+    // `workflow_steps` rows), so a failed task creation strands nothing to clean.
+    const createdTask: Task = await this._createTaskInternal(input, title, resolvedWorkflowSteps, id, {
+      createdAt: options.createdAt,
+      updatedAt: options.updatedAt,
+      promptOverride: options.prompt,
+      invokeTaskCreatedHook: options.invokeTaskCreatedHook,
+    });
 
     // Record the inherited workflow selection now that the task row exists.
     if (pendingWorkflowSelection) {
@@ -14436,96 +14339,7 @@ ${deps}
 ${stepsSection}`;
   }
 
-  // ── Workflow Step CRUD Methods ─────────────────────────────────────
-
-  /**
-   * Create a new workflow step definition.
-   * Generates a unique ID (WS-001, WS-002, etc.) and stores in the workflow_steps table.
-   */
-  async createWorkflowStep(input: import("./types.js").WorkflowStepInput): Promise<import("./types.js").WorkflowStep> {
-    return this.withConfigLock(async () => {
-      const counterRow = this.db
-        .prepare("SELECT nextWorkflowStepId FROM config WHERE id = 1")
-        .get() as { nextWorkflowStepId?: number } | undefined;
-      const nextWsId = counterRow?.nextWorkflowStepId || 1;
-      const id = `WS-${String(nextWsId).padStart(3, "0")}`;
-
-      const mode = input.mode || "prompt";
-      const gateMode = input.gateMode || "advisory";
-
-      // Validate: script mode requires scriptName
-      if (mode === "script" && !input.scriptName?.trim()) {
-        throw new Error("Script mode requires a scriptName");
-      }
-
-      const now = new Date().toISOString();
-      const step: import("./types.js").WorkflowStep = {
-        id,
-        templateId: input.templateId,
-        name: input.name,
-        description: input.description,
-        mode,
-        phase: input.phase || "pre-merge",
-        gateMode,
-        prompt: mode === "prompt" ? (input.prompt || "") : "",
-        toolMode: mode === "prompt" ? (input.toolMode || "readonly") : undefined,
-        scriptName: mode === "script" ? input.scriptName : undefined,
-        enabled: input.enabled !== undefined ? input.enabled : true,
-        defaultOn: input.defaultOn !== undefined ? input.defaultOn : undefined,
-        modelProvider: mode === "prompt" ? input.modelProvider : undefined,
-        modelId: mode === "prompt" ? input.modelId : undefined,
-        migratedFragmentId: input.migratedFragmentId,
-        createdAt: now,
-        updatedAt: now,
-      };
-
-      this.db.prepare(
-        `INSERT INTO workflow_steps (
-          id,
-          templateId,
-          name,
-          description,
-          mode,
-          phase,
-          gateMode,
-          prompt,
-          toolMode,
-          scriptName,
-          enabled,
-          defaultOn,
-          modelProvider,
-          modelId,
-          migrated_fragment_id,
-          createdAt,
-          updatedAt
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        step.id,
-        step.templateId ?? null,
-        step.name,
-        step.description,
-        step.mode,
-        step.phase || "pre-merge",
-        step.gateMode,
-        step.prompt,
-        step.toolMode ?? null,
-        step.scriptName ?? null,
-        step.enabled ? 1 : 0,
-        step.defaultOn === undefined ? null : step.defaultOn ? 1 : 0,
-        step.modelProvider ?? null,
-        step.modelId ?? null,
-        step.migratedFragmentId ?? null,
-        step.createdAt,
-        step.updatedAt,
-      );
-
-      const config = await this.readConfig();
-      await this.writeConfig(config, { nextWorkflowStepId: nextWsId + 1 });
-      this.workflowStepsCache = null;
-
-      return step;
-    });
-  }
+  // ── Workflow Step palette (plugin templates) ──────────────────────────
 
   setPluginWorkflowStepTemplates(templates: Array<{ pluginId: string; template: WorkflowStepTemplate }>): void {
     this._pluginWorkflowStepTemplates = [...templates];
@@ -14563,276 +14377,43 @@ ${stepsSection}`;
     };
   }
 
+  /*
+  FNXC:WorkflowStepCRUD 2026-06-26-14:00:
+  U7c dropped the legacy `workflow_steps` table (migration 131). Pre-merge and post-merge
+  workflow steps run graph-native and record into `task.workflowStepResults`; nothing reads
+  `workflow_steps` rows at runtime. The store-level table CRUD (`createWorkflowStep`/
+  `updateWorkflowStep`/`deleteWorkflowStep`), the workflow-compilation materializer, and
+  `migrateLegacyWorkflowSteps` have been REMOVED. The plugin step-template PALETTE
+  (`setPluginWorkflowStepTemplates` / `resolvePluginWorkflowStep`) is RETAINED — it is
+  in-memory only and never touches the table. `listWorkflowSteps` returns ONLY plugin palette
+  steps (so `readConfig` and the task-create default-on fallback keep working without the
+  table), and `getWorkflowStep` is retained but resolves ONLY `plugin:`-prefixed palette ids
+  (every other id → undefined). Both are the public surface plugins use for their palette.
+  */
+
   /**
-   * List all workflow step definitions from workflow_steps.
-   * Results are cached and invalidated on create/update/delete.
+   * List workflow step definitions. Post table-drop (U7c) this returns only the
+   * in-memory plugin step-template palette; legacy table-backed steps no longer exist.
    */
   async listWorkflowSteps(): Promise<import("./types.js").WorkflowStep[]> {
     if (this.workflowStepsCache) return this.workflowStepsCache;
-    const rows = this.db.prepare("SELECT * FROM workflow_steps ORDER BY createdAt ASC").all() as Array<{
-      id: string;
-      templateId: string | null;
-      name: string;
-      description: string;
-      mode: string;
-      phase: string | null;
-      prompt: string;
-      gateMode: string | null;
-      toolMode: string | null;
-      scriptName: string | null;
-      enabled: number;
-      defaultOn: number | null;
-      modelProvider: string | null;
-      modelId: string | null;
-      createdAt: string;
-      updatedAt: string;
-    }>;
-    const storedSteps = rows
-      .map((row) => this.applyLegacyWorkflowStepOverrides(this.toStoredWorkflowStep(row)))
-      // Steps materialized by compiling a workflow are an execution detail; keep
-      // them out of the user-facing step manager listing. The executor resolves
-      // them directly via getWorkflowStep, which is unaffected by this filter.
-      .filter((step) => !step.templateId?.startsWith(WORKFLOW_COMPILED_STEP_TEMPLATE_PREFIX));
     const pluginSteps = this._pluginWorkflowStepTemplates
       .map(({ template }) => this.resolvePluginWorkflowStep(template.id))
       .filter((step): step is import("./types.js").WorkflowStep => Boolean(step));
-    this.workflowStepsCache = [...storedSteps, ...pluginSteps];
+    this.workflowStepsCache = [...pluginSteps];
     return this.workflowStepsCache;
   }
 
   /**
-   * Get a single workflow step by ID.
+   * Resolve a single workflow step by id. Post table-drop (U7c) only PLUGIN palette
+   * steps (`plugin:<pluginId>:<stepId>`) resolve — from the in-memory plugin
+   * step-template registry, never the dropped `workflow_steps` table. Any other id
+   * (legacy WS-xxx, graph node ids) resolves to `undefined`, which every caller
+   * treats as "no step".
    */
   async getWorkflowStep(id: string): Promise<import("./types.js").WorkflowStep | undefined> {
-    if (id.startsWith("plugin:")) {
-      const pluginStep = this.resolvePluginWorkflowStep(id);
-      if (pluginStep) {
-        return pluginStep;
-      }
-    }
-
-    const byId = this.db.prepare("SELECT * FROM workflow_steps WHERE id = ?").get(id) as
-      | {
-          id: string;
-          templateId: string | null;
-          name: string;
-          description: string;
-          mode: string;
-          phase: string | null;
-          gateMode: string | null;
-          prompt: string;
-          toolMode: string | null;
-          scriptName: string | null;
-          enabled: number;
-          defaultOn: number | null;
-          modelProvider: string | null;
-          modelId: string | null;
-          createdAt: string;
-          updatedAt: string;
-        }
-      | undefined;
-    if (byId) {
-      return this.applyLegacyWorkflowStepOverrides(this.toStoredWorkflowStep(byId));
-    }
-
-    const byTemplate = this.db
-      .prepare("SELECT * FROM workflow_steps WHERE templateId = ? ORDER BY createdAt ASC LIMIT 1")
-      .get(id) as
-      | {
-          id: string;
-          templateId: string | null;
-          name: string;
-          description: string;
-          mode: string;
-          phase: string | null;
-          gateMode: string | null;
-          prompt: string;
-          toolMode: string | null;
-          scriptName: string | null;
-          enabled: number;
-          defaultOn: number | null;
-          modelProvider: string | null;
-          modelId: string | null;
-          createdAt: string;
-          updatedAt: string;
-        }
-      | undefined;
-    if (byTemplate) {
-      return this.applyLegacyWorkflowStepOverrides(this.toStoredWorkflowStep(byTemplate));
-    }
-
-    // U6: the built-in step-template catalog was deleted. Built-in quality
-    // gates (browser-verification, code-review) are now graph optional-group nodes, not
-    // `workflow_steps` rows, so there is no built-in template to synthesize a step from.
-    // An id with no stored row resolves to undefined (callers treat that as "no step").
+    if (id.startsWith("plugin:")) return this.resolvePluginWorkflowStep(id);
     return undefined;
-  }
-
-  /*
-  FNXC:WorkflowStepCRUD 2026-06-25-00:00:
-  U5 removed the `/api/workflow-steps` REST surface (GET/POST/PATCH/DELETE + refine), the
-  `/workflow-step-templates/:id/create` route, the dead dashboard client mutations, and
-  (already absent) the Settings management UI. The store-level `workflow_steps` CRUD is
-  INTENTIONALLY KEPT in full: the table is retained (its drop is U7), `createWorkflowStep`
-  drives the workflow-compilation materializer (`materializeWorkflowSteps`),
-  `getWorkflowStep` is consumed by the engine (merger post-merge steps + executor
-  recovery), `listWorkflowSteps` backs `readConfig`, and `update`/`deleteWorkflowStep`
-  round-trip the table for those execution/read paths and their store tests. Removing the
-  store methods belongs with U7's table drop, not the management-surface removal.
-  */
-  /**
-   * Update a workflow step definition.
-   * @throws Error if the workflow step is not found
-   */
-  async updateWorkflowStep(id: string, updates: Partial<import("./types.js").WorkflowStepInput>): Promise<import("./types.js").WorkflowStep> {
-    const row = this.db.prepare("SELECT * FROM workflow_steps WHERE id = ?").get(id) as
-      | {
-          id: string;
-          templateId: string | null;
-          name: string;
-          description: string;
-          mode: string;
-          phase: string | null;
-          gateMode: string | null;
-          prompt: string;
-          toolMode: string | null;
-          scriptName: string | null;
-          enabled: number;
-          defaultOn: number | null;
-          modelProvider: string | null;
-          modelId: string | null;
-          createdAt: string;
-          updatedAt: string;
-        }
-      | undefined;
-
-    if (!row) {
-      throw new Error(`Workflow step '${id}' not found`);
-    }
-
-    const step = this.toStoredWorkflowStep(row);
-
-    // Handle mode change
-    if (updates.mode !== undefined) {
-      const newMode = updates.mode;
-      // Validate: script mode requires scriptName
-      if (newMode === "script" && !updates.scriptName?.trim() && !step.scriptName?.trim()) {
-        throw new Error("Script mode requires a scriptName");
-      }
-      step.mode = newMode;
-      // When switching to script mode, clear prompt and model overrides
-      if (newMode === "script") {
-        step.prompt = "";
-        step.gateMode = step.gateMode || "gate";
-        step.toolMode = undefined;
-        step.modelProvider = undefined;
-        step.modelId = undefined;
-      }
-      // When switching to prompt mode, clear scriptName
-      if (newMode === "prompt") {
-        step.scriptName = undefined;
-        step.gateMode = step.gateMode || "advisory";
-        step.toolMode = step.toolMode || "readonly";
-      }
-    }
-
-    if (updates.name !== undefined) step.name = updates.name;
-    if (updates.description !== undefined) step.description = updates.description;
-    if (updates.phase !== undefined) step.phase = updates.phase;
-    if (updates.gateMode !== undefined) step.gateMode = updates.gateMode;
-    if (updates.prompt !== undefined && step.mode === "prompt") step.prompt = updates.prompt;
-    if (updates.toolMode !== undefined && step.mode === "prompt") step.toolMode = updates.toolMode;
-    if (updates.scriptName !== undefined && step.mode === "script") step.scriptName = updates.scriptName;
-    if (updates.enabled !== undefined) step.enabled = updates.enabled;
-    if (updates.defaultOn !== undefined) step.defaultOn = updates.defaultOn;
-    if (step.mode === "script" && !step.scriptName?.trim()) {
-      throw new Error("Script mode requires a scriptName");
-    }
-    if (step.mode === "prompt") {
-      if ("modelProvider" in updates) step.modelProvider = updates.modelProvider;
-      if ("modelId" in updates) step.modelId = updates.modelId;
-    }
-    if ("migratedFragmentId" in updates) step.migratedFragmentId = updates.migratedFragmentId;
-    step.updatedAt = new Date().toISOString();
-
-    this.db.prepare(
-      `UPDATE workflow_steps
-       SET templateId = ?,
-           name = ?,
-           description = ?,
-           mode = ?,
-           phase = ?,
-           gateMode = ?,
-           prompt = ?,
-           toolMode = ?,
-           scriptName = ?,
-           enabled = ?,
-           defaultOn = ?,
-           modelProvider = ?,
-           modelId = ?,
-           migrated_fragment_id = ?,
-           updatedAt = ?
-       WHERE id = ?`,
-    ).run(
-      step.templateId ?? null,
-      step.name,
-      step.description,
-      step.mode,
-      step.phase || "pre-merge",
-      step.gateMode,
-      step.prompt,
-      step.toolMode ?? null,
-      step.scriptName ?? null,
-      step.enabled ? 1 : 0,
-      step.defaultOn === undefined ? null : step.defaultOn ? 1 : 0,
-      step.modelProvider ?? null,
-      step.modelId ?? null,
-      step.migratedFragmentId ?? null,
-      step.updatedAt,
-      step.id,
-    );
-    this.db.bumpLastModified();
-    this.workflowStepsCache = null;
-
-    return step;
-  }
-
-  /**
-   * Delete a workflow step definition.
-   * Also removes the ID from any tasks that reference it in enabledWorkflowSteps.
-   * @throws Error if the workflow step is not found
-   */
-  async deleteWorkflowStep(id: string): Promise<void> {
-    const deleted = this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(id) as {
-      changes?: number;
-    };
-
-    if ((deleted.changes || 0) === 0) {
-      throw new Error(`Workflow step '${id}' not found`);
-    }
-
-    this.db.bumpLastModified();
-    this.workflowStepsCache = null;
-
-    // Clean up references from existing tasks (best-effort, outside config lock)
-    try {
-      const tasks = await this.listTasks({ slim: true });
-      for (const task of tasks) {
-        if (task.enabledWorkflowSteps?.includes(id)) {
-          const updated = task.enabledWorkflowSteps.filter((wsId) => wsId !== id);
-          // Direct task.json mutation for enabledWorkflowSteps cleanup
-          await this.withTaskLock(task.id, async () => {
-            const dir = this.taskDir(task.id);
-            const t = await this.readTaskJson(dir);
-            t.enabledWorkflowSteps = updated.length > 0 ? updated : undefined;
-            t.updatedAt = new Date().toISOString();
-            await this.atomicWriteTaskJson(dir, t);
-          });
-        }
-      }
-    } catch {
-      // Best-effort: task cleanup is non-critical
-    }
   }
 
   // ── Workflow definitions (named WorkflowIr graphs) ─────────────────────
@@ -15243,24 +14824,12 @@ ${stepsSection}`;
       // Best-effort: a dangling default falls back gracefully at task creation.
     }
 
-    // Cascade: drop selections referencing this workflow, their materialized
-    // step rows, and reset the affected tasks' enabled steps.
+    // Cascade: drop selections referencing this workflow and reset the affected
+    // tasks' enabled steps. (U7c: no materialized `workflow_steps` rows to delete.)
     const selections = this.db
-      .prepare("SELECT taskId, stepIds FROM task_workflow_selection WHERE workflowId = ?")
-      .all(id) as Array<{ taskId: string; stepIds: string }>;
+      .prepare("SELECT taskId FROM task_workflow_selection WHERE workflowId = ?")
+      .all(id) as Array<{ taskId: string }>;
     for (const row of selections) {
-      try {
-        const stepIds = JSON.parse(row.stepIds) as unknown;
-        if (Array.isArray(stepIds)) {
-          for (const stepId of stepIds) {
-            if (typeof stepId === "string") {
-              this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
-            }
-          }
-        }
-      } catch {
-        // Corrupt stepIds list — still remove the selection row below.
-      }
       this.db.prepare("DELETE FROM task_workflow_selection WHERE taskId = ?").run(row.taskId);
       try {
         await this.updateTask(row.taskId, { enabledWorkflowSteps: [] });
@@ -15269,7 +14838,6 @@ ${stepsSection}`;
         // at execution time and are skipped.
       }
     }
-    if (selections.length > 0) this.workflowStepsCache = null;
     this.db.bumpLastModified();
 
     // U5 (R20) delete reconciliation: re-home each occupant to the default
@@ -15753,130 +15321,6 @@ ${stepsSection}`;
     return definition;
   }
 
-  /**
-   * Lazy, idempotent migration of legacy user-authored workflow steps into the
-   * dual workflow-definition representation (U2 / R5 / KTD-3). Runs on first
-   * editor open per project via `POST /api/workflows/migrate-legacy-steps`.
-   *
-   * Policy:
-   *  - Every unmigrated user step (enabled or not, excluding compiled-materialized
-   *    rows) becomes a `kind: "fragment"` definition — the reusable palette piece.
-   *  - The `defaultOn` subset additionally becomes ONE combined `kind: "workflow"`
-   *    definition named "Migrated steps" (these were the steps that ran
-   *    automatically on new tasks); when non-empty and no project default is
-   *    already set, it becomes the project default so new-task behavior is
-   *    preserved. An explicit existing default is never clobbered.
-   *  - Each source row is stamped with `migratedFragmentId` (idempotency marker).
-   *    Source rows are never deleted.
-   *
-   * Idempotency: the unmigrated-rows SELECT and the marker stamping happen inside
-   * a single `transactionImmediate` (write lock acquired BEFORE the SELECT,
-   * matching `selectTaskWorkflow`'s ordering rationale), so concurrent opens /
-   * re-runs converge to a single set of definitions. A second run sees zero
-   * unmigrated rows and returns `{ migrated: 0, skipped: n }`.
-   */
-  async migrateLegacyWorkflowSteps(): Promise<{
-    migrated: number;
-    skipped: number;
-    combinedWorkflowId?: string;
-  }> {
-    // Resolve async prerequisites BEFORE the synchronous transaction: the
-    // workflow-columns flag (for flag-aware persistence). The project default is
-    // re-read AFTER the transaction (compare-and-set) so a concurrently-set
-    // default is never clobbered.
-    const flagOn = await this.workflowColumnsFlagOn();
-
-    const result = this.db.transactionImmediate(() => {
-      // Write lock is now held. Read the raw step rows directly (the cached,
-      // plugin-merged listWorkflowSteps() is not transaction-scoped). Mirror
-      // listWorkflowSteps()'s compiled-materialized filter and toStoredWorkflowStep
-      // mapping so policy decisions match the user-facing step listing.
-      const rows = this.db
-        .prepare("SELECT * FROM workflow_steps ORDER BY createdAt ASC")
-        .all() as Array<Parameters<typeof this.toStoredWorkflowStep>[0]>;
-
-      const userSteps = rows
-        .map((row) => this.applyLegacyWorkflowStepOverrides(this.toStoredWorkflowStep(row)))
-        // Compiled-materialized rows are an execution detail, not user-authored.
-        .filter((step) => !step.templateId?.startsWith(WORKFLOW_COMPILED_STEP_TEMPLATE_PREFIX));
-
-      const alreadyMigrated = userSteps.filter((s) => s.migratedFragmentId);
-      const unmigrated = userSteps.filter((s) => !s.migratedFragmentId);
-
-      if (unmigrated.length === 0) {
-        return { migrated: 0, skipped: alreadyMigrated.length, combinedWorkflowId: undefined as string | undefined };
-      }
-
-      // Every unmigrated user step → a single-node fragment; stamp the source row.
-      for (const step of unmigrated) {
-        // parseWorkflowIr runs inside both insertWorkflowDefinitionSync and
-        // layoutForIr, so compute the fragment IR once and reuse it.
-        const fragmentIr = stepToFragmentIr(step);
-        const fragment = this.insertWorkflowDefinitionSync(
-          {
-            name: step.name,
-            description: step.description,
-            kind: "fragment",
-            ir: fragmentIr,
-            layout: layoutForIr(fragmentIr),
-          },
-          flagOn,
-        );
-        this.db
-          .prepare("UPDATE workflow_steps SET migrated_fragment_id = ?, updatedAt = ? WHERE id = ?")
-          .run(fragment.id, new Date().toISOString(), step.id);
-      }
-      this.workflowStepsCache = null;
-      this.db.bumpLastModified();
-
-      // The defaultOn subset → one combined "Migrated steps" workflow.
-      const defaultOnSteps = unmigrated.filter((s) => s.defaultOn === true);
-      let combinedWorkflowId: string | undefined;
-      if (defaultOnSteps.length > 0) {
-        const ir = stepsToWorkflowIr(defaultOnSteps, "Migrated steps");
-        const combined = this.insertWorkflowDefinitionSync(
-          {
-            name: "Migrated steps",
-            description: "Converted from your legacy workflow steps",
-            kind: "workflow",
-            ir,
-            layout: layoutForIr(ir),
-          },
-          flagOn,
-        );
-        combinedWorkflowId = combined.id;
-      }
-
-      return { migrated: unmigrated.length, skipped: alreadyMigrated.length, combinedWorkflowId };
-    });
-
-    // Set the combined workflow as the project default — only when one was
-    // created AND no explicit default is already set (don't clobber a user
-    // choice). Done outside the transaction via the async setter so the project
-    // default-workflow hooks run. Compare-and-set against the CURRENT default
-    // (re-read immediately before writing, not the pre-transaction snapshot) so
-    // a default set concurrently by another writer is never overwritten. If the
-    // set fails, swallow the error: a missing migrated default is recoverable
-    // (the user can set one), but throwing here would surface the whole
-    // migration as failed even though the definitions were written.
-    if (result.combinedWorkflowId) {
-      const currentDefaultId = await this.getDefaultWorkflowId();
-      if (!currentDefaultId) {
-        try {
-          await this.setDefaultWorkflowId(result.combinedWorkflowId);
-        } catch (err) {
-          storeLog.warn("Failed to set migrated combined workflow as project default", {
-            phase: "migrateLegacyWorkflowSteps:set-default",
-            combinedWorkflowId: result.combinedWorkflowId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-    }
-
-    return result;
-  }
-
   /** Whether a raw workflow CLI command has been approved (trust-on-first-use).
    *  Comparison is on the exact trimmed command string. */
   async isWorkflowCliCommandApproved(command: string): Promise<boolean> {
@@ -16126,136 +15570,67 @@ ${stepsSection}`;
       .run(taskId, workflowId, JSON.stringify(stepIds), new Date().toISOString());
   }
 
-  /** Delete the WorkflowStep rows previously materialized for a task's selection
-   *  and remove the selection record. Best-effort; safe to call when unset. */
+  /*
+  FNXC:WorkflowStepCRUD 2026-06-26-14:00:
+  U7c: workflow selection no longer MATERIALIZES legacy `workflow_steps` rows (the table is
+  dropped). A task's selection records the workflow id plus the set of DEFAULT-ON
+  `optional-group` node ids (the `enabledWorkflowSteps` toggle keys the graph reads at the
+  optional-group seam via `enabledWorkflowSteps.includes(node.id)`). The graph runs the
+  selected workflow's IR directly from `workflowId`; it never reads `selection.stepIds` as
+  table rows. Compilation is retained ONLY for up-front IR validation (genuinely invalid
+  graphs still throw before any state is written; interpreter-deferred built-ins are valid).
+  */
+
+  /** Remove a task's workflow selection record. Best-effort; safe when unset. */
   private removeMaterializedSelection(taskId: string): void {
-    const existing = this.getTaskWorkflowSelection(taskId);
-    if (existing) {
-      for (const stepId of existing.stepIds) {
-        this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
-      }
-      this.workflowStepsCache = null;
-    }
     this.db.prepare("DELETE FROM task_workflow_selection WHERE taskId = ?").run(taskId);
   }
 
-  /** Purge a task's workflow selection and its materialized WorkflowStep rows
-   *  when the task row itself is being physically removed. `task_workflow_selection`
-   *  has no FK to `tasks(id)` (SQLite can't add one to an existing table without a
-   *  rebuild), so deletion must be mirrored here to avoid orphaned selection rows
-   *  and unreclaimable compiled steps. Best-effort and synchronous: unlike
-   *  clearTaskWorkflowSelection it does not touch enabledWorkflowSteps, since the
-   *  owning task row no longer exists. */
+  /** Purge a task's workflow selection row when the task row itself is being
+   *  physically removed. `task_workflow_selection` has no FK to `tasks(id)`
+   *  (SQLite can't add one to an existing table without a rebuild), so deletion
+   *  must be mirrored here to avoid orphaned selection rows. */
   private purgeTaskWorkflowSelectionRows(taskId: string): void {
-    const row = this.db
-      .prepare("SELECT stepIds FROM task_workflow_selection WHERE taskId = ?")
-      .get(taskId) as { stepIds: string } | undefined;
-    if (!row) return;
-    try {
-      const parsed = JSON.parse(row.stepIds) as unknown;
-      if (Array.isArray(parsed)) {
-        for (const stepId of parsed) {
-          if (typeof stepId === "string") {
-            this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
-          }
-        }
-      }
-    } catch {
-      // Corrupt stepIds list — still remove the selection row below.
-    }
     this.db.prepare("DELETE FROM task_workflow_selection WHERE taskId = ?").run(taskId);
-    this.workflowStepsCache = null;
   }
 
-  /** Delete a set of freshly materialized WorkflowStep rows that were never
-   *  successfully attached to a task/selection (e.g. the owning task create
-   *  failed). Best-effort; tolerates already-removed ids. */
-  private cleanupOrphanedMaterializedSteps(stepIds: string[] | undefined): void {
-    if (!stepIds || stepIds.length === 0) return;
-    for (const stepId of stepIds) {
-      try {
-        this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
-      } catch {
-        // Best-effort cleanup.
-      }
+  /** Validate a workflow's IR by compiling it; throws on genuinely invalid graphs.
+   *  Interpreter-deferred built-ins (optional-group bearing) are valid and tolerated.
+   *  No `workflow_steps` rows are written (U7c). */
+  private validateWorkflowCompilable(workflowId: string, def: { ir: WorkflowIr }): void {
+    try {
+      compileWorkflowToSteps(def.ir);
+    } catch (err) {
+      if (isBuiltinWorkflowId(workflowId) && isInterpreterDeferredWorkflowCompileError(err)) return;
+      throw err;
     }
-    this.workflowStepsCache = null;
   }
 
-  /** Persist pre-compiled workflow steps as fresh WorkflowStep rows and return
-   *  their ids in execution order. Steps are tagged so they stay out of the
-   *  step manager. Compile via compileWorkflowToSteps before calling. */
-  private async materializeWorkflowSteps(
-    workflowId: string,
-    inputs: import("./types.js").WorkflowStepInput[],
-  ): Promise<string[]> {
-    const ids: string[] = [];
-    for (const input of inputs) {
-      const step = await this.createWorkflowStep({
-        ...input,
-        templateId: `${WORKFLOW_COMPILED_STEP_TEMPLATE_PREFIX}${workflowId}`,
-        enabled: true,
-      });
-      ids.push(step.id);
-    }
-    return ids;
-  }
-
-  /** Resolve the project-default workflow into materialized step ids, or null
-   *  when no default is set / it is missing / it does not compile. */
+  /** Resolve the project-default workflow into the selection seed (workflow id +
+   *  default-on optional-group node ids), or undefined when no default is set /
+   *  it is missing / it is a fragment. */
   private async materializeDefaultWorkflowSteps(): Promise<{ workflowId: string; stepIds: string[] } | undefined> {
     const workflowId = await this.getDefaultWorkflowId();
     if (!workflowId) return undefined;
     const def = await this.getWorkflowDefinition(workflowId);
     if (!def) return undefined;
     // KTD-1/R6: a fragment must never act as a project default (it is not a
-    // selectable workflow); fall back to no default rather than materializing it.
+    // selectable workflow); fall back to no default.
     if (def.kind === "fragment") return undefined;
-    // Compile (and validate) before creating any rows so a non-compilable
-    // default falls back cleanly with nothing written. Interpreter-deferred
-    // built-ins are valid selectable workflows but not lowerable to legacy
-    // WorkflowStep rows, so default materialization falls back to legacy defaults.
-    // Built-ins that compile to zero steps still record a stepless selection,
-    // mirroring explicit workflow materialization.
-    let inputs: import("./types.js").WorkflowStepInput[];
-    try {
-      inputs = compileWorkflowToSteps(def.ir);
-    } catch (err) {
-      // FNXC:CodeReviewStep 2026-06-25-15:00:
-      // Interpreter-deferred built-ins (e.g. builtin:coding/stepwise, which carry
-      // optional-group nodes) cannot lower to legacy WorkflowStep rows, but they may
-      // still carry DEFAULT-ON optional groups (e.g. `code-review`) that must be seeded
-      // into the new task's `enabledWorkflowSteps` for default-on to actually take
-      // effect — the executor enables a group strictly via
-      // `enabledWorkflowSteps.includes(node.id)` with no defaultOn fallback. Mirror the
-      // explicit-workflow path (`materializeExplicitWorkflowSteps`) by recording a
-      // selection seeded with the default-on group ids instead of bailing to `undefined`
-      // (which dropped the seeding and silently disabled default-on groups under a
-      // project-default workflow).
-      if (isBuiltinWorkflowId(workflowId) && isInterpreterDeferredWorkflowCompileError(err)) {
-        return { workflowId, stepIds: resolveDefaultOnOptionalGroupIds(def.ir) };
-      }
-      throw err;
-    }
+    // Validate the IR up front (a genuinely non-compilable default propagates and
+    // is caught by the createTask fallback). Interpreter-deferred built-ins are valid.
+    this.validateWorkflowCompilable(workflowId, def);
     // FNXC:WorkflowOptionalGroup 2026-06-21-14:20: seed `enabledWorkflowSteps`
-    // with the ids of `optional-group` nodes whose `defaultOn` is true, mirroring
-    // the prior `optionalStep.defaultOn ?? false` precedence (U3, R3). These group
-    // ids are NOT WorkflowStep rows — they are toggle keys the executor reads at
-    // the optional-group seam — so they ride alongside the compiled step ids.
-    const defaultGroupIds = resolveDefaultOnOptionalGroupIds(def.ir);
-    if (isBuiltinWorkflowId(workflowId) && inputs.length === 0) {
-      return { workflowId, stepIds: defaultGroupIds };
-    }
-    const stepIds = await this.materializeWorkflowSteps(workflowId, inputs);
-    return { workflowId, stepIds: [...stepIds, ...defaultGroupIds] };
+    // with the ids of `optional-group` nodes whose `defaultOn` is true. These group
+    // ids are the toggle keys the executor reads at the optional-group seam.
+    return { workflowId, stepIds: resolveDefaultOnOptionalGroupIds(def.ir) };
   }
 
-  /** Resolve an EXPLICITLY requested workflow id (U6/R3/KTD-4) into materialized
-   *  step ids for the create-time `workflowId` parameter. Unlike
+  /** Resolve an EXPLICITLY requested workflow id (U6/R3/KTD-4) into the selection
+   *  seed for the create-time `workflowId` parameter. Unlike
    *  `materializeDefaultWorkflowSteps`, unknown ids and fragments are hard errors
-   *  (thrown BEFORE any task row is created) rather than silent fallbacks, since
-   *  the caller asked for a specific workflow. Compilation happens up front so a
-   *  non-compilable workflow aborts before any rows are written. */
+   *  (thrown BEFORE any task row is created) since the caller asked for a specific
+   *  workflow. Validation happens up front so a non-compilable workflow aborts. */
   private async materializeExplicitWorkflowSteps(
     workflowId: string,
   ): Promise<{ workflowId: string; stepIds: string[] }> {
@@ -16264,88 +15639,42 @@ ${stepsSection}`;
     if (def.kind === "fragment") {
       throw new Error(`Workflow '${workflowId}' is a fragment and cannot be selected for a task`);
     }
-    let inputs: import("./types.js").WorkflowStepInput[];
-    try {
-      inputs = compileWorkflowToSteps(def.ir);
-    } catch (err) {
-      if (isBuiltinWorkflowId(workflowId) && isInterpreterDeferredWorkflowCompileError(err))
-        return { workflowId, stepIds: resolveDefaultOnOptionalGroupIds(def.ir) };
-      throw err;
-    }
-    // FNXC:WorkflowOptionalGroup 2026-06-21-14:20: same defaultOn-group seeding as
-    // the default-workflow path, for an explicitly requested create-time workflow.
-    const defaultGroupIds = resolveDefaultOnOptionalGroupIds(def.ir);
-    const stepIds = await this.materializeWorkflowSteps(workflowId, inputs);
-    return { workflowId, stepIds: [...stepIds, ...defaultGroupIds] };
+    this.validateWorkflowCompilable(workflowId, def);
+    return { workflowId, stepIds: resolveDefaultOnOptionalGroupIds(def.ir) };
   }
 
   /**
-   * Select a workflow for a task: compile it when possible, materialize its
-   * steps, and write their ids into the task's enabledWorkflowSteps. Replaces
-   * any prior selection (no orphaned steps). Interpreter-deferred workflow IRs
-   * record the selection with zero materialized steps; genuinely invalid graphs
-   * still throw before any state is written.
+   * Select a workflow for a task: validate its IR, then record the selection
+   * (workflow id + default-on optional-group node ids) and write those ids into
+   * the task's enabledWorkflowSteps. Replaces any prior selection. Genuinely
+   * invalid graphs throw before any state is written (U7c: no row materialization).
    */
   async selectTaskWorkflow(taskId: string, workflowId: string): Promise<string[]> {
-    // Hold the task lock across the whole sequence (materialize → owner write →
-    // prior-step cleanup) so it can't interleave with a concurrent select/clear
-    // or executor updateTask on the same task. updateTaskUnlocked is used inside
-    // because the per-task lock is non-reentrant.
+    // Hold the task lock across the whole sequence so it can't interleave with a
+    // concurrent select/clear or executor updateTask on the same task.
+    // updateTaskUnlocked is used inside because the per-task lock is non-reentrant.
     return this.withTaskLock(taskId, async () => {
       const def = await this.getWorkflowDefinition(workflowId);
       if (!def) throw new Error(`Workflow '${workflowId}' not found`);
       // KTD-1/R6: fragments are reusable single-node palette templates, not
-      // selectable workflows. Reject them from task selection with a clear error
-      // rather than materializing a degenerate single-step task.
+      // selectable workflows.
       if (def.kind === "fragment") {
         throw new Error(`Workflow '${workflowId}' is a fragment and cannot be selected for a task`);
       }
-      // Compile once up front: invalid graphs abort before any mutation, while
-      // interpreter-deferred graphs keep the selection but materialize no legacy
-      // WorkflowStep rows.
-      let inputs: import("./types.js").WorkflowStepInput[];
-      try {
-        inputs = compileWorkflowToSteps(def.ir);
-      } catch (err) {
-        if (isBuiltinWorkflowId(workflowId) && isInterpreterDeferredWorkflowCompileError(err)) inputs = [];
-        else throw err;
-      }
+      // Validate once up front: invalid graphs abort before any mutation.
+      this.validateWorkflowCompilable(workflowId, def);
 
-      // Materialize the new steps and point the task at them BEFORE deleting the
-      // prior selection's rows, so a mid-flight failure never leaves the task
-      // referencing already-deleted step ids.
-      const priorSelection = this.getTaskWorkflowSelection(taskId);
       // U11/KTD-13: capture the OLD field schema (from the prior selection's IR)
       // before the selection row flips, so we can reconcile existing field values
       // against the NEW workflow's schema below.
       const oldFieldDefs = this.resolveTaskCustomFieldDefsSync(taskId);
       const newFieldDefs: WorkflowFieldDefinition[] =
         def.ir.version === "v2" ? (def.ir.fields ?? []) : [];
-      const ids = await this.materializeWorkflowSteps(workflowId, inputs);
-      try {
-        await this.updateTaskUnlocked(taskId, { enabledWorkflowSteps: ids });
-        this.writeTaskWorkflowSelection(taskId, workflowId, ids);
-      } catch (err) {
-        // The owner write (updateTask / selection upsert) failed, so the steps we
-        // just materialized would orphan with no selection row pointing at them.
-        // Delete them before propagating; the prior selection is left untouched.
-        for (const stepId of ids) {
-          try {
-            this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
-          } catch {
-            // Best-effort cleanup; surface the original error below.
-          }
-        }
-        this.workflowStepsCache = null;
-        throw err;
-      }
-
-      if (priorSelection) {
-        for (const stepId of priorSelection.stepIds) {
-          this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
-        }
-        this.workflowStepsCache = null;
-      }
+      // Selection seed: default-on optional-group node ids (the graph runs the IR
+      // directly from workflowId; these ids are the enabledWorkflowSteps toggles).
+      const ids = resolveDefaultOnOptionalGroupIds(def.ir);
+      await this.updateTaskUnlocked(taskId, { enabledWorkflowSteps: ids });
+      this.writeTaskWorkflowSelection(taskId, workflowId, ids);
 
       // U11/KTD-13: reconcile custom field values against the NEW workflow's
       // schema. Same-id, type-compatible values are kept; incompatible/removed

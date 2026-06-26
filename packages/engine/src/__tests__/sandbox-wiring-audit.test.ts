@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { RunAuditEventInput, Routine, RoutineStore, TaskStore } from "@fusion/core";
 import { __runConfiguredCommandForTests } from "../executor.js";
-import { __executePostMergeScriptStepForTests } from "../merger.js";
 import { createRunAuditor } from "../run-audit.js";
 import { RoutineRunner } from "../routine-runner.js";
 import { __resetSandboxBackendForTests, __setSandboxBackendForTests } from "../sandbox/index.js";
@@ -42,28 +41,6 @@ describe("sandbox wiring audit emissions", () => {
     await __runConfiguredCommandForTests("node -e \"process.exit(7)\"", process.cwd(), 20_000, undefined, auditor);
 
     expect(store.events.some((event) => event.domain === "sandbox" && event.mutationType === "sandbox:failure")).toBe(true);
-  });
-
-  it("emits sandbox:run for merger script-mode execution", async () => {
-    const store = new AuditStoreStub();
-    const auditor = createRunAuditor(store as unknown as TaskStore, {
-      runId: "run-merge-1",
-      agentId: "merger",
-      taskId: "FN-4640",
-      phase: "merge",
-    });
-
-    const response = await __executePostMergeScriptStepForTests(
-      {} as TaskStore,
-      "FN-4640",
-      { id: "ws-1", name: "post", type: "script", scriptName: "ok" } as any,
-      process.cwd(),
-      { scripts: { ok: "node -e \"process.stdout.write('ok')\"" } } as any,
-      auditor,
-    );
-
-    expect(response.success).toBe(true);
-    expect(store.events.some((event) => event.domain === "sandbox" && event.mutationType === "sandbox:run")).toBe(true);
   });
 
   it("emits sandbox:prepare and sandbox:run for routine-runner command execution", async () => {

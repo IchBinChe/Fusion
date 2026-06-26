@@ -162,19 +162,11 @@ describe("migrateFromLegacy", () => {
       expect(row.nextId).toBe(42);
       expect(row.nextWorkflowStepId).toBe(3);
       expect(JSON.parse(row.settings).maxConcurrent).toBe(4);
+      // FNXC:WorkflowStepCRUD 2026-06-26-14:00: U7c dropped the `workflow_steps` table.
+      // The legacy config.json steps are still preserved verbatim in the config column for
+      // archival reference, but are no longer imported as table rows (workflow steps run
+      // graph-native; the table no longer exists in the schema).
       expect(JSON.parse(row.workflowSteps)).toHaveLength(1);
-
-      const workflowRows = db.prepare("SELECT * FROM workflow_steps ORDER BY id ASC").all() as any[];
-      expect(workflowRows).toHaveLength(1);
-      expect(workflowRows[0]).toMatchObject({
-        id: "WS-001",
-        name: "Test",
-        description: "Test step",
-        mode: "prompt",
-        phase: "pre-merge",
-        prompt: "test",
-        enabled: 1,
-      });
     });
   });
 
@@ -850,12 +842,19 @@ describe("schema migration", () => {
     db.close();
   });
 
-  it("adds workflow_steps.gateMode and backfills legacy rows by mode", () => {
+  // FNXC:WorkflowStepCRUD 2026-06-26-14:00: U7c — the legacy `workflow_steps` table is
+  // DROPPED by migration 131. A v75 DB with seeded legacy step rows must migrate cleanly
+  // through the whole chain (incl. the gateMode/migrated_fragment_id column migrations and
+  // the migration-130 enable-id normalization) and END with the table gone. The former
+  // per-row gateMode-backfill assertion is obsolete: the column is on a table nothing reads
+  // and that the cutover removes.
+  it("migrates a v75 DB with legacy workflow_steps rows and drops the table at the cutover", () => {
     const db = new Database(fusionDir);
     db.exec("CREATE TABLE IF NOT EXISTS __meta (key TEXT PRIMARY KEY, value TEXT)");
     db.exec(`
       CREATE TABLE IF NOT EXISTS workflow_steps (
         id TEXT PRIMARY KEY,
+        templateId TEXT,
         name TEXT NOT NULL,
         description TEXT NOT NULL,
         mode TEXT NOT NULL DEFAULT 'prompt',
@@ -873,11 +872,10 @@ describe("schema migration", () => {
 
     db.init();
 
-    const rows = db.prepare("SELECT id, mode, gateMode FROM workflow_steps ORDER BY id ASC").all() as Array<{ id: string; mode: string; gateMode: string }>;
-    expect(rows).toEqual([
-      { id: "WS-001", mode: "prompt", gateMode: "advisory" },
-      { id: "WS-002", mode: "script", gateMode: "advisory" },
-    ]);
+    const table = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workflow_steps'")
+      .get();
+    expect(table).toBeUndefined();
     expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
 
     db.close();
@@ -1008,6 +1006,7 @@ describe("schema migration", () => {
     db.exec(`
       CREATE TABLE IF NOT EXISTS workflow_steps (
         id TEXT PRIMARY KEY,
+        templateId TEXT,
         name TEXT NOT NULL,
         description TEXT NOT NULL,
         mode TEXT NOT NULL DEFAULT 'prompt',
@@ -1026,12 +1025,13 @@ describe("schema migration", () => {
 
     db.init();
 
-    const rows = db.prepare("SELECT id, mode, enabled, gateMode FROM workflow_steps ORDER BY id ASC").all() as Array<{ id: string; mode: string; enabled: number; gateMode: string }>;
-    expect(rows).toEqual([
-      { id: "WS-001", mode: "prompt", enabled: 1, gateMode: "advisory" },
-      { id: "WS-002", mode: "script", enabled: 1, gateMode: "advisory" },
-      { id: "WS-003", mode: "prompt", enabled: 0, gateMode: "advisory" },
-    ]);
+    // FNXC:WorkflowStepCRUD 2026-06-26-14:00: U7c — the cutover (migration 131) drops the
+    // legacy table after the historical gateMode/enabled backfills run, so the per-row
+    // gateMode assertion is obsolete; assert the table is gone and the chain completed.
+    const table = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workflow_steps'")
+      .get();
+    expect(table).toBeUndefined();
     expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
 
     db.close();
@@ -1315,6 +1315,7 @@ describe("schema migration", () => {
     db.exec(`
       CREATE TABLE IF NOT EXISTS workflow_steps (
         id TEXT PRIMARY KEY,
+        templateId TEXT,
         name TEXT NOT NULL,
         description TEXT NOT NULL,
         mode TEXT NOT NULL DEFAULT 'prompt',
@@ -1342,31 +1343,37 @@ describe("schema migration", () => {
     const wfRow = db.prepare("SELECT kind FROM workflows WHERE id = 'WF-legacy'").get() as { kind: string };
     expect(wfRow.kind).toBe("workflow");
 
-    const stepColumns = db.prepare("PRAGMA table_info(workflow_steps)").all() as Array<{ name: string }>;
-    expect(stepColumns.map((c) => c.name)).toContain("migrated_fragment_id");
-    const stepRow = db
-      .prepare("SELECT migrated_fragment_id FROM workflow_steps WHERE id = 'WS-legacy'")
-      .get() as { migrated_fragment_id: string | null };
-    expect(stepRow.migrated_fragment_id).toBeNull();
+    // FNXC:WorkflowStepCRUD 2026-06-26-14:00: U7c — migration 109 adds
+    // workflow_steps.migrated_fragment_id, but the cutover (migration 131) drops the whole
+    // table by the time init() completes, so the column is unobservable. Assert the table
+    // is gone (the migration chain ran clean through the cutover).
+    const stepTable = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workflow_steps'")
+      .get();
+    expect(stepTable).toBeUndefined();
 
     expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     db.close();
   });
 
-  it("migration 109 is idempotent on re-init", () => {
+  it("migration 109 (workflows.kind) is idempotent on re-init", () => {
     const db = new Database(fusionDir);
     db.init();
     expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
     db.close();
 
-    // Re-open the same on-disk DB: already at 109, the 109 block must be a no-op.
+    // Re-open the same on-disk DB: already at the current version, the migration blocks
+    // must be a no-op. (U7c: workflow_steps no longer exists on a fresh DB — the cutover
+    // never creates it — so only the surviving workflows.kind column is asserted.)
     const reopened = new Database(fusionDir);
     reopened.init();
     expect(reopened.getSchemaVersion()).toBe(SCHEMA_VERSION);
     const workflowColumns = reopened.prepare("PRAGMA table_info(workflows)").all() as Array<{ name: string }>;
     expect(workflowColumns.filter((c) => c.name === "kind")).toHaveLength(1);
-    const stepColumns = reopened.prepare("PRAGMA table_info(workflow_steps)").all() as Array<{ name: string }>;
-    expect(stepColumns.filter((c) => c.name === "migrated_fragment_id")).toHaveLength(1);
+    const stepTable = reopened
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'workflow_steps'")
+      .get();
+    expect(stepTable).toBeUndefined();
     reopened.close();
   });
 });

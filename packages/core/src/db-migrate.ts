@@ -151,56 +151,10 @@ async function migrateConfig(fusionDir: string, db: Database): Promise<void> {
     new Date().toISOString(),
   );
 
-  const insertWorkflowStep = db.prepare(`
-    INSERT OR IGNORE INTO workflow_steps (
-      id,
-      templateId,
-      name,
-      description,
-      mode,
-      phase,
-      prompt,
-      gateMode,
-      toolMode,
-      scriptName,
-      enabled,
-      defaultOn,
-      modelProvider,
-      modelId,
-      createdAt,
-      updatedAt
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
-  for (const step of workflowSteps) {
-    if (!step?.id || !step.name || !step.description) {
-      continue;
-    }
-
-    const mode = step.mode === "script" ? "script" : "prompt";
-    const phase = step.phase === "post-merge" ? "post-merge" : "pre-merge";
-    const createdAt = step.createdAt || new Date().toISOString();
-    const updatedAt = step.updatedAt || createdAt;
-
-    insertWorkflowStep.run(
-      step.id,
-      step.templateId ?? null,
-      step.name,
-      step.description,
-      mode,
-      phase,
-      mode === "prompt" ? step.prompt || "" : "",
-      step.gateMode ?? "advisory",
-      mode === "prompt" ? step.toolMode ?? null : null,
-      mode === "script" ? step.scriptName ?? null : null,
-      step.enabled === false ? 0 : 1,
-      step.defaultOn === undefined ? null : step.defaultOn ? 1 : 0,
-      mode === "prompt" ? step.modelProvider ?? null : null,
-      mode === "prompt" ? step.modelId ?? null : null,
-      createdAt,
-      updatedAt,
-    );
-  }
+  // FNXC:WorkflowStepCRUD 2026-06-26-14:00: U7c dropped the `workflow_steps` table.
+  // Legacy `config.json` workflow steps are preserved in the `config.workflowSteps` JSON
+  // column above for archival/diagnostic reference, but are NOT imported as table rows —
+  // workflow steps run graph-native and the table no longer exists in the schema.
 
   db.bumpLastModified();
   console.log("[migrate] Migrated config.json");

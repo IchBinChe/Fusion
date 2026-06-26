@@ -927,13 +927,8 @@ describe("TaskStore", () => {
     });
 
     it("applyReplicatedTaskCreate does not auto-apply default workflow steps", async () => {
-      const workflowStep = await store.createWorkflowStep({
-        name: "Default step",
-        description: "auto",
-        enabled: true,
-        defaultOn: true,
-      });
-
+      // U7c: the legacy default-on step table/CRUD is gone; the invariant under test is
+      // purely that a replicated create never auto-seeds enabledWorkflowSteps.
       const payload = {
         replicationVersion: 1 as const,
         reservationId: "res-default-step",
@@ -951,7 +946,6 @@ describe("TaskStore", () => {
       const result = await store.applyReplicatedTaskCreate(payload);
       expect(result.applied).toBe(true);
       expect(result.task.enabledWorkflowSteps).toBeUndefined();
-      expect(workflowStep.defaultOn).toBe(true);
     });
 
     it("applyReplicatedTaskCreate is idempotent and detects collisions", async () => {

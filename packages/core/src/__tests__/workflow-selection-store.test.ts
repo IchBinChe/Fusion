@@ -64,6 +64,50 @@ function branchingIr(): WorkflowIr {
   };
 }
 
+/*
+FNXC:WorkflowStepCRUD 2026-06-26-14:00:
+U7c dropped the `workflow_steps` table and the workflow-compilation materializer.
+Selecting/inheriting a workflow no longer materializes per-step rows: the graph runs the
+selected workflow's IR directly, and `task.enabledWorkflowSteps` / `selection.stepIds` now
+hold ONLY the ids of default-on `optional-group` nodes (the executor toggle keys). A pure
+v1 linear workflow has no optional-group nodes, so its selection seeds an EMPTY set. The
+invariant `selection.stepIds === task.enabledWorkflowSteps` still holds.
+*/
+/** v2 workflow whose success path threads through two optional-group nodes
+ *  (og-on defaultOn:true, og-off defaultOn:false). */
+function optionalGroupIr(): WorkflowIr {
+  const groupTemplate = (id: string) => ({
+    nodes: [{ id: `${id}-inner`, kind: "prompt" as const, config: { prompt: "x" } }],
+    edges: [],
+  });
+  return {
+    version: "v2",
+    name: "og-wf",
+    columns: [{ id: "todo", name: "Todo", traits: [] }],
+    nodes: [
+      { id: "start", kind: "start", column: "todo" },
+      {
+        id: "og-on",
+        kind: "optional-group",
+        column: "todo",
+        config: { name: "On Group", defaultOn: true, template: groupTemplate("og-on") },
+      },
+      {
+        id: "og-off",
+        kind: "optional-group",
+        column: "todo",
+        config: { name: "Off Group", defaultOn: false, template: groupTemplate("og-off") },
+      },
+      { id: "end", kind: "end", column: "todo" },
+    ],
+    edges: [
+      { from: "start", to: "og-on", condition: "success" },
+      { from: "og-on", to: "og-off", condition: "success" },
+      { from: "og-off", to: "end", condition: "success" },
+    ],
+  };
+}
+
 describe("TaskStore workflow selection (U3)", () => {
   const harness = createTaskStoreTestHarness();
   let store: ReturnType<typeof harness.store>;
@@ -77,52 +121,58 @@ describe("TaskStore workflow selection (U3)", () => {
     await harness.afterEach();
   });
 
-  it("selecting a workflow populates enabledWorkflowSteps and records selection", async () => {
-    const wf = await store.createWorkflowDefinition({ name: "QA", ir: linearIr() });
+  it("selecting a workflow seeds enabledWorkflowSteps with default-on group ids and records selection", async () => {
+    const wf = await store.createWorkflowDefinition({ name: "QA", ir: optionalGroupIr() });
     const task = await store.createTask({ description: "T", enabledWorkflowSteps: [] });
 
     await store.selectTaskWorkflow(task.id, wf.id);
 
     const detail = await store.getTask(task.id);
-    expect(detail.enabledWorkflowSteps).toHaveLength(2);
+    // Only the defaultOn:true optional-group id is seeded (og-off is excluded).
+    expect(detail.enabledWorkflowSteps).toEqual(["og-on"]);
     const selection = store.getTaskWorkflowSelection(task.id);
     expect(selection?.workflowId).toBe(wf.id);
     expect(selection?.stepIds).toEqual(detail.enabledWorkflowSteps);
   });
 
-  it("compiled steps are hidden from the user-facing step manager listing", async () => {
+  it("selecting a pure-linear workflow records the selection with an empty step set", async () => {
     const wf = await store.createWorkflowDefinition({ name: "QA", ir: linearIr() });
     const task = await store.createTask({ description: "T", enabledWorkflowSteps: [] });
+
     await store.selectTaskWorkflow(task.id, wf.id);
 
+    const detail = await store.getTask(task.id);
+    // No optional-group nodes → no toggle ids; the graph runs the IR's nodes directly.
+    expect(detail.enabledWorkflowSteps ?? []).toEqual([]);
+    const selection = store.getTaskWorkflowSelection(task.id);
+    expect(selection?.workflowId).toBe(wf.id);
+    expect(selection?.stepIds).toEqual(detail.enabledWorkflowSteps ?? []);
+    // U7c: the legacy step manager listing is gone; the table-backed list is empty.
     expect(await store.listWorkflowSteps()).toHaveLength(0);
-    // …but the executor can still resolve them directly.
-    const selection = store.getTaskWorkflowSelection(task.id)!;
-    expect(await store.getWorkflowStep(selection.stepIds[0])).toBeDefined();
   });
 
-  it("re-selecting replaces prior compiled steps without accumulating orphans", async () => {
-    const wfA = await store.createWorkflowDefinition({ name: "A", ir: linearIr() });
+  it("re-selecting replaces the prior selection's seeded group ids", async () => {
+    const wfA = await store.createWorkflowDefinition({ name: "A", ir: optionalGroupIr() });
     const wfB = await store.createWorkflowDefinition({ name: "B", ir: linearIr() });
     const task = await store.createTask({ description: "T", enabledWorkflowSteps: [] });
 
     await store.selectTaskWorkflow(task.id, wfA.id);
-    const firstIds = store.getTaskWorkflowSelection(task.id)!.stepIds;
+    expect(store.getTaskWorkflowSelection(task.id)!.stepIds).toEqual(["og-on"]);
+
     await store.selectTaskWorkflow(task.id, wfB.id);
     const secondIds = store.getTaskWorkflowSelection(task.id)!.stepIds;
-
-    // Old steps are gone, only the new selection's steps remain.
-    for (const id of firstIds) {
-      expect(await store.getWorkflowStep(id)).toBeUndefined();
-    }
+    // The prior selection's group ids are replaced wholesale by the new workflow's.
+    expect(secondIds).toEqual([]);
     const detail = await store.getTask(task.id);
-    expect(detail.enabledWorkflowSteps).toEqual(secondIds);
+    expect(detail.enabledWorkflowSteps ?? []).toEqual(secondIds);
+    expect(store.getTaskWorkflowSelection(task.id)!.workflowId).toBe(wfB.id);
   });
 
   it("clearing selection empties enabledWorkflowSteps", async () => {
-    const wf = await store.createWorkflowDefinition({ name: "QA", ir: linearIr() });
+    const wf = await store.createWorkflowDefinition({ name: "QA", ir: optionalGroupIr() });
     const task = await store.createTask({ description: "T", enabledWorkflowSteps: [] });
     await store.selectTaskWorkflow(task.id, wf.id);
+    expect((await store.getTask(task.id)).enabledWorkflowSteps).toEqual(["og-on"]);
 
     await store.clearTaskWorkflowSelection(task.id);
     const detail = await store.getTask(task.id);
@@ -141,14 +191,14 @@ describe("TaskStore workflow selection (U3)", () => {
   });
 
   it("force-resurrecting over a tombstoned task purges its prior workflow selection", async () => {
-    const wf = await store.createWorkflowDefinition({ name: "QA", ir: linearIr() });
+    const wf = await store.createWorkflowDefinition({ name: "QA", ir: optionalGroupIr() });
     const task = await store.createTask({ description: "T", enabledWorkflowSteps: [] });
     await store.selectTaskWorkflow(task.id, wf.id);
-    const priorIds = store.getTaskWorkflowSelection(task.id)!.stepIds;
-    expect(priorIds).toHaveLength(2);
+    expect(store.getTaskWorkflowSelection(task.id)!.stepIds).toEqual(["og-on"]);
 
     // Soft-delete then physically resurrect the same id; the physical purge of
-    // the old tasks row must drop the orphaned selection + its compiled steps.
+    // the old tasks row must drop the orphaned selection row (U7c: no compiled
+    // step rows to reclaim — selection ids are optional-group node ids).
     await store.deleteTask(task.id);
     await store.createTaskWithReservedId(
       { description: "resurrected", enabledWorkflowSteps: [], forceResurrect: true },
@@ -156,9 +206,6 @@ describe("TaskStore workflow selection (U3)", () => {
     );
 
     expect(store.getTaskWorkflowSelection(task.id)).toBeUndefined();
-    for (const id of priorIds) {
-      expect(await store.getWorkflowStep(id)).toBeUndefined();
-    }
   });
 
   it("throws when selecting an unknown workflow", async () => {
@@ -167,53 +214,21 @@ describe("TaskStore workflow selection (U3)", () => {
   });
 
   it("new tasks inherit the project default workflow", async () => {
-    const wf = await store.createWorkflowDefinition({ name: "Default", ir: linearIr() });
+    const wf = await store.createWorkflowDefinition({ name: "Default", ir: optionalGroupIr() });
     await store.setDefaultWorkflowId(wf.id);
 
     const task = await store.createTask({ description: "inherits" });
     const detail = await store.getTask(task.id);
-    expect(detail.enabledWorkflowSteps).toHaveLength(2);
+    // Inherits the default workflow's default-on optional-group seed.
+    expect(detail.enabledWorkflowSteps).toEqual(["og-on"]);
     expect(store.getTaskWorkflowSelection(task.id)?.workflowId).toBe(wf.id);
   });
 
   // FNXC:WorkflowOptionalGroup 2026-06-21-14:30: a new task seeds
   // `enabledWorkflowSteps` with exactly the defaultOn:true optional-group ids of
-  // its selected workflow (U3, R3), alongside the compiled workflow step ids.
+  // its selected workflow (U3, R3). (U7c: these are the ONLY seeded ids — there
+  // are no compiled workflow step ids anymore.)
   describe("optional-group defaultOn seeding (U3/R3)", () => {
-    /** v2 workflow whose success path threads through two optional-group nodes. */
-    function optionalGroupIr(): WorkflowIr {
-      const groupTemplate = (id: string) => ({
-        nodes: [{ id: `${id}-inner`, kind: "prompt" as const, config: { prompt: "x" } }],
-        edges: [],
-      });
-      return {
-        version: "v2",
-        name: "og-wf",
-        columns: [{ id: "todo", name: "Todo", traits: [] }],
-        nodes: [
-          { id: "start", kind: "start", column: "todo" },
-          {
-            id: "og-on",
-            kind: "optional-group",
-            column: "todo",
-            config: { name: "On Group", defaultOn: true, template: groupTemplate("og-on") },
-          },
-          {
-            id: "og-off",
-            kind: "optional-group",
-            column: "todo",
-            config: { name: "Off Group", defaultOn: false, template: groupTemplate("og-off") },
-          },
-          { id: "end", kind: "end", column: "todo" },
-        ],
-        edges: [
-          { from: "start", to: "og-on", condition: "success" },
-          { from: "og-on", to: "og-off", condition: "success" },
-          { from: "og-off", to: "end", condition: "success" },
-        ],
-      };
-    }
-
     it("seeds the defaultOn:true group id at creation from the default workflow", async () => {
       const wf = await store.createWorkflowDefinition({ name: "OG Default", ir: optionalGroupIr() });
       await store.setDefaultWorkflowId(wf.id);
@@ -321,14 +336,14 @@ describe("TaskStore workflow selection (U3)", () => {
 
   // U6/R3/KTD-4: create-time `workflowId` materializes the selection atomically.
   describe("create-time workflowId (U6/R3)", () => {
-    it("materializes enabledWorkflowSteps atomically when workflowId is given", async () => {
-      const wf = await store.createWorkflowDefinition({ name: "Pick", ir: linearIr() });
+    it("seeds enabledWorkflowSteps atomically when workflowId is given", async () => {
+      const wf = await store.createWorkflowDefinition({ name: "Pick", ir: optionalGroupIr() });
 
       const task = await store.createTask({ description: "with workflow", workflowId: wf.id });
-      // Reading the task right after create observes the populated steps — no
+      // Reading the task right after create observes the populated group seed — no
       // intermediate empty state visible to the executor.
       const detail = await store.getTask(task.id);
-      expect(detail.enabledWorkflowSteps).toHaveLength(2);
+      expect(detail.enabledWorkflowSteps).toEqual(["og-on"]);
       expect(store.getTaskWorkflowSelection(task.id)?.workflowId).toBe(wf.id);
       expect(store.getTaskWorkflowSelection(task.id)?.stepIds).toEqual(detail.enabledWorkflowSteps);
     });
@@ -353,12 +368,12 @@ describe("TaskStore workflow selection (U3)", () => {
     });
 
     it("undefined workflowId still inherits the project default (unchanged)", async () => {
-      const def = await store.createWorkflowDefinition({ name: "Default", ir: linearIr() });
+      const def = await store.createWorkflowDefinition({ name: "Default", ir: optionalGroupIr() });
       await store.setDefaultWorkflowId(def.id);
 
       const task = await store.createTask({ description: "inherit" });
       const detail = await store.getTask(task.id);
-      expect(detail.enabledWorkflowSteps).toHaveLength(2);
+      expect(detail.enabledWorkflowSteps).toEqual(["og-on"]);
       expect(store.getTaskWorkflowSelection(task.id)?.workflowId).toBe(def.id);
     });
 

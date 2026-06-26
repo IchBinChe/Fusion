@@ -64,7 +64,6 @@ import {
   readInstallMarker,
   writeInstallMarker,
 } from "./merge-dependency-sync.js";
-import { resolveTaskWorktreePath } from "./worktree-paths.js";
 import { resolveTaskWorkingBranch } from "./worktree-names.js";
 import {
   collectOwnTaskCommitsForRange,
@@ -93,8 +92,6 @@ import {
   type AutostashOutcome,
   type MergeResult,
   type MergeDetails,
-  type WorkflowStep,
-  type WorkflowStepResult,
   type Settings,
   type AgentPromptsConfig,
   type CanonicalMergeConflictStrategy,
@@ -107,8 +104,6 @@ import {
   type AutostashOrphanRecord,
   normalizeMergeAdvanceAutoSyncMode,
   isMergeRequestContractShadowEnabled,
-  isExperimentalFeatureEnabled,
-  GRAPH_NATIVE_POST_MERGE_FLAG,
 } from "@fusion/core";
 import { evaluateAutoMergeFactProviders } from "./auto-merge-fact-providers.js";
 import { resolveMergePolicy, type MergeFileScopeMode } from "./merge-trait.js";
@@ -140,7 +135,6 @@ import {
 } from "./merger-squash-audit.js";
 import { detectMergeOverlap, restoreBranchWinsFiles } from "./merger-overlap-guard.js";
 import { checkDiffVolume, DiffVolumeRegressionError } from "./merger-diff-volume-gate.js";
-import { ReadonlyViolationError, filterCustomToolsForReadonly } from "./workflow-step-tool-policy.js";
 import { detectAlreadyLandedOnMain, type AlreadyMergedDetectionStrategy } from "./already-merged-detector.js";
 import { decideAutoPrerebase, probeDivergence, runAutoPrerebase } from "./merger-auto-prerebase.js";
 import {
@@ -339,7 +333,6 @@ const DEPENDENCY_SYNC_TRIGGER_PATTERNS = [
   "packages/*/package.json",
 ];
 
-const WORKFLOW_SCRIPT_OUTPUT_MAX_CHARS = 4_000;
 const PULL_REBASE_TIMEOUT_MS = 120_000;
 const PUSH_TIMEOUT_MS = 60_000;
 
@@ -383,11 +376,6 @@ const MERGE_USER_COMMENTS_MAX_CHARS = 4000;
  * @deprecated Use summarizeVerificationOutput from verification-utils.js instead
  */
 export const summarizeVerificationOutputLocal = summarizeVerificationOutput;
-
-function truncateWorkflowScriptOutput(output: string): string {
-  if (output.length <= WORKFLOW_SCRIPT_OUTPUT_MAX_CHARS) return output;
-  return `... output truncated to last ${WORKFLOW_SCRIPT_OUTPUT_MAX_CHARS} characters ...\n${output.slice(-WORKFLOW_SCRIPT_OUTPUT_MAX_CHARS)}`;
-}
 
 /** Check if a path matches a glob pattern (simple glob support: * and **) */
 export function matchGlob(path: string, pattern: string): boolean {
@@ -540,43 +528,6 @@ export function shouldSyncDependenciesForMerge(
   );
 }
 
-type MergeWorktreeCommandResult = Awaited<ReturnType<typeof runConfiguredMergeWorktreeCommand>>;
-
-const POST_MERGE_INIT_OUTCOME_MAX_CHARS = 2_000;
-
-function mergeWorktreeCommandErrorMessage(result: { spawnError?: string | Error; timedOut?: boolean; exitCode?: number | null }): string {
-  if (result.spawnError) return `Failed to start command: ${result.spawnError}`;
-  if (result.timedOut) return "Command timed out";
-  return `Command exited with code ${result.exitCode ?? "unknown"}`;
-}
-
-function truncatePostMergeInitOutput(output: string): string {
-  if (output.length <= POST_MERGE_INIT_OUTCOME_MAX_CHARS) return output;
-  return `... output truncated to last ${POST_MERGE_INIT_OUTCOME_MAX_CHARS} chars ...\n${output.slice(-POST_MERGE_INIT_OUTCOME_MAX_CHARS)}`;
-}
-
-function formatPostMergeInitFailureOutcome(initResult: MergeWorktreeCommandResult | undefined, err: unknown): string {
-  const stderr = initResult?.stderr?.trim();
-  if (stderr) return truncatePostMergeInitOutput(stderr);
-
-  const stdout = initResult?.stdout?.trim();
-  if (stdout) return truncatePostMergeInitOutput(stdout);
-
-  if (initResult?.spawnError) {
-    return typeof initResult.spawnError === "string" ? initResult.spawnError : initResult.spawnError.message;
-  }
-
-  const parts: string[] = [];
-  if (initResult?.timedOut) parts.push("Command timed out");
-  if (initResult?.exitCode !== undefined && initResult.exitCode !== null) parts.push(`exit code: ${initResult.exitCode}`);
-  if (initResult?.signal) parts.push(`signal: ${initResult.signal}`);
-  if (parts.length > 0) return parts.join("; ");
-
-  if (err instanceof Error && err.message.trim().length > 0) return err.message;
-
-  const fallback = String(err).trim();
-  return fallback.length > 0 ? fallback : "Command failed";
-}
 
 async function syncDependenciesForMerge(
   store: TaskStore,
@@ -7396,88 +7347,12 @@ export async function pushToRemoteAfterMerge(
   }
 }
 
-/**
- * Create a temporary worktree from the current HEAD for isolated post-merge step execution.
- * Returns the worktree path, or null if creation fails (graceful fallback to rootDir).
- */
-async function createPostMergeWorktree(
-  rootDir: string,
-  taskId: string,
-  settings: Partial<Settings>,
-): Promise<string | null> {
-  const randomSuffix = Math.random().toString(36).slice(2, 10);
-  const postMergeWorktree = resolveTaskWorktreePath(rootDir, settings, `post-merge-${taskId}-${randomSuffix}`);
-
-  try {
-    await execAsync(`git worktree add ${quoteArg(postMergeWorktree)} HEAD`, { cwd: rootDir });
-    return postMergeWorktree;
-  } catch (err: unknown) {
-    mergerLog.warn(`${taskId}: failed to create post-merge worktree: ${getCommandErrorMessage(err)}`);
-    return null;
-  }
-}
-
-async function runPostMergeWorktreeInitCommand(
-  store: TaskStore,
-  taskId: string,
-  postMergeWorktree: string,
-  settings: Partial<Settings>,
-  audit?: RunAuditor,
-): Promise<void> {
-  const initCommand = getConfiguredWorktreeInitCommand(settings);
-  if (!initCommand) return;
-
-  const initStartedAt = Date.now();
-  let initResult: MergeWorktreeCommandResult | undefined;
-  try {
-    initResult = await runConfiguredMergeWorktreeCommand(initCommand, postMergeWorktree, 300_000, undefined, audit);
-    if (initResult.spawnError || initResult.timedOut || initResult.exitCode !== 0) {
-      throw new Error(mergeWorktreeCommandErrorMessage(initResult));
-    }
-    await store.logEntry(taskId, `[timing] Post-merge worktree init command completed in ${Date.now() - initStartedAt}ms`, initCommand);
-  } catch (err: unknown) {
-    if (err instanceof Error && err.name === "AbortError") {
-      throw err;
-    }
-    await store.logEntry(taskId, `[timing] Post-merge worktree init command failed after ${Date.now() - initStartedAt}ms`);
-    const message = err instanceof Error ? err.message : String(err);
-    const outcome = formatPostMergeInitFailureOutcome(initResult, err);
-    mergerLog.warn(`${taskId}: post-merge worktree init command failed — post-merge workflow steps will still run: ${message}`);
-    await store.logEntry(taskId, `Post-merge worktree init command failed (post-merge workflow steps will still run): ${message}`, outcome);
-  }
-}
-
-/**
- * Remove a temporary worktree created for post-merge step execution.
- * Non-fatal: logs and swallows errors.
- */
-async function removePostMergeWorktree(
-  rootDir: string,
-  postMergeWorktree: string,
-  taskId: string,
-  settings: Partial<Settings>,
-  audit?: RunAuditor,
-): Promise<void> {
-  try {
-    const outcome = await removeWorktree({
-      rootDir,
-      worktreePath: postMergeWorktree,
-      settings,
-      taskId,
-      reason: RemovalReason.MergerPostMerge,
-      audit,
-    });
-    if ("harmless" in outcome && outcome.harmless) {
-      mergerLog.warn(`${taskId}: post-merge worktree cleanup classified harmless for ${postMergeWorktree}: ${outcome.message}`);
-    }
-  } catch (err: unknown) {
-    mergerLog.warn(`${taskId}: failed to remove post-merge worktree ${postMergeWorktree}: ${getCommandErrorMessage(err)}`);
-  }
-}
-
-export const mergerTestHooks = {
-  removePostMergeWorktree,
-};
+/*
+FNXC:WorkflowPostMerge 2026-06-26-14:00:
+U7c removed the merger-side post-merge execution path entirely (worktree creation +
+init-command + prompt/script step execution + isolated-worktree cleanup). Post-merge
+workflow steps run exclusively as the workflow graph's own post-merge optional-group node.
+*/
 
 /**
  * AI-powered merge with 3-attempt retry logic when autoResolveConflicts is enabled.
@@ -10815,35 +10690,12 @@ export async function aiMergeTask(
     }
   }
 
-  // 7. Run post-merge workflow steps (in temporary worktree for isolation)
-  // FNXC:WorkflowPostMerge 2026-06-26-12:00: U7b cutover — when graph-native post-merge
-  // is active (now default-ON) the GRAPH is the sole post-merge runner; this legacy merger
-  // path is inert so post-merge steps never double-run. `settings` (project-resolved) gates
-  // the no-op; an explicit opt-out (`graphNativePostMerge: false`) restores the legacy path.
-  throwIfAborted(options.signal, taskId);
-  const hasPostMergeSteps = await hasEnabledPostMergeWorkflowSteps(store, taskId, task.enabledWorkflowSteps, settings);
-  if (hasPostMergeSteps) {
-    const postMergeWorktree = await createPostMergeWorktree(rootDir, taskId, settings);
-    const postMergeCwd = postMergeWorktree || rootDir;
-    if (postMergeWorktree) {
-      await runPostMergeWorktreeInitCommand(store, taskId, postMergeWorktree, settings, audit);
-      mergerLog.log(`${taskId}: running post-merge workflow steps in isolated worktree: ${postMergeWorktree}`);
-    } else {
-      mergerLog.warn(`${taskId}: could not create post-merge worktree — falling back to rootDir`);
-    }
-
-    try {
-      await runPostMergeWorkflowSteps(store, taskId, rootDir, postMergeCwd, settings, options, audit);
-    } catch (err: any) {
-      rethrowIfMergeAborted(err);
-      mergerLog.error(`${taskId}: post-merge workflow steps error: ${err.message}`);
-      // Non-fatal — task still moves to done
-    } finally {
-      if (postMergeWorktree) {
-        await removePostMergeWorktree(rootDir, postMergeWorktree, taskId, settings, audit);
-      }
-    }
-  }
+  // 7. Post-merge workflow steps run graph-native.
+  // FNXC:WorkflowPostMerge 2026-06-26-14:00: U7c — the legacy merger post-merge execution
+  // path (worktree creation + prompt/script step execution) has been REMOVED. Post-merge
+  // workflow steps run exclusively as the workflow graph's own post-merge optional-group
+  // node, which records into `task.workflowStepResults`. The graph is the single post-merge
+  // owner; there is no longer a merger-side path to double-run or gate behind a flag.
 
   // 8. Clean up worktree
   throwIfAborted(options.signal, taskId);
@@ -12461,163 +12313,6 @@ export function buildMergePrompt(params: MergePromptParams): string {
   return parts.join("\n");
 }
 
-async function hasEnabledPostMergeWorkflowSteps(
-  store: TaskStore,
-  taskId: string,
-  enabledWorkflowSteps: string[] | undefined,
-  settings?: Settings,
-): Promise<boolean> {
-  // FNXC:WorkflowPostMerge 2026-06-26-12:00: U7b cutover — graph owns post-merge when the
-  // flag is on (default). Report "no post-merge steps" so the merger skips worktree creation
-  // and execution; the graph runs the equivalent post-merge graph node exactly once.
-  if (isExperimentalFeatureEnabled(settings, GRAPH_NATIVE_POST_MERGE_FLAG)) return false;
-  if (!enabledWorkflowSteps?.length) return false;
-
-  for (const wsId of enabledWorkflowSteps) {
-    try {
-      const ws = await store.getWorkflowStep(wsId);
-      if (!ws) continue;
-      const stepPhase = ws.phase || "pre-merge";
-      // readonly review steps always run pre-merge to reuse the coding worktree — see FN-2185 post-mortem.
-      if (stepPhase === "post-merge" && ws.toolMode !== "readonly") {
-        return true;
-      }
-    } catch (err: unknown) {
-      mergerLog.warn(`${taskId}: failed to inspect workflow step ${wsId} for post-merge phase: ${getCommandErrorMessage(err)}`);
-    }
-  }
-
-  return false;
-}
-
-/**
- * Run post-merge workflow steps for a task after the merge succeeds.
- * Steps execute in an isolated worktree (created from merged HEAD) to prevent
- * modifications to the main project directory. Falls back to rootDir if worktree
- * creation fails. Failures are logged but do NOT block task completion.
- */
-async function runPostMergeWorkflowSteps(
-  store: TaskStore,
-  taskId: string,
-  rootDir: string,
-  cwd: string,
-  settings: Settings,
-  mergeOptions: MergerOptions = {},
-  auditor?: RunAuditor,
-): Promise<void> {
-  throwIfAborted(mergeOptions.signal, taskId);
-  // FNXC:WorkflowPostMerge 2026-06-26-12:00: U7b cutover — defensive no-op (the call site's
-  // hasEnabledPostMergeWorkflowSteps already gates entry). When graph-native post-merge is
-  // active the graph is the sole runner; never execute legacy post-merge steps here to avoid
-  // double-running. Removed entirely in U7c.
-  if (isExperimentalFeatureEnabled(settings, GRAPH_NATIVE_POST_MERGE_FLAG)) return;
-  const task = await store.getTask(taskId);
-  if (!task.enabledWorkflowSteps?.length) return;
-
-  // Get existing pre-merge results to append to
-  const existingResults: WorkflowStepResult[] = task.workflowStepResults || [];
-
-  for (const wsId of task.enabledWorkflowSteps) {
-    const ws = await store.getWorkflowStep(wsId);
-    if (!ws) {
-      mergerLog.log(`${taskId}: [post-merge] workflow step ${wsId} not found — skipping`);
-      continue;
-    }
-
-    // Normalize legacy steps: undefined phase → "pre-merge"
-    const stepPhase = ws.phase || "pre-merge";
-
-    // Only run post-merge steps here.
-    // readonly review steps always run pre-merge to reuse the coding worktree — see FN-2185 post-mortem.
-    if (stepPhase !== "post-merge" || ws.toolMode === "readonly") continue;
-
-    // Normalize legacy steps without mode to prompt-mode
-    const stepMode: "prompt" | "script" = ws.mode || "prompt";
-
-    // Skip validation per mode
-    if (stepMode === "prompt" && !ws.prompt?.trim()) {
-      await store.logEntry(taskId, `[post-merge] Workflow step '${ws.name}' has no prompt — skipping`);
-      existingResults.push({
-        workflowStepId: ws.id,
-        workflowStepName: ws.name,
-        phase: "post-merge",
-        status: "skipped",
-        output: "No prompt configured for this workflow step",
-      });
-      await store.updateTask(taskId, { workflowStepResults: existingResults });
-      continue;
-    }
-
-    if (stepMode === "script" && !ws.scriptName?.trim()) {
-      await store.logEntry(taskId, `[post-merge] Workflow step '${ws.name}' has no scriptName — skipping`);
-      existingResults.push({
-        workflowStepId: ws.id,
-        workflowStepName: ws.name,
-        phase: "post-merge",
-        status: "skipped",
-        output: "No scriptName configured for this workflow step",
-      });
-      await store.updateTask(taskId, { workflowStepResults: existingResults });
-      continue;
-    }
-
-    await store.logEntry(taskId, `[post-merge] Starting workflow step: ${ws.name} (${stepMode} mode)`);
-    mergerLog.log(`${taskId}: [post-merge] running workflow step: ${ws.name} (${stepMode} mode)`);
-
-    const startedAt = new Date().toISOString();
-
-    try {
-      const result = stepMode === "script"
-        ? await executePostMergeScriptStep(store, taskId, ws, cwd, settings, auditor, mergeOptions.signal)
-        : await executePostMergePromptStep(store, taskId, ws, rootDir, cwd, settings, mergeOptions);
-      const completedAt = new Date().toISOString();
-
-      if (result.success) {
-        await store.logEntry(taskId, `[post-merge] Workflow step completed: ${ws.name}`);
-        mergerLog.log(`${taskId}: [post-merge] workflow step passed: ${ws.name}`);
-        existingResults.push({
-          workflowStepId: ws.id,
-          workflowStepName: ws.name,
-          phase: "post-merge",
-          status: "passed",
-          output: result.output,
-          startedAt,
-          completedAt,
-        });
-      } else {
-        // Post-merge failures are logged but do NOT block task completion
-        await store.logEntry(taskId, `[post-merge] Workflow step failed: ${ws.name}`, result.error || "Unknown error");
-        mergerLog.error(`${taskId}: [post-merge] workflow step failed: ${ws.name}; output captured in task log`);
-        existingResults.push({
-          workflowStepId: ws.id,
-          workflowStepName: ws.name,
-          phase: "post-merge",
-          status: "failed",
-          output: result.error || "Workflow step failed",
-          startedAt,
-          completedAt,
-        });
-      }
-    } catch (err: any) {
-      const completedAt = new Date().toISOString();
-      await store.logEntry(taskId, `[post-merge] Workflow step error: ${ws.name}`, err.message || "Unknown error");
-      mergerLog.error(`${taskId}: [post-merge] workflow step error: ${ws.name} — ${err.message}`);
-      existingResults.push({
-        workflowStepId: ws.id,
-        workflowStepName: ws.name,
-        phase: "post-merge",
-        status: "failed",
-        output: err.message || "Workflow step error",
-        startedAt,
-        completedAt,
-      });
-    }
-
-    // Save results after each step (partial results preserved on crash)
-    await store.updateTask(taskId, { workflowStepResults: existingResults });
-  }
-}
-
 function getPostMergeScriptSandboxBackend(auditor?: RunAuditor): SandboxBackend {
   return resolveSandboxBackend({ auditor });
 }
@@ -12655,228 +12350,6 @@ async function runConfiguredMergeWorktreeCommand(
     bufferExceeded: result.bufferExceeded,
     spawnError: result.spawnError,
   };
-}
-
-/** Execute a script-mode post-merge workflow step in the provided execution directory. */
-async function executePostMergeScriptStep(
-  store: TaskStore,
-  taskId: string,
-  workflowStep: WorkflowStep,
-  cwd: string,
-  settings: Settings,
-  auditor?: RunAuditor,
-  signal?: AbortSignal,
-): Promise<{ success: boolean; output?: string; error?: string }> {
-  const scriptName = workflowStep.scriptName!.trim();
-  const scripts = settings.scripts || {};
-  const scriptCommand = scripts[scriptName];
-
-  if (!scriptCommand) {
-    return { success: false, error: `Script '${scriptName}' not found in project settings` };
-  }
-
-  const backend = getPostMergeScriptSandboxBackend(auditor);
-  const result = await backend.run(scriptCommand, {
-    cwd,
-    encoding: "utf-8",
-    timeoutMs: 120_000,
-    maxBuffer: 10 * 1024 * 1024,
-    ...(signal !== undefined && { signal }),
-  });
-
-  if (result.exitCode === 0 && !result.signal && !result.timedOut && !result.bufferExceeded && !result.spawnError) {
-    return { success: true, output: `Script '${scriptName}' completed successfully` };
-  }
-
-  const stderr = result.stderr.trim();
-  const stdout = result.stdout.trim();
-  const parts: string[] = [];
-  if (result.spawnError) {
-    parts.push(result.spawnError.message);
-  } else {
-    if (result.exitCode !== null) parts.push(`Exit code: ${result.exitCode}`);
-    if (stdout) parts.push(`stdout: ${truncateWorkflowScriptOutput(stdout)}`);
-    if (stderr) parts.push(`stderr: ${truncateWorkflowScriptOutput(stderr)}`);
-  }
-  if (!parts.length) parts.push("Unknown error");
-  return { success: false, error: parts.join("\n") };
-}
-
-export async function __executePostMergeScriptStepForTests(
-  store: TaskStore,
-  taskId: string,
-  workflowStep: WorkflowStep,
-  cwd: string,
-  settings: Settings,
-  auditor?: RunAuditor,
-  signal?: AbortSignal,
-): Promise<{ success: boolean; output?: string; error?: string }> {
-  return executePostMergeScriptStep(store, taskId, workflowStep, cwd, settings, auditor, signal);
-}
-
-/** Execute a prompt-mode post-merge workflow step using an AI agent in the provided execution directory. */
-async function executePostMergePromptStep(
-  store: TaskStore,
-  taskId: string,
-  workflowStep: WorkflowStep,
-  rootDir: string,
-  cwd: string,
-  settings: Settings,
-  mergeOptions: MergerOptions = {},
-): Promise<{ success: boolean; output?: string; error?: string }> {
-  const toolMode: "coding" | "readonly" = workflowStep.toolMode || "readonly";
-  const systemPrompt = `You are a post-merge workflow step agent executing: ${workflowStep.name}
-
-Task Context:
-- Task ID: ${taskId}
-- The merge has already been completed successfully.
-- You are running in a temporary worktree with the merged code.
-
-Your role:
-- Execute this step exactly as requested.
-- Validate outcomes against evidence in the merged tree.
-- Report findings in clear, actionable language with file-level references when possible.
-
-Your Instructions:
-${workflowStep.prompt}
-
-You have access to the file system to review the merged changes.
-When your review is complete and everything looks good, simply state your findings.
-If issues are found that need attention, describe them clearly and include concrete remediation direction.`;
-
-  const agentLogger = new AgentLogger({
-    store,
-    taskId,
-    agent: "merger",
-    persistAgentToolOutput: settings.persistAgentToolOutput,
-    // Merger agents are task-scoped ephemeral workers.
-    persistAgentThinkingLog: resolvePersistAgentThinkingLog(settings, { ephemeral: true }),
-  });
-
-  try {
-    // Build skill selection context for post-merge session
-    let postMergeSkillContext = undefined;
-    let taskForSkillContext: Awaited<ReturnType<typeof store.getTask>> | null = null;
-    if (mergeOptions.agentStore) {
-      try {
-        taskForSkillContext = await store.getTask(taskId);
-        postMergeSkillContext = await buildSessionSkillContext({
-          agentStore: mergeOptions.agentStore,
-          task: taskForSkillContext,
-          sessionPurpose: "merger",
-          projectRootDir: rootDir,
-          pluginRunner: mergeOptions.pluginRunner,
-        });
-      } catch {
-        // Graceful fallback - no skill selection
-      }
-    }
-
-    const assignedAgentId = taskForSkillContext?.assignedAgentId?.trim();
-    const agentStoreWithGetAgent = mergeOptions.agentStore && typeof (mergeOptions.agentStore as { getAgent?: unknown }).getAgent === "function"
-      ? mergeOptions.agentStore
-      : null;
-    const assignedAgent = assignedAgentId && agentStoreWithGetAgent
-      ? await agentStoreWithGetAgent.getAgent(assignedAgentId).catch(() => null)
-      : null;
-    const mergerSessionModel = resolveMergerSessionModel(settings, assignedAgent?.runtimeConfig);
-    const stepProvider = workflowStep.modelProvider || mergerSessionModel.provider;
-    const stepModelId = workflowStep.modelId || mergerSessionModel.modelId;
-    const useOverride = !!(workflowStep.modelProvider && workflowStep.modelId);
-
-    // Post-merge step agents inherit merger instructions
-    let postMergeInstructions = "";
-    if (mergeOptions.agentStore) {
-      try {
-        const agents = await mergeOptions.agentStore.listAgents({ role: "merger" });
-        for (const agent of agents) {
-          if (agent.instructionsText || agent.instructionsPath) {
-            postMergeInstructions = await resolveAgentInstructions(agent, rootDir);
-            break;
-          }
-        }
-      } catch {
-        // Graceful fallback
-      }
-    }
-    const postMergeSystemPrompt = buildSystemPromptWithInstructions(systemPrompt, postMergeInstructions);
-
-    const mergerRuntimeHint = extractRuntimeHint(assignedAgent?.runtimeConfig);
-    const readonlyCustomTools = toolMode === "readonly"
-      ? filterCustomToolsForReadonly([])
-      : { allowed: [] as ToolDefinition[], denied: [] as string[] };
-    if (toolMode === "readonly" && readonlyCustomTools.denied.length > 0) {
-      await store.logEntry(
-        taskId,
-        `[readonly-violation] Post-merge workflow step '${workflowStep.name}' dropped denied custom tools: ${readonlyCustomTools.denied.join(", ")}`,
-      );
-    }
-    const { session } = await createResolvedAgentSession({
-      sessionPurpose: "merger",
-      runtimeHint: mergerRuntimeHint,
-      pluginRunner: mergeOptions.pluginRunner,
-      cwd,
-      systemPrompt: postMergeSystemPrompt,
-      tools: toolMode,
-      defaultProvider: stepProvider,
-      defaultModelId: stepModelId,
-      fallbackProvider: settings.fallbackProvider,
-      fallbackModelId: settings.fallbackModelId,
-      defaultThinkingLevel: settings.defaultThinkingLevel,
-      runAuditor: createRunAuditor(store, {
-        runId: generateSyntheticRunId("merge", taskId),
-        agentId: "merger",
-        taskId,
-        phase: "merge",
-        source: "merger",
-      }),
-      settings,
-      // Skill selection: use assigned agent skills if available, otherwise role fallback
-      ...(postMergeSkillContext?.skillSelectionContext ? { skillSelection: postMergeSkillContext.skillSelectionContext } : {}),
-      ...(readonlyCustomTools.allowed.length > 0 ? { customTools: readonlyCustomTools.allowed } : {}),
-      taskId,
-      onFallbackModelUsed: createFallbackModelObserver({
-        agent: "merger",
-        label: `post-merge workflow step '${workflowStep.name}'`,
-        store,
-        taskId,
-      }),
-    });
-
-    mergerLog.log(`${taskId}: [post-merge] workflow step '${workflowStep.name}' using model ${describeModel(session)}${useOverride ? " (workflow step override)" : ""}`);
-    await store.logEntry(taskId, `[post-merge] Workflow step '${workflowStep.name}' using model: ${describeModel(session)}${useOverride ? " (workflow step override)" : ""}`);
-
-    let output = "";
-    session.subscribe((event) => {
-      if (event.type === "message_update") {
-        const msgEvent = event.assistantMessageEvent;
-        if (msgEvent.type === "text_delta") {
-          output += msgEvent.delta;
-        }
-      }
-    });
-
-    await promptWithFallback(
-      session,
-      `Execute the post-merge workflow step "${workflowStep.name}" for task ${taskId}.\n\n` +
-      `Review the merged code in the temporary worktree and evaluate it against your instructions.`,
-    );
-
-    checkSessionError(session);
-    await accumulateSessionTokenUsage(store, taskId, session);
-    session.dispose();
-    await agentLogger.flush();
-
-    return { success: true, output };
-  } catch (err: any) {
-    await agentLogger.flush();
-    if ((err instanceof ReadonlyViolationError) || err?.code === "READONLY_VIOLATION") {
-      const deniedTool = err?.toolName || "unknown";
-      await store.logEntry(taskId, `[readonly-violation] Post-merge workflow step '${workflowStep.name}' attempted denied tool '${deniedTool}'`);
-      return { success: false, error: `[readonly-violation] ${err?.message ?? "Readonly policy violation"}` };
-    }
-    return { success: false, error: err.message };
-  }
 }
 
 async function completeTask(

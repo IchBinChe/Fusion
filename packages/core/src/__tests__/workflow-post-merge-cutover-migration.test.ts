@@ -19,10 +19,41 @@ leaves already-node-id and compiled-workflow entries untouched, and is idempoten
 const WS_BV = "WS-TEST-BV"; // legacy compiled row for the browser-verification optional group
 const WS_DOC = "WS-TEST-DOC"; // compiled-workflow materialization row (templateId workflow:*)
 
+// FNXC:WorkflowPostMerge 2026-06-26-14:00: U7c dropped `workflow_steps` from SCHEMA_SQL,
+// so a fresh test DB no longer has the table. To exercise migration 130's normalization of
+// LEGACY data we recreate the legacy table shape on disk before seeding rows (the same shape
+// historical migration 16 created). Migration 130 then reads it; migration 131 drops it.
+function createLegacyWorkflowStepsTable(db: {
+  prepare: (sql: string) => { run: (...args: unknown[]) => unknown };
+}): void {
+  db.prepare(
+    `CREATE TABLE IF NOT EXISTS workflow_steps (
+       id TEXT PRIMARY KEY,
+       templateId TEXT,
+       name TEXT NOT NULL,
+       description TEXT NOT NULL,
+       mode TEXT NOT NULL DEFAULT 'prompt',
+       phase TEXT NOT NULL DEFAULT 'pre-merge',
+       prompt TEXT NOT NULL DEFAULT '',
+       gateMode TEXT NOT NULL DEFAULT 'advisory',
+       toolMode TEXT,
+       scriptName TEXT,
+       enabled INTEGER NOT NULL DEFAULT 1,
+       defaultOn INTEGER DEFAULT 0,
+       modelProvider TEXT,
+       modelId TEXT,
+       migrated_fragment_id TEXT,
+       createdAt TEXT NOT NULL,
+       updatedAt TEXT NOT NULL
+     )`,
+  ).run();
+}
+
 function insertWorkflowStep(
   db: { prepare: (sql: string) => { run: (...args: unknown[]) => unknown } },
   args: { id: string; templateId: string; name: string; phase: string },
 ): void {
+  createLegacyWorkflowStepsTable(db);
   const now = new Date().toISOString();
   db.prepare(
     `INSERT OR REPLACE INTO workflow_steps
@@ -99,3 +130,6 @@ describe("Migration 130: post-merge cutover enable-id normalization", () => {
     expect(afterSecond).toEqual([BROWSER_VERIFICATION_GROUP_ID]);
   });
 });
+
+// The seed-at-130 table-drop (migration 131) coverage lives in its own file:
+// workflow-steps-table-drop-migration.test.ts.

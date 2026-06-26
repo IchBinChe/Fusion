@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { __runConfiguredCommandForTests } from "../executor.js";
-import { __executePostMergeScriptStepForTests } from "../merger.js";
 import { RoutineRunner } from "../routine-runner.js";
 import {
   __resetSandboxBackendForTests,
@@ -67,38 +66,6 @@ describe("sandbox wiring", () => {
       bufferExceeded: true,
     });
     expect(result.spawnError).toBeInstanceOf(Error);
-  });
-
-  it("routes merger executePostMergeScriptStep through sandbox backend", async () => {
-    const run = vi.fn().mockResolvedValue({
-      stdout: "",
-      stderr: "",
-      exitCode: 0,
-      signal: null,
-      timedOut: false,
-      bufferExceeded: false,
-    });
-    __setSandboxBackendForTests(makeStub({ run }));
-    const controller = new AbortController();
-
-    const result = await __executePostMergeScriptStepForTests(
-      { updateTask: vi.fn() } as any,
-      "FN-1",
-      { scriptName: "post" } as any,
-      "/tmp/worktree",
-      { scripts: { post: "echo post" } } as any,
-      undefined,
-      controller.signal,
-    );
-
-    expect(result.success).toBe(true);
-    expect(run).toHaveBeenCalledWith("echo post", {
-      cwd: "/tmp/worktree",
-      encoding: "utf-8",
-      timeoutMs: 120_000,
-      maxBuffer: 10 * 1024 * 1024,
-      signal: controller.signal,
-    });
   });
 
   it("routes routine runner command branch through sandbox backend", async () => {

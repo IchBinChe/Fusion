@@ -167,7 +167,7 @@ export function isFts5CorruptionError(error: unknown): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 130;
+const SCHEMA_VERSION = 131;
 
 const TASKS_FTS_AUTOMERGE = 8;
 const TASKS_FTS_CRISISMERGE = 16;
@@ -401,29 +401,10 @@ CREATE TABLE IF NOT EXISTS distributed_task_id_reservations (
 CREATE INDEX IF NOT EXISTS idxDistributedTaskIdReservationsPrefixStatus ON distributed_task_id_reservations(prefix, status);
 CREATE INDEX IF NOT EXISTS idxDistributedTaskIdReservationsExpiry ON distributed_task_id_reservations(status, expiresAt);
 
--- Workflow step definitions
-CREATE TABLE IF NOT EXISTS workflow_steps (
-  id TEXT PRIMARY KEY,
-  templateId TEXT,
-  name TEXT NOT NULL,
-  description TEXT NOT NULL,
-  mode TEXT NOT NULL DEFAULT 'prompt',
-  phase TEXT NOT NULL DEFAULT 'pre-merge',
-  prompt TEXT NOT NULL DEFAULT '',
-  gateMode TEXT NOT NULL DEFAULT 'advisory',
-  toolMode TEXT,
-  scriptName TEXT,
-  enabled INTEGER NOT NULL DEFAULT 1,
-  defaultOn INTEGER DEFAULT 0,
-  modelProvider TEXT,
-  modelId TEXT,
-  -- (workflow-editor-consolidation U1/U2) when this step has been migrated into a
-  -- fragment WorkflowDefinition, the fragment's id is stamped here so re-runs of
-  -- the lazy migration skip already-migrated rows (marker idempotency).
-  migrated_fragment_id TEXT,
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL
-);
+-- FNXC:WorkflowStepCRUD 2026-06-26-14:00: U7c dropped the legacy workflow_steps table.
+-- Pre-merge and post-merge workflow steps run graph-native (recorded into
+-- task.workflowStepResults); nothing reads workflow_steps rows at runtime. Migration 131
+-- drops the table for upgrading DBs; fresh DBs never create it. See migration 131 below.
 
 -- Named workflow definitions authored as WorkflowIr graphs (+ editor layout).
 -- The ir and layout columns are JSON-encoded TEXT; ir is validated via
@@ -4374,6 +4355,10 @@ export class Database {
 
     if (version < 77) {
       this.applyMigration(77, () => {
+        // FNXC:WorkflowStepCRUD 2026-06-26-14:00: U7c removed `workflow_steps` from SCHEMA_SQL,
+        // so a DB stamped below this migration can legitimately lack the table — guard the
+        // column add / backfill (nothing to alter when the table was never created).
+        if (!this.tableExists("workflow_steps")) return;
         this.addColumnIfMissing("workflow_steps", "gateMode", "TEXT NOT NULL DEFAULT 'advisory'");
         // FN-4368: advisory-by-default for all legacy workflow_steps rows; users opt in to 'gate' via UI.
         this.db.exec("UPDATE workflow_steps SET gateMode = 'advisory'");
@@ -4790,15 +4775,22 @@ export class Database {
         // Delete the compiled steps referenced by orphaned selections first, then
         // the orphaned selection rows themselves. json_each expands the stepIds
         // JSON array; the WHERE guards against malformed (non-array) stepIds.
+        // FNXC:WorkflowStepCRUD 2026-06-26-14:00: U7c removed `workflow_steps` from
+        // SCHEMA_SQL — guard the compiled-step delete when the table is absent; the
+        // orphaned-selection cleanup still runs (that table always exists).
+        if (this.tableExists("workflow_steps")) {
+          this.db.exec(`
+            DELETE FROM workflow_steps WHERE id IN (
+              SELECT je.value
+              FROM task_workflow_selection sel
+              JOIN json_each(sel.stepIds) je
+              WHERE json_valid(sel.stepIds)
+                AND json_type(sel.stepIds) = 'array'
+                AND sel.taskId NOT IN (SELECT id FROM tasks)
+            );
+          `);
+        }
         this.db.exec(`
-          DELETE FROM workflow_steps WHERE id IN (
-            SELECT je.value
-            FROM task_workflow_selection sel
-            JOIN json_each(sel.stepIds) je
-            WHERE json_valid(sel.stepIds)
-              AND json_type(sel.stepIds) = 'array'
-              AND sel.taskId NOT IN (SELECT id FROM tasks)
-          );
           DELETE FROM task_workflow_selection
           WHERE taskId NOT IN (SELECT id FROM tasks);
         `);
@@ -4880,7 +4872,11 @@ export class Database {
     if (version < 109) {
       this.applyMigration(109, () => {
         this.addColumnIfMissing("workflows", "kind", "TEXT NOT NULL DEFAULT 'workflow'");
-        this.addColumnIfMissing("workflow_steps", "migrated_fragment_id", "TEXT");
+        // FNXC:WorkflowStepCRUD 2026-06-26-14:00: U7c removed `workflow_steps` from SCHEMA_SQL;
+        // guard the column add when the table is absent on a table-less seeded DB.
+        if (this.tableExists("workflow_steps")) {
+          this.addColumnIfMissing("workflow_steps", "migrated_fragment_id", "TEXT");
+        }
       });
     }
 
@@ -5357,6 +5353,11 @@ export class Database {
     // table is intentionally KEPT (dropped in U7c once all readers are gone).
     if (version < 130) {
       this.applyMigration(130, () => {
+        // FNXC:WorkflowPostMerge 2026-06-26-14:00: U7c removed `workflow_steps` from
+        // SCHEMA_SQL, so a DB stamped between the table's creation migration and 130 can
+        // legitimately lack the table (nothing to normalize). Guard the SELECT — absence
+        // means no legacy compiled-step ids to rewrite, so this migration is a no-op.
+        if (!this.tableExists("workflow_steps")) return;
         const optionalGroupNodeIds = new Set<string>([
           BROWSER_VERIFICATION_GROUP_ID,
           CODE_REVIEW_GROUP_ID,
@@ -5412,6 +5413,21 @@ export class Database {
           this.db.exec("ROLLBACK");
           throw err;
         }
+      });
+    }
+
+    // Migration 131: drop the legacy `workflow_steps` table (U7c).
+    // FNXC:WorkflowStepCRUD 2026-06-26-14:00:
+    // Pre-merge and post-merge workflow steps run graph-native and record into
+    // `task.workflowStepResults`. Migration 130 already normalized legacy compiled-step
+    // enable ids (WS-xxx) in `tasks.enabledWorkflowSteps` to their built-in optional-group
+    // node ids, so the table holds nothing read at runtime. All store CRUD, the
+    // workflow-compilation materializer, the merger post-merge path, and the executor
+    // recovery table read have been removed. Drop the table. Idempotent
+    // (`DROP TABLE IF EXISTS`); a fresh DB never created it (removed from SCHEMA_SQL).
+    if (version < 131) {
+      this.applyMigration(131, () => {
+        this.db.exec("DROP TABLE IF EXISTS workflow_steps");
       });
     }
 

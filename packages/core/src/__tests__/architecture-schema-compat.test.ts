@@ -78,6 +78,17 @@ describe("architecture schema compatibility", () => {
       discoveredTables.add(match[1]);
     }
 
+    // FNXC:WorkflowStepCRUD 2026-06-26-14:00: TRANSIENT migration tables — created by a
+    // historical migration and DROPPED by a later one (e.g. `workflow_steps`, created in
+    // migration 16, dropped in migration 131) — never reach the final schema, so they must
+    // NOT be in SCHEMA_SQL or MIGRATION_ONLY_TABLE_SCHEMAS (which would resurrect them via
+    // ensureSchemaCompatibility). Exclude any table that has a `DROP TABLE` in db.ts.
+    const droppedTables = new Set<string>();
+    for (const match of source.matchAll(/DROP TABLE\s+(?:IF EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)/g)) {
+      droppedTables.add(match[1]);
+    }
+    for (const dropped of droppedTables) discoveredTables.delete(dropped);
+
     const coveredTables = new Set<string>([
       ...[...getSchemaSqlTableSchemas().keys()],
       ...Object.keys(MIGRATION_ONLY_TABLE_SCHEMAS),

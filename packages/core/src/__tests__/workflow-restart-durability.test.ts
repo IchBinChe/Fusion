@@ -14,20 +14,37 @@ FNXC:CustomWorkflows 2026-06-17-10:55:
 FN-6580 found no restart evidence for explicit custom-workflow selections, interpreter-deferred built-ins, or their graph/foreach run progress. These tests use the disk-backed store reopen seam instead of booting the engine so restart durability stays fast while proving the store cannot silently switch an in-flight task to a different workflow after process restart.
 */
 
+/*
+FNXC:WorkflowStepCRUD 2026-06-26-14:00:
+U7c dropped the `workflow_steps` table + the compilation materializer. A selection's
+`stepIds` are now the default-on `optional-group` node ids (executor toggle keys), not
+materialized step rows. This IR carries one default-on optional-group ("review-group") so
+a NON-EMPTY selection's durability across restart is still exercised.
+*/
 function linearIr(): WorkflowIr {
   return {
-    version: "v1",
+    version: "v2",
     name: "restart-linear",
+    columns: [{ id: "todo", name: "Todo", traits: [] }],
     nodes: [
-      { id: "start", kind: "start" },
-      { id: "lint", kind: "gate", config: { name: "Lint", scriptName: "lint" } },
-      { id: "spec", kind: "prompt", config: { name: "Spec", prompt: "verify restart" } },
-      { id: "end", kind: "end" },
+      { id: "start", kind: "start", column: "todo" },
+      { id: "lint", kind: "gate", column: "todo", config: { name: "Lint", scriptName: "lint" } },
+      {
+        id: "review-group",
+        kind: "optional-group",
+        column: "todo",
+        config: {
+          name: "Review",
+          defaultOn: true,
+          template: { nodes: [{ id: "review-inner", kind: "prompt", config: { prompt: "verify restart" } }], edges: [] },
+        },
+      },
+      { id: "end", kind: "end", column: "todo" },
     ],
     edges: [
       { from: "start", to: "lint", condition: "success" },
-      { from: "lint", to: "spec", condition: "success" },
-      { from: "spec", to: "end", condition: "success" },
+      { from: "lint", to: "review-group", condition: "success" },
+      { from: "review-group", to: "end", condition: "success" },
     ],
   };
 }
@@ -123,7 +140,7 @@ describe("workflow restart durability for explicit selections", () => {
     const task = await store().createTask({ description: "custom selection", enabledWorkflowSteps: [] });
 
     const selectedStepIds = await store().selectTaskWorkflow(task.id, workflow.id);
-    expect(selectedStepIds).toHaveLength(2);
+    expect(selectedStepIds).toEqual(["review-group"]);
     store().saveWorkflowRunBranch({
       taskId: task.id,
       runId: "run-restart",
@@ -157,9 +174,6 @@ describe("workflow restart durability for explicit selections", () => {
     expect(selection).toEqual({ workflowId: workflow.id, stepIds: selectedStepIds });
     expect((await store().getTask(task.id)).enabledWorkflowSteps).toEqual(selectedStepIds);
     expect(await taskJsonEnabledWorkflowSteps(task.id)).toEqual(selectedStepIds);
-    for (const stepId of selectedStepIds) {
-      expect(await store().getWorkflowStep(stepId)).toBeDefined();
-    }
 
     expect(store().loadWorkflowRunBranches(task.id, "run-restart")).toEqual(
       expect.arrayContaining([
@@ -217,16 +231,21 @@ describe("workflow restart durability for explicit selections", () => {
     ]);
   });
 
-  it("persists interpreter-deferred builtin selection with zero materialized steps across restart", async () => {
+  // FNXC:WorkflowStepCRUD 2026-06-26-14:00: U7c — explicit selection of an
+  // interpreter-deferred builtin now seeds its DEFAULT-ON optional-group ids (here
+  // `code-review`), consistent with the create-time selection path. (The pre-U7c
+  // selectTaskWorkflow returned [] for this case — an inconsistency with create-time
+  // seeding — because it only returned materialized step ids, which no longer exist.)
+  it("persists interpreter-deferred builtin selection seeding its default-on group across restart", async () => {
     const task = await store().createTask({ description: "builtin selection", enabledWorkflowSteps: [] });
 
-    await expect(store().selectTaskWorkflow(task.id, "builtin:coding")).resolves.toEqual([]);
+    await expect(store().selectTaskWorkflow(task.id, "builtin:coding")).resolves.toEqual(["code-review"]);
 
     await reopenAsDiskBackedStore();
 
-    expect(store().getTaskWorkflowSelection(task.id)).toEqual({ workflowId: "builtin:coding", stepIds: [] });
-    expect((await store().getTask(task.id)).enabledWorkflowSteps ?? []).toEqual([]);
-    expect((await taskJsonEnabledWorkflowSteps(task.id)) ?? []).toEqual([]);
+    expect(store().getTaskWorkflowSelection(task.id)).toEqual({ workflowId: "builtin:coding", stepIds: ["code-review"] });
+    expect((await store().getTask(task.id)).enabledWorkflowSteps ?? []).toEqual(["code-review"]);
+    expect((await taskJsonEnabledWorkflowSteps(task.id)) ?? []).toEqual(["code-review"]);
     expect(privateStore().resolveTaskWorkflowIrSync(task.id)).toEqual(BUILTIN_CODING_WORKFLOW_IR);
   });
 
@@ -237,7 +256,7 @@ describe("workflow restart durability for explicit selections", () => {
 
     const customSelectionBefore = store().getTaskWorkflowSelection(customTask.id);
     expect(customSelectionBefore?.workflowId).toBe(workflow.id);
-    expect(customSelectionBefore?.stepIds).toHaveLength(2);
+    expect(customSelectionBefore?.stepIds).toEqual(["review-group"]);
     // FNXC:CodeReviewStep — builtin:coding carries the DEFAULT-ON `code-review`
     // optional-group, so the create-time workflowId path seeds it into the selection.
     expect(store().getTaskWorkflowSelection(builtinTask.id)).toEqual({ workflowId: "builtin:coding", stepIds: ["code-review"] });
@@ -248,9 +267,6 @@ describe("workflow restart durability for explicit selections", () => {
     expect(customSelection).toEqual(customSelectionBefore);
     expect((await store().getTask(customTask.id)).enabledWorkflowSteps).toEqual(customSelectionBefore?.stepIds);
     expect(await taskJsonEnabledWorkflowSteps(customTask.id)).toEqual(customSelectionBefore?.stepIds);
-    for (const stepId of customSelection?.stepIds ?? []) {
-      expect(await store().getWorkflowStep(stepId)).toBeDefined();
-    }
     expect(store().getTaskWorkflowSelection(builtinTask.id)).toEqual({ workflowId: "builtin:coding", stepIds: ["code-review"] });
     expect((await store().getTask(builtinTask.id)).enabledWorkflowSteps ?? []).toEqual(["code-review"]);
     expect((await taskJsonEnabledWorkflowSteps(builtinTask.id)) ?? []).toEqual(["code-review"]);

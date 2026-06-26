@@ -3715,25 +3715,24 @@ export class TaskExecutor {
    */
   async recoverFailedPreMergeWorkflowStep(task: Task): Promise<boolean> {
     try {
-      const preMergeFailed = (task.workflowStepResults ?? [])
+      /*
+      FNXC:WorkflowPostMerge 2026-06-26-14:00:
+      U7c: gate-ness is now sourced from the recorded `WorkflowStepResult.status`, NOT a
+      `workflow_steps` table read. The graph executor (workflow-graph-executor.ts) maps a
+      group outcome to status by gate semantics: a GATE REVISE / hard failure records
+      `status: "failed"` (blocking), while an ADVISORY REVISE records `status:
+      "advisory_failure"` (non-blocking). So a pre-merge result with `status === "failed"`
+      IS by construction a blocking gate failure — the prior `getWorkflowStep(id).gateMode`
+      lookup was redundant (and after the table drop it returned undefined for graph node
+      ids anyway). Recovery revives the task from the latest blocking pre-merge failure.
+      */
+      const failed = (task.workflowStepResults ?? [])
         .filter((r) => (r.phase || "pre-merge") === "pre-merge" && r.status === "failed")
         .sort((a, b) => {
           const aTs = Date.parse(a.completedAt || a.startedAt || "");
           const bTs = Date.parse(b.completedAt || b.startedAt || "");
           return (Number.isFinite(bTs) ? bTs : 0) - (Number.isFinite(aTs) ? aTs : 0);
         });
-
-      const gateModeCache = new Map<string, "gate" | "advisory">();
-      const failed: typeof preMergeFailed = [];
-      for (const result of preMergeFailed) {
-        let mode = gateModeCache.get(result.workflowStepId);
-        if (!mode) {
-          const step = await this.store.getWorkflowStep(result.workflowStepId).catch(() => null);
-          mode = step?.gateMode || (step?.mode === "script" ? "gate" : "advisory");
-          gateModeCache.set(result.workflowStepId, mode);
-        }
-        if (mode === "gate") failed.push(result);
-      }
 
       const target = failed[0];
       if (!target) {

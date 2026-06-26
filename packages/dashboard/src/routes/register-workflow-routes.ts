@@ -724,20 +724,10 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
     }
   });
 
-  // POST /api/workflows/migrate-legacy-steps — Lazy idempotent migration of
-  // legacy user-authored workflow steps into fragments + a combined "Migrated
-  // steps" workflow (U2/R5/KTD-3). Fired once per project on first editor open;
-  // safe to call repeatedly (idempotent via per-row markers). Returns the counts.
-  router.post("/workflows/migrate-legacy-steps", async (req, res) => {
-    try {
-      const { store } = await getProjectContext(req);
-      const result = await store.migrateLegacyWorkflowSteps();
-      res.json(result);
-    } catch (err: unknown) {
-      if (err instanceof ApiError) throw err;
-      rethrowAsApiError(err);
-    }
-  });
+  // FNXC:WorkflowStepCRUD 2026-06-26-14:00: U7c removed POST
+  // /api/workflows/migrate-legacy-steps along with the legacy workflow_steps table and its
+  // store-level migrator. Workflow steps run graph-native; there is no legacy table to
+  // migrate from.
 
   // GET /api/workflows/:id/export — emit a portable, versioned JSON envelope for
   // a single workflow or fragment (U5/R9/KTD-5). Built-ins are exportable too —

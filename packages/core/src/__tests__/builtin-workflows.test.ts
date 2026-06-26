@@ -588,15 +588,26 @@ describe("built-in workflows", () => {
       await expect(store.deleteWorkflowDefinition("builtin:coding")).rejects.toThrow(/cannot be deleted/i);
     });
 
-    it("branching built-ins can be selected without throwing", async () => {
+    it("branching built-ins can be selected without throwing, seeding default-on optional-group ids", async () => {
+      // FNXC:WorkflowStepCRUD 2026-06-26-14:00: U7c — `selectTaskWorkflow` no longer
+      // materializes legacy `workflow_steps` rows; it seeds `enabledWorkflowSteps` with the
+      // workflow's DEFAULT-ON optional-group node ids, exactly matching the create-time path
+      // (a task that SELECTS builtin:coding now enables `code-review` just like one CREATED
+      // with builtin:coding — previously select returned [] and silently skipped the gate).
+      const expectedGroups: Record<string, string[]> = {
+        "builtin:coding": ["code-review"],
+        "builtin:marketing": [],
+        "builtin:stepwise-coding": ["code-review"],
+      };
       for (const workflowId of ["builtin:coding", "builtin:marketing", "builtin:stepwise-coding"]) {
         const task = await store.createTask({ description: `select ${workflowId}`, enabledWorkflowSteps: [] });
+        const expected = expectedGroups[workflowId];
 
-        await expect(store.selectTaskWorkflow(task.id, workflowId)).resolves.toEqual([]);
+        await expect(store.selectTaskWorkflow(task.id, workflowId)).resolves.toEqual(expected);
 
         const detail = await store.getTask(task.id);
-        expect(detail.enabledWorkflowSteps ?? []).toEqual([]);
-        expect(store.getTaskWorkflowSelection(task.id)).toEqual({ workflowId, stepIds: [] });
+        expect(detail.enabledWorkflowSteps ?? []).toEqual(expected);
+        expect(store.getTaskWorkflowSelection(task.id)).toEqual({ workflowId, stepIds: expected });
       }
     });
 

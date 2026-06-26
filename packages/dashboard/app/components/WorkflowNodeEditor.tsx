@@ -29,7 +29,6 @@ import {
   importWorkflow,
   designWorkflow,
   ApiRequestError,
-  migrateLegacyWorkflowSteps,
   fetchModels,
   fetchAgents,
   fetchDiscoveredSkills,
@@ -902,16 +901,6 @@ function InnerEditor({
   // canvas container (R6) instead of leaving it on a now-removed node.
   const canvasRef = useRef<HTMLDivElement>(null);
 
-  // U2/R5: one-time legacy-step migration notice. Shown after the on-open
-  // migration call converts >0 steps, dismissible, dismissal persisted in
-  // localStorage (per project when a projectId is available). Guards against
-  // re-showing across re-opens.
-  const migrationNoticeStorageKey = useMemo(
-    () => `fusion:wf-migration-notice-dismissed${projectId ? `:${projectId}` : ""}`,
-    [projectId],
-  );
-  const [showMigrationNotice, setShowMigrationNotice] = useState(false);
-
   // U5/R10: import affordance state. `importError` renders a PERSISTENT inline
   // error region (not a toast) for client parse failures and server 4xx
   // validation failures; `importWarnings` renders non-blocking notes in the same
@@ -1119,48 +1108,9 @@ function InnerEditor({
     setWorkflowListStageOpen(false);
   }, [activeId, initialWorkflowId, isMobileMode, workflowListStageOpen]);
 
-  // U2/R5: fire the lazy legacy-step migration once on editor open, then reload
-  // the workflow list so any newly created fragments / "Migrated steps" workflow
-  // appear. Non-fatal on ANY error (incl. 404 if the route ships in a later
-  // release — the call is best-effort). When the run converted >0 steps and the
-  // notice hasn't been dismissed before, surface the one-time notice.
-  const migrationFiredRef = useRef(false);
-  useEffect(() => {
-    if (migrationFiredRef.current) return;
-    migrationFiredRef.current = true;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const result = await migrateLegacyWorkflowSteps(projectId);
-        if (cancelled) return;
-        if (result.migrated > 0) {
-          await loadWorkflows();
-          if (cancelled) return;
-          let dismissed = false;
-          try {
-            dismissed = localStorage.getItem(migrationNoticeStorageKey) === "1";
-          } catch {
-            // localStorage unavailable (private mode / SSR): treat as not dismissed.
-          }
-          if (!dismissed) setShowMigrationNotice(true);
-        }
-      } catch {
-        // Non-fatal: migration is best-effort and tolerates a missing route.
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, loadWorkflows, migrationNoticeStorageKey]);
-
-  const dismissMigrationNotice = useCallback(() => {
-    setShowMigrationNotice(false);
-    try {
-      localStorage.setItem(migrationNoticeStorageKey, "1");
-    } catch {
-      // Best-effort persistence; the in-session dismissal still hides it.
-    }
-  }, [migrationNoticeStorageKey]);
+  // FNXC:WorkflowStepCRUD 2026-06-26-14:00: U7c removed the on-open legacy-step
+  // migration trigger and its one-time notice. The legacy workflow_steps table was
+  // dropped; workflow steps run graph-native, so there is nothing to migrate.
 
   // U5/R9: export the active workflow as a downloaded JSON envelope. Enabled for
   // built-ins; the caller gates on `isDirty` (a stale export is impossible
@@ -2553,25 +2503,6 @@ function InnerEditor({
           ) : null}
         </header>
 
-        {showMigrationNotice ? (
-          <div className="wf-migration-notice" role="status" data-testid="wf-migration-notice">
-            <span className="wf-migration-notice-text">
-              {t(
-                "workflows.migrationNotice",
-                'Your legacy workflow steps were converted — find them as templates in the palette and as the "Migrated steps" workflow.',
-              )}
-            </span>
-            <button
-              type="button"
-              className="wf-migration-notice-dismiss"
-              data-testid="wf-migration-notice-dismiss"
-              onClick={dismissMigrationNotice}
-              aria-label={t("common.dismiss", "Dismiss")}
-            >
-              <X size={14} />
-            </button>
-          </div>
-        ) : null}
 
         <div
           className={`wf-editor-body${workflowListStageOpen ? " wf-editor-body--list-stage" : " wf-editor-body--editor-stage"}${

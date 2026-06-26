@@ -12,14 +12,12 @@ describe("createSharedTaskStoreTestHarness", () => {
   afterEach(harness.afterEach);
   afterAll(harness.afterAll);
 
-  it("resets ids so tasks and workflow steps restart from FN-001 / WS-001", async () => {
+  it("resets ids so tasks restart from FN-001", async () => {
     const task = await harness.store().createTask({ description: "first" });
-    const step = await harness.store().createWorkflowStep({ name: "Step", description: "Desc" });
     expect(task.id).toBe("FN-001");
-    expect(step.id).toBe("WS-001");
   });
 
-  it("clears workflow steps cache between tests", async () => {
+  it("workflow steps listing is empty between tests (U7c: plugin-only, table dropped)", async () => {
     const steps = await harness.store().listWorkflowSteps();
     expect(steps).toEqual([]);
   });
@@ -27,7 +25,6 @@ describe("createSharedTaskStoreTestHarness", () => {
   it("seeds state across multiple tables for truncation coverage", async () => {
     const store = harness.store();
     const task = await store.createTask({ description: "seed" });
-    await store.createWorkflowStep({ name: "Seed Step", description: "seed" });
     const db = (store as any).db;
     db.prepare(
       `INSERT INTO agents (id, name, role, state, createdAt, updatedAt, metadata, data)

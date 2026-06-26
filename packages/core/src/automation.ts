@@ -17,6 +17,17 @@ export const AUTOMATION_PRESETS: Record<Exclude<ScheduleType, "custom">, string>
 
 // ── Automation Step Types ────────────────────────────────────────────
 
+/**
+ * Builtin tool names that automation AI-prompt steps can expose in the dashboard selector.
+ *
+ * FNXC:AutomationTools 2026-06-26-00:00:
+ * Automation AI steps default to every selectable coding tool for backward-compatible legacy schedules. Persist an explicit allowlist only when the operator narrows the set; an empty allowlist intentionally means no tools.
+ */
+export const AUTOMATION_SELECTABLE_TOOLS = ["Read", "Bash", "Edit", "Write", "Grep", "Find", "Ls"] as const;
+
+/** Selectable automation AI tool name. */
+export type AutomationSelectableTool = (typeof AUTOMATION_SELECTABLE_TOOLS)[number];
+
 /** The type of an automation step. */
 export type AutomationStepType = "command" | "ai-prompt" | "create-task";
 
@@ -36,6 +47,13 @@ export interface AutomationStep {
   modelProvider?: string;
   /** AI model ID (for ai-prompt steps). */
   modelId?: string;
+  /**
+   * Optional tool allowlist for ai-prompt steps.
+   *
+   * FNXC:Automations 2026-06-26-00:00:
+   * Undefined means the agent receives all automation coding tools by default. A provided array restricts the agent to those tool names, and an empty array deliberately runs the prompt with no tools.
+   */
+  allowedTools?: string[];
   /** Task title for the created task (for create-task steps). */
   taskTitle?: string;
   /** Task description for the created task (for create-task steps). */

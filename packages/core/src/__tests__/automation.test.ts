@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { CronExpressionParser } from "cron-parser";
 import {
   AUTOMATION_PRESETS,
+  AUTOMATION_SELECTABLE_TOOLS,
   MAX_RUN_HISTORY,
   type AutomationRunResult,
   type AutomationStep,
@@ -115,6 +116,16 @@ describe("ScheduleType", () => {
   });
 });
 
+describe("AUTOMATION_SELECTABLE_TOOLS", () => {
+  it("lists the builtin coding tools offered to automation AI steps", () => {
+    expect(AUTOMATION_SELECTABLE_TOOLS).toEqual(["Read", "Bash", "Edit", "Write", "Grep", "Find", "Ls"]);
+  });
+
+  it("contains unique tool names", () => {
+    expect(new Set(AUTOMATION_SELECTABLE_TOOLS).size).toBe(AUTOMATION_SELECTABLE_TOOLS.length);
+  });
+});
+
 describe("MAX_RUN_HISTORY", () => {
   it("is set to 50", () => {
     expect(MAX_RUN_HISTORY).toBe(50);
@@ -166,7 +177,7 @@ describe("Interface contracts with AutomationStore", () => {
     });
   });
 
-  it("supports AutomationStep ai-prompt shape", () => {
+  it("supports AutomationStep ai-prompt shape with optional allowedTools", () => {
     const aiPromptStep: AutomationStep = {
       id: "step-ai-1",
       type: "ai-prompt",
@@ -174,6 +185,7 @@ describe("Interface contracts with AutomationStore", () => {
       prompt: "Summarize the latest run output",
       modelProvider: "anthropic",
       modelId: "claude-sonnet-4-5",
+      allowedTools: ["Read", "Grep"],
     };
 
     expect(aiPromptStep).toMatchObject({
@@ -183,7 +195,20 @@ describe("Interface contracts with AutomationStore", () => {
       prompt: "Summarize the latest run output",
       modelProvider: "anthropic",
       modelId: "claude-sonnet-4-5",
+      allowedTools: ["Read", "Grep"],
     });
+  });
+
+  it("supports explicit empty allowedTools on AutomationStep ai-prompt shape", () => {
+    const aiPromptStep: AutomationStep = {
+      id: "step-ai-empty-tools",
+      type: "ai-prompt",
+      name: "No tools",
+      prompt: "Summarize without tools",
+      allowedTools: [],
+    };
+
+    expect(aiPromptStep.allowedTools).toEqual([]);
   });
 
   it("supports successful AutomationRunResult shape", () => {

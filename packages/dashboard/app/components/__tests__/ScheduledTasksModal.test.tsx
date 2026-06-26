@@ -27,7 +27,9 @@ vi.mock("lucide-react", () => ({
   X: () => <span data-testid="icon-x-close">Close</span>,
 }));
 
-vi.mock("@fusion/core", () => ({}));
+vi.mock("@fusion/core", () => ({
+  AUTOMATION_SELECTABLE_TOOLS: ["Read", "Bash", "Edit", "Write", "Grep", "Find", "Ls"],
+}));
 
 const mockConfirm = vi.fn();
 
@@ -46,6 +48,7 @@ const mockCreateRoutine = vi.fn();
 const mockUpdateRoutine = vi.fn();
 const mockDeleteRoutine = vi.fn();
 const mockRunRoutine = vi.fn();
+const mockStreamRoutineRun = vi.fn();
 
 vi.mock("../../api", () => ({
   fetchAutomations: (...args: any[]) => mockFetchAutomations(...args),
@@ -59,6 +62,7 @@ vi.mock("../../api", () => ({
   updateRoutine: (...args: any[]) => mockUpdateRoutine(...args),
   deleteRoutine: (...args: any[]) => mockDeleteRoutine(...args),
   runRoutine: (...args: any[]) => mockRunRoutine(...args),
+  streamRoutineRun: (...args: any[]) => mockStreamRoutineRun(...args),
   fetchModels: vi.fn().mockResolvedValue({
     models: [
       { provider: "openai", id: "gpt-4o", name: "GPT-4o", reasoning: false, contextWindow: 128000 },
@@ -124,6 +128,7 @@ describe("ScheduledTasksModal", () => {
     mockConfirm.mockResolvedValue(true);
     mockFetchAutomations.mockResolvedValue([]);
     mockFetchRoutines.mockResolvedValue([]);
+    mockStreamRoutineRun.mockReturnValue({ close: vi.fn() });
     localStorage.removeItem("floating-window:automation");
     localStorage.removeItem("fusion:automation-modal-size");
     setViewport(1200, 900);
@@ -373,14 +378,25 @@ describe("ScheduledTasksModal", () => {
   it("runs routines, shows toast, and renders inline output on the card", async () => {
     const routine = makeRoutine({ name: "My Routine" });
     mockFetchRoutines.mockResolvedValue([routine]);
-    mockRunRoutine.mockResolvedValue({
-      result: {
-        routineId: routine.id,
-        success: true,
-        output: "Done",
-        startedAt: "2026-04-08T00:00:00.000Z",
-        completedAt: "2026-04-08T00:01:00.000Z",
-      },
+    let streamHandlers: { onEvent: (event: any) => void } | undefined;
+    mockStreamRoutineRun.mockImplementation((_id, handlers) => {
+      streamHandlers = handlers;
+      return { close: vi.fn() };
+    });
+    mockRunRoutine.mockImplementation(async () => {
+      streamHandlers?.onEvent({ type: "step", stepIndex: 0, stepName: "Analyze", status: "started" });
+      streamHandlers?.onEvent({ type: "output", text: "live line" });
+      streamHandlers?.onEvent({ type: "tool", status: "started", name: "Read" });
+      streamHandlers?.onEvent({ type: "complete" });
+      return {
+        result: {
+          routineId: routine.id,
+          success: true,
+          output: "Done",
+          startedAt: "2026-04-08T00:00:00.000Z",
+          completedAt: "2026-04-08T00:01:00.000Z",
+        },
+      };
     });
 
     render(<ScheduledTasksModal onClose={onClose} addToast={addToast} />);
@@ -391,8 +407,10 @@ describe("ScheduledTasksModal", () => {
     fireEvent.click(screen.getByLabelText("Run My Routine now"));
 
     await waitFor(() => {
+      expect(mockStreamRoutineRun).toHaveBeenCalledWith("routine-001", expect.any(Object), { scope: "global" });
       expect(mockRunRoutine).toHaveBeenCalledWith("routine-001", { scope: "global" });
       expect(addToast).toHaveBeenCalledWith('"My Routine" completed successfully', "success");
+      expect(screen.getByText(/live line/)).toBeDefined();
       expect(screen.getByText("Done")).toBeDefined();
     });
   });

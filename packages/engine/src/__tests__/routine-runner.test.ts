@@ -138,6 +138,7 @@ function createMockHeartbeatMonitor(): HeartbeatMonitor {
 
 function createRoutineRunner(options?: Partial<RoutineRunnerOptions>): RoutineRunner {
   return new RoutineRunner({
+    ...options,
     routineStore: options?.routineStore ?? createMockRoutineStore(),
     heartbeatMonitor: options?.heartbeatMonitor ?? createMockHeartbeatMonitor(),
     rootDir: options?.rootDir ?? "/test/root",
@@ -264,6 +265,33 @@ describe("RoutineRunner", () => {
 
       // After completion, should not be in-flight
       expect(runner.isRoutineRunning("routine-cleanup")).toBe(false);
+    });
+
+    it("forwards ai-prompt allowedTools and live callbacks to the AI executor", async () => {
+      const routine = createMockRoutine({
+        id: "routine-ai",
+        agentId: undefined,
+        steps: [
+          {
+            id: "step-ai",
+            type: "ai-prompt",
+            name: "Analyze",
+            prompt: "Analyze this",
+            allowedTools: ["Read", "Grep"],
+          },
+        ],
+      });
+      const routineStore = createMockRoutineStore([routine]);
+      const aiPromptExecutor = vi.fn().mockResolvedValue("ai output");
+      const liveCallbacks = { onText: vi.fn(), onStep: vi.fn() };
+      const runner = createRoutineRunner({ routineStore, aiPromptExecutor });
+
+      const result = await runner.executeRoutine("routine-ai", "api", undefined, liveCallbacks);
+
+      expect(result.success).toBe(true);
+      expect(aiPromptExecutor).toHaveBeenCalledWith("Analyze this", undefined, undefined, ["Read", "Grep"], liveCallbacks);
+      expect(liveCallbacks.onStep).toHaveBeenCalledWith(expect.objectContaining({ stepId: "step-ai", status: "started" }));
+      expect(liveCallbacks.onStep).toHaveBeenCalledWith(expect.objectContaining({ stepId: "step-ai", status: "completed", success: true }));
     });
 
     it("cleans up inFlightExecutions map even on error", async () => {

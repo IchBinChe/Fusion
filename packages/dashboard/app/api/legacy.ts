@@ -5142,6 +5142,21 @@ export function reorderAutomationSteps(id: string, stepIds: string[], options?: 
 export interface RoutineRunResponse {
   routine: Routine;
   result: RoutineExecutionResult;
+  liveRunId?: string;
+}
+
+export type RoutineRunStreamEvent =
+  | { type: "run"; runId?: string; scheduleId?: string; status?: string }
+  | { type: "step"; runId?: string; stepIndex?: number; stepId?: string; stepName?: string; stepType?: string; status?: string; success?: boolean; error?: string }
+  | { type: "output"; runId?: string; text?: string }
+  | { type: "tool"; runId?: string; status?: string; name?: string; args?: unknown; isError?: boolean; result?: unknown }
+  | { type: "complete"; runId?: string; result?: RoutineExecutionResult }
+  | { type: "error"; runId?: string; message?: string; result?: RoutineExecutionResult };
+
+export interface RoutineRunStreamHandlers {
+  onEvent: (event: RoutineRunStreamEvent) => void;
+  onConnectionStateChange?: (state: StreamConnectionState) => void;
+  onFatalError?: (message: string) => void;
 }
 
 export function fetchRoutines(options?: SchedulingScopeOptions): Promise<Routine[]> {
@@ -5178,6 +5193,39 @@ export function runRoutine(id: string, options?: SchedulingScopeOptions): Promis
   return api<RoutineRunResponse>(withSchedulingScope(`/routines/${id}/trigger`, options), {
     method: "POST",
   });
+}
+
+export function streamRoutineRun(id: string, handlers: RoutineRunStreamHandlers, options?: SchedulingScopeOptions & { runId?: string }) {
+  const baseUrl = withSchedulingScope(`/routines/${id}/run/stream`, options);
+  const separator = baseUrl.includes("?") ? "&" : "?";
+  const url = options?.runId ? `${baseUrl}${separator}runId=${encodeURIComponent(options.runId)}` : baseUrl;
+  const parse = (type: RoutineRunStreamEvent["type"], event: MessageEvent) => {
+    let data: Record<string, unknown> = {};
+    try {
+      data = event.data ? JSON.parse(event.data) : {};
+    } catch {
+      data = { message: event.data };
+    }
+    handlers.onEvent({ type, ...data } as RoutineRunStreamEvent);
+  };
+  return createResilientEventSource(
+    url,
+    {
+      events: {
+        run: (event) => parse("run", event),
+        step: (event) => parse("step", event),
+        output: (event) => parse("output", event),
+        tool: (event) => parse("tool", event),
+        complete: (event) => parse("complete", event),
+        error: (event) => parse("error", event),
+      },
+    },
+    {
+      maxReconnectAttempts: 2,
+      onConnectionStateChange: handlers.onConnectionStateChange,
+      onFatalError: handlers.onFatalError,
+    },
+  );
 }
 
 export function fetchRoutineRuns(id: string, options?: SchedulingScopeOptions): Promise<RoutineExecutionResult[]> {

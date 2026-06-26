@@ -7,8 +7,10 @@ import type { AutomationStep } from "@fusion/core";
 
 type ScheduleStepsEditorProps = ComponentProps<typeof ScheduleStepsEditor>;
 
-// Mock @fusion/core
-vi.mock("@fusion/core", () => ({}));
+// Mock @fusion/core runtime constants used by the editor.
+vi.mock("@fusion/core", () => ({
+  AUTOMATION_SELECTABLE_TOOLS: ["Read", "Bash", "Edit", "Write", "Grep", "Find", "Ls"],
+}));
 
 // Mock lucide-react
 vi.mock("lucide-react", () => ({
@@ -339,6 +341,67 @@ describe("ScheduleStepsEditor", () => {
       const steps = [makeStep(), makeStep({ id: "s2" })];
       render(<ScheduleStepsEditor steps={steps} onChange={onChange} />);
       expect(screen.getByText("Steps (2)")).toBeDefined();
+    });
+  });
+
+  describe("tool selection", () => {
+    it("shows all tools checked by default for advanced AI prompt steps", () => {
+      const steps = [makeStep({ id: "s1", name: "AI Step", type: "ai-prompt", prompt: "Test prompt" })];
+      render(<ScheduleStepsEditor steps={steps} onChange={onChange} />);
+
+      fireEvent.click(screen.getByLabelText("Edit AI Step"));
+
+      for (const tool of ["Read", "Bash", "Edit", "Write", "Grep", "Find", "Ls"]) {
+        expect(screen.getByLabelText(tool)).toHaveProperty("checked", true);
+      }
+    });
+
+    it("saves a restricted allowedTools array for advanced AI prompt steps", () => {
+      const steps = [makeStep({ id: "s1", name: "AI Step", type: "ai-prompt", prompt: "Test prompt" })];
+      render(<ScheduleStepsEditor steps={steps} onChange={onChange} />);
+
+      fireEvent.click(screen.getByLabelText("Edit AI Step"));
+      fireEvent.click(screen.getByLabelText("Bash"));
+      fireEvent.click(screen.getByText("Save Step"));
+
+      expect(onChange).toHaveBeenCalledWith([
+        expect.objectContaining({
+          type: "ai-prompt",
+          allowedTools: ["Read", "Edit", "Write", "Grep", "Find", "Ls"],
+        }),
+      ]);
+    });
+
+    it("saves undefined allowedTools when advanced AI prompt tools are all selected", () => {
+      const steps = [makeStep({ id: "s1", name: "AI Step", type: "ai-prompt", prompt: "Test prompt", allowedTools: ["Read"] })];
+      render(<ScheduleStepsEditor steps={steps} onChange={onChange} />);
+
+      fireEvent.click(screen.getByLabelText("Edit AI Step"));
+      fireEvent.click(screen.getByRole("button", { name: "Select all" }));
+      fireEvent.click(screen.getByText("Save Step"));
+
+      expect(onChange).toHaveBeenCalledWith([
+        expect.objectContaining({
+          type: "ai-prompt",
+          allowedTools: undefined,
+        }),
+      ]);
+    });
+
+    it("saves an explicit empty allowedTools array when advanced tools are cleared", () => {
+      const steps = [makeStep({ id: "s1", name: "AI Step", type: "ai-prompt", prompt: "Test prompt" })];
+      render(<ScheduleStepsEditor steps={steps} onChange={onChange} />);
+
+      fireEvent.click(screen.getByLabelText("Edit AI Step"));
+      fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+      fireEvent.click(screen.getByText("Save Step"));
+
+      expect(onChange).toHaveBeenCalledWith([
+        expect.objectContaining({
+          type: "ai-prompt",
+          allowedTools: [],
+        }),
+      ]);
     });
   });
 

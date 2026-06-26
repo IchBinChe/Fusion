@@ -98,6 +98,8 @@ interface RoutineCardProps {
   running?: boolean;
   /** Latest manual-run output shown inline until refreshed routine data catches up. */
   lastRunOutput?: { output: string; error?: string; success: boolean } | null;
+  /** Incremental live run transcript while a manual run is in progress. */
+  liveRunOutput?: { output: string; status: "idle" | "running" | "complete" | "error" } | null;
 }
 
 function RunResultBadge({ result }: { result: RoutineExecutionResult }) {
@@ -158,7 +160,7 @@ function RunHistoryItem({ result, index }: { result: RoutineExecutionResult; ind
   );
 }
 
-export function RoutineCard({ routine, onEdit, onDelete, onRun, onToggle, running, lastRunOutput }: RoutineCardProps) {
+export function RoutineCard({ routine, onEdit, onDelete, onRun, onToggle, running, lastRunOutput, liveRunOutput }: RoutineCardProps) {
   const { t } = useTranslation("app");
   const [showHistory, setShowHistory] = useState(false);
   const { confirm } = useConfirm();
@@ -300,6 +302,18 @@ export function RoutineCard({ routine, onEdit, onDelete, onRun, onToggle, runnin
           <span>{routine.runCount}</span>
         </div>
       </div>
+
+      {liveRunOutput && (
+        <div className={`routine-live-output ${liveRunOutput.status}`} aria-live="polite">
+          <div className="routine-live-output-header">
+            <span className="status-dot" />
+            <span>{liveRunOutput.status === "running" ? t("schedule.liveOutputRunning", "Live output — running") : t("schedule.liveOutput", "Live output")}</span>
+          </div>
+          {liveRunOutput.output && (
+            <pre className="routine-run-output-text">{liveRunOutput.output}</pre>
+          )}
+        </div>
+      )}
 
       {lastRunOutput && (
         <div className={`routine-run-output ${lastRunOutput.success ? "success" : "failure"}`}>

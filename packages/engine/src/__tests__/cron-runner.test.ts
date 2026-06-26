@@ -183,6 +183,34 @@ describe("CronRunner", () => {
       });
     });
 
+    it("requests coding tools and forwards the allowed tool list", async () => {
+      let capturedOptions: any;
+      piModuleMocks.createFnAgent.mockImplementation(async (options: any) => {
+        capturedOptions = options;
+        return { session: { dispose: vi.fn() } };
+      });
+
+      const executor = await createAiPromptExecutor("/test/project");
+      await executor("Summarize this", "anthropic", "claude-sonnet-4-5", ["Read", "Grep"]);
+
+      expect(capturedOptions.tools).toBe("coding");
+      expect(capturedOptions.toolsAllowlist).toEqual(["Read", "Grep"]);
+    });
+
+    it("leaves toolsAllowlist undefined when the step omits allowedTools", async () => {
+      let capturedOptions: any;
+      piModuleMocks.createFnAgent.mockImplementation(async (options: any) => {
+        capturedOptions = options;
+        return { session: { dispose: vi.fn() } };
+      });
+
+      const executor = await createAiPromptExecutor("/test/project");
+      await executor("Summarize this");
+
+      expect(capturedOptions.tools).toBe("coding");
+      expect(capturedOptions.toolsAllowlist).toBeUndefined();
+    });
+
     it("returns response text even when session disposal throws", async () => {
       piModuleMocks.createFnAgent.mockImplementation(async (options: { onText?: (delta: string) => void }) => {
         options.onText?.("hello ");
@@ -834,6 +862,7 @@ describe("CronRunner", () => {
         "Analyze the codebase",
         "anthropic",
         "claude-sonnet-4-5",
+        undefined,
       );
     });
 
@@ -1004,6 +1033,29 @@ describe("CronRunner", () => {
       expect(result.stepResults![0].output).toContain("Analysis complete: 3 findings");
     });
 
+    it("passes step allowedTools to executor", async () => {
+      const store = createMockStore();
+      const mockExecutor = createAiMockExecutor("response");
+      const schedule = createMockSchedule({
+        command: "",
+        steps: [
+          makeStep({
+            type: "ai-prompt",
+            name: "Step with tools",
+            prompt: "Use selected tools",
+            allowedTools: ["Read", "Grep"],
+            command: undefined,
+          }),
+        ],
+      });
+      const automationStore = createMockAutomationStore([schedule]);
+      runner = new CronRunner(store, automationStore, { aiPromptExecutor: mockExecutor });
+
+      await runner.executeSchedule(schedule);
+
+      expect(mockExecutor).toHaveBeenCalledWith("Use selected tools", "anthropic", "claude-sonnet-4-5", ["Read", "Grep"]);
+    });
+
     it("passes step model provider and model ID to executor", async () => {
       const store = createMockStore();
       const mockExecutor = createAiMockExecutor("response");
@@ -1025,7 +1077,7 @@ describe("CronRunner", () => {
 
       await runner.executeSchedule(schedule);
 
-      expect(mockExecutor).toHaveBeenCalledWith("Do something", "openai", "gpt-4o");
+      expect(mockExecutor).toHaveBeenCalledWith("Do something", "openai", "gpt-4o", undefined);
     });
 
     it("falls back to settings defaults when step has no model", async () => {
@@ -1050,7 +1102,7 @@ describe("CronRunner", () => {
 
       await runner.executeSchedule(schedule);
 
-      expect(mockExecutor).toHaveBeenCalledWith("Use defaults", "anthropic", "claude-sonnet-4-5");
+      expect(mockExecutor).toHaveBeenCalledWith("Use defaults", "anthropic", "claude-sonnet-4-5", undefined);
     });
 
     it("returns configuration error when no executor is provided", async () => {

@@ -1603,6 +1603,50 @@ describe("createFnAgent", () => {
     ]));
   });
 
+  it("filters coding tools with a case-insensitive toolsAllowlist", async () => {
+    const { createFnAgent } = await import("../pi.js");
+
+    await createFnAgent({
+      cwd: "/tmp",
+      systemPrompt: "test",
+      tools: "coding",
+      toolsAllowlist: [" Read ", "GREP"],
+    });
+
+    const createSessionArgs = createAgentSessionMock.mock.calls[0]?.[0] as { customTools: Array<{ name: string }>; tools?: string[] };
+    expect(createSessionArgs.customTools.map((tool) => tool.name).sort()).toEqual(["grep", "read"]);
+    expect(createSessionArgs.tools).toEqual(["GREP", "Read", "grep", "read"]);
+  });
+
+  it("keeps all coding tools when toolsAllowlist is undefined", async () => {
+    const { createFnAgent } = await import("../pi.js");
+
+    await createFnAgent({
+      cwd: "/tmp",
+      systemPrompt: "test",
+      tools: "coding",
+    });
+
+    const createSessionArgs = createAgentSessionMock.mock.calls[0]?.[0] as { customTools: Array<{ name: string }>; tools?: string[] };
+    expect(createSessionArgs.customTools.map((tool) => tool.name).sort()).toEqual(["bash", "edit", "find", "grep", "ls", "read", "write"]);
+    expect(createSessionArgs.tools).toBeUndefined();
+  });
+
+  it("exposes no coding tools when toolsAllowlist is empty", async () => {
+    const { createFnAgent } = await import("../pi.js");
+
+    await createFnAgent({
+      cwd: "/tmp",
+      systemPrompt: "test",
+      tools: "coding",
+      toolsAllowlist: [],
+    });
+
+    const createSessionArgs = createAgentSessionMock.mock.calls[0]?.[0] as { customTools: Array<{ name: string }>; tools?: string[] };
+    expect(createSessionArgs.customTools).toEqual([]);
+    expect(createSessionArgs.tools).toEqual([]);
+  });
+
   it("keeps caller customTools in coding sessions", async () => {
     createCodingToolsMock.mockReturnValueOnce([{ name: "read" }, { name: "write" }] as any);
     const customTool = {

@@ -21,7 +21,7 @@ import type {
   TaskStore,
 } from "@fusion/core";
 import type { HeartbeatMonitor } from "./agent-heartbeat.js";
-import type { AiPromptExecutor } from "./cron-runner.js";
+import type { AiPromptExecutor, AiPromptLiveCallbacks } from "./cron-runner.js";
 import { createLogger } from "./logger.js";
 import { defaultShell } from "./shell-utils.js";
 import { resolveSandboxBackend } from "./sandbox/index.js";
@@ -36,6 +36,14 @@ const MAX_OUTPUT_LENGTH = 10 * 1024;
 
 
 /** Options for RoutineRunner constructor */
+/*
+FNXC:AutomationLiveOutput 2026-06-26-00:00:
+Routine manual triggers share the automation live-output contract. Thread optional callbacks through the runner so routes can stream step boundaries, AI text/tool events, and final output without changing scheduled/background execution behavior.
+*/
+export type RoutineLiveRunCallbacks = AiPromptLiveCallbacks & {
+  onStep?: (data: Record<string, unknown>) => void;
+};
+
 export interface RoutineRunnerOptions {
   /** RoutineStore for querying and updating routines */
   routineStore: RoutineStore;
@@ -84,6 +92,7 @@ export class RoutineRunner {
     routineId: string,
     triggerType: "cron" | "webhook" | "api",
     context?: Record<string, unknown>,
+    liveCallbacks?: RoutineLiveRunCallbacks,
   ): Promise<RoutineExecutionResult> {
     // 1. Load routine
     let routine: Routine;
@@ -131,7 +140,7 @@ export class RoutineRunner {
     const startedAt = new Date().toISOString();
 
     // Set in-flight BEFORE starting execution to prevent race conditions
-    const executionPromise = this.runExecution(routine, triggerType, context, startedAt);
+    const executionPromise = this.runExecution(routine, triggerType, context, startedAt, liveCallbacks);
     this.inFlightExecutions.set(routineId, executionPromise);
 
     try {
@@ -155,12 +164,13 @@ export class RoutineRunner {
     triggerType: string,
     context: Record<string, unknown> | undefined,
     startedAt: string,
+    liveCallbacks?: RoutineLiveRunCallbacks,
   ): Promise<RoutineExecutionResult> {
     const routineId = routine.id;
 
     try {
       const actionResult = this.hasRoutineAction(routine)
-        ? await this.executeRoutineAction(routine, startedAt)
+        ? await this.executeRoutineAction(routine, startedAt, liveCallbacks)
         : await this.executeAgentRoutine(routine, triggerType, context);
 
       await this.options.routineStore.completeRoutineExecution(routineId, {
@@ -252,11 +262,16 @@ export class RoutineRunner {
   private async executeRoutineAction(
     routine: Routine,
     startedAt: string,
+    liveCallbacks?: RoutineLiveRunCallbacks,
   ): Promise<AutomationRunResult> {
     if (routine.steps && routine.steps.length > 0) {
-      return this.executeSteps(routine, startedAt);
+      return this.executeSteps(routine, startedAt, liveCallbacks);
     }
-    return this.executeCommand(routine, routine.command ?? "", routine.timeoutMs, startedAt);
+    liveCallbacks?.onStep?.({ stepIndex: 0, stepId: "command", stepName: routine.name, stepType: "command", status: "started" });
+    const result = await this.executeCommand(routine, routine.command ?? "", routine.timeoutMs, startedAt);
+    liveCallbacks?.onStep?.({ stepIndex: 0, stepId: "command", stepName: routine.name, stepType: "command", status: "completed", success: result.success, error: result.error });
+    if (result.output) liveCallbacks?.onText?.(result.output);
+    return result;
   }
 
   private getRoutineCommandAuditor(routine: Routine): RunAuditor | undefined {
@@ -368,7 +383,7 @@ export class RoutineRunner {
     };
   }
 
-  private async executeSteps(routine: Routine, startedAt: string): Promise<AutomationRunResult> {
+  private async executeSteps(routine: Routine, startedAt: string, liveCallbacks?: RoutineLiveRunCallbacks): Promise<AutomationRunResult> {
     const steps = routine.steps ?? [];
     const stepResults: AutomationStepResult[] = [];
     let overallSuccess = true;
@@ -376,7 +391,10 @@ export class RoutineRunner {
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
-      const result = await this.executeStep(routine, step, i);
+      liveCallbacks?.onStep?.({ stepIndex: i, stepId: step.id, stepName: step.name, stepType: step.type, status: "started" });
+      const result = await this.executeStep(routine, step, i, liveCallbacks);
+      liveCallbacks?.onStep?.({ stepIndex: i, stepId: step.id, stepName: step.name, stepType: step.type, status: "completed", success: result.success, error: result.error });
+      if (step.type !== "ai-prompt" && result.output) liveCallbacks?.onText?.(result.output);
       stepResults.push(result);
 
       if (!result.success) {
@@ -412,6 +430,7 @@ export class RoutineRunner {
     routine: Routine,
     step: AutomationStep,
     stepIndex: number,
+    liveCallbacks?: RoutineLiveRunCallbacks,
   ): Promise<AutomationStepResult> {
     const startedAt = new Date().toISOString();
     const timeoutMs = step.timeoutMs ?? routine.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -439,7 +458,7 @@ export class RoutineRunner {
       }
       try {
         const output = await Promise.race([
-          this.options.aiPromptExecutor(step.prompt, step.modelProvider, step.modelId),
+          this.options.aiPromptExecutor(step.prompt, step.modelProvider, step.modelId, step.allowedTools, liveCallbacks),
           new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error(`AI prompt step timed out after ${timeoutMs / 1000}s`)), timeoutMs)),
         ]);
         return { stepId: step.id, stepName: step.name, stepIndex, success: true, output: truncateOutput(output, ""), startedAt, completedAt: new Date().toISOString() };
@@ -560,14 +579,14 @@ export class RoutineRunner {
    * @returns The execution result
    * @throws Error if routine not found or disabled
    */
-  async triggerManual(routineId: string): Promise<RoutineExecutionResult> {
+  async triggerManual(routineId: string, liveCallbacks?: RoutineLiveRunCallbacks): Promise<RoutineExecutionResult> {
     const routine = await this.options.routineStore.getRoutine(routineId);
 
     if (!routine.enabled) {
       throw new Error(`Routine '${routineId}' is disabled`);
     }
 
-    return this.executeRoutine(routineId, "api");
+    return this.executeRoutine(routineId, "api", undefined, liveCallbacks);
   }
 
   /**

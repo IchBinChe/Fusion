@@ -71,6 +71,15 @@ Content views such as Artifacts, Research, Insights, Skills, Memory, Evals, Goal
 
 On mobile viewports, the Right Dock never renders. The compact Header actions and bottom `MobileNavBar` keep their existing mobile behavior even when the experiment is enabled.
 
+## Automations
+
+<!-- FNXC:AutomationTools 2026-06-26-00:00: Automation AI-prompt steps now default to the full coding tool set and expose per-step restrictions so operators can intentionally narrow tool access without breaking legacy schedules. -->
+<!-- FNXC:AutomationLiveOutput 2026-06-26-00:00: Manual automation runs stream step, text, and tool activity into the Automations card while preserving the final run-result history after completion. -->
+
+Open **Automations** from the left sidebar (or the mobile More surfaces) to create cron, webhook, API, or manual routines. AI Prompt steps now run with all selectable coding tools by default: **Read**, **Bash**, **Edit**, **Write**, **Grep**, **Find**, and **Ls**. In the routine editor, use **Allowed tools** on a simple AI Prompt action or any multi-step AI Prompt step to clear or re-select tools. Leaving every tool selected stores the legacy default, so existing schedules continue to run with full tool access; clearing every box is an explicit no-tools configuration.
+
+When you choose **Run now**, the routine card opens a **Live output** panel while the manual run is active. The panel appends step status, AI text deltas, and tool start/finish activity as the run executes, then the card falls back to the persisted final run output and run history once the server records the result. The same `RoutineCard` surface is used by the floating modal and embedded Automations view, so live output appears in both presentations and collapses into a single-column card layout on mobile.
+
 ## Deep Links
 
 Use deep links to open a specific task directly from notifications, chat, or external tools.

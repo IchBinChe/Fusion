@@ -1,7 +1,7 @@
 // ScheduledTasksModal renders schedule/routine cards using .scheduling-*, .routine-*,
 // .schedule-form classes that live in ScriptsModal.css. Both modals share that file.
 import "./ScriptsModal.css";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Zap, Globe, Folder, X } from "lucide-react";
 import type { Routine, RoutineCreateInput } from "@fusion/core";
@@ -12,7 +12,9 @@ import {
   updateRoutine,
   deleteRoutine,
   runRoutine,
+  streamRoutineRun,
 } from "../api";
+import type { RoutineRunStreamEvent } from "../api";
 import { RoutineCard } from "./RoutineCard";
 import { RoutineEditor } from "./RoutineEditor";
 import type { ToastType } from "../hooks/useToast";
@@ -54,6 +56,8 @@ export function ScheduledTasksModal({ onClose, addToast, projectId, presentation
   const [editingRoutine, setEditingRoutine] = useState<Routine | undefined>();
   const [runningRoutineId, setRunningRoutineId] = useState<string | null>(null);
   const [lastRunOutput, setLastRunOutput] = useState<Record<string, { output: string; error?: string; success: boolean }>>({});
+  const [liveRunOutput, setLiveRunOutput] = useState<Record<string, { output: string; status: "idle" | "running" | "complete" | "error" }>>({});
+  const liveRunStreamsRef = useRef<Record<string, { close: () => void }>>({});
   // FNXC:AutomationsEmbedded 2026-06-22-00:00: Two-pane embedded layout tracks the routine selected in the left list to render its detail on the right.
   const [selectedRoutineId, setSelectedRoutineId] = useState<string | null>(null);
 
@@ -119,6 +123,56 @@ export function ScheduledTasksModal({ onClose, addToast, projectId, presentation
     return () => document.removeEventListener("keydown", handleKey);
   }, [onClose, routineView, escapeEnabled]);
 
+  useEffect(() => {
+    return () => {
+      for (const stream of Object.values(liveRunStreamsRef.current)) stream.close();
+      liveRunStreamsRef.current = {};
+    };
+  }, []);
+
+  const appendLiveRunLine = useCallback((routineId: string, line: string, status: "running" | "complete" | "error" = "running") => {
+    setLiveRunOutput((previous) => {
+      const current = previous[routineId]?.output ?? "";
+      return {
+        ...previous,
+        [routineId]: {
+          output: current ? `${current}\n${line}` : line,
+          status,
+        },
+      };
+    });
+  }, []);
+
+  /*
+  FNXC:AutomationLiveOutput 2026-06-26-00:00:
+  The modal and embedded Automations view both render RoutineCard, so the run handler owns one SSE stream per routine and passes the accumulated live transcript down instead of duplicating stream logic per presentation.
+  */
+  const handleLiveRunEvent = useCallback((routineId: string, event: RoutineRunStreamEvent) => {
+    if (event.type === "output" && event.text) {
+      appendLiveRunLine(routineId, event.text);
+      return;
+    }
+    if (event.type === "tool" && event.name) {
+      appendLiveRunLine(routineId, event.status === "completed" ? `Tool ${event.name} finished${event.isError ? " with errors" : ""}` : `Tool ${event.name} started`);
+      return;
+    }
+    if (event.type === "step" && event.stepName) {
+      appendLiveRunLine(routineId, event.status === "completed" ? `Step ${Number(event.stepIndex ?? 0) + 1}: ${event.stepName} ${event.success ? "completed" : "failed"}` : `Step ${Number(event.stepIndex ?? 0) + 1}: ${event.stepName} started`);
+      return;
+    }
+    if (event.type === "complete") {
+      appendLiveRunLine(routineId, t("schedule.liveRunComplete", "Run complete"), "complete");
+      liveRunStreamsRef.current[routineId]?.close();
+      delete liveRunStreamsRef.current[routineId];
+      return;
+    }
+    if (event.type === "error") {
+      appendLiveRunLine(routineId, event.message ?? t("schedule.liveRunError", "Run failed"), "error");
+      liveRunStreamsRef.current[routineId]?.close();
+      delete liveRunStreamsRef.current[routineId];
+    }
+  }, [appendLiveRunLine, t]);
+
   // ── Routine CRUD handlers ───────────────────────────────────────────────
 
   const handleCreateRoutine = useCallback(
@@ -172,6 +226,15 @@ export function ScheduledTasksModal({ onClose, addToast, projectId, presentation
   const handleRunRoutine = useCallback(
     async (routine: Routine) => {
       setRunningRoutineId(routine.id);
+      setLiveRunOutput((previous) => ({
+        ...previous,
+        [routine.id]: { output: t("schedule.liveRunStarting", "Starting run…"), status: "running" },
+      }));
+      liveRunStreamsRef.current[routine.id]?.close();
+      liveRunStreamsRef.current[routine.id] = streamRoutineRun(routine.id, {
+        onEvent: (event) => handleLiveRunEvent(routine.id, event),
+        onFatalError: (message) => appendLiveRunLine(routine.id, message, "error"),
+      }, scopeOptions);
       try {
         const { result } = await runRoutine(routine.id, scopeOptions);
         setLastRunOutput((previous) => ({
@@ -191,10 +254,12 @@ export function ScheduledTasksModal({ onClose, addToast, projectId, presentation
       } catch (err) {
         addToast(getErrorMessage(err) || t("schedule.runError", "Failed to run routine"), "error");
       } finally {
+        liveRunStreamsRef.current[routine.id]?.close();
+        delete liveRunStreamsRef.current[routine.id];
         setRunningRoutineId(null);
       }
     },
-    [addToast, loadRoutines, scopeOptions, t],
+    [addToast, appendLiveRunLine, handleLiveRunEvent, loadRoutines, scopeOptions, t],
   );
 
   const handleToggleRoutine = useCallback(
@@ -221,6 +286,7 @@ export function ScheduledTasksModal({ onClose, addToast, projectId, presentation
   useEffect(() => {
     if (routineView !== "list") {
       setLastRunOutput({});
+      setLiveRunOutput({});
     }
   }, [routineView]);
 
@@ -295,6 +361,7 @@ export function ScheduledTasksModal({ onClose, addToast, projectId, presentation
             onToggle={handleToggleRoutine}
             running={runningRoutineId === r.id}
             lastRunOutput={lastRunOutput[r.id] ?? null}
+            liveRunOutput={liveRunOutput[r.id] ?? null}
           />
         ))}
       </div>
@@ -411,6 +478,7 @@ export function ScheduledTasksModal({ onClose, addToast, projectId, presentation
                       onToggle={handleToggleRoutine}
                       running={runningRoutineId === selectedRoutine.id}
                       lastRunOutput={lastRunOutput[selectedRoutine.id] ?? null}
+                      liveRunOutput={liveRunOutput[selectedRoutine.id] ?? null}
                     />
                   </div>
                 ) : (

@@ -958,6 +958,13 @@ export interface AgentOptions {
   systemPromptLayers?: SystemPromptLayers;
   tools?: "coding" | "readonly";
   customTools?: ToolDefinition[];
+  /**
+   * Optional resolved tool-name allowlist. Undefined preserves the selected tool mode; an empty array deliberately exposes no matched tools.
+   *
+   * FNXC:AutomationTools 2026-06-26-00:00:
+   * Automation AI steps can narrow coding sessions by tool name while legacy steps keep all tools. Normalize names case-insensitively at the engine boundary so dashboard labels like "Read" match pi tool names like "read".
+   */
+  toolsAllowlist?: string[];
   /** Optional allowlist of builtin runtime web tools to keep enabled. */
   builtinToolsAllowlist?: BuiltinWebToolName[];
   onText?: (delta: string) => void;
@@ -2045,6 +2052,10 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     : undefined;
 
   const isReadonly = options.tools === "readonly";
+  const normalizedToolsAllowlist = options.toolsAllowlist === undefined
+    ? undefined
+    : new Set(options.toolsAllowlist.map((name) => name.trim().toLowerCase()).filter(Boolean));
+  const isAllowedByToolAllowlist = (toolName: string): boolean => normalizedToolsAllowlist === undefined || normalizedToolsAllowlist.has(toolName.trim().toLowerCase());
   const builtins = [
     createReadTool(options.cwd),
     createBashTool(options.cwd, bashToolOptions),
@@ -2054,9 +2065,10 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     createFindTool(options.cwd),
     createLsTool(options.cwd),
   ] as ToolDefinition[];
-  const tools = isReadonly
+  const modeFilteredTools = isReadonly
     ? builtins.filter((tool) => isReadonlyAllowed(tool.name))
     : builtins;
+  const tools = modeFilteredTools.filter((tool) => isAllowedByToolAllowlist(tool.name));
   // Suppress lint about unused presets — kept in scope for incremental migration.
   void createCodingTools;
   void createReadOnlyTools;
@@ -2201,6 +2213,10 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     const readonlyFilteredCustomTools = isReadonly
       ? filterCustomToolsForReadonly(options.customTools ?? [])
       : { allowed: options.customTools ?? [], denied: [] };
+    const allowlistFilteredCustomTools = {
+      ...readonlyFilteredCustomTools,
+      allowed: readonlyFilteredCustomTools.allowed.filter((tool) => isAllowedByToolAllowlist(tool.name)),
+    };
     if (isReadonly && readonlyFilteredCustomTools.denied.length > 0) {
       piLog.warn(
         `[pi] readonly mode: dropped ${readonlyFilteredCustomTools.denied.length} denied custom tool(s): ${readonlyFilteredCustomTools.denied.join(", ")}`,
@@ -2209,7 +2225,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
 
     const toolChainStart: ToolDefinition[] = [
       ...(tools as ToolDefinition[]),
-      ...readonlyFilteredCustomTools.allowed,
+      ...allowlistFilteredCustomTools.allowed,
     ];
     const toolsWithRtkRewrite = wrapToolsWithRtkRewrite(toolChainStart);
     const toolsWithPermanentGating = wrapToolsWithPermanentAgentGating(
@@ -2258,13 +2274,21 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     };
 
     if (options.builtinToolsAllowlist && options.builtinToolsAllowlist.length > 0) {
-      const safeBuiltinAllowlist = isReadonly
+      const safeBuiltinAllowlist = (isReadonly
         ? options.builtinToolsAllowlist.filter((name) => READONLY_ALLOWLIST.includes(name as (typeof READONLY_ALLOWLIST)[number]))
-        : options.builtinToolsAllowlist;
+        : options.builtinToolsAllowlist).filter(isAllowedByToolAllowlist);
       createSessionOptions.tools = [
         ...new Set([
           ...customToolList.map((tool) => tool.name),
           ...safeBuiltinAllowlist,
+        ]),
+      ].sort();
+    }
+    if (normalizedToolsAllowlist !== undefined) {
+      createSessionOptions.tools = [
+        ...new Set([
+          ...customToolList.map((tool) => tool.name),
+          ...options.toolsAllowlist!.map((name) => name.trim()).filter(Boolean),
         ]),
       ].sort();
     }

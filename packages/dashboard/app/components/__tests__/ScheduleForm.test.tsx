@@ -21,8 +21,10 @@ vi.mock("lucide-react", () => ({
   ListPlus: () => <span data-testid="icon-list-plus">➕</span>,
 }));
 
-// Mock @fusion/core to provide type-only exports (no runtime values needed)
-vi.mock("@fusion/core", () => ({}));
+// Mock @fusion/core to provide the runtime tool catalog used by ScheduleForm.
+vi.mock("@fusion/core", () => ({
+  AUTOMATION_SELECTABLE_TOOLS: ["Read", "Bash", "Edit", "Write", "Grep", "Find", "Ls"],
+}));
 
 // Mock api
 const mockFetchModels = vi.fn().mockResolvedValue({
@@ -182,6 +184,69 @@ describe("ScheduleForm", () => {
       });
     });
 
+    it("shows all automation tools checked by default in simple AI Prompt mode", () => {
+      render(<ScheduleForm onSubmit={onSubmit} onCancel={onCancel} />);
+
+      fireEvent.click(screen.getByRole("radio", { name: "AI Prompt" }));
+
+      for (const tool of ["Read", "Bash", "Edit", "Write", "Grep", "Find", "Ls"]) {
+        expect(screen.getByLabelText(tool)).toHaveProperty("checked", true);
+      }
+    });
+
+    it("submits undefined allowedTools when every simple AI Prompt tool is selected", async () => {
+      render(<ScheduleForm onSubmit={onSubmit} onCancel={onCancel} />);
+
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "AI Job" } });
+      fireEvent.click(screen.getByRole("radio", { name: "AI Prompt" }));
+      fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Summarize recent commits" } });
+      fireEvent.click(screen.getByText("Create Schedule"));
+
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith(
+          expect.objectContaining({
+            steps: [expect.objectContaining({ allowedTools: undefined })],
+          }),
+        );
+      });
+    });
+
+    it("submits a restricted allowedTools array from simple AI Prompt mode", async () => {
+      render(<ScheduleForm onSubmit={onSubmit} onCancel={onCancel} />);
+
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "AI Job" } });
+      fireEvent.click(screen.getByRole("radio", { name: "AI Prompt" }));
+      fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Summarize recent commits" } });
+      fireEvent.click(screen.getByLabelText("Bash"));
+      fireEvent.click(screen.getByText("Create Schedule"));
+
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith(
+          expect.objectContaining({
+            steps: [expect.objectContaining({ allowedTools: ["Read", "Edit", "Write", "Grep", "Find", "Ls"] })],
+          }),
+        );
+      });
+    });
+
+    it("submits an explicit empty allowedTools array when simple AI Prompt tools are cleared", async () => {
+      render(<ScheduleForm onSubmit={onSubmit} onCancel={onCancel} />);
+
+      fireEvent.change(screen.getByLabelText("Name"), { target: { value: "AI Job" } });
+      fireEvent.click(screen.getByRole("radio", { name: "AI Prompt" }));
+      fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "Summarize recent commits" } });
+      fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+      fireEvent.click(screen.getByText("Create Schedule"));
+
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith(
+          expect.objectContaining({
+            steps: [expect.objectContaining({ allowedTools: [] })],
+          }),
+        );
+      });
+    });
+
     it("submits with model provider and model ID when provided in simple AI Prompt mode", async () => {
       render(<ScheduleForm onSubmit={onSubmit} onCancel={onCancel} />);
       
@@ -271,6 +336,37 @@ describe("ScheduleForm", () => {
       
       // Model dropdown should be present
       expect(screen.getByTestId("model-dropdown")).toBeDefined();
+    });
+
+    it("restores restricted tool selection when editing a simple AI Prompt schedule", async () => {
+      const schedule = makeSchedule({
+        steps: [
+          {
+            id: "step-1",
+            type: "ai-prompt",
+            name: "AI Schedule",
+            prompt: "Summarize this",
+            allowedTools: ["Read", "Grep"],
+          },
+        ],
+        command: "",
+      });
+
+      render(<ScheduleForm schedule={schedule} onSubmit={onSubmit} onCancel={onCancel} />);
+
+      expect(screen.getByLabelText("Read")).toHaveProperty("checked", true);
+      expect(screen.getByLabelText("Grep")).toHaveProperty("checked", true);
+      expect(screen.getByLabelText("Bash")).toHaveProperty("checked", false);
+
+      fireEvent.click(screen.getByText("Save Changes"));
+
+      await waitFor(() => {
+        expect(onSubmit).toHaveBeenCalledWith(
+          expect.objectContaining({
+            steps: [expect.objectContaining({ allowedTools: ["Read", "Grep"] })],
+          }),
+        );
+      });
     });
   });
 

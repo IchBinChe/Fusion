@@ -814,6 +814,41 @@ The Automations sub-header scope button bar should match the Artifacts tab bar s
   flex: 1;
 }
 
+/*
+FNXC:AutomationTools 2026-06-26-00:00:
+Automation AI steps expose an explicit per-step tool allowlist. Keep the selector compact and token-based so the modal and embedded Automations surfaces share the same responsive layout.
+*/
+.automation-tool-selector {
+  border: solid var(--border);
+  border-width: thin;
+  border-radius: var(--radius-sm);
+  padding: var(--space-md);
+}
+
+.automation-tool-selector legend {
+  padding: 0 var(--space-xs);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.automation-tool-selector__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.automation-tool-selector__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+}
+
+.automation-tool-selector__option {
+  margin: 0;
+}
+
 /* Schedule form within modal */
 .schedule-form {
   padding: 0;
@@ -857,6 +892,10 @@ The Automations sub-header scope button bar should match the Artifacts tab bar s
   .schedule-form {
     padding-left: var(--space-lg);
     padding-right: var(--space-lg);
+  }
+
+  .automation-tool-selector__grid {
+    grid-template-columns: 1fr;
   }
 
   .scheduling-toolbar {
@@ -1044,6 +1083,46 @@ The Automations sub-header scope button bar should match the Artifacts tab bar s
   margin-top: var(--space-sm);
   border-radius: var(--radius-sm);
   overflow: hidden;
+}
+
+/*
+FNXC:AutomationLiveOutput 2026-06-26-00:00:
+Live routine output must reuse the existing run-output typography and status-dot convention while the manual run is active, then give way to the persisted final result after refresh.
+*/
+.routine-live-output {
+  margin-top: var(--space-sm);
+  border: solid var(--border);
+  border-width: thin;
+  border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+  overflow: hidden;
+}
+
+.routine-live-output.running {
+  border-color: var(--color-warning);
+}
+
+.routine-live-output.error {
+  border-color: var(--color-error);
+}
+
+.routine-live-output-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  border-bottom: solid var(--border);
+  border-bottom-width: thin;
+}
+
+.routine-live-output.running .status-dot {
+  background: var(--color-warning);
+}
+
+.routine-live-output.error .status-dot {
+  background: var(--color-error);
 }
 
 .routine-run-output.success {

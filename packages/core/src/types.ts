@@ -6195,6 +6195,12 @@ export interface AgentHeartbeatEvent {
 /** What triggered a heartbeat run */
 export type HeartbeatInvocationSource = "on_demand" | "timer" | "assignment" | "automation" | "routine";
 
+/*
+FNXC:AutomationTools 2026-06-26-00:00:
+Dashboard source-checkout builds alias @fusion/core to this frontend-safe module, so mirror the automation AI-step tool catalog here as a runtime export for UI selectors.
+*/
+export const AUTOMATION_SELECTABLE_TOOLS = ["Read", "Bash", "Edit", "Write", "Grep", "Find", "Ls"] as const;
+
 /** Snapshot of the last blocked state for a task, used for dedup comparison. */
 export interface BlockedStateSnapshot {
   /** The task ID that was blocked */

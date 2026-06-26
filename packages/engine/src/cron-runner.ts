@@ -201,10 +201,18 @@ const MIN_POLL_INTERVAL_MS = 10 * 1000;
  * Function type for executing AI prompts.
  * Injected into CronRunner to decouple it from agent session creation.
  */
+export type AiPromptLiveCallbacks = {
+  onText?: (delta: string) => void;
+  onToolStart?: (name: string, args?: Record<string, unknown>) => void;
+  onToolEnd?: (name: string, isError: boolean, result?: unknown) => void;
+};
+
 export type AiPromptExecutor = (
   prompt: string,
   modelProvider?: string,
   modelId?: string,
+  allowedTools?: string[],
+  liveCallbacks?: AiPromptLiveCallbacks,
 ) => Promise<string>;
 
 export interface CronRunnerOptions {
@@ -870,7 +878,7 @@ export class CronRunner {
 
     try {
       // Race between executor and timeout
-      const resultPromise = this.aiPromptExecutor(step.prompt, modelProvider, modelId);
+      const resultPromise = this.aiPromptExecutor(step.prompt, modelProvider, modelId, step.allowedTools);
       const timeoutPromise = new Promise<never>((_resolve, reject) => {
         setTimeout(() => reject(new Error(`AI prompt step timed out after ${timeoutMs / 1000}s`)), timeoutMs);
       });
@@ -983,7 +991,7 @@ export class CronRunner {
 
 const AI_AUTOMATION_SYSTEM_PROMPT = [
   "You are an AI automation agent executing a scheduled task.",
-  "You have read-only access to the project files.",
+  "You may use the coding tools selected for this automation step; follow any tool restrictions exactly.",
   "Execute the prompt precisely and return concise, structured results.",
   "When analyzing code or data, provide actionable summaries.",
   "Structure outputs with clear sections: Summary, Findings, Recommended Actions, and Risks/Unknowns when applicable.",
@@ -1004,7 +1012,7 @@ const AI_AUTOMATION_SYSTEM_PROMPT = [
 export async function createAiPromptExecutor(cwd: string): Promise<AiPromptExecutor> {
   const disposeLog = createLogger("cron-runner");
 
-  return async (prompt: string, modelProvider?: string, modelId?: string): Promise<string> => {
+  return async (prompt: string, modelProvider?: string, modelId?: string, allowedTools?: string[], liveCallbacks?: AiPromptLiveCallbacks): Promise<string> => {
     let responseText = "";
     const skillContext = buildSessionSkillContextSync(null, "executor", cwd, undefined);
 
@@ -1015,13 +1023,17 @@ export async function createAiPromptExecutor(cwd: string): Promise<AiPromptExecu
     const { session } = await createFnAgent({
       cwd,
       systemPrompt: AI_AUTOMATION_SYSTEM_PROMPT,
-      tools: "readonly",
+      tools: "coding",
+      toolsAllowlist: allowedTools,
       ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
       defaultProvider: modelProvider,
       defaultModelId: modelId,
       onText: (delta: string) => {
         responseText += delta;
+        liveCallbacks?.onText?.(delta);
       },
+      onToolStart: liveCallbacks?.onToolStart,
+      onToolEnd: liveCallbacks?.onToolEnd,
     });
 
     try {

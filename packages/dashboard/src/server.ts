@@ -258,7 +258,12 @@ export interface ServerOptions {
   routineStore?: RoutineStore;
   /** Optional RoutineRunner for triggering routine execution via heartbeat */
   routineRunner?: {
-    triggerManual(routineId: string): Promise<import("@fusion/core").RoutineExecutionResult>;
+    triggerManual(routineId: string, liveCallbacks?: {
+      onStep?: (data: Record<string, unknown>) => void;
+      onText?: (delta: string) => void;
+      onToolStart?: (name: string, args?: Record<string, unknown>) => void;
+      onToolEnd?: (name: string, isError: boolean, result?: unknown) => void;
+    }): Promise<import("@fusion/core").RoutineExecutionResult>;
     triggerWebhook(routineId: string, payload: Record<string, unknown>, signature?: string): Promise<import("@fusion/core").RoutineExecutionResult>;
   };
   /** Optional AiSessionStore — if not provided, one is created from the default store's database */

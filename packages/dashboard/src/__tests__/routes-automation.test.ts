@@ -111,13 +111,15 @@ vi.mock("@fusion/core", async (importOriginal) => {
 vi.mock("@fusion/engine", async () => {
   const { createEngineMock } = await import("../test/mockCoreEngine.js");
   return createEngineMock({
-  createFnAgent: vi.fn(async (options?: { onText?: (delta: string) => void }) => ({
+  createFnAgent: vi.fn(async (options?: { onText?: (delta: string) => void; onToolStart?: (name: string, args?: Record<string, unknown>) => void; onToolEnd?: (name: string, isError: boolean, result?: unknown) => void }) => ({
     session: {
       state: {
         messages: [] as Array<{ role: string; content: string }>,
       },
       prompt: vi.fn(async function (this: { state?: { messages?: Array<{ role: string; content: string }> } }, message: string) {
+        options?.onToolStart?.("Read", { path: "README.md" });
         options?.onText?.("mock-ai-output");
+        options?.onToolEnd?.("Read", false, "read result");
         const messages = this.state?.messages ?? [];
         messages.push({ role: "user", content: message });
         messages.push({
@@ -699,6 +701,26 @@ describe("Automation routes", () => {
       expect(res.body.error).toContain("Invalid schedule type");
     });
 
+    it("returns 400 for ai-prompt allowedTools with an unknown tool", async () => {
+      const { app } = buildApp();
+      const res = await REQUEST(app, "POST", "/api/automations", JSON.stringify({
+        name: "Test",
+        command: "",
+        scheduleType: "hourly",
+        steps: [
+          {
+            id: "step-ai",
+            type: "ai-prompt",
+            name: "AI",
+            prompt: "Summarize",
+            allowedTools: ["Read", "UnknownTool"],
+          },
+        ],
+      }), { "Content-Type": "application/json" });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toContain("allowedTools contains unknown tool");
+    });
+
     it("returns 400 for custom type with missing cron", async () => {
       const { app } = buildApp();
       const res = await REQUEST(app, "POST", "/api/automations", JSON.stringify({
@@ -789,7 +811,8 @@ describe("Automation routes", () => {
       );
     });
 
-    it("executes ai-prompt steps during manual runs", async () => {
+    it("executes ai-prompt steps during manual runs with the selected tool allowlist", async () => {
+      vi.mocked(createFnAgent).mockClear();
       const mockStore = createMockAutomationStore();
       mockStore.getSchedule.mockResolvedValue({
         ...FAKE_SCHEDULE,
@@ -800,6 +823,7 @@ describe("Automation routes", () => {
             type: "ai-prompt",
             name: "AI analysis",
             prompt: "Summarize repository status",
+            allowedTools: ["Read", "Grep"],
           },
         ],
       });
@@ -824,6 +848,81 @@ describe("Automation routes", () => {
           ]),
         }),
       );
+      expect(vi.mocked(createFnAgent)).toHaveBeenCalledWith(expect.objectContaining({
+        tools: "coding",
+        toolsAllowlist: ["Read", "Grep"],
+      }));
+    });
+
+    it("streams buffered live events for a completed manual AI prompt run", async () => {
+      vi.mocked(createFnAgent).mockClear();
+      const mockStore = createMockAutomationStore();
+      mockStore.getSchedule.mockResolvedValue({
+        ...FAKE_SCHEDULE,
+        command: "",
+        steps: [
+          {
+            id: "step-ai",
+            type: "ai-prompt",
+            name: "Analyze",
+            prompt: "Analyze recent activity",
+          },
+        ],
+      });
+      const { app } = buildApp(mockStore);
+
+      const runRes = await REQUEST(app, "POST", "/api/automations/sched-001/run");
+      expect(runRes.status).toBe(200);
+      expect(runRes.body.liveRunId).toBeTruthy();
+      expect(runRes.body.result.output).toContain("mock-ai-output");
+
+      const streamRes = await performRequest(app, "GET", `/api/automations/sched-001/run/stream?runId=${runRes.body.liveRunId}`);
+      expect(streamRes.status).toBe(200);
+      const body = String(streamRes.body);
+      expect(body).toContain("event: step");
+      expect(body).toContain("event: output");
+      expect(body).toContain("mock-ai-output");
+      expect(body).toContain("event: tool");
+      expect(body).toContain("Read");
+      expect(body).toContain("event: complete");
+      expect(runRes.body.result.stepResults).toHaveLength(1);
+    });
+
+    it("returns a terminal SSE error for an unknown manual run id", async () => {
+      const mockStore = createMockAutomationStore();
+      mockStore.getSchedule.mockResolvedValue({ ...FAKE_SCHEDULE });
+      const { app } = buildApp(mockStore);
+
+      const streamRes = await performRequest(app, "GET", "/api/automations/sched-001/run/stream?runId=missing-run");
+      expect(streamRes.status).toBe(200);
+      expect(String(streamRes.body)).toContain("event: error");
+      expect(String(streamRes.body)).toContain("Live run not found or expired");
+    });
+
+    it("defaults manual ai-prompt runs to all tools when allowedTools is omitted", async () => {
+      vi.mocked(createFnAgent).mockClear();
+      const mockStore = createMockAutomationStore();
+      mockStore.getSchedule.mockResolvedValue({
+        ...FAKE_SCHEDULE,
+        command: "",
+        steps: [
+          {
+            id: "step-ai",
+            type: "ai-prompt",
+            name: "AI analysis",
+            prompt: "Summarize repository status",
+          },
+        ],
+      });
+
+      const { app } = buildApp(mockStore);
+      const res = await REQUEST(app, "POST", "/api/automations/sched-001/run");
+
+      expect(res.status).toBe(200);
+      expect(vi.mocked(createFnAgent)).toHaveBeenCalledWith(expect.objectContaining({
+        tools: "coding",
+        toolsAllowlist: undefined,
+      }));
     });
 
     it("executes create-task steps during manual runs", async () => {
@@ -1428,14 +1527,21 @@ describe("Routine routes", () => {
 
   function createMockRoutineRunner() {
     return {
-      triggerManual: vi.fn().mockResolvedValue({
-        routineId: "routine-001",
-        success: true,
-        output: "",
-        triggerType: "cron" as const,
-        startedAt: new Date().toISOString(),
-        completedAt: new Date().toISOString(),
-      } satisfies RoutineExecutionResult),
+      triggerManual: vi.fn().mockImplementation(async (_id: string, liveCallbacks?: { onStep?: (data: Record<string, unknown>) => void; onText?: (delta: string) => void; onToolStart?: (name: string) => void; onToolEnd?: (name: string, isError: boolean, result?: unknown) => void }) => {
+        liveCallbacks?.onStep?.({ stepIndex: 0, stepId: "step-1", stepName: "Mock step", status: "started" });
+        liveCallbacks?.onToolStart?.("Read");
+        liveCallbacks?.onText?.("routine-live-output");
+        liveCallbacks?.onToolEnd?.("Read", false, "ok");
+        liveCallbacks?.onStep?.({ stepIndex: 0, stepId: "step-1", stepName: "Mock step", status: "completed", success: true });
+        return {
+          routineId: "routine-001",
+          success: true,
+          output: "routine-live-output",
+          triggerType: "cron" as const,
+          startedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+        } satisfies RoutineExecutionResult;
+      }),
       triggerWebhook: vi.fn().mockResolvedValue({
         routineId: "routine-001",
         success: true,
@@ -1720,9 +1826,28 @@ describe("Routine routes", () => {
       expect(res.body.result).toBeDefined();
       expect(res.body.result.triggerType).toBe("cron");
       // Verify triggerManual was called (persistence handled by RoutineRunner)
-      expect(routineRunner.triggerManual).toHaveBeenCalledWith("routine-001");
+      expect(routineRunner.triggerManual).toHaveBeenCalledWith("routine-001", expect.any(Object));
       // Verify recordRun was NOT called (double-persist fix)
       expect(mockStore.recordRun).not.toHaveBeenCalled();
+    });
+
+    it("streams buffered live events for completed routine manual runs", async () => {
+      const mockStore = createMockRoutineStore();
+      const { app } = buildRoutineApp(mockStore);
+
+      const runRes = await REQUEST(app, "POST", "/api/routines/routine-001/run");
+      expect(runRes.status).toBe(200);
+      expect(runRes.body.liveRunId).toBeTruthy();
+
+      const streamRes = await performRequest(app, "GET", `/api/routines/routine-001/run/stream?runId=${runRes.body.liveRunId}`);
+      expect(streamRes.status).toBe(200);
+      const body = String(streamRes.body);
+      expect(body).toContain("event: step");
+      expect(body).toContain("event: output");
+      expect(body).toContain("routine-live-output");
+      expect(body).toContain("event: tool");
+      expect(body).toContain("event: complete");
+      expect(runRes.body.result.output).toBe("routine-live-output");
     });
 
     it("returns 404 for missing routine", async () => {
@@ -1773,7 +1898,7 @@ describe("Routine routes", () => {
       expect(res.status).toBe(200);
       expect(res.body.routine).toBeDefined();
       expect(res.body.result).toBeDefined();
-      expect(routineRunner.triggerManual).toHaveBeenCalledWith("routine-001");
+      expect(routineRunner.triggerManual).toHaveBeenCalledWith("routine-001", expect.any(Object));
     });
 
     it("returns 404 for missing routine (ENOENT)", async () => {
@@ -2203,7 +2328,7 @@ describe("Routine routes", () => {
       expect(res.status).toBe(200);
       expect(res.body.routine).toBeDefined();
       expect(res.body.result).toBeDefined();
-      expect(routineRunner.triggerManual).toHaveBeenCalledWith("routine-001");
+      expect(routineRunner.triggerManual).toHaveBeenCalledWith("routine-001", expect.any(Object));
     });
 
     it("POST /routines/:id/trigger with scope mismatch returns 404", async () => {

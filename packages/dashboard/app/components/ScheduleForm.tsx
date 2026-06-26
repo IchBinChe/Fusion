@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import { Globe, Folder } from "lucide-react";
+import { AUTOMATION_SELECTABLE_TOOLS } from "@fusion/core";
 import type { ScheduledTask, ScheduledTaskCreateInput, ScheduleType, AutomationStep } from "@fusion/core";
 import { ScheduleStepsEditor } from "./ScheduleStepsEditor";
 import { CustomModelDropdown } from "./CustomModelDropdown";
@@ -59,6 +60,16 @@ function generateStepId(): string {
   }
   // Deterministic fallback: timestamp + random hex
   return `step-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+const ALL_AUTOMATION_TOOLS = [...AUTOMATION_SELECTABLE_TOOLS];
+
+function normalizeAllowedTools(selectedTools: string[]): string[] | undefined {
+  return selectedTools.length === ALL_AUTOMATION_TOOLS.length ? undefined : selectedTools;
+}
+
+function resolveAllowedToolSelection(step?: AutomationStep): string[] {
+  return step?.allowedTools === undefined ? ALL_AUTOMATION_TOOLS : step.allowedTools;
 }
 
 type ScheduleMode = "simple" | "advanced";
@@ -145,6 +156,16 @@ export function ScheduleForm({ schedule, onSubmit, onCancel, scope: formScope, p
       return schedule.steps[0].modelId ?? "";
     }
     return "";
+  });
+  /*
+  FNXC:AutomationTools 2026-06-26-00:00:
+  Automation AI prompts default to every selectable coding tool for legacy schedules. Persist undefined for all-selected, but preserve an explicit empty array as the operator's no-tools choice.
+  */
+  const [simpleAllowedTools, setSimpleAllowedTools] = useState<string[]>(() => {
+    if (schedule?.steps && schedule.steps.length === 1 && schedule.steps[0].type === "ai-prompt" && !schedule.command) {
+      return resolveAllowedToolSelection(schedule.steps[0]);
+    }
+    return ALL_AUTOMATION_TOOLS;
   });
   // Create-task fields
   const [taskTitle, setTaskTitle] = useState(() => {
@@ -343,6 +364,7 @@ export function ScheduleForm({ schedule, onSubmit, onCancel, scope: formScope, p
               prompt: prompt.trim(),
               modelProvider: modelProvider.trim() || undefined,
               modelId: modelId.trim() || undefined,
+              allowedTools: normalizeAllowedTools(simpleAllowedTools),
             };
             submitData = {
               name: name.trim(),
@@ -398,7 +420,7 @@ export function ScheduleForm({ schedule, onSubmit, onCancel, scope: formScope, p
         setSubmitting(false);
       }
     },
-    [validate, onSubmit, name, description, scheduleType, cronExpression, command, prompt, modelProvider, modelId, enabled, timeoutMs, mode, simpleType, steps, localScope, projectId, schedule?.scope, taskTitle, taskDescription, taskColumn],
+    [validate, onSubmit, name, description, scheduleType, cronExpression, command, prompt, modelProvider, modelId, simpleAllowedTools, enabled, timeoutMs, mode, simpleType, steps, localScope, projectId, schedule?.scope, taskTitle, taskDescription, taskColumn],
   );
 
   const cronFieldId = "schedule-cron";
@@ -649,6 +671,35 @@ export function ScheduleForm({ schedule, onSubmit, onCancel, scope: formScope, p
                   <small>{t("schedule.modelHelp", "AI model for this prompt. Uses default if not selected.")}</small>
                 )}
               </div>
+
+              <fieldset className="form-group automation-tool-selector">
+                <legend>{t("schedule.allowedToolsLabel", "Allowed tools")}</legend>
+                <small>{t("schedule.allowedToolsHint", "AI prompt steps use all tools by default. Clear tools only when this automation should run without tool access.")}</small>
+                <div className="automation-tool-selector__actions">
+                  <button type="button" className="btn btn-sm" onClick={() => setSimpleAllowedTools(ALL_AUTOMATION_TOOLS)}>
+                    {t("schedule.selectAllTools", "Select all")}
+                  </button>
+                  <button type="button" className="btn btn-sm" onClick={() => setSimpleAllowedTools([])}>
+                    {t("schedule.clearTools", "Clear")}
+                  </button>
+                </div>
+                <div className="automation-tool-selector__grid">
+                  {ALL_AUTOMATION_TOOLS.map((tool) => (
+                    <label key={tool} className="checkbox-label automation-tool-selector__option">
+                      <input
+                        type="checkbox"
+                        checked={simpleAllowedTools.includes(tool)}
+                        onChange={(event) => {
+                          setSimpleAllowedTools((current) => event.target.checked
+                            ? [...current, tool].filter((value, index, array) => array.indexOf(value) === index)
+                            : current.filter((value) => value !== tool));
+                        }}
+                      />
+                      {tool}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
             </>
           ) : (
             <>

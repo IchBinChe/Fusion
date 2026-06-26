@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, Trash2, ChevronUp, ChevronDown, Pencil, GripVertical } from "lucide-react";
+import { AUTOMATION_SELECTABLE_TOOLS } from "@fusion/core";
 import type { AutomationStep, AutomationStepType } from "@fusion/core";
 import { StepTypeBadge } from "./StepTypeBadge";
 import { CustomModelDropdown } from "./CustomModelDropdown";
@@ -23,6 +24,16 @@ function generateStepId(): string {
   }
   // Deterministic fallback: timestamp + random hex
   return `step-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+}
+
+const ALL_AUTOMATION_TOOLS = [...AUTOMATION_SELECTABLE_TOOLS];
+
+function normalizeAllowedTools(selectedTools: string[]): string[] | undefined {
+  return selectedTools.length === ALL_AUTOMATION_TOOLS.length ? undefined : selectedTools;
+}
+
+function resolveAllowedToolSelection(step?: AutomationStep): string[] {
+  return step?.allowedTools === undefined ? ALL_AUTOMATION_TOOLS : step.allowedTools;
 }
 
 function createEmptyStep(type: AutomationStepType): AutomationStep {
@@ -69,6 +80,11 @@ function StepEditor({ step, onSave, onCancel }: StepEditorProps) {
   const [prompt, setPrompt] = useState(step.prompt ?? "");
   const [modelProvider, setModelProvider] = useState(step.modelProvider ?? "");
   const [modelId, setModelId] = useState(step.modelId ?? "");
+  /*
+  FNXC:AutomationTools 2026-06-26-00:00:
+  Multi-step AI prompts share the simple form's default-all contract: undefined means every selectable coding tool, while [] intentionally removes all tools for the step.
+  */
+  const [allowedTools, setAllowedTools] = useState<string[]>(() => resolveAllowedToolSelection(step));
   const [taskTitle, setTaskTitle] = useState(step.taskTitle ?? "");
   const [taskDescription, setTaskDescription] = useState(step.taskDescription ?? "");
   const [taskColumn, setTaskColumn] = useState(step.taskColumn ?? "triage");
@@ -158,6 +174,7 @@ function StepEditor({ step, onSave, onCancel }: StepEditorProps) {
       taskColumn: type === "create-task" ? taskColumn : undefined,
       modelProvider: (type === "ai-prompt" || type === "create-task") && modelProvider.trim() ? modelProvider.trim() : undefined,
       modelId: (type === "ai-prompt" || type === "create-task") && modelId.trim() ? modelId.trim() : undefined,
+      allowedTools: type === "ai-prompt" ? normalizeAllowedTools(allowedTools) : undefined,
       timeoutMs: timeoutMs || undefined,
       continueOnFailure,
     };
@@ -165,6 +182,7 @@ function StepEditor({ step, onSave, onCancel }: StepEditorProps) {
     // Clear ai-prompt and create-task specific fields when switching to command
     if (type !== "ai-prompt") {
       delete baseStep.prompt;
+      delete baseStep.allowedTools;
     }
     if (type !== "create-task") {
       delete baseStep.taskTitle;
@@ -173,7 +191,7 @@ function StepEditor({ step, onSave, onCancel }: StepEditorProps) {
     }
 
     onSave(baseStep as AutomationStep);
-  }, [validate, onSave, step, name, type, command, prompt, taskTitle, taskDescription, taskColumn, modelProvider, modelId, timeoutMs, continueOnFailure]);
+  }, [validate, onSave, step, name, type, command, prompt, taskTitle, taskDescription, taskColumn, modelProvider, modelId, allowedTools, timeoutMs, continueOnFailure]);
 
   return (
     <div className="step-editor">
@@ -247,6 +265,35 @@ function StepEditor({ step, onSave, onCancel }: StepEditorProps) {
             {modelsError && <small className="field-error">{modelsError}</small>}
             <small>{t("schedule.modelHelp", "AI model for this step. Uses default if not selected.")}</small>
           </div>
+
+          <fieldset className="form-group automation-tool-selector">
+            <legend>{t("schedule.allowedToolsLabel", "Allowed tools")}</legend>
+            <small>{t("schedule.allowedToolsHint", "AI prompt steps use all tools by default. Clear tools only when this automation should run without tool access.")}</small>
+            <div className="automation-tool-selector__actions">
+              <button type="button" className="btn btn-sm" onClick={() => setAllowedTools(ALL_AUTOMATION_TOOLS)}>
+                {t("schedule.selectAllTools", "Select all")}
+              </button>
+              <button type="button" className="btn btn-sm" onClick={() => setAllowedTools([])}>
+                {t("schedule.clearTools", "Clear")}
+              </button>
+            </div>
+            <div className="automation-tool-selector__grid">
+              {ALL_AUTOMATION_TOOLS.map((tool) => (
+                <label key={tool} className="checkbox-label automation-tool-selector__option">
+                  <input
+                    type="checkbox"
+                    checked={allowedTools.includes(tool)}
+                    onChange={(event) => {
+                      setAllowedTools((current) => event.target.checked
+                        ? [...current, tool].filter((value, index, array) => array.indexOf(value) === index)
+                        : current.filter((value) => value !== tool));
+                    }}
+                  />
+                  {tool}
+                </label>
+              ))}
+            </div>
+          </fieldset>
         </>
       )}
 

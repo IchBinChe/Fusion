@@ -876,8 +876,8 @@ export {
   resolveTaskGithubTracking,
 } from "./github-tracking.js";
 export type { RepoSlug, ResolvedTaskGithubTracking } from "./github-tracking.js";
-export { AUTOMATION_PRESETS, MAX_RUN_HISTORY } from "./automation.js";
-export type { ScheduleType, ScheduledTask, ScheduledTaskCreateInput, ScheduledTaskUpdateInput, AutomationRunResult, AutomationStepType, AutomationStep, AutomationStepResult } from "./automation.js";
+export { AUTOMATION_PRESETS, AUTOMATION_SELECTABLE_TOOLS, MAX_RUN_HISTORY } from "./automation.js";
+export type { ScheduleType, ScheduledTask, ScheduledTaskCreateInput, ScheduledTaskUpdateInput, AutomationRunResult, AutomationStepType, AutomationStep, AutomationStepResult, AutomationSelectableTool } from "./automation.js";
 export { AutomationStore } from "./automation-store.js";
 export type { AutomationStoreEvents } from "./automation-store.js";
 export { runCommandAsync } from "./run-command.js";

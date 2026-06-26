@@ -178,6 +178,51 @@ describe("RoutineCard", () => {
       expect(screen.getByText("hello")).toBeDefined();
     });
 
+    it("renders live run output while running", () => {
+      render(
+        <RoutineCard
+          routine={makeRoutine()}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onRun={onRun}
+          onToggle={onToggle}
+          liveRunOutput={{ output: "incremental line", status: "running" }}
+        />,
+      );
+      expect(screen.getByText("Live output — running")).toBeDefined();
+      expect(screen.getByText("incremental line")).toBeDefined();
+    });
+
+    it("renders completed live run output without the running label", () => {
+      render(
+        <RoutineCard
+          routine={makeRoutine()}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onRun={onRun}
+          onToggle={onToggle}
+          liveRunOutput={{ output: "done line", status: "complete" }}
+        />,
+      );
+      expect(screen.getByText("Live output")).toBeDefined();
+      expect(screen.queryByText("Live output — running")).toBeNull();
+      expect(screen.getByText("done line")).toBeDefined();
+    });
+
+    it("does not render a live-output panel when liveRunOutput is null", () => {
+      render(
+        <RoutineCard
+          routine={makeRoutine()}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onRun={onRun}
+          onToggle={onToggle}
+          liveRunOutput={null}
+        />,
+      );
+      expect(screen.queryByText("Live output")).toBeNull();
+    });
+
     it("renders inline run error when lastRunOutput fails", () => {
       render(
         <RoutineCard

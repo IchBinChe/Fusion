@@ -137,10 +137,15 @@ describe("createHeartbeatTools", () => {
       "fn_reflect_on_performance",
       "fn_workflow_list",
       "fn_workflow_get",
+      "fn_workflow_create",
+      "fn_workflow_update",
+      "fn_workflow_delete",
+      "fn_workflow_settings",
       "fn_trait_list",
       "fn_research_run",
       "fn_research_list",
       "fn_research_get",
+      "fn_research_cancel",
       "fn_ask_question",
       "fn_heartbeat_done",
     ] as const;
@@ -183,7 +188,7 @@ describe("createHeartbeatTools", () => {
 
     const tools = monitor.createHeartbeatTools("agent-001", mockTaskStore, "FN-001");
 
-    expect(tools).toHaveLength(27);
+    expect(tools).toHaveLength(34);
     expect(tools[0]!.name).toBe("fn_task_create");
     expect(tools[1]!.name).toBe("fn_task_log");
     expect(tools[2]!.name).toBe("fn_task_document_write");
@@ -207,14 +212,67 @@ describe("createHeartbeatTools", () => {
       "fn_task_search",
       "fn_workflow_list",
       "fn_workflow_get",
+      "fn_workflow_create",
+      "fn_workflow_update",
+      "fn_workflow_delete",
+      "fn_workflow_settings",
       "fn_trait_list",
       "fn_ask_question",
       "fn_research_run",
       "fn_research_list",
       "fn_research_get",
+      "fn_research_cancel",
+      "fn_workflow_select",
+      "fn_task_promote",
     ]);
-    expect(tools.map((tool) => tool.name)).not.toContain("fn_research_cancel");
     expect(tools.map((tool) => tool.name)).not.toContain("fn_run_verification");
+    expect(tools.map((tool) => tool.name)).not.toContain("fn_acquire_repo_worktree");
+  });
+
+  it("heartbeat workflow create/update tools strip approval-bypass flags", async () => {
+    const store = createMockStore();
+    const captured: { createIr?: any; updateIr?: any } = {};
+    const taskStore = createMockTaskStoreForTools({
+      createWorkflowDefinition: vi.fn().mockImplementation(async (input: any) => {
+        captured.createIr = input.ir;
+        return { id: "WF-001", name: input.name };
+      }),
+      updateWorkflowDefinition: vi.fn().mockImplementation(async (_id: string, input: any) => {
+        captured.updateIr = input.ir;
+        return { id: "WF-001", name: input.name ?? "wf" };
+      }),
+    } as Partial<TaskStore>);
+    const monitor = new HeartbeatMonitor({ store, taskStore, rootDir: "/tmp" });
+
+    const tools = monitor.createHeartbeatTools("agent-001", taskStore, "FN-001");
+    const createTool = tools.find((tool) => tool.name === "fn_workflow_create")!;
+    const updateTool = tools.find((tool) => tool.name === "fn_workflow_update")!;
+    const irWithFlags = {
+      version: "v1",
+      name: "wf",
+      nodes: [
+        { id: "prompt", kind: "prompt", config: { cliSkipApproval: true } },
+        {
+          id: "foreach",
+          kind: "foreach",
+          config: {
+            template: {
+              nodes: [{ id: "inner", kind: "step-execute", config: { autoApprove: true } }],
+              edges: [],
+            },
+          },
+        },
+      ],
+      edges: [],
+    };
+
+    await createTool.execute("call-create", { name: "wf", ir: irWithFlags }, undefined as any, undefined as any, undefined as any);
+    await updateTool.execute("call-update", { workflow_id: "WF-001", ir: irWithFlags }, undefined as any, undefined as any, undefined as any);
+
+    expect(captured.createIr.nodes[0].config.cliSkipApproval).toBeUndefined();
+    expect(captured.createIr.nodes[1].config.template.nodes[0].config.autoApprove).toBeUndefined();
+    expect(captured.updateIr.nodes[0].config.cliSkipApproval).toBeUndefined();
+    expect(captured.updateIr.nodes[1].config.template.nodes[0].config.autoApprove).toBeUndefined();
   });
 
   it("fn_task_create tool creates a task in triage via TaskStore", async () => {
@@ -810,18 +868,23 @@ describe("no-task heartbeat tool surface", () => {
         "fn_artifact_view",
         "fn_workflow_list",
         "fn_workflow_get",
+        "fn_workflow_create",
+        "fn_workflow_update",
+        "fn_workflow_delete",
+        "fn_workflow_settings",
         "fn_trait_list",
         "fn_ask_question",
         "fn_research_run",
         "fn_research_list",
         "fn_research_get",
+        "fn_research_cancel",
       ]));
       expect(capturedCustomTools).not.toEqual(expect.arrayContaining([
         "fn_task_log",
         "fn_task_document_write",
         "fn_task_document_read",
-        "fn_research_cancel",
         "fn_run_verification",
+        "fn_acquire_repo_worktree",
         "fn_workflow_select",
         "fn_task_promote",
       ]));

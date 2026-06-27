@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   addToExemptTools,
   computeApprovalDedupeKey,
@@ -133,6 +133,90 @@ describe("agent-action-gate", () => {
     expect(approvalDecision.disposition).toBe("require-approval");
     expect(blockedDecision.category).toBe("task_agent_mutation");
     expect(blockedDecision.disposition).toBe("block");
+  });
+
+  it.each([
+    "fn_workflow_create",
+    "fn_workflow_update",
+    "fn_workflow_delete",
+    "fn_workflow_settings",
+    "fn_workflow_select",
+    "fn_task_promote",
+  ] as const)("governs newly injected heartbeat mutating tool %s by task-agent policy", (toolName) => {
+    const allowedDecision = evaluateAgentActionGate({ agentId: "a1", toolName, args: {}, permissionPolicy: unrestrictedPolicy });
+    const approvalDecision = evaluateAgentActionGate({ agentId: "a1", toolName, args: {}, permissionPolicy: approvalPolicy });
+    const blockedDecision = evaluateAgentActionGate({ agentId: "a1", toolName, args: {}, permissionPolicy: lockedDownPolicy });
+
+    expect(allowedDecision.category).toBe("task_agent_mutation");
+    expect(allowedDecision.disposition).toBe("allow");
+    expect(approvalDecision.category).toBe("task_agent_mutation");
+    expect(approvalDecision.disposition).toBe("require-approval");
+    expect(blockedDecision.category).toBe("task_agent_mutation");
+    expect(blockedDecision.disposition).toBe("block");
+  });
+
+  it("executes or withholds newly injected workflow tools according to AgentPermissionPolicy", async () => {
+    const execute = vi.fn().mockResolvedValue({ ok: true });
+    const tool = { name: "fn_workflow_delete", label: "Delete Workflow", description: "", parameters: {}, execute };
+    const { wrapToolsWithActionGate } = await import("../pi.js");
+
+    const unrestricted = wrapToolsWithActionGate([tool as any], {
+      agentId: "agent-1",
+      agentName: "Agent",
+      isEphemeral: false,
+      taskId: "FN-1",
+      permissionPolicy: unrestrictedPolicy,
+      createApprovalRequest: vi.fn(),
+      findApprovalByDedupeKey: vi.fn(),
+    });
+    await expect((unrestricted[0] as any).execute("delete-allow", { workflow_id: "WF-1" })).resolves.toEqual({ ok: true });
+    expect(execute).toHaveBeenCalledTimes(1);
+
+    const locked = wrapToolsWithActionGate([tool as any], {
+      agentId: "agent-1",
+      agentName: "Agent",
+      isEphemeral: false,
+      taskId: "FN-1",
+      permissionPolicy: lockedDownPolicy,
+      createApprovalRequest: vi.fn(),
+      findApprovalByDedupeKey: vi.fn(),
+    });
+    const blocked = await (locked[0] as any).execute("delete-block", { workflow_id: "WF-1" });
+    expect(blocked).toEqual(expect.objectContaining({
+      isError: true,
+      decision: expect.objectContaining({
+        category: "task_agent_mutation",
+        disposition: "block",
+        toolName: "fn_workflow_delete",
+      }),
+    }));
+    expect(execute).toHaveBeenCalledTimes(1);
+
+    const createApprovalRequest = vi.fn().mockResolvedValue({ id: "apr-workflow-1" });
+    const pauseForApproval = vi.fn();
+    const approval = wrapToolsWithActionGate([tool as any], {
+      agentId: "agent-1",
+      agentName: "Agent",
+      isEphemeral: false,
+      taskId: "FN-1",
+      permissionPolicy: approvalPolicy,
+      createApprovalRequest,
+      findApprovalByDedupeKey: vi.fn().mockResolvedValue(null),
+      pauseForApproval,
+    });
+    const pending = await (approval[0] as any).execute("delete-approval", { workflow_id: "WF-1" });
+    expect(pending).toEqual(expect.objectContaining({
+      isError: true,
+      decision: expect.objectContaining({
+        category: "task_agent_mutation",
+        disposition: "require-approval",
+        toolName: "fn_workflow_delete",
+        metadata: expect.objectContaining({ approvalRequestId: "apr-workflow-1" }),
+      }),
+    }));
+    expect(createApprovalRequest).toHaveBeenCalledTimes(1);
+    expect(pauseForApproval).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it.each(FN_3548_COORDINATION_TOOLS)("always allows newly exempt internal tool %s under locked-down policies", (toolName) => {

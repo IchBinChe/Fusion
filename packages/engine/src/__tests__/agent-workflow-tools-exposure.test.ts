@@ -8,16 +8,19 @@ import {
   createWorkflowUpdateTool,
   createWorkflowDeleteTool,
 } from "../index.js";
+import { createWorkflowSettingsTool } from "../agent-tools.js";
 import type { TaskStore } from "@fusion/core";
 
 /**
  * U11 / R12 drift guard (engine half): the workflow-authoring tool surface that
- * chat, planning, and the task executor all share must always expose the six
- * `fn_workflow_*` tools. The lanes assemble their toolset from
- * `createWorkflowAuthoringTools` (chat/planning) and the executor mirrors the
- * same factories — so asserting factory completeness here guards every lane's
- * source of truth. Lane-wiring (that chat/planning actually pass these to
- * createFnAgent) is asserted in packages/dashboard's exposure test.
+ * chat, planning, and the task executor all share must always expose the core
+ * `fn_workflow_*` authoring tools. The lanes assemble most of their toolset
+ * from `createWorkflowAuthoringTools` (chat/planning) and the executor mirrors
+ * the same factories — so asserting factory completeness here guards every
+ * lane's source of truth. `fn_workflow_settings` remains a standalone factory
+ * that heartbeat/executor wire explicitly. Lane-wiring (that chat/planning
+ * actually pass these to createFnAgent) is asserted in packages/dashboard's
+ * exposure test.
  *
  * We invoke the REAL factories with a fake store — never mock the factories
  * themselves — so a renamed/removed tool name is caught.
@@ -52,6 +55,7 @@ describe("workflow tool exposure (engine factories)", () => {
     expect(createWorkflowCreateTool(fakeStore).name).toBe("fn_workflow_create");
     expect(createWorkflowUpdateTool(fakeStore).name).toBe("fn_workflow_update");
     expect(createWorkflowDeleteTool(fakeStore).name).toBe("fn_workflow_delete");
+    expect(createWorkflowSettingsTool(fakeStore).name).toBe("fn_workflow_settings");
   });
 });
 

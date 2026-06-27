@@ -23,7 +23,7 @@ import { ApprovalRequestStore, buildExecutionMemoryInstructions, isEphemeralAgen
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "@earendil-works/pi-ai";
 import { createHash } from "node:crypto";
-import { createTaskCreateTool, createTaskLogToolWithContext, createTaskDocumentWriteTool, createTaskDocumentReadTool, createTaskReadTools, createArtifactRegisterTool, createArtifactListTool, createArtifactViewTool, createListAgentsTool, createDelegateTaskTool, createGetAgentConfigTool, createUpdateAgentConfigTool, createAgentCreateTool, createAgentDeleteTool, createSendMessageTool, createReadMessagesTool, createPostRoomMessageTool, createMemoryTools, createGoalRetrievalTools, createReadEvaluationsTool, createUpdateIdentityTool, createReflectOnPerformanceTool, createWebFetchTool, createWorkflowListTool, createWorkflowGetTool, createTraitListTool, createAskQuestionTool, createResearchTools, readAgentMemoryWorkspaceLongTerm, taskCreateParams } from "./agent-tools.js";
+import { createTaskCreateTool, createTaskLogToolWithContext, createTaskDocumentWriteTool, createTaskDocumentReadTool, createTaskReadTools, createArtifactRegisterTool, createArtifactListTool, createArtifactViewTool, createListAgentsTool, createDelegateTaskTool, createGetAgentConfigTool, createUpdateAgentConfigTool, createAgentCreateTool, createAgentDeleteTool, createSendMessageTool, createReadMessagesTool, createPostRoomMessageTool, createMemoryTools, createGoalRetrievalTools, createReadEvaluationsTool, createUpdateIdentityTool, createReflectOnPerformanceTool, createWebFetchTool, createWorkflowListTool, createWorkflowGetTool, createWorkflowSelectTool, createTaskPromoteTool, createWorkflowCreateTool, createWorkflowUpdateTool, createWorkflowDeleteTool, createWorkflowSettingsTool, createTraitListTool, createAskQuestionTool, createResearchTools, readAgentMemoryWorkspaceLongTerm, taskCreateParams } from "./agent-tools.js";
 import { AgentLogger } from "./agent-logger.js";
 import {
   resolveAgentInstructionsWithRatings,
@@ -409,7 +409,7 @@ Examples of ONE useful coordination action:
 
 Keep work lightweight — this is a single-pass coordination check, not an implementation run.
 You have workspace read tools (for context gathering) plus fn_task_create, fn_task_log, fn_task_document tools,
-fn_send_message, fn_read_messages, fn_post_room_message, fn_list_agents, fn_delegate_task, workflow discovery, bounded research, fn_ask_question, and memory tools.
+fn_send_message, fn_read_messages, fn_post_room_message, fn_list_agents, fn_delegate_task, workflow discovery/authoring, task promotion, bounded research, fn_ask_question, and memory tools.
 
 **Task Documents:** Save important findings with fn_task_document_write(key="...", content="...").
 Documents persist across sessions and are visible in the dashboard's Documents tab.
@@ -507,8 +507,8 @@ You have coding-capable workspace tools (read/write/edit/bash within worktree bo
 - fn_artifact_register, fn_artifact_list, and fn_artifact_view
 - fn_read_evaluations and fn_update_identity (available in no-task runs)
 - fn_reflect_on_performance when reflection is enabled for this run
-- fn_workflow_list, fn_workflow_get, and fn_trait_list for workflow discovery
-- fn_research_run, fn_research_list, and fn_research_get for bounded research when configured
+- fn_workflow_list, fn_workflow_get, fn_workflow_create, fn_workflow_update, fn_workflow_delete, fn_workflow_settings, and fn_trait_list for workflow discovery/authoring
+- fn_research_run, fn_research_list, fn_research_get, and fn_research_cancel for bounded research when configured
 - fn_ask_question to ask the dashboard user for structured clarification
 - fn_web_fetch
 - fn_memory_search, fn_memory_get, and fn_memory_append
@@ -3423,6 +3423,12 @@ export class HeartbeatMonitor {
    *
    * FNXC:AgentTooling 2026-06-27-14:21:
    * Read-only task discovery tools are part of this shared heartbeat-safe surface so both no-task and task-scoped permanent/custom heartbeat runs can list, show, and search tasks for duplicate avoidance without bespoke tool copies.
+   *
+   * FNXC:AgentTooling 2026-06-27-15:30:
+   * FN-7115 requires classified mutating workflow tools and governed research cancellation to be injected into the heartbeat lane instead of being withheld. Executor-only tools that need a task worktree or workspace task stay excluded because this ambient lane cannot supply that context safely.
+   *
+   * FNXC:AgentTooling 2026-06-27-23:04:
+   * Heartbeat agents are autonomous and prompt-injectable, so workflow create/update tools must strip embedded approval-bypass flags before persisting IR. Permission policy governs whether the tool call may happen; stripApprovalFlags prevents the resulting workflow from weakening future approval gates.
    */
   private createSharedHeartbeatWorkTools(taskStore: TaskStore): ToolDefinition[] {
     const rootDir = this.rootDir ?? process.cwd();
@@ -3430,12 +3436,16 @@ export class HeartbeatMonitor {
       store: taskStore,
       rootDir,
       getSettings: () => taskStore.getSettings(),
-    }).filter((tool) => tool.name !== "fn_research_cancel");
+    });
 
     return [
       ...createTaskReadTools(taskStore),
       createWorkflowListTool(taskStore),
       createWorkflowGetTool(taskStore),
+      createWorkflowCreateTool(taskStore, { stripApprovalFlags: true }),
+      createWorkflowUpdateTool(taskStore, { stripApprovalFlags: true }),
+      createWorkflowDeleteTool(taskStore),
+      createWorkflowSettingsTool(taskStore),
       createTraitListTool(),
       createAskQuestionTool(),
       ...researchTools,
@@ -3541,6 +3551,8 @@ export class HeartbeatMonitor {
     }
 
     tools.push(...this.createSharedHeartbeatWorkTools(taskStore));
+    tools.push(createWorkflowSelectTool(taskStore, taskId));
+    tools.push(createTaskPromoteTool(taskStore, taskId));
 
     return tools;
   }

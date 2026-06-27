@@ -21,7 +21,7 @@ import {
 } from "@fusion/core";
 import { isNearDuplicateCanonicalInactive } from "../../../core/src/near-duplicate-canonical";
 import { resolveEffectiveAutoMerge } from "../../../core/src/task-merge";
-import { uploadAttachment, deleteAttachment, updateTask, repairOverlapBlocker, pauseTask, unpauseTask, fetchTaskDetail, fetchSettings, fetchGlobalSettings, requestSpecRevision, rebuildTaskSpec, approvePlan, rejectPlan, refineTask, fetchWorkflowResults, assignTask, fetchAgents, fetchAgent, refreshPrStatus, fetchBoardWorkflows, updateTaskCustomFields, summarizeTitle, api } from "../api";
+import { uploadAttachment, deleteAttachment, updateTask, repairOverlapBlocker, pauseTask, unpauseTask, fetchTaskDetail, fetchSettings, fetchTaskEffectiveSettings, fetchGlobalSettings, requestSpecRevision, rebuildTaskSpec, approvePlan, rejectPlan, refineTask, fetchWorkflowResults, assignTask, fetchAgents, fetchAgent, refreshPrStatus, fetchBoardWorkflows, updateTaskCustomFields, summarizeTitle, api } from "../api";
 import type { WorkflowFieldDefinition, CustomFieldRejection } from "../api";
 import { ApiRequestError } from "../api";
 import { TaskFieldsSection } from "./TaskFieldsSection";
@@ -978,10 +978,15 @@ export function TaskDetailContent({
     }
   }, [githubTrackingEnabledDraft, workingTask.githubTracking?.enabled]);
 
-  // Load merged settings for effective model resolution
+  // Load task-scoped settings for effective model resolution.
   useEffect(() => {
     let cancelled = false;
-    fetchSettings(projectId)
+    /*
+    FNXC:ModelResolution 2026-06-27-10:52:
+    Task-detail model displays are task-scoped because project model lanes moved into workflow setting values. Fetch the effective settings for the selected task so Workflow, Chat, Agent Log, and Model editor surfaces resolve the same Executor/Reviewer/Planning models the engine uses.
+    */
+    fetchTaskEffectiveSettings(task.id, projectId)
+      .catch(() => fetchSettings(projectId))
       .then((s) => {
         if (!cancelled) setSettings(s);
       })
@@ -996,7 +1001,7 @@ export function TaskDetailContent({
         if (!cancelled) setGlobalSettings(null);
       });
     return () => { cancelled = true; };
-  }, [projectId]);
+  }, [projectId, task.id]);
 
   // Load workflow results when workflow tab is active
   useEffect(() => {

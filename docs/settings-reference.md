@@ -266,11 +266,15 @@ Actions. It has two tabs:
   controls. Edits batch and commit through a single **Save** in the Values tab.
 
 **How values resolve.** The engine resolves *effective settings* per task as
-`stored value ?? declaration default`. A built-in workflow with no stored value
-falls back to the declaration default, which is byte-equal to the legacy project
-default — so an untuned project behaves exactly as before. Switching a project to a
-**new** custom workflow starts that workflow from its own declaration defaults, not
-the project's prior customized values.
+`stored value ?? declaration default`. The task-detail Workflow, Chat, and Agent
+Log model displays use the same per-task effective workflow values, so configured
+Plan/Triage, Executor, Reviewer, and fallback lanes match what task execution
+will use instead of falling back to the ambient project settings response. A
+built-in workflow with no stored value falls back to the declaration default,
+which is byte-equal to the legacy project default — so an untuned project behaves
+exactly as before. Switching a project to a **new** custom workflow starts that
+workflow from its own declaration defaults, not the project's prior customized
+values.
 
 **Built-in prompt overrides.** Built-in workflow prompt/gate node text has a similar project-scoped persistence model, but it is separate from workflow settings: prompt overrides are stored per `(workflowId, nodeId, projectId)` and resolve as `stored prompt ?? shipped prompt`. Resetting a prompt deletes the stored node override and restores the built-in IR text; graph structure and setting declarations remain read-only for built-ins. See [Workflow Steps → Overriding built-in workflow prompts](./workflow-steps.md#overriding-built-in-workflow-prompts).
 

@@ -116,6 +116,52 @@ describe("TaskDetailModal", () => {
       return container.querySelector("[data-testid='agent-log-model-header']") as HTMLElement;
     }
 
+    it("uses task effective settings success path for Agent Log model display", async () => {
+      const { fetchTaskEffectiveSettings, fetchSettings } = await import("../../api");
+      const { useAgentLogs } = await import("../../hooks/useAgentLogs");
+
+      vi.mocked(fetchTaskEffectiveSettings).mockResolvedValueOnce({
+        modelPresets: [],
+        autoSelectModelPreset: false,
+        defaultPresetBySize: {},
+        executionProvider: "overlay-executor",
+        executionModelId: "overlay-executor-model",
+        validatorProvider: "overlay-reviewer",
+        validatorModelId: "overlay-reviewer-model",
+        planningProvider: "overlay-planner",
+        planningModelId: "overlay-planner-model",
+      } as any);
+      vi.mocked(useAgentLogs).mockReturnValue({
+        entries: [mockLogEntry],
+        loading: false,
+        clear: vi.fn(),
+        loadMore: vi.fn(async () => {}),
+        hasMore: false,
+        total: null,
+        loadingMore: false,
+      });
+
+      const { container } = render(
+        <TaskDetailModal
+          initialTab="definition"
+          task={makeTask({ prompt: "# Hello\n\nContent" })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      const header = await openAgentLogAndExpandModelDetails(container);
+      await waitFor(() => expect(header.textContent).toContain("overlay-executor/overlay-executor-model"));
+      expect(header.textContent).toContain("overlay-reviewer/overlay-reviewer-model");
+      expect(header.textContent).toContain("overlay-planner/overlay-planner-model");
+      expect(header.textContent).not.toContain("fallback-provider/fallback-model");
+      expect(fetchSettings).not.toHaveBeenCalled();
+    });
+
     it("shows resolved executor from settings when task has no explicit executor override", async () => {
       const { container } = await setupModelTest({
         defaultProvider: "anthropic",

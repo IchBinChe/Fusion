@@ -27,6 +27,7 @@ function getFallback(name: string): AnyFn {
 export const dashboardApiMocks: Record<string, AnyFn> = {
   fetchTasks: vi.fn(async () => []),
   fetchSettings: vi.fn(async () => ({})),
+  fetchTaskEffectiveSettings: vi.fn().mockRejectedValue(new Error("fetchTaskEffectiveSettings: use fetchSettings mock")),
   updateSettings: vi.fn(async () => ({})),
   fetchGlobalSettings: vi.fn(async () => ({})),
   fetchAuthStatus: vi.fn(async () => ({ providers: [] })),
@@ -64,5 +65,13 @@ export async function createDashboardApiMock(
 
 export function resetDashboardApiMockState(): void {
   Object.values(dashboardApiMocks).forEach((fn) => fn.mockReset());
+  dashboardApiMocks.fetchTasks.mockResolvedValue([]);
+  dashboardApiMocks.fetchSettings.mockResolvedValue({});
+  dashboardApiMocks.fetchTaskEffectiveSettings.mockRejectedValue(new Error("fetchTaskEffectiveSettings: use fetchSettings mock"));
+  dashboardApiMocks.updateSettings.mockResolvedValue({});
+  dashboardApiMocks.fetchGlobalSettings.mockResolvedValue({});
+  dashboardApiMocks.fetchAuthStatus.mockResolvedValue({ providers: [] });
+  dashboardApiMocks.fetchModels.mockResolvedValue({ models: [], favoriteProviders: [], favoriteModels: [] });
+  dashboardApiMocks.fetchUnreadCount.mockResolvedValue({ unreadCount: 0 });
   for (const fn of fallbackFns.values()) fn.mockReset();
 }

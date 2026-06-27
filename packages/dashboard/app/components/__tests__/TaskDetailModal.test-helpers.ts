@@ -110,6 +110,7 @@ vi.mock("lucide-react", () => ({
   ClipboardCheck: () => null,
   ListChecks: () => null,
   Code2: () => null,
+  Cpu: () => null,
   Bell: () => null,
 }));
 

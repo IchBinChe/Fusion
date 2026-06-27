@@ -19,7 +19,12 @@
  * defaults), so this helper is a thin store-coupled wrapper that also never throws.
  */
 
-import { resolveEffectiveSettingsDetailed, type Settings, type TaskStore } from "@fusion/core";
+import {
+  applyWorkflowSettingsOverlay,
+  resolveEffectiveSettingsDetailed,
+  type Settings,
+  type TaskStore,
+} from "@fusion/core";
 
 /** The minimal task shape the resolver needs. Task carries no projectId field —
  *  the project key is derived from the store. */
@@ -43,29 +48,13 @@ export async function mergeEffectiveSettings<T extends Partial<Settings>>(
   task: EffectiveSettingsTask,
   base: T,
 ): Promise<T> {
-  let effective: Record<string, unknown>;
-  let storedKeys: Set<string>;
   try {
     const detailed = await resolveEffectiveSettingsDetailed(
       store as Parameters<typeof resolveEffectiveSettingsDetailed>[0],
       task,
     );
-    effective = detailed.effective;
-    storedKeys = detailed.storedKeys;
+    return applyWorkflowSettingsOverlay(base, detailed);
   } catch {
     return base;
   }
-  const merged: Record<string, unknown> = { ...base };
-  for (const key of Object.keys(effective)) {
-    const value = effective[key];
-    if (value === undefined) continue;
-    if (storedKeys.has(key)) {
-      // Stored workflow value: always overrides the base.
-      merged[key] = value;
-    } else if (merged[key] === undefined) {
-      // Declaration default: only fills when the base lacks the key (post-migration).
-      merged[key] = value;
-    }
-  }
-  return merged as T;
 }

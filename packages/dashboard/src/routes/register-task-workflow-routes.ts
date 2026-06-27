@@ -27,6 +27,8 @@ import {
   resolveTitleSummarizerSettingsModel,
   validateNodeOverrideChange,
   canAgentTakeImplementationTaskForExplicitRouting,
+  applyWorkflowSettingsOverlay,
+  resolveEffectiveSettingsDetailed,
   formatRoleMismatchReason,
   getCurrentRepo,
   findDuplicateMatches,
@@ -2191,6 +2193,25 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
           recommendation: strandedReasonRecommendation(item.reasons),
         })),
       });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  // Get task-scoped settings with effective workflow-setting values overlaid.
+  router.get("/tasks/:id/effective-settings", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const base = await scopedStore.getSettingsFast();
+      const detailed = await resolveEffectiveSettingsDetailed(scopedStore, { id: req.params.id });
+      /*
+       * FNXC:ModelResolution 2026-06-27-10:52:
+       * Task-detail model displays need the same task-scoped workflow model lanes as execution. This route overlays the task's workflow setting values onto getSettingsFast() so moved Execution/Reviewer/Planning lanes render instead of the base "Default" fallback.
+       */
+      res.json(applyWorkflowSettingsOverlay(base, detailed));
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;

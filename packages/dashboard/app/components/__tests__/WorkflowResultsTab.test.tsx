@@ -586,6 +586,39 @@ describe("WorkflowResultsTab", () => {
     expect(screen.getByTestId("workflow-model-setting-reviewer")).not.toHaveTextContent("configured-reviewer/configured-reviewer-model");
   });
 
+  it("shows workflow-overlaid project model lanes when the task has no explicit overrides", async () => {
+    const taskWithoutOverrides = {
+      ...baseTask,
+      modelProvider: null,
+      modelId: null,
+      validatorModelProvider: null,
+      validatorModelId: null,
+      planningModelProvider: null,
+      planningModelId: null,
+    } as Task;
+    const workflowOverlaidSettings = {
+      ...mockSettings,
+      executionProvider: "workflow-executor",
+      executionModelId: "workflow-executor-model",
+      validatorProvider: "workflow-reviewer",
+      validatorModelId: "workflow-reviewer-model",
+      planningProvider: "workflow-planner",
+      planningModelId: "workflow-planner-model",
+    } as Settings;
+
+    render(<WorkflowResultsTab taskId="FN-001" task={taskWithoutOverrides} settings={workflowOverlaidSettings} results={mockResults} />);
+
+    await screen.findByTestId("workflow-state-summary-name");
+    fireEvent.click(screen.getByTestId("workflow-model-settings-toggle"));
+
+    await waitFor(() => expect(screen.getByTestId("workflow-model-setting-executor")).toHaveTextContent("workflow-executor/workflow-executor-model"));
+    expect(screen.getByTestId("workflow-model-setting-reviewer")).toHaveTextContent("workflow-reviewer/workflow-reviewer-model");
+    expect(screen.getByTestId("workflow-model-setting-planning")).toHaveTextContent("workflow-planner/workflow-planner-model");
+    expect(screen.getByTestId("workflow-model-setting-executor")).not.toHaveTextContent("Default");
+    expect(screen.getByTestId("workflow-model-setting-reviewer")).not.toHaveTextContent("Default");
+    expect(screen.getByTestId("workflow-model-setting-planning")).not.toHaveTextContent("Default");
+  });
+
   it("shows effective model settings and default fallbacks", async () => {
     const { rerender } = render(
       <WorkflowResultsTab taskId="FN-001" task={baseTask} settings={mockSettings} results={mockResults} />,

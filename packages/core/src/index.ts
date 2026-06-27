@@ -395,6 +395,10 @@ export {
   type EffectiveSettingsResult,
   type EffectiveSettingsTaskRef,
 } from "./workflow-settings-resolver.js";
+export {
+  applyWorkflowSettingsOverlay,
+  type WorkflowSettingsOverlayInput,
+} from "./effective-settings-overlay.js";
 
 // ── Engine wiring (set by @fusion/engine at module load) ────────────
 export {

@@ -844,6 +844,11 @@ export function fetchSettings(projectId?: string, options?: FetchOptions): Promi
   return dedupe(path, () => api<Settings>(path), options);
 }
 
+export function fetchTaskEffectiveSettings(taskId: string, projectId?: string, options?: FetchOptions): Promise<Settings> {
+  const path = withProjectId(`/tasks/${taskId}/effective-settings`, projectId);
+  return dedupe(path, () => api<Settings>(path), options);
+}
+
 export function updateSettings(settings: Partial<Settings>, projectId?: string): Promise<Settings> {
   return api<Settings>(withProjectId("/settings", projectId), {
     method: "PUT",

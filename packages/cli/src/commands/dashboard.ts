@@ -1097,6 +1097,28 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   let disposed = false;
   let shutdownInProgress = false;
 
+  /*
+   * FNXC:DashboardShutdown 2026-06-27-10:32:
+   * Pressing `q`/Ctrl+C in the TUI routes through SIGINT so the graceful shutdown
+   * runs (kills dev-server process groups, engines, mesh, central-core). That
+   * shutdown awaits several teardown steps with no timeout, so a single hung step
+   * (a dev-server child that won't die, an in-flight engine merge, a stuck
+   * central-core close) left `process.exit(0)` unreachable: the process never
+   * exited, and because the alt-screen was already restored the still-alive
+   * dashboard kept writing output onto the user's shell ("the TUI keeps rendering
+   * what happened"). The `shutdownInProgress` guard also swallowed repeat signals,
+   * so mashing `q` could not escape.
+   *
+   * Guarantee exit two ways: (1) arm a hard-exit watchdog the moment shutdown
+   * begins so any hung teardown step still force-exits within the grace window,
+   * and (2) let a second signal force an immediate exit. The watchdog is unref'd
+   * so it never itself keeps the process alive.
+   */
+  const SHUTDOWN_HARD_EXIT_GRACE_MS = 3000;
+  function armHardExitWatchdog(): void {
+    setTimeout(() => process.exit(0), SHUTDOWN_HARD_EXIT_GRACE_MS).unref();
+  }
+
   async function logShutdownDiagnostics(reason: string): Promise<void> {
     const uptimeSeconds = Math.round((Date.now() - dashboardStartedAt) / 1000);
     let taskSummary = "tasks=unknown";
@@ -1913,8 +1935,11 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     });
 
     const shutdown = async (signal: NodeJS.Signals) => {
-      if (shutdownInProgress) return;
+      // Second signal (user mashing q/Ctrl+C because the first didn't exit) —
+      // force an immediate exit rather than being swallowed by the guard.
+      if (shutdownInProgress) process.exit(0);
       shutdownInProgress = true;
+      armHardExitWatchdog();
 
       // Log active handles at shutdown for diagnostics
       const handleTypes: Record<string, number> = {};
@@ -2243,8 +2268,11 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   // UI-only mode: simplified shutdown handlers (no engine components)
   if (noEngine) {
     const devShutdown = async (signal: NodeJS.Signals) => {
-      if (shutdownInProgress) return;
+      // Second signal (user mashing q/Ctrl+C because the first didn't exit) —
+      // force an immediate exit rather than being swallowed by the guard.
+      if (shutdownInProgress) process.exit(0);
       shutdownInProgress = true;
+      armHardExitWatchdog();
 
       // Log active handles at shutdown for diagnostics
       const handleTypes: Record<string, number> = {};

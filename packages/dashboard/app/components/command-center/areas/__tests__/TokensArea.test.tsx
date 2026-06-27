@@ -17,6 +17,22 @@ vi.mock("../../../ProviderIcon", () => ({
 
 const range7d: DateRange = { from: "2026-06-08", to: null, preset: "7d" };
 
+function makeTokenGroup(key: string | null, totalTokens: number) {
+  const inputTokens = Math.round(totalTokens * 0.6);
+  const outputTokens = Math.round(totalTokens * 0.3);
+  const cachedTokens = totalTokens - inputTokens - outputTokens;
+  return {
+    key,
+    inputTokens,
+    outputTokens,
+    cachedTokens,
+    cacheWriteTokens: 0,
+    totalTokens,
+    nTasks: 1,
+    cost: { usd: key === null ? null : totalTokens / 1_000, unavailable: key === null, stale: false },
+  };
+}
+
 function tokenFixture() {
   return {
     from: "2026-06-08",
@@ -67,6 +83,34 @@ function tokenFixture() {
   };
 }
 
+function manyModelTokenFixture() {
+  const groups = [
+    makeTokenGroup("claude-sonnet-4-5", 2_000),
+    makeTokenGroup("gpt-4o-mini", 1_900),
+    ...Array.from({ length: 13 }, (_, index) => makeTokenGroup(`model-${String(index + 1).padStart(2, "0")}`, 1_800 - index * 100)),
+    makeTokenGroup(null, 150),
+    makeTokenGroup("(unknown)", 125),
+  ];
+  const totals = groups.reduce(
+    (acc, group) => ({
+      inputTokens: acc.inputTokens + group.inputTokens,
+      outputTokens: acc.outputTokens + group.outputTokens,
+      cachedTokens: acc.cachedTokens + group.cachedTokens,
+      cacheWriteTokens: acc.cacheWriteTokens + group.cacheWriteTokens,
+      totalTokens: acc.totalTokens + group.totalTokens,
+      nTasks: acc.nTasks + group.nTasks,
+    }),
+    { inputTokens: 0, outputTokens: 0, cachedTokens: 0, cacheWriteTokens: 0, totalTokens: 0, nTasks: 0 },
+  );
+
+  return {
+    ...tokenFixture(),
+    totals,
+    cost: { usd: null, unavailable: true, stale: false },
+    groups,
+  };
+}
+
 beforeEach(() => {
   apiMock.mockReset();
   apiMock.mockResolvedValue(tokenFixture());
@@ -106,5 +150,29 @@ describe("TokensArea provider model icons", () => {
     expect(screen.getByTestId("cc-tokens-pie")).toHaveTextContent("claude-sonnet-4-5");
     expect(screen.getByTestId("cc-tokens-pie")).toHaveTextContent("gpt-4o-mini");
     expect(screen.getByTestId("cc-tokens-pie")).toHaveTextContent("(unknown)");
+  });
+
+  it("renders every analytics model group in detail bar, pie, and table even beyond the old cap", async () => {
+    apiMock.mockResolvedValue(manyModelTokenFixture());
+    render(<TokensArea range={range7d} />);
+
+    const byModelChart = await screen.findByRole("list", { name: "Tokens by model" });
+    const pie = screen.getByTestId("cc-tokens-pie");
+    const table = screen.getByTestId("cc-tokens-table");
+    const expectedLabels = [
+      "claude-sonnet-4-5",
+      "gpt-4o-mini",
+      ...Array.from({ length: 13 }, (_, index) => `model-${String(index + 1).padStart(2, "0")}`),
+      "(unknown)",
+    ];
+
+    // FNXC:CommandCenter 2026-06-27-09:55: Symptom verification for FN-7117 uses more than the former 12-row detail cap plus null/literal unknown labels, so any reintroduced bar/pie truncation drops model-13 or one of the unknown buckets here.
+    for (const label of expectedLabels) {
+      expect(within(byModelChart).getAllByText(label).length).toBeGreaterThan(0);
+      expect(within(pie).getAllByText(label).length).toBeGreaterThan(0);
+      expect(within(table).getAllByText(label).length).toBeGreaterThan(0);
+    }
+    expect(screen.getByTestId("cc-tokens-row-unknown")).toHaveTextContent("(unknown)");
+    expect(screen.getByTestId("cc-tokens-row-(unknown)")).toHaveTextContent("(unknown)");
   });
 });

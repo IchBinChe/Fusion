@@ -48,6 +48,22 @@ function providerIconIn(element: HTMLElement, provider: string): Element | null 
   return element.querySelector(`.provider-icon[data-provider="${provider}"]`);
 }
 
+function makeTokenGroup(key: string | null, totalTokens: number) {
+  const inputTokens = Math.round(totalTokens * 0.6);
+  const outputTokens = Math.round(totalTokens * 0.3);
+  const cachedTokens = totalTokens - inputTokens - outputTokens;
+  return {
+    key,
+    inputTokens,
+    outputTokens,
+    cachedTokens,
+    cacheWriteTokens: 0,
+    totalTokens,
+    nTasks: 1,
+    cost: { usd: key === null ? null : totalTokens / 1_000, unavailable: key === null, stale: false },
+  };
+}
+
 function tokenFixture(totalTokens = 1_500) {
   return {
     from: "2026-06-08",
@@ -87,6 +103,40 @@ function tokenFixture(totalTokens = 1_500) {
             },
           ]
         : [],
+  };
+}
+
+function manyModelTokenFixture() {
+  const groups = [
+    makeTokenGroup("model-01", 2_000),
+    makeTokenGroup("model-02", 1_900),
+    makeTokenGroup("model-03", 1_800),
+    makeTokenGroup("model-04", 1_700),
+    makeTokenGroup("model-05", 1_600),
+    makeTokenGroup("model-06", 1_500),
+    makeTokenGroup("model-07", 1_400),
+    makeTokenGroup("model-08", 1_300),
+    makeTokenGroup("model-09", 1_200),
+    makeTokenGroup(null, 1_100),
+    makeTokenGroup("(unknown)", 1_000),
+  ];
+  const totals = groups.reduce(
+    (acc, group) => ({
+      inputTokens: acc.inputTokens + group.inputTokens,
+      outputTokens: acc.outputTokens + group.outputTokens,
+      cachedTokens: acc.cachedTokens + group.cachedTokens,
+      cacheWriteTokens: acc.cacheWriteTokens + group.cacheWriteTokens,
+      totalTokens: acc.totalTokens + group.totalTokens,
+      nTasks: acc.nTasks + group.nTasks,
+    }),
+    { inputTokens: 0, outputTokens: 0, cachedTokens: 0, cacheWriteTokens: 0, totalTokens: 0, nTasks: 0 },
+  );
+
+  return {
+    ...tokenFixture(totals.totalTokens),
+    totals,
+    cost: { usd: null, unavailable: true, stale: false },
+    groups,
   };
 }
 
@@ -535,6 +585,27 @@ describe("CommandCenter shell", () => {
     expectThroughputLastAfter("command-center-stat-tokens", "command-center-live-strip", "command-center-overview-charts");
   });
 
+  it("keeps Overview token charts as an accurate top-model summary sourced from the same cap", async () => {
+    mockOverviewApi({ tokens: manyModelTokenFixture() });
+    render(<CommandCenter />);
+
+    const overviewTokenChart = await screen.findByTestId("command-center-overview-chart-tokens");
+    const overviewPie = screen.getByTestId("cc-overview-pie");
+    expect(screen.getByTestId("command-center-stat-models")).toHaveTextContent("11");
+    expect(within(overviewTokenChart).getByText("Top model token consumers in this range")).toBeTruthy();
+    expect(within(overviewPie).getByText("Top model token share in this range")).toBeTruthy();
+
+    // FNXC:CommandCenter 2026-06-27-09:55: Overview intentionally remains top-8; this locks the design decision that the bar and pie summarize the same leading models while the unique-model card still exposes the full analytics count.
+    for (const label of ["model-01", "model-02", "model-03", "model-04", "model-05", "model-06", "model-07", "model-08"]) {
+      expect(within(overviewTokenChart).getByText(label)).toBeTruthy();
+      expect(within(overviewPie).getByText(label)).toBeTruthy();
+    }
+    for (const label of ["model-09", "(unknown)"]) {
+      expect(within(overviewTokenChart).queryByText(label)).toBeNull();
+      expect(within(overviewPie).queryByText(label)).toBeNull();
+    }
+  });
+
   it("renders Overview providerless and unknown model icons without touching pie labels", async () => {
     mockOverviewApi({
       tokens: {
@@ -855,7 +926,12 @@ describe("CommandCenter shell", () => {
 
     await screen.findByTestId("command-center-empty");
     expect(screen.queryByTestId("command-center-stat-tokens")).toBeNull();
-    expect(apiMock.mock.calls.some(([path]) => typeof path === "string" && path === "/command-center/tools")).toBe(true);
+    // FNXC:CommandCenter 2026-06-27-09:55: The All-time preset now serializes an explicit upper bound, so range-change coverage should assert the tools endpoint refetched for the open-lower-bound range rather than requiring the legacy bare path.
+    expect(
+      apiMock.mock.calls.some(
+        ([path]) => typeof path === "string" && path.startsWith("/command-center/tools?to=") && !path.includes("from="),
+      ),
+    ).toBe(true);
   });
 
   it("exposes the ARIA tabs pattern (tablist + tabs + tabpanel)", () => {

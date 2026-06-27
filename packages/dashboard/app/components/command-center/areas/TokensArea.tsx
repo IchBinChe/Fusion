@@ -32,6 +32,9 @@ const GRANULARITIES: TokenTimeGranularity[] = ["hour", "day", "week"];
 /*
 FNXC:CommandCenterCharts 2026-06-18-23:20:
 The Tokens surface must add real pie and line charts from already-fetched token analytics only. Keep the existing bars, tables, granularity controls, loading/error/empty branches, and testids intact while the FN-6682 recharts wrappers provide token-themed, non-finite-safe visuals.
+
+FNXC:CommandCenter 2026-06-27-09:45:
+The Tokens detail area is the full-fidelity by-model source of truth: every group returned by model token analytics must appear in the bar chart, pie chart, and per-model table. Do not cap these detail charts; Overview owns any intentional top-N summarization.
 */
 
 function costSortValue(cost: CostResult): number {
@@ -121,30 +124,29 @@ export function TokensArea({ range }: { range: DateRange }) {
 
   const sortedGroups = useMemo(() => sortGroups(groups, sortKey, sortDir), [groups, sortKey, sortDir]);
 
+  const fullModelGroupsByTokens = useMemo(
+    () => [...groups].sort((a, b) => b.totalTokens - a.totalTokens || (a.key ?? "").localeCompare(b.key ?? "")),
+    [groups],
+  );
+
   const barData = useMemo(
     () =>
-      [...groups]
-        .sort((a, b) => b.totalTokens - a.totalTokens)
-        .slice(0, 12)
-        .map((g) => ({
-          label: modelGroupDisplayLabel(g, t("commandCenter.tokens.unknownModel", "(unknown)")),
-          value: g.totalTokens,
-          valueLabel: formatCount(g.totalTokens),
-          iconProvider: modelGroupIconProvider(g),
-        })),
-    [groups, t],
+      fullModelGroupsByTokens.map((g) => ({
+        label: modelGroupDisplayLabel(g, t("commandCenter.tokens.unknownModel", "(unknown)")),
+        value: g.totalTokens,
+        valueLabel: formatCount(g.totalTokens),
+        iconProvider: modelGroupIconProvider(g),
+      })),
+    [fullModelGroupsByTokens, t],
   );
 
   const pieData = useMemo(
     () =>
-      [...groups]
-        .sort((a, b) => b.totalTokens - a.totalTokens)
-        .slice(0, 12)
-        .map((g) => ({
-          label: modelGroupDisplayLabel(g, t("commandCenter.tokens.unknownModel", "(unknown)")),
-          value: g.totalTokens,
-        })),
-    [groups, t],
+      fullModelGroupsByTokens.map((g) => ({
+        label: modelGroupDisplayLabel(g, t("commandCenter.tokens.unknownModel", "(unknown)")),
+        value: g.totalTokens,
+      })),
+    [fullModelGroupsByTokens, t],
   );
 
   const lineSeries = useMemo(

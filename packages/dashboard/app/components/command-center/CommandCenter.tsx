@@ -50,6 +50,12 @@ interface SubView {
 }
 
 /*
+FNXC:CommandCenter 2026-06-27-09:45:
+Overview remains an intentionally compact top-consumers summary because its chart copy promises a top-N snapshot, while the Tokens detail area shows every used model. Keep the bar and pie on this same capped source so the two Overview cards never disagree about which models are summarized.
+*/
+const OVERVIEW_TOKEN_MODEL_LIMIT = 8;
+
+/*
 FNXC:CommandCenter 2026-06-18-16:57:
 Team tab shows each agent's tokens/cost/files-changed/tasks-completed with live status and bar charts, reusing existing analytics primitives; GitHub-issue per-agent stats are FN-6653, not here.
 
@@ -182,7 +188,7 @@ function OverviewTab({
     () =>
       [...(tokens.data?.groups ?? [])]
         .sort((a, b) => b.totalTokens - a.totalTokens || (a.key ?? "").localeCompare(b.key ?? ""))
-        .slice(0, 8)
+        .slice(0, OVERVIEW_TOKEN_MODEL_LIMIT)
         .map((g) => {
           const label = g.key ?? t("commandCenter.tokens.unknownModel", "(unknown)");
           return {

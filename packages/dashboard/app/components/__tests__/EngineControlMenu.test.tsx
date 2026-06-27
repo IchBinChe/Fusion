@@ -78,6 +78,48 @@ describe("EngineControlMenu", () => {
     vi.useRealTimers();
   });
 
+  it("renders an explicit close button when opened", async () => {
+    await openMenu();
+
+    expect(screen.getByTestId("engine-control-menu-close")).toBeInTheDocument();
+    expect(screen.getByLabelText(/close engine controls/i)).toBeInTheDocument();
+  });
+
+  it("closes the menu when the explicit close button is clicked", async () => {
+    await openMenu();
+
+    fireEvent.click(screen.getByTestId("engine-control-menu-close"));
+
+    await waitFor(() => expect(screen.queryByTestId("engine-control-menu")).not.toBeInTheDocument());
+  });
+
+  it("flushes pending project concurrency changes when the explicit close button is clicked", async () => {
+    await openMenu();
+
+    const maxConcurrent = await screen.findByLabelText(/max concurrent tasks/i);
+    vi.useFakeTimers();
+
+    fireEvent.change(maxConcurrent, { target: { value: "7" } });
+    fireEvent.click(screen.getByTestId("engine-control-menu-close"));
+
+    expect(legacyMocks.updateSettings).toHaveBeenCalledWith(
+      { maxConcurrent: 7, maxTriageConcurrent: 1, maxWorktrees: 4 },
+      "proj_123",
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expect(legacyMocks.updateSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the close button available when concurrency settings fail to load", async () => {
+    legacyMocks.fetchSettings.mockRejectedValue(new Error("settings unavailable"));
+    await openMenu();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("settings unavailable");
+    expect(screen.getByTestId("engine-control-menu-close")).toBeInTheDocument();
+  });
+
   it("stops and starts the global AI engine via settings", async () => {
     apiMocks.fetchSettings.mockResolvedValue({ ...defaultSettings, globalPause: false });
     await openMenu();

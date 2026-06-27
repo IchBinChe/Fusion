@@ -2,7 +2,7 @@ import "./EngineControlMenu.css";
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { DEFAULT_PROJECT_SETTINGS } from "@fusion/core";
-import { Pause, Play, SlidersHorizontal, Square } from "lucide-react";
+import { Pause, Play, SlidersHorizontal, Square, X } from "lucide-react";
 import { fetchConfig, fetchSettings, updateSettings } from "../api/legacy";
 import { useAppSettings } from "../hooks/useAppSettings";
 // FNXC:GlobalConcurrencyControls 2026-06-25-22:45: Footer menu adopts the shared global-concurrency hook so it and the Command Center card read/write ONE source of truth (no more duplicated fetch/debounce/clobber logic).
@@ -84,12 +84,49 @@ export const EngineControlMenu = forwardRef<EngineControlMenuHandle, EngineContr
   const [concurrencyState, setConcurrencyState] = useState<AsyncState<ConcurrencyValues>>({ status: "idle", data: null, error: null });
   const [concurrencyDirty, setConcurrencyDirty] = useState(false);
   const [concurrencySaveState, setConcurrencySaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const projectConcurrencySaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingProjectConcurrencySaveRef = useRef<ConcurrencyValues | null>(null);
+  // FNXC:EngineControls 2026-06-27-11:15: Closing the footer popover must not discard a just-dragged per-project concurrency value; flush the pending debounce before any explicit, outside-click, Escape, or trigger-close path hides the menu.
   // FNXC:GlobalConcurrencyControls 2026-06-25-22:45: Fetch is gated on the menu being open; the hook flushes any pending debounced write when `open` flips false.
   const gc = useGlobalConcurrency({ activeWhen: open });
 
-  const closeMenu = useCallback(() => setOpen(false), []);
+  const saveProjectConcurrencyValues = useCallback((values: ConcurrencyValues) => {
+    setConcurrencySaveState("saving");
+    void updateSettings(values, projectId)
+      .then(async () => {
+        await refresh();
+        setConcurrencyDirty(false);
+        setConcurrencySaveState("saved");
+      })
+      .catch(() => {
+        setConcurrencySaveState("error");
+      });
+  }, [projectId, refresh]);
+
+  const clearProjectConcurrencySaveTimeout = useCallback(() => {
+    if (projectConcurrencySaveTimeoutRef.current) {
+      clearTimeout(projectConcurrencySaveTimeoutRef.current);
+      projectConcurrencySaveTimeoutRef.current = null;
+    }
+  }, []);
+
+  const flushProjectConcurrencySave = useCallback(() => {
+    const pendingValues = pendingProjectConcurrencySaveRef.current;
+    if (!pendingValues) return;
+    clearProjectConcurrencySaveTimeout();
+    pendingProjectConcurrencySaveRef.current = null;
+    saveProjectConcurrencyValues(pendingValues);
+  }, [clearProjectConcurrencySaveTimeout, saveProjectConcurrencyValues]);
+
+  const closeMenu = useCallback(() => {
+    flushProjectConcurrencySave();
+    setOpen(false);
+  }, [flushProjectConcurrencySave]);
   const openMenu = useCallback(() => setOpen(true), []);
-  const toggleMenu = useCallback(() => setOpen((current) => !current), []);
+  const toggleMenu = useCallback(() => {
+    if (open) flushProjectConcurrencySave();
+    setOpen((current) => !current);
+  }, [flushProjectConcurrencySave, open]);
 
   useImperativeHandle(ref, () => ({
     open: openMenu,
@@ -102,12 +139,12 @@ export const EngineControlMenu = forwardRef<EngineControlMenuHandle, EngineContr
 
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setOpen(false);
+        closeMenu();
       }
     };
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") closeMenu();
     };
 
     document.addEventListener("mousedown", handleClickOutside);
@@ -116,7 +153,7 @@ export const EngineControlMenu = forwardRef<EngineControlMenuHandle, EngineContr
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleKeyDown);
     };
-  }, [open]);
+  }, [closeMenu, open]);
 
   useEffect(() => {
     if (!open) return;
@@ -156,20 +193,19 @@ export const EngineControlMenu = forwardRef<EngineControlMenuHandle, EngineContr
   useEffect(() => {
     if (!open || !concurrencyDirty || !concurrencyState.data) return;
     const values = concurrencyState.data;
-    const timeoutId = setTimeout(() => {
-      setConcurrencySaveState("saving");
-      void updateSettings(values, projectId)
-        .then(async () => {
-          await refresh();
-          setConcurrencyDirty(false);
-          setConcurrencySaveState("saved");
-        })
-        .catch(() => {
-          setConcurrencySaveState("error");
-        });
+    pendingProjectConcurrencySaveRef.current = values;
+    projectConcurrencySaveTimeoutRef.current = setTimeout(() => {
+      pendingProjectConcurrencySaveRef.current = null;
+      projectConcurrencySaveTimeoutRef.current = null;
+      saveProjectConcurrencyValues(values);
     }, CONCURRENCY_SAVE_DEBOUNCE_MS);
-    return () => clearTimeout(timeoutId);
-  }, [concurrencyDirty, concurrencyState.data, open, projectId, refresh]);
+    return () => {
+      clearProjectConcurrencySaveTimeout();
+      if (pendingProjectConcurrencySaveRef.current === values) {
+        pendingProjectConcurrencySaveRef.current = null;
+      }
+    };
+  }, [clearProjectConcurrencySaveTimeout, concurrencyDirty, concurrencyState.data, open, saveProjectConcurrencyValues]);
 
   const updateConcurrencyValue = (key: keyof ConcurrencyValues, rawValue: string, min: number, max: number) => {
     const nextValue = clamp(Number(rawValue), min, max);
@@ -228,6 +264,19 @@ export const EngineControlMenu = forwardRef<EngineControlMenuHandle, EngineContr
 
       {open && (
         <div className="card engine-control-menu__popover" role="menu" aria-label={t("executor.engineControls", "Engine controls")} data-testid="engine-control-menu">
+          {/* FNXC:EngineControls 2026-06-27-00:00: FN-7124 requires the footer engine-controls popover to expose an explicit dismiss affordance in addition to outside-click and Escape, and it must stay inside the popover so desktop and mobile layouts both keep it visible and tappable. */}
+          <div className="engine-control-menu__header">
+            <button
+              type="button"
+              className="btn-icon engine-control-menu__close"
+              onClick={closeMenu}
+              title={t("executor.engineControlsClose", "Close engine controls")}
+              aria-label={t("executor.engineControlsClose", "Close engine controls")}
+              data-testid="engine-control-menu-close"
+            >
+              <X size={14} aria-hidden="true" />
+            </button>
+          </div>
           <div className="engine-control-menu__section engine-control-menu__section--actions">
             <button
               type="button"

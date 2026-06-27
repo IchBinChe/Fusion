@@ -2320,6 +2320,7 @@
     "escalated": "Escalated",
     "escalatedSuffix": " (escalated)",
     "engineControls": "Engine controls",
+    "engineControlsClose": "Close engine controls",
     "hideProjectDir": "Hide project directory",
     "hoursAgo_one": "{{count}}h ago",
     "hoursAgo_other": "{{count}}h ago",

@@ -2337,6 +2337,7 @@
     "temporary": "임시",
     "todoStatus": "",
     "engineControls": "Engine controls",
+    "engineControlsClose": "Close engine controls",
     "openEngineControlsForState": "Open engine controls for {{state}} state",
     "triageDisabledWhileStopped": "Start the AI engine before changing triage scheduling"
   },

@@ -307,6 +307,36 @@ function reachableFrom(
   return seen;
 }
 
+const INTERPRETER_ENTRY_NODE_KINDS: ReadonlySet<WorkflowIrNodeKind> = new Set([
+  "merge-gate",
+  "merge-attempt",
+  "manual-merge-hold",
+  "retry-backoff",
+  "recovery-router",
+  "branch-group-member-integration",
+  "branch-group-promotion",
+  "pr-create",
+  "pr-respond",
+  "pr-merge",
+]);
+
+function validateRequiredTopLevelReachability(
+  nodes: WorkflowIrNode[],
+  outgoing: Map<string, WorkflowIrEdge[]>,
+): void {
+  /*
+  FNXC:WorkflowValidation 2026-06-27-07:40:
+  FN-7113 requires required top-level workflow nodes to be reachable from start at parse time, including interpreter-deferred branch graphs. Engine-owned recovery entry primitives stay exempt because they can be re-entered by persisted runtime state rather than by the author-facing start path.
+  */
+  const startNode = nodes.find((node) => node.kind === "start");
+  if (!startNode) return;
+  const reachable = reachableFrom(startNode.id, outgoing);
+  for (const node of nodes) {
+    if (reachable.has(node.id) || INTERPRETER_ENTRY_NODE_KINDS.has(node.kind)) continue;
+    throw new WorkflowIrError(`Workflow node '${node.id}' is not reachable from the start node`);
+  }
+}
+
 /**
  * Validate a foreach `template` subgraph recursively (KTD-3):
  *  - non-empty;
@@ -1234,7 +1264,14 @@ function validateRegisteredExtensionMetadata(
   value: Record<string, unknown>,
 ): void {
   const definition = getWorkflowExtensionRegistry().get(key);
-  const fields = definition?.extension.configSchema?.fields;
+  /*
+  FNXC:WorkflowValidation 2026-06-27-00:00:
+  FN-7113 requires plugin-referencing workflow graphs to validate against the same central gate as built-in/custom graphs. Reject unknown workflow extension keys by name so authoring surfaces cannot persist a graph whose plugin node/column contract is missing at save or launch time.
+  */
+  if (!definition) {
+    throw new WorkflowIrError(`${owner} extension key '${key}' is not registered`);
+  }
+  const fields = definition.extension.configSchema?.fields;
   if (!fields || fields.length === 0) return;
   for (const field of fields) {
     if (field.required && !(field.key in value)) {
@@ -1314,6 +1351,17 @@ function validateV2(ir: WorkflowIrV2): void {
   validateColumns(ir);
 
   const columnIds = new Set(ir.columns.map((c) => c.id));
+  const nodeIds = new Set<string>();
+  for (const node of ir.nodes) {
+    /*
+    FNXC:WorkflowValidation 2026-06-27-00:00:
+    FN-7113 requires top-level duplicate node ids to fail before persistence or launch. Keep this check before nodesById is built so Map de-duplication cannot silently mask a malformed author/plugin workflow graph.
+    */
+    if (nodeIds.has(node.id)) {
+      throw new WorkflowIrError(`Workflow IR has duplicate node id '${node.id}'`);
+    }
+    nodeIds.add(node.id);
+  }
   const nodesById = new Map(ir.nodes.map((n) => [n.id, n]));
 
   for (const node of ir.nodes) {
@@ -1394,6 +1442,7 @@ function validateV2(ir: WorkflowIrV2): void {
   }
 
   validateNoIllegalCycles(ir.nodes, outgoing);
+  validateRequiredTopLevelReachability(ir.nodes, outgoing);
   validateForeachDominance(ir.nodes, ir.edges, outgoing);
 }
 

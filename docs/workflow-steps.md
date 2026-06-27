@@ -55,6 +55,26 @@ Decision-only or investigation tasks can also declare `noCommitsExpected` / `**N
 
 Use the dashboard [Workflow Editor](./workflow-editor.md) to inspect built-ins, tune built-in prompts, duplicate workflows, or author custom workflows. Custom workflows can declare graph nodes and edges, columns/traits, task fields, typed workflow settings, model lanes, optional workflow-step templates, and author-time validation. Use this page for runtime semantics; use the editor guide for the visual authoring surface.
 
+### Workflow graph integrity validation
+
+<!--
+FNXC:WorkflowValidation 2026-06-27-00:00:
+FN-7113 makes graph integrity a save-and-run invariant. The central `parseWorkflowIr`/`validateV2` gate rejects malformed author/plugin graphs before persistence, and `WorkflowGraphTaskRunner` re-validates the resolved IR before side-effecting seams so stale or plugin-supplied invalid graphs fail closed instead of partially running or falling back into the wrong legacy workflow.
+-->
+
+Workflow definitions are validated through the same central IR gate before they can be saved, imported, AI-designed, selected/materialized for a task, or launched by the graph interpreter. Dashboard routes and workflow tools surface `WorkflowIrError` / `WorkflowCompileError` messages as author-facing validation failures instead of persisting partial definitions.
+
+The enforced integrity classes include:
+
+- exactly one `start` node and exactly one `end` node;
+- unique top-level node ids and unique column/field/setting ids;
+- every top-level edge endpoint references a declared top-level node;
+- no illegal non-rework cycles in DAG-required regions;
+- required reachability/dominance rules: every required top-level node must be reachable from `start`, and `parse-steps` must dominate `foreach(source:"task-steps")`; interpreter-owned recovery entry primitives remain valid even when they are re-entered from persisted runtime state instead of the author-facing start path;
+- valid node-specific references, including `parse-steps` artifacts, `loop.exitWhen.nodeId`, foreach/loop/optional-group template entry/exit references, and registered plugin workflow-extension keys.
+
+At run time, `WorkflowGraphTaskRunner` resolves the selected built-in or custom workflow, re-runs this integrity validation before any seam, primitive, or custom-node side effect, and fails closed with an `invalid-ir: <message>` reason when the resolved IR is malformed. Once a node side effect has run, runtime failures keep the existing failed-run behavior rather than re-running the legacy pipeline.
+
 ### Overriding built-in workflow prompts
 
 <!--

@@ -29,7 +29,22 @@ describe("workflow IR extension metadata", () => {
     __resetWorkflowExtensionRegistryForTests();
   });
 
-  it("accepts plugin-namespaced column and node extension metadata", () => {
+  it("accepts registered plugin-namespaced column and node extension metadata", () => {
+    getWorkflowExtensionRegistry().register("workflow-pack", {
+      extensionId: "role",
+      name: "Role",
+      kind: "column-metadata",
+      schemaVersion: WORKFLOW_EXTENSION_SCHEMA_VERSION,
+      fallback: "failClosed",
+    });
+    getWorkflowExtensionRegistry().register("workflow-pack", {
+      extensionId: "node-handler",
+      name: "Node handler",
+      kind: "node-handler",
+      schemaVersion: WORKFLOW_EXTENSION_SCHEMA_VERSION,
+      fallback: "failClosed",
+    });
+
     const parsed = parseWorkflowIr(ir({
       columns: [
         {
@@ -60,6 +75,22 @@ describe("workflow IR extension metadata", () => {
     expect(parsed.nodes[0].extensions?.["plugin:workflow-pack:node-handler"]).toEqual({ handler: "plan" });
   });
 
+  it("rejects unknown plugin-namespaced extension metadata keys", () => {
+    expect(() =>
+      parseWorkflowIr(ir({
+        nodes: [
+          {
+            id: "start",
+            kind: "start",
+            column: "todo",
+            extensions: { "plugin:workflow-pack:missing": {} },
+          },
+          { id: "end", kind: "end", column: "todo" },
+        ],
+      })),
+    ).toThrow(/Workflow node 'start' extension key 'plugin:workflow-pack:missing' is not registered/);
+  });
+
   it("rejects extension metadata keys outside the plugin namespace", () => {
     expect(() =>
       parseWorkflowIr(ir({
@@ -76,6 +107,14 @@ describe("workflow IR extension metadata", () => {
   });
 
   it("rejects non-object extension metadata values", () => {
+    getWorkflowExtensionRegistry().register("workflow-pack", {
+      extensionId: "node-handler",
+      name: "Node handler",
+      kind: "node-handler",
+      schemaVersion: WORKFLOW_EXTENSION_SCHEMA_VERSION,
+      fallback: "failClosed",
+    });
+
     expect(() =>
       parseWorkflowIr(ir({
         nodes: [
@@ -140,6 +179,14 @@ describe("workflow IR extension metadata", () => {
   });
 
   it("keeps v2 when otherwise-pure workflows carry extension metadata", () => {
+    getWorkflowExtensionRegistry().register("workflow-pack", {
+      extensionId: "role",
+      name: "Role",
+      kind: "column-metadata",
+      schemaVersion: WORKFLOW_EXTENSION_SCHEMA_VERSION,
+      fallback: "failClosed",
+    });
+
     const parsed = parseWorkflowIr(ir({
       columns: [
         {

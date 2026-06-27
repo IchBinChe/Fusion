@@ -9,6 +9,9 @@ This artifact distinguishes MVP/blocking requirements from nice-to-have enhancem
 
 FNXC:WorkflowRouting 2026-06-22-12:00:
 Workflow selection acceptance must distinguish operator intent and task creator ownership from executor opportunism. Agents can assign workflows when the user asked or when creating the task; executors cannot reroute the task under execution unless instructed.
+
+FNXC:WorkflowValidation 2026-06-27-00:00:
+FN-7113 upgrades graph integrity from an authoring-only expectation to a save-and-run acceptance criterion: malformed workflow DAGs must be rejected before persistence and revalidated before graph execution side effects.
 -->
 
 ## Purpose
@@ -37,7 +40,7 @@ Use this document to write engineering tasks, QA plans, and release checks. It i
 - **Actor / need:** A workflow author needs to create or copy a workflow that can be reviewed, saved, and selected without corrupting built-in definitions.
 - **Trigger:** Open the [Workflow Editor](./workflow-editor.md) from the dashboard, duplicate a built-in with **Duplicate to customize**, start from Blank, import a JSON envelope, or use workflow tools such as `fn_workflow_create` / `fn_workflow_update`.
 - **Expected happy path + lifecycle transitions + feedback:** The editor serializes graph nodes/edges, columns, fields, and setting declarations into Workflow IR, saves the custom definition, and keeps built-ins read-only. The saved workflow appears in the editor picker and `fn_workflow_list`; no task lifecycle transition occurs until a task selects the workflow. The editor reports whether the workflow can run on the linear engine or must run on the graph interpreter.
-- **Failure / recovery expectation:** Invalid JSON, dangling edges, illegal cycles, unplaced nodes, blocking column-trait violations, invalid setting/field declarations, and attempts to mutate built-ins are rejected before partial persistence. Import errors and server validation errors render in a persistent inline error region; built-ins show read-only hints and disable mutation controls.
+- **Failure / recovery expectation:** Invalid JSON, duplicate top-level node ids, missing/multiple start or end nodes, dangling edges, illegal cycles, invalid step/template references, unknown plugin workflow-extension keys, unplaced nodes, blocking column-trait violations, invalid setting/field declarations, and attempts to mutate built-ins are rejected before partial persistence. Import errors and server validation errors render in a persistent inline error region; built-ins show read-only hints and disable mutation controls.
 - **Measurable success signal:** A stable workflow ID is returned/listed by `fn_workflow_list`; `fn_workflow_get` or the editor reload shows the saved IR; invalid saves return a typed validation failure without changing the prior persisted definition.
 - **Priority:** MVP/blocking for save/validation/discovery; enhancement for AI-assisted design quality and richer telemetry around definition registration.
 
@@ -64,7 +67,7 @@ Use this document to write engineering tasks, QA plans, and release checks. It i
 - **Actor / need:** The scheduler/executor needs to run the selected workflow deterministically while preserving Fusion's observable task lifecycle.
 - **Trigger:** A schedulable task with a selected or default workflow is picked up for execution.
 - **Expected happy path + lifecycle transitions + feedback:** `TaskExecutor.execute()` resolves the workflow, pins graph execution for the run, and `WorkflowGraphExecutor` traverses nodes through workflow runtime primitives such as planning, execute, workflow-step, review, merge, schedule, and step-execute. Standard coding work continues to show `todo → in-progress → in-review → done` (or equivalent workflow-defined columns/holds where enabled), workflow checks appear on task cards/list/detail, and task documents/artifacts are persisted as produced.
-- **Failure / recovery expectation:** Unsupported edge conditions throw `WorkflowIrError`; explicit custom workflow resolution failures fail closed; interpreter failures park as workflow failures rather than re-running a legacy imperative path. File-scope guards (`FileScopeViolationError`), squash overlap enforcement, `autoMerge:false` terminal-until-human behavior, and `moveTask(in-progress → todo)` hard-cancel semantics remain non-bypassable.
+- **Failure / recovery expectation:** Unsupported edge conditions throw `WorkflowIrError`; explicit custom workflow resolution failures fail closed; resolved IR is revalidated before any graph side effects and malformed graphs fail closed with `invalid-ir: <message>` rather than partially running or falling back into the wrong legacy workflow; interpreter failures after side effects park as workflow failures rather than re-running a legacy imperative path. File-scope guards (`FileScopeViolationError`), squash overlap enforcement, `autoMerge:false` terminal-until-human behavior, and `moveTask(in-progress → todo)` hard-cancel semantics remain non-bypassable.
 - **Measurable success signal:** Workflow results are visible in task card/list/detail surfaces; node outcomes route according to `success`, `failure`, or `outcome:<value>` edges; relevant run-audit records exist for lifecycle/git/database mutations; parity instrumentation emits `workflow:parity-observed` or `workflow:parity-drift` when dual-observe is enabled.
 - **Priority:** MVP/blocking.
 

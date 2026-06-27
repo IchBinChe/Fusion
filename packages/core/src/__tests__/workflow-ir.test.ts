@@ -13,6 +13,7 @@ import type {
   WorkflowIrNode,
   WorkflowIrEdge,
 } from "../workflow-ir-types.js";
+import { BUILTIN_WORKFLOWS } from "../builtin-workflows.js";
 
 function v2(
   columns: WorkflowIrV2["columns"],
@@ -152,6 +153,25 @@ describe("parseWorkflowIr — v2 columns & placement", () => {
       [{ from: "start", to: "end" }],
     );
     expect(() => parseWorkflowIr(ir)).toThrow(/duplicate column id 'dup'/);
+  });
+
+  it("rejects duplicate top-level node ids before Map de-duplication can mask them", () => {
+    const ir = v2(
+      [{ id: "only", name: "Only", traits: [] }],
+      [
+        { id: "start", kind: "start", column: "only" },
+        { id: "dup", kind: "prompt", column: "only" },
+        { id: "dup", kind: "script", column: "only" },
+        { id: "end", kind: "end", column: "only" },
+      ],
+      [
+        { from: "start", to: "dup" },
+        { from: "dup", to: "end" },
+      ],
+    );
+
+    expect(() => parseWorkflowIr(ir)).toThrow(WorkflowIrError);
+    expect(() => parseWorkflowIr(ir)).toThrow(/Workflow IR has duplicate node id 'dup'/);
   });
 });
 
@@ -659,8 +679,92 @@ describe("parseWorkflowIr — version & shape guards", () => {
     );
   });
 
-  it("rejects missing start/end nodes", () => {
-    const ir = v2([{ id: "c", name: "C", traits: [] }], [{ id: "start", kind: "start", column: "c" }], []);
+  it("rejects missing start nodes", () => {
+    const ir = v2([{ id: "c", name: "C", traits: [] }], [{ id: "end", kind: "end", column: "c" }], []);
+    expect(() => parseWorkflowIr(ir)).toThrow(WorkflowIrError);
     expect(() => parseWorkflowIr(ir)).toThrow(/exactly one start and one end/);
+  });
+
+  it("rejects missing end nodes", () => {
+    const ir = v2([{ id: "c", name: "C", traits: [] }], [{ id: "start", kind: "start", column: "c" }], []);
+    expect(() => parseWorkflowIr(ir)).toThrow(WorkflowIrError);
+    expect(() => parseWorkflowIr(ir)).toThrow(/exactly one start and one end/);
+  });
+
+  it("rejects illegal non-rework cycles", () => {
+    const ir = v2(
+      [{ id: "c", name: "C", traits: [] }],
+      [
+        { id: "start", kind: "start", column: "c" },
+        { id: "a", kind: "prompt", column: "c" },
+        { id: "b", kind: "prompt", column: "c" },
+        { id: "end", kind: "end", column: "c" },
+      ],
+      [
+        { from: "start", to: "a" },
+        { from: "a", to: "b" },
+        { from: "b", to: "a" },
+      ],
+    );
+
+    expect(() => parseWorkflowIr(ir)).toThrow(WorkflowIrError);
+    expect(() => parseWorkflowIr(ir)).toThrow(/illegal cycle.*edge 'b' -> 'a'/);
+  });
+
+  it("rejects unreachable required top-level nodes with the offending node id", () => {
+    const ir = v2(
+      [{ id: "c", name: "C", traits: [] }],
+      [
+        { id: "start", kind: "start", column: "c" },
+        { id: "reachable", kind: "prompt", column: "c" },
+        { id: "orphan", kind: "prompt", column: "c" },
+        { id: "end", kind: "end", column: "c" },
+      ],
+      [
+        { from: "start", to: "reachable" },
+        { from: "reachable", to: "end" },
+      ],
+    );
+
+    expect(() => parseWorkflowIr(ir)).toThrow(WorkflowIrError);
+    expect(() => parseWorkflowIr(ir)).toThrow(/Workflow node 'orphan' is not reachable from the start node/);
+  });
+
+  it("rejects invalid parse-steps artifact references with the offending node and artifact", () => {
+    const ir = v2(
+      [{ id: "c", name: "C", traits: [] }],
+      [
+        { id: "start", kind: "start", column: "c" },
+        { id: "parse", kind: "parse-steps", column: "c", config: { artifact: "missing.md", parser: "step-headings" } },
+        { id: "end", kind: "end", column: "c" },
+      ],
+      [
+        { from: "start", to: "parse" },
+        { from: "parse", to: "end" },
+      ],
+    );
+
+    expect(() => parseWorkflowIr(ir)).toThrow(WorkflowIrError);
+    expect(() => parseWorkflowIr(ir)).toThrow(/parse-steps node 'parse' references artifact 'missing.md'/);
+  });
+
+  it("parses valid v2 graphs and every built-in workflow without false rejection", () => {
+    const valid = v2(
+      [{ id: "c", name: "C", traits: [] }],
+      [
+        { id: "start", kind: "start", column: "c" },
+        { id: "custom", kind: "prompt", column: "c" },
+        { id: "end", kind: "end", column: "c" },
+      ],
+      [
+        { from: "start", to: "custom" },
+        { from: "custom", to: "end" },
+      ],
+    );
+
+    expect(() => parseWorkflowIr(valid)).not.toThrow();
+    for (const workflow of BUILTIN_WORKFLOWS) {
+      expect(() => parseWorkflowIr(workflow.ir)).not.toThrow();
+    }
   });
 });

@@ -1,5 +1,11 @@
-import type { Settings, TaskDetail, WorkflowDefinition, WorkflowStepResult } from "@fusion/core";
-import { getBuiltinWorkflow, isBuiltinWorkflowId } from "@fusion/core";
+import type { Settings, TaskDetail, WorkflowDefinition, WorkflowIr, WorkflowStepResult } from "@fusion/core";
+import {
+  compileWorkflowToSteps,
+  getBuiltinWorkflow,
+  isBuiltinWorkflowId,
+  parseWorkflowIr,
+  WorkflowCompileError,
+} from "@fusion/core";
 
 import { WorkflowGraphExecutor, type WorkflowGraphExecutorDeps, type WorkflowNodeOutcome, type WorkflowTaskProjection } from "./workflow-graph-executor.js";
 import type {
@@ -29,11 +35,15 @@ import type { WorkflowPrimitiveContext, WorkflowRuntimePrimitives } from "./runt
  */
 export type WorkflowGraphRunDisposition = "completed" | "failed" | "fell-back";
 
+function isInterpreterDeferredCompileError(error: unknown): boolean {
+  return error instanceof WorkflowCompileError && error.message.includes("require the workflow interpreter (deferred)");
+}
+
 export interface WorkflowGraphTaskRunResult {
   disposition: WorkflowGraphRunDisposition;
   outcome?: WorkflowNodeOutcome;
   visitedNodeIds: string[];
-  /** Why the runner fell back (flag-off, no-selection, workflow-missing, interpreter-error). */
+  /** Why the runner fell back or failed before execution (flag-off, no-selection, workflow-missing, invalid-ir, interpreter-error). */
   reason?: string;
   /** Shared graph context after the run (node outcomes/values). */
   context?: Record<string, unknown>;
@@ -141,6 +151,11 @@ export class WorkflowGraphTaskRunner {
     return { disposition: "fell-back", reason, visitedNodeIds: [] };
   }
 
+  private failBeforeSideEffects(taskId: string, reason: string): WorkflowGraphTaskRunResult {
+    this.emit("terminal", taskId, reason);
+    return { disposition: "failed", outcome: "failure", reason, visitedNodeIds: [] };
+  }
+
   public async run(
     task: TaskDetail,
     settings: Pick<Settings, "experimentalFeatures"> | undefined,
@@ -167,13 +182,28 @@ export class WorkflowGraphTaskRunner {
       return this.fallBack(task.id, `workflow-missing: ${selection.workflowId}`);
     }
 
+    let validatedIr: WorkflowIr;
+    try {
+      /*
+      FNXC:WorkflowExecution 2026-06-27-07:40:
+      FN-7113 requires the interpreter to re-validate the resolved built-in/custom/plugin workflow IR before any seam, primitive, or custom-node side effects. Invalid persisted or plugin-authored graphs fail closed with an author-facing invalid-ir reason instead of partially running or falling back into the wrong legacy workflow.
+      */
+      validatedIr = parseWorkflowIr(definition.ir);
+      try {
+        compileWorkflowToSteps(validatedIr);
+      } catch (err) {
+        if (!isInterpreterDeferredCompileError(err)) throw err;
+      }
+    } catch (err) {
+      return this.failBeforeSideEffects(task.id, `invalid-ir: ${err instanceof Error ? err.message : String(err)}`);
+    }
+
     this.emit("start", task.id, definition.id);
     this.branchProgress.clear();
 
-    // Track whether any node side effects ran. A pre-run interpreter error
-    // (bad IR structure, wiring) can safely fall back to the legacy pipeline;
-    // a mid-run error cannot — re-running legacy would repeat the implementation
-    // session — so it terminates as "failed" for the caller to park instead.
+    // Track whether any node side effects ran. Invalid IR is rejected above as
+    // failed/terminal before this point; once execution starts, no error can
+    // safely fall back to legacy because that could repeat a partial workflow run.
     let sideEffectsRan = false;
     const invoked: string[] = [];
     const seams = this.deps.seams;
@@ -254,7 +284,7 @@ export class WorkflowGraphTaskRunner {
           }
         },
       });
-      const result = await executor.run(task, settings, definition.ir);
+      const result = await executor.run(task, settings, validatedIr);
       if (!result.executed) {
         return this.fallBack(task.id, "not-executed");
       }

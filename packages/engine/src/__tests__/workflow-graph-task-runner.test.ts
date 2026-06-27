@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Settings, TaskDetail, WorkflowDefinition, WorkflowIr } from "@fusion/core";
+import { TaskStore } from "@fusion/core";
 
 import { NotificationService } from "../notification/notification-service.js";
 import { WorkflowGraphTaskRunner, type WorkflowGraphRunnerStore } from "../workflow-graph-task-runner.js";
@@ -229,6 +233,56 @@ describe("WorkflowGraphTaskRunner (CU-U2)", () => {
     expect(result.reason).toMatch(/workflow-missing/);
   });
 
+  it("persists a valid workflow through the store and launches it through the graph runner", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "fn-7113-workflow-run-"));
+    const globalDir = mkdtempSync(join(tmpdir(), "fn-7113-workflow-global-"));
+    const store = new TaskStore(rootDir, globalDir, { inMemoryDb: true });
+    try {
+      const invalidIr: WorkflowIr = {
+        version: "v2",
+        name: "invalid-save",
+        columns: [{ id: "todo", name: "Todo", traits: [] }],
+        nodes: [
+          { id: "start", kind: "start", column: "todo" },
+          { id: "dup", kind: "prompt", column: "todo" },
+          { id: "dup", kind: "script", column: "todo" },
+          { id: "end", kind: "end", column: "todo" },
+        ],
+        edges: [
+          { from: "start", to: "dup" },
+          { from: "dup", to: "end" },
+        ],
+      };
+      await expect(store.createWorkflowDefinition({ name: "Invalid", ir: invalidIr })).rejects.toThrow(
+        /Workflow IR has duplicate node id 'dup'/,
+      );
+
+      const workflow = await store.createWorkflowDefinition({ name: "Valid", ir: fullLifecycleIr() });
+      const persisted = await store.getWorkflowDefinition(workflow.id);
+      expect(persisted?.id).toBe(workflow.id);
+      const savedTask = await store.createTask({ description: "save run", enabledWorkflowSteps: [] });
+      await store.selectTaskWorkflow(savedTask.id, workflow.id);
+
+      const calls: string[] = [];
+      const runner = new WorkflowGraphTaskRunner({
+        store,
+        seams: recordingSeams(calls),
+        runCustomNode: async (node) => {
+          calls.push(`custom:${node.id}`);
+          return { outcome: "success" };
+        },
+      });
+
+      const result = await runner.run(savedTask, flagOn);
+
+      expect(result.disposition).toBe("completed");
+      expect(calls).toEqual(["custom:lint", "execute", "review", "merge", "custom:notify"]);
+    } finally {
+      rmSync(rootDir, { recursive: true, force: true });
+      rmSync(globalDir, { recursive: true, force: true });
+    }
+  });
+
   it("resolves built-in workflow selections without requiring the store to return a definition", async () => {
     const calls: string[] = [];
     const getWorkflowDefinition = vi.fn(async () => undefined);
@@ -252,61 +306,92 @@ describe("WorkflowGraphTaskRunner (CU-U2)", () => {
     expect(getWorkflowDefinition).not.toHaveBeenCalled();
   });
 
-  it("falls back (never strands the task) when the interpreter throws", async () => {
-    // Malformed graph: edge references unknown node → WorkflowIrError inside run().
+  it("fails closed with invalid-ir before any side-effect seam when resolved IR is malformed", async () => {
     const badIr: WorkflowIr = {
-      version: "v1",
+      version: "v2",
       name: "bad",
+      columns: [{ id: "c", name: "C", traits: [] }],
       nodes: [
-        { id: "start", kind: "start" },
-        { id: "end", kind: "end" },
+        { id: "start", kind: "start", column: "c" },
+        { id: "dup", kind: "prompt", column: "c" },
+        { id: "dup", kind: "script", column: "c" },
+        { id: "end", kind: "end", column: "c" },
       ],
-      edges: [{ from: "start", to: "ghost" }],
+      edges: [
+        { from: "start", to: "dup" },
+        { from: "dup", to: "end" },
+      ],
     };
+    const calls: string[] = [];
     const events: string[] = [];
     const runner = new WorkflowGraphTaskRunner({
       store: storeWith(definition(badIr)),
-      seams: recordingSeams([]),
-      runCustomNode: async () => ({ outcome: "success" }),
-      onEvent: (e) => events.push(e.type),
+      seams: recordingSeams(calls),
+      runCustomNode: async (node) => {
+        calls.push(`custom:${node.id}`);
+        return { outcome: "success" };
+      },
+      onEvent: (e) => events.push(`${e.type}:${e.detail}`),
     });
+
     const result = await runner.run(task, flagOn);
-    expect(result.disposition).toBe("fell-back");
-    expect(result.reason).toMatch(/interpreter-error/);
-    expect(events).toContain("fallback");
+
+    expect(result.disposition).toBe("failed");
+    expect(result.outcome).toBe("failure");
+    expect(result.reason).toMatch(/invalid-ir: Workflow IR has duplicate node id 'dup'/);
+    expect(result.visitedNodeIds).toEqual([]);
+    expect(calls).toEqual([]);
+    expect(events.some((event) => event.includes("terminal:invalid-ir"))).toBe(true);
   });
 
-  it("an interpreter error AFTER side effects terminates as failed, not fell-back", async () => {
-    // Cycle reached only after custom nodes execute: re-running legacy would
-    // repeat the implementation, so the runner must not signal fallback.
-    const cyclicIr: WorkflowIr = {
-      version: "v1",
-      name: "cyclic",
+  it("fails closed with invalid-ir before any custom node when resolved IR has a dangling edge", async () => {
+    const badIr: WorkflowIr = {
+      version: "v2",
+      name: "bad-edge",
+      columns: [{ id: "c", name: "C", traits: [] }],
       nodes: [
-        { id: "start", kind: "start" },
-        { id: "a", kind: "prompt", config: { prompt: "a" } },
-        { id: "b", kind: "prompt", config: { prompt: "b" } },
-        { id: "end", kind: "end" },
+        { id: "start", kind: "start", column: "c" },
+        { id: "a", kind: "prompt", column: "c" },
+        { id: "end", kind: "end", column: "c" },
       ],
       edges: [
-        { from: "start", to: "a", condition: "success" },
-        { from: "a", to: "b", condition: "success" },
-        { from: "b", to: "a", condition: "success" },
+        { from: "start", to: "a" },
+        { from: "a", to: "ghost" },
       ],
     };
     const calls: string[] = [];
     const runner = new WorkflowGraphTaskRunner({
-      store: storeWith(definition(cyclicIr)),
+      store: storeWith(definition(badIr)),
       seams: recordingSeams(calls),
       runCustomNode: async (node) => {
         calls.push(`custom:${node.id}`);
         return { outcome: "success" };
       },
     });
+
     const result = await runner.run(task, flagOn);
-    expect(calls.length).toBeGreaterThan(0);
+
     expect(result.disposition).toBe("failed");
-    expect(result.reason).toMatch(/interpreter-error/);
+    expect(result.outcome).toBe("failure");
+    expect(result.reason).toMatch(/invalid-ir: Workflow edge 'a' -> 'ghost' references undefined node 'ghost'/);
+    expect(result.visitedNodeIds).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
+  it("a custom-node failure AFTER side effects terminates as failed, not fell-back", async () => {
+    const calls: string[] = [];
+    const runner = new WorkflowGraphTaskRunner({
+      store: storeWith(definition(fullLifecycleIr())),
+      seams: recordingSeams(calls),
+      runCustomNode: async (node) => {
+        throw new Error(`custom boom: ${node.id}`);
+      },
+    });
+    const result = await runner.run(task, flagOn);
+    expect(calls).toEqual([]);
+    expect(result.visitedNodeIds).toEqual(["start", "lint"]);
+    expect(result.disposition).toBe("failed");
+    expect(result.reason).toBeUndefined();
   });
 
   it("exposes node outcomes in the shared context for downstream consumers", async () => {

@@ -98,3 +98,6 @@ packages/mobile/android/
 # Dolt database files
 .dolt/
 *.db
+
+# MCP server config (contains API keys)
+.mcp.json

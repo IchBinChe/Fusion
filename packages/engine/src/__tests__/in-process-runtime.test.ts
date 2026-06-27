@@ -2,7 +2,11 @@ import { describe, it, expect, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { EventEmitter } from "node:events";
-import { InProcessRuntime } from "../runtimes/in-process-runtime.js";
+import type { CliSession } from "@fusion/core";
+import {
+  buildCliAgentAwaitingInputNotificationPayload,
+  InProcessRuntime,
+} from "../runtimes/in-process-runtime.js";
 
 describe("InProcessRuntime onStart duplicate guard", () => {
   it("contains a taskAgentMap guard before creating task-worker agents", () => {
@@ -22,6 +26,56 @@ describe("InProcessRuntime onStart duplicate guard", () => {
   it("rehydrates autopilot mission watches during startup recovery", () => {
     const source = readFileSync(join(process.cwd(), "src/runtimes/in-process-runtime.ts"), "utf-8");
     expect(source).toContain("activeMissionAutopilot.recoverMissions(activeMissionStore)");
+  });
+
+  it("builds prompt-scoped CLI input notification dedupe keys", () => {
+    const makeSession = (updatedAt: string): CliSession => ({
+      id: "cli-1",
+      taskId: "FN-7109",
+      chatSessionId: null,
+      purpose: "execute",
+      projectId: "proj-test",
+      adapterId: "claude-code",
+      agentState: "waitingOnInput",
+      terminationReason: null,
+      nativeSessionId: null,
+      resumeAttempts: 0,
+      autonomyPosture: null,
+      worktreePath: null,
+      createdAt: "2026-06-27T00:00:00.000Z",
+      updatedAt,
+    });
+
+    const first = buildCliAgentAwaitingInputNotificationPayload({
+      projectId: "proj-test",
+      info: {
+        sessionId: "cli-1",
+        notification: { kind: "permission_request", toolName: "Bash", prompt: "run tests" },
+      },
+      session: makeSession("2026-06-27T00:01:00.000Z"),
+      task: undefined,
+    });
+    const duplicate = buildCliAgentAwaitingInputNotificationPayload({
+      projectId: "proj-test",
+      info: {
+        sessionId: "cli-1",
+        notification: { prompt: "run tests", toolName: "Bash", kind: "permission_request" },
+      },
+      session: makeSession("2026-06-27T00:01:00.000Z"),
+      task: undefined,
+    });
+    const nextPromptSameSession = buildCliAgentAwaitingInputNotificationPayload({
+      projectId: "proj-test",
+      info: {
+        sessionId: "cli-1",
+        notification: { kind: "permission_request", toolName: "Bash", prompt: "run build" },
+      },
+      session: makeSession("2026-06-27T00:02:00.000Z"),
+      task: undefined,
+    });
+
+    expect(first.metadata?.notificationDedupeKey).toBe(duplicate.metadata?.notificationDedupeKey);
+    expect(nextPromptSameSession.metadata?.notificationDedupeKey).not.toBe(first.metadata?.notificationDedupeKey);
   });
 
   it("forwards task:deleted events with and without githubIssueAction metadata", () => {

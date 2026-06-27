@@ -707,7 +707,14 @@ export class NotificationService {
   }
 
   private maybeNotify(taskId: string, eventType: NotificationEvent, payload: NotificationPayload): void {
-    const key = `${taskId}:${eventType}`;
+    const metadataDedupeKey = typeof payload.metadata?.notificationDedupeKey === "string"
+      ? payload.metadata.notificationDedupeKey.trim()
+      : "";
+    /*
+     * FNXC:ToolPermissionNotifications 2026-06-27-00:00:
+     * Some notification surfaces are not task-lifecycle events. Honor a caller-provided dedupe key so CLI tool-permission prompts can suppress repeated telemetry records without suppressing unrelated future task notifications.
+     */
+    const key = metadataDedupeKey.length > 0 ? metadataDedupeKey : `${taskId}:${eventType}`;
     if (this.notifiedEvents.has(key)) {
       schedulerLog.log(`NotificationService.maybeNotify suppressed duplicate key=${key}`);
       return;

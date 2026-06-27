@@ -19,6 +19,8 @@ describe("Ntfy notifier helpers", () => {
   it("includes mailbox message events in default events", () => {
     expect(DEFAULT_NTFY_EVENTS).toContain("planning-awaiting-input");
     expect(resolveNtfyEvents(undefined)).toContain("planning-awaiting-input");
+    expect(DEFAULT_NTFY_EVENTS).toContain("cli-agent-awaiting-input");
+    expect(resolveNtfyEvents(undefined)).toContain("cli-agent-awaiting-input");
     expect(DEFAULT_NTFY_EVENTS).toContain("gridlock");
     expect(DEFAULT_NTFY_EVENTS).toContain("fallback-used");
     expect(DEFAULT_NTFY_EVENTS).toContain("message:agent-to-user");
@@ -26,9 +28,11 @@ describe("Ntfy notifier helpers", () => {
     expect(DEFAULT_NTFY_EVENTS).toContain("message:room");
   });
 
-  it("checks planning-awaiting-input event enablement", () => {
+  it("checks awaiting-input event enablement", () => {
     expect(isNtfyEventEnabled(["planning-awaiting-input"], "planning-awaiting-input")).toBe(true);
     expect(isNtfyEventEnabled(["failed"], "planning-awaiting-input")).toBe(false);
+    expect(isNtfyEventEnabled(["cli-agent-awaiting-input"], "cli-agent-awaiting-input")).toBe(true);
+    expect(isNtfyEventEnabled(["failed"], "cli-agent-awaiting-input")).toBe(false);
   });
 
   it("supports task-created enablement while keeping it default-off", () => {

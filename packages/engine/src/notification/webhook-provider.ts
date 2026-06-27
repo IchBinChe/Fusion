@@ -170,6 +170,8 @@ export class WebhookNotificationProvider implements NotificationProvider {
         return `Task "${identifier}" needs human review before it can proceed`;
       case "planning-awaiting-input":
         return `Task "${identifier}" is awaiting your input during planning`;
+      case "cli-agent-awaiting-input":
+        return `Task "${identifier}" has a CLI agent waiting for ${String(payload.metadata?.notificationKind ?? "human input")}`;
       case "gridlock":
         return "Pipeline gridlocked";
       case "fallback-used":

@@ -693,6 +693,7 @@ export type NtfyNotificationEvent =
   | "awaiting-approval"
   | "awaiting-user-review"
   | "planning-awaiting-input"
+  | "cli-agent-awaiting-input"
   | "gridlock"
   | "board-stall-unrecovered"
   | "db-corruption-detected"
@@ -714,6 +715,11 @@ export const NOTIFICATION_EVENTS = [
   "awaiting-approval",
   "awaiting-user-review",
   "planning-awaiting-input",
+  /*
+   * FNXC:ToolPermissionNotifications 2026-06-27-00:00:
+   * CLI tool-permission requests are a distinct user-facing notification event from plan approval. Operators must be able to enable external alerts when a terminal-backed agent waits for human input.
+   */
+  "cli-agent-awaiting-input",
   "gridlock",
   "board-stall-unrecovered",
   "db-corruption-detected",

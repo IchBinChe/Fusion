@@ -30,6 +30,7 @@ export const DEFAULT_NTFY_EVENTS: readonly NtfyNotificationEvent[] = [
   "awaiting-approval",
   "awaiting-user-review",
   "planning-awaiting-input",
+  "cli-agent-awaiting-input",
   "gridlock",
   "board-stall-unrecovered",
   "db-corruption-detected",

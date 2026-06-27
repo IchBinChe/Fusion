@@ -707,6 +707,7 @@ describe("SettingsModal", () => {
           "awaiting-approval",
           "awaiting-user-review",
           "planning-awaiting-input",
+          "cli-agent-awaiting-input",
           "gridlock",
           "fallback-used",
           "memory-dreams-processed",

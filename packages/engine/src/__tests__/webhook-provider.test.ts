@@ -163,6 +163,7 @@ describe("WebhookNotificationProvider", () => {
     ["awaiting-approval", "needs your approval before it can proceed"],
     ["awaiting-user-review", "needs human review before it can proceed"],
     ["planning-awaiting-input", "is awaiting your input during planning"],
+    ["cli-agent-awaiting-input", "has a CLI agent waiting for permission_request"],
     ["gridlock", "Pipeline gridlocked"],
     ["fallback-used", "Fusion recovered by switching from"],
     ["message:agent-to-user", "From: Triage Bot → You: hello"],
@@ -187,6 +188,7 @@ describe("WebhookNotificationProvider", () => {
         roomId: "room-1",
         roomName: "Incident Room",
         preview: "hello",
+        notificationKind: "permission_request",
       },
     });
 

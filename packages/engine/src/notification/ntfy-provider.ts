@@ -37,6 +37,7 @@ type SupportedNtfyEvent =
   | "awaiting-approval"
   | "awaiting-user-review"
   | "planning-awaiting-input"
+  | "cli-agent-awaiting-input"
   | "fallback-used"
   | "task-created"
   | "workflow-notify"
@@ -52,6 +53,7 @@ const SUPPORTED_EVENTS = new Set<SupportedNtfyEvent>([
   "awaiting-approval",
   "awaiting-user-review",
   "planning-awaiting-input",
+  "cli-agent-awaiting-input",
   "fallback-used",
   "task-created",
   "workflow-notify",
@@ -225,6 +227,11 @@ export class NtfyNotificationProvider implements NotificationProvider {
       "planning-awaiting-input": {
         title: `Planning input needed for ${taskId}`,
         message: `Task "${identifier}" is awaiting your input during planning`,
+        priority: "high",
+      },
+      "cli-agent-awaiting-input": {
+        title: `CLI agent input needed for ${taskId}`,
+        message: `Task "${identifier}" has a CLI agent waiting for ${String(payload.metadata?.notificationKind ?? "human input")}`,
         priority: "high",
       },
       "fallback-used": {

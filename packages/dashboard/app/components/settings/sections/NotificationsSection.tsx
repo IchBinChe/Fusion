@@ -10,6 +10,7 @@ export const DEFAULT_NTFY_EVENTS: NtfyNotificationEvent[] = [
     "awaiting-approval",
     "awaiting-user-review",
     "planning-awaiting-input",
+    "cli-agent-awaiting-input",
     "gridlock",
     "fallback-used",
     "memory-dreams-processed",
@@ -29,6 +30,8 @@ export const NOTIFICATION_EVENT_OPTIONS: Array<{
     { event: "awaiting-approval", label: "Plan needs approval", description: "When a task specification needs manual approval before execution" },
     { event: "awaiting-user-review", label: "User review needed", description: "When an agent hands off a task for human review (high priority)" },
     { event: "planning-awaiting-input", label: "Planning needs input", description: "When planning mode is waiting for your response to continue" },
+    // FNXC:ToolPermissionNotifications 2026-06-27-00:00: Settings must expose CLI-agent awaiting-input alerts separately from plan approval so operators can opt into external notifications for blocked terminal tool permissions.
+    { event: "cli-agent-awaiting-input", label: "CLI agent needs input", description: "When a CLI agent is blocked on a tool permission or terminal input prompt" },
     { event: "gridlock", label: "Pipeline gridlocked", description: "When all schedulable todo tasks are blocked and work cannot advance" },
     { event: "fallback-used", label: "Fallback model used (recovered)", description: "When Fusion recovers from a retryable model failure by switching to a fallback model" },
     { event: "task-created", label: "Agent created a task", description: "When an agent files a new task on the board" },

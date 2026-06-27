@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { NotificationProvider, Settings, Task } from "@fusion/core";
+import type { NotificationPayload, NotificationProvider, Settings, Task } from "@fusion/core";
 import { NotificationService } from "../notification-service.js";
 import { schedulerLog } from "../../logger.js";
 
@@ -302,5 +302,59 @@ describe("NotificationService deferred failure notifications", () => {
     await vi.advanceTimersByTimeAsync(100);
 
     expect(sendNotification).not.toHaveBeenCalled();
+  });
+});
+
+describe("NotificationService manual dispatch dedupe", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  async function setup(settings: Partial<Settings> = {}) {
+    const store = createStore(settings);
+    const sendNotification = vi.fn(async () => ({ success: true, providerId: "mock" }));
+    const provider: NotificationProvider = {
+      getProviderId: () => "mock",
+      isEventSupported: () => true,
+      sendNotification,
+    };
+    const service = new NotificationService(store as any);
+    service.registerProvider(provider);
+    await service.start();
+    return { service, sendNotification };
+  }
+
+  it("suppresses duplicate CLI permission notifications using a metadata dedupe key", async () => {
+    const { service, sendNotification } = await setup();
+    const payload: NotificationPayload = {
+      taskId: "FN-7109",
+      event: "cli-agent-awaiting-input",
+      metadata: {
+        notificationDedupeKey: "cli-agent:proj-1:session-1:cli-agent-awaiting-input",
+        notificationKind: "permission_request",
+      },
+    };
+
+    await service.dispatch("cli-agent-awaiting-input", payload);
+    await service.dispatch("cli-agent-awaiting-input", payload);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(sendNotification).toHaveBeenCalledTimes(1);
+    expect(sendNotification).toHaveBeenCalledWith("cli-agent-awaiting-input", expect.objectContaining({ taskId: "FN-7109" }));
+    await service.stop();
+  });
+
+  it("no-ops manual dispatch cleanly when notifications are disabled", async () => {
+    const { service, sendNotification } = await setup({ ntfyEnabled: false, ntfyTopic: undefined });
+
+    await service.dispatch("cli-agent-awaiting-input", {
+      taskId: "FN-7109",
+      event: "cli-agent-awaiting-input",
+      metadata: { notificationDedupeKey: "cli-agent:disabled" },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(sendNotification).not.toHaveBeenCalled();
+    await service.stop();
   });
 });

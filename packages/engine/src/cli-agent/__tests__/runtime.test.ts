@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -41,7 +41,7 @@ interface Harness {
   fusionDir: string;
 }
 
-function makeHarness(): Harness {
+function makeHarness(options: Partial<Parameters<typeof createCliAgentRuntime>[0]> = {}): Harness {
   const tmpDir = mkdtempSync(join(tmpdir(), "fn-cli-runtime-test-"));
   const fusionDir = join(tmpDir, ".fusion");
   const db = new Database(fusionDir, { inMemory: true });
@@ -52,6 +52,7 @@ function makeHarness(): Harness {
     projectId: "proj-1",
     hookEndpointUrl: "http://127.0.0.1:4040/api/cli-agent/hooks",
     managerOptions: { loadPty: async () => makeMockPtyModule() },
+    ...options,
   });
   return { runtime, db, tmpDir, fusionDir };
 }
@@ -77,6 +78,40 @@ describe("createCliAgentRuntime", () => {
     expect(bundle.store).toBeDefined();
     expect(bundle.projectId).toBe("proj-1");
     expect(bundle.hookEndpointUrl).toBe("http://127.0.0.1:4040/api/cli-agent/hooks");
+  });
+
+  it("forwards waitingOnInput permission notifications through the runtime hub", () => {
+    const onNotification = vi.fn();
+    h.runtime.dispose();
+    h.runtime = createCliAgentRuntime({
+      fusionDir: h.fusionDir,
+      db: h.db,
+      projectId: "proj-1",
+      hookEndpointUrl: "http://127.0.0.1:4040/api/cli-agent/hooks",
+      managerOptions: { loadPty: async () => makeMockPtyModule() },
+      onNotification,
+    });
+    const adapterId = BUNDLED_CLI_ADAPTERS[0].id;
+    const session = h.runtime.bundle.store.createSession({
+      adapterId,
+      projectId: "proj-1",
+      purpose: "execute",
+      taskId: "FN-7109",
+      worktreePath: "/wt/permission",
+      agentState: "busy",
+    });
+
+    h.runtime.bundle.hub.issueToken(session.id);
+    h.runtime.bundle.hub.ingest(session.id, {
+      kind: "waitingOnInput",
+      payload: { notification: { kind: "permission_request", toolName: "Bash" } },
+    });
+
+    expect(onNotification).toHaveBeenCalledTimes(1);
+    expect(onNotification).toHaveBeenCalledWith({
+      sessionId: session.id,
+      notification: { kind: "permission_request", toolName: "Bash" },
+    });
   });
 
   it("registers all bundled adapters into a per-runtime registry", () => {

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type {
   TaskStore,
@@ -11,6 +12,8 @@ import type {
   MessageStore,
   RoutineStore,
   GithubIssueAction,
+  CliSession,
+  NotificationPayload,
 } from "@fusion/core";
 import { ChatStore, createCentralDatabase, isEphemeralAgent } from "@fusion/core";
 import { Scheduler } from "../scheduler.js";
@@ -36,6 +39,7 @@ import type {
   ProjectRuntimeEvents,
 } from "../project-runtime.js";
 import { runtimeLog } from "../logger.js";
+import { getActiveNotificationService } from "../notifier.js";
 import { StuckTaskDetector } from "../stuck-task-detector.js";
 import type { UsageLimitPauser } from "../usage-limit-detector.js";
 import { SelfHealingManager, VALIDATOR_RUN_STALE_MAX_AGE_MS } from "../self-healing.js";
@@ -52,6 +56,79 @@ import { createRunAuditor, generateSyntheticRunId } from "../run-audit.js";
 import { setImmediate as setImmediateCb } from "node:timers";
 
 const yieldEventLoop = (): Promise<void> => new Promise((resolve) => setImmediateCb(resolve));
+
+export const CLI_AGENT_AWAITING_INPUT_EVENT = "cli-agent-awaiting-input" as const;
+
+export interface CliAgentAwaitingInputNotificationInfo {
+  sessionId: string;
+  notification: Record<string, unknown> | undefined;
+}
+
+function stableNotificationJson(value: unknown): string {
+  if (value === undefined) {
+    return "undefined";
+  }
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value) ?? String(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableNotificationJson(entry)).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  const fields = Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${stableNotificationJson(record[key])}`);
+  return `{${fields.join(",")}}`;
+}
+
+function buildCliAgentNotificationDedupeKey(input: {
+  projectId: string;
+  info: CliAgentAwaitingInputNotificationInfo;
+  session: CliSession | undefined;
+}): string {
+  const notificationFingerprint = createHash("sha256")
+    .update(stableNotificationJson(input.info.notification ?? null))
+    .digest("hex")
+    .slice(0, 16);
+  const waitingEpoch = input.session?.updatedAt ?? "unknown-waiting-epoch";
+  return [
+    "cli-agent",
+    input.projectId,
+    input.info.sessionId,
+    CLI_AGENT_AWAITING_INPUT_EVENT,
+    waitingEpoch,
+    notificationFingerprint,
+  ].join(":");
+}
+
+export function buildCliAgentAwaitingInputNotificationPayload(input: {
+  projectId: string;
+  info: CliAgentAwaitingInputNotificationInfo;
+  session: CliSession | undefined;
+  task: Task | undefined;
+}): NotificationPayload {
+  const taskId = input.session?.taskId ?? undefined;
+  const adapterId = input.session?.adapterId;
+  const notificationKind = typeof input.info.notification?.kind === "string"
+    ? input.info.notification.kind
+    : "waiting_on_input";
+
+  return {
+    ...(taskId ? { taskId } : {}),
+    taskTitle: input.task?.title,
+    taskDescription: input.task?.description,
+    event: CLI_AGENT_AWAITING_INPUT_EVENT,
+    metadata: {
+      sessionId: input.info.sessionId,
+      projectId: input.projectId,
+      ...(adapterId ? { adapterId } : {}),
+      notificationKind,
+      notification: input.info.notification ?? null,
+      // FNXC:ToolPermissionNotifications 2026-06-27-00:00: CLI adapters can emit duplicate waiting-on-input records for one blocked prompt. The external notification path carries a waiting-epoch plus prompt-fingerprint key so repeated telemetry for the same blocked prompt does not spam providers, while later tool requests in the same session still notify operators.
+      notificationDedupeKey: buildCliAgentNotificationDedupeKey(input),
+    },
+  };
+}
 
 /**
  * InProcessRuntime runs a project within the main process.
@@ -417,6 +494,13 @@ export class InProcessRuntime
             db: this.taskStore.getDatabase(),
             projectId: this.config.projectId,
             hookEndpointUrl: this.resolveCliAgentHookEndpointUrl(),
+            onNotification: (info) => {
+              /*
+               * FNXC:ToolPermissionNotifications 2026-06-27-00:00:
+               * CLI tool-permission prompts must notify operators through configured external providers, not only through in-app session state. Keep this callback wired to the active NotificationService so ntfy/webhook users see blocked terminal sessions.
+               */
+              void this.dispatchCliAgentAwaitingInputNotification(info);
+            },
           });
           runtimeLog.log("CLI Agent Executor runtime initialized");
         } catch (cliErr) {
@@ -1333,6 +1417,33 @@ export class InProcessRuntime
    */
   getCliAgentRuntime(): BootstrappedCliAgentRuntime | undefined {
     return this.cliAgentRuntime;
+  }
+
+  private async dispatchCliAgentAwaitingInputNotification(
+    info: CliAgentAwaitingInputNotificationInfo,
+  ): Promise<void> {
+    const notificationService = getActiveNotificationService();
+    if (!notificationService) {
+      return;
+    }
+
+    const session = this.cliAgentRuntime?.bundle.store.getSession(info.sessionId);
+    let task: Task | undefined;
+    if (session?.taskId) {
+      try {
+        task = await this.taskStore.getTask(session.taskId);
+      } catch {
+        task = undefined;
+      }
+    }
+
+    const payload = buildCliAgentAwaitingInputNotificationPayload({
+      projectId: this.config.projectId,
+      info,
+      session,
+      task,
+    });
+    await notificationService.dispatch(CLI_AGENT_AWAITING_INPUT_EVENT, payload);
   }
 
   /**

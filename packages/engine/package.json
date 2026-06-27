@@ -42,6 +42,7 @@
     "@fusion/pi-claude-cli": "workspace:*",
     "@earendil-works/pi-ai": "^0.79.9",
     "@earendil-works/pi-coding-agent": "^0.79.9",
+    "@modelcontextprotocol/sdk": "^1.0.0",
     "cron-parser": "^5.5.0",
     "esbuild": "^0.25.12",
     "node-pty": "npm:@homebridge/node-pty-prebuilt-multiarch@^0.13.1",
@@ -49,7 +50,6 @@
     "typebox": "^1.0.0"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
     "@types/node": "^25.5.0",
     "@types/proper-lockfile": "^4.1.4",
     "@vitest/coverage-v8": "^4.1.0",

@@ -74,6 +74,7 @@ import { READONLY_ALLOWLIST, filterCustomToolsForReadonly, isReadonlyAllowed } f
 import { createStreamingDeltaNormalizer } from "./streaming-delta.js";
 import { isModelAuthTierIncompatibilityError, isUnsupportedMessageRoleError } from "./transient-error-detector.js";
 import { logMcpForwardingSkipped, runtimeSupportsMcp } from "./mcp-runtime-support.js";
+import { connectMcpSessionTools, type McpClientFactory, type McpSessionToolset } from "./mcp-session-tools.js";
 export { isModelAuthTierIncompatibilityError } from "./transient-error-detector.js";
 
 const RTK_ACCEPTED_REWRITE_EXIT_CODES = new Set([0, 3]);
@@ -1005,6 +1006,8 @@ export interface AgentOptions {
    * below decides whether to forward or skip them without logging contents.
    */
   mcpServers?: ResolvedMcpServerDefinition[];
+  /** Test seam for MCP session tools; production uses the SDK client/transport factories. */
+  mcpClientFactory?: McpClientFactory;
   /** Optional task-scoped env injected into this session's subprocess tools only. */
   taskEnv?: NodeJS.ProcessEnv;
   /** Last-chance abort hook fired immediately before `createAgentSession`.
@@ -2210,9 +2213,28 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     // suppress the defaults with `noTools: "builtin"` and register our wrapped
     // tools through `customTools` instead. The wrapped tools preserve the same
     // names (`read`, `bash`, ...) as the built-ins they replace.
+    let mcpToolset: McpSessionToolset | undefined;
+    if (forwardedMcpServers.length > 0 && !isReadonly) {
+      /*
+       * FNXC:McpConfig 2026-06-27-14:06:
+       * pi-coding-agent does not have a createAgentSession `mcpServers` option, so passing resolved servers is silently ignored. Connect MCP servers here and merge namespaced tools into the same customTools filtering/gating/boundary pipeline as engine tools before the session sees them.
+       */
+      mcpToolset = await connectMcpSessionTools(forwardedMcpServers, {
+        cwd: options.cwd,
+        clientFactory: options.mcpClientFactory,
+        logger: piLog,
+      });
+    } else if (forwardedMcpServers.length > 0 && isReadonly) {
+      piLog.log(`readonly session — MCP servers (${forwardedMcpServers.length}) skipped`);
+    }
+
+    const candidateCustomTools = [
+      ...(options.customTools ?? []),
+      ...(mcpToolset?.tools ?? []),
+    ];
     const readonlyFilteredCustomTools = isReadonly
-      ? filterCustomToolsForReadonly(options.customTools ?? [])
-      : { allowed: options.customTools ?? [], denied: [] };
+      ? filterCustomToolsForReadonly(candidateCustomTools)
+      : { allowed: candidateCustomTools, denied: [] };
     const allowlistFilteredCustomTools = {
       ...readonlyFilteredCustomTools,
       allowed: readonlyFilteredCustomTools.allowed.filter((tool) => isAllowedByToolAllowlist(tool.name)),
@@ -2258,9 +2280,14 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     // This is the latest synchronous decision point where the engine can
     // honor a pause that flipped during this function's setup window.
     if (options.beforeSpawnSession) {
-      await options.beforeSpawnSession();
+      try {
+        await options.beforeSpawnSession();
+      } catch (error) {
+        await mcpToolset?.dispose();
+        throw error;
+      }
     }
-    const createSessionOptions: Parameters<typeof createAgentSession>[0] & { mcpServers?: ResolvedMcpServerDefinition[] } = {
+    const createSessionOptions: Parameters<typeof createAgentSession>[0] = {
       cwd: options.cwd,
       authStorage,
       modelRegistry,
@@ -2269,7 +2296,6 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
       customTools: customToolList,
       sessionManager,
       settingsManager,
-      ...(forwardedMcpServers.length > 0 ? { mcpServers: forwardedMcpServers } : {}),
       ...(modelOverride ? { model: modelOverride } : {}),
     };
 
@@ -2293,15 +2319,34 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
       ].sort();
     }
 
-    const result = await createAgentSession(createSessionOptions);
-    /*
-     * FNXC:TokenAnalytics 2026-06-26-13:58:
-     * Token analytics depends on every resolved lane model being visible on `session.model` after session creation. Some pi providers accept the explicit model override but do not mirror it back onto the session, so backfill the snapshot here before shared token accounting reads it.
-     */
-    if (modelOverride && !(result.session as AgentSession & { model?: unknown }).model) {
-      (result.session as AgentSession & { model?: typeof modelOverride }).model = modelOverride;
+    try {
+      const result = await createAgentSession(createSessionOptions);
+      if (mcpToolset) {
+        const sessionWithDispose = result.session as AgentSession & { dispose?: () => void | Promise<void> };
+        const originalDispose = typeof sessionWithDispose.dispose === "function"
+          ? sessionWithDispose.dispose.bind(sessionWithDispose)
+          : () => undefined;
+        let mcpDisposeStarted = false;
+        sessionWithDispose.dispose = async () => {
+          if (!mcpDisposeStarted) {
+            mcpDisposeStarted = true;
+            await mcpToolset.dispose();
+          }
+          await Promise.resolve(originalDispose());
+        };
+      }
+      /*
+       * FNXC:TokenAnalytics 2026-06-26-13:58:
+       * Token analytics depends on every resolved lane model being visible on `session.model` after session creation. Some pi providers accept the explicit model override but do not mirror it back onto the session, so backfill the snapshot here before shared token accounting reads it.
+       */
+      if (modelOverride && !(result.session as AgentSession & { model?: unknown }).model) {
+        (result.session as AgentSession & { model?: typeof modelOverride }).model = modelOverride;
+      }
+      return result;
+    } catch (error) {
+      await mcpToolset?.dispose();
+      throw error;
     }
-    return result;
   };
 
   const emitFallbackUsed = async (triggerPoint: "session-creation" | "prompt-time"): Promise<void> => {

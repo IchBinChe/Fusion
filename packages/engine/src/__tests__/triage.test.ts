@@ -1749,6 +1749,64 @@ describe("requirePlanApproval setting", () => {
     const settings = await store.getSettings();
     expect(settings.requirePlanApproval).toBeUndefined();
   });
+
+  async function finalizeWithSettings(settings: Settings) {
+    const task = createTriageTask({
+      id: "FN-APPROVAL",
+      title: "Approval mode task",
+      status: "planning",
+    } as Partial<Task>);
+    const store = createMockStore({
+      getTask: vi.fn().mockResolvedValue(task),
+    });
+    const processor = new TriageProcessor(store, rootDir);
+    await (processor as unknown as {
+      finalizeApprovedTask(task: Task, writtenInput: string, settings: Settings): Promise<void>;
+    }).finalizeApprovedTask(
+      task,
+      "# Task: FN-APPROVAL - Approval mode task\n\n**Size:** M\n\n## Review Level: 1\n\n## File Scope\n\n- packages/engine/src/triage.ts\n",
+      settings,
+    );
+    return store;
+  }
+
+  it("auto-approve-all moves to todo even when workflow requires plan approval", async () => {
+    const store = await finalizeWithSettings({
+      requirePlanApproval: true,
+      planApprovalMode: "auto-approve-all",
+    } as Settings);
+
+    expect(store.moveTask).toHaveBeenCalledWith("FN-APPROVAL", "todo");
+    expect(store.updateTask).not.toHaveBeenCalledWith("FN-APPROVAL", expect.objectContaining({ status: "awaiting-approval" }));
+  });
+
+  it("require-all parks for manual approval even when workflow disables plan approval", async () => {
+    const store = await finalizeWithSettings({
+      requirePlanApproval: false,
+      planApprovalMode: "require-all",
+    } as Settings);
+
+    expect(store.updateTask).toHaveBeenCalledWith("FN-APPROVAL", expect.objectContaining({ status: "awaiting-approval" }));
+    expect(store.moveTask).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { mode: "workflow" as const, requirePlanApproval: true, expectedApproval: true },
+    { mode: undefined, requirePlanApproval: false, expectedApproval: false },
+  ])("defers to workflow requirePlanApproval when mode is $mode", async ({ mode, requirePlanApproval, expectedApproval }) => {
+    const store = await finalizeWithSettings({
+      requirePlanApproval,
+      planApprovalMode: mode,
+    } as Settings);
+
+    if (expectedApproval) {
+      expect(store.updateTask).toHaveBeenCalledWith("FN-APPROVAL", expect.objectContaining({ status: "awaiting-approval" }));
+      expect(store.moveTask).not.toHaveBeenCalled();
+    } else {
+      expect(store.moveTask).toHaveBeenCalledWith("FN-APPROVAL", "todo");
+      expect(store.updateTask).not.toHaveBeenCalledWith("FN-APPROVAL", expect.objectContaining({ status: "awaiting-approval" }));
+    }
+  });
 });
 
 describe("approved triage recovery", () => {

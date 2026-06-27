@@ -283,6 +283,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   ignoreHiddenOverlapPaths: true,
   overlapIgnorePaths: [],
   autoMerge: true,
+  planApprovalMode: "workflow",
   // U18 (R15): the Review-response loop is default-on. Independent of `autoMerge` —
   // with this on but auto-merge off, review threads are resolved but the PR is not merged.
   autoResolveReviewComments: true,
@@ -382,7 +383,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   // planOnlyScopeLeakEnforcement, workflowRevisionForkOnScopeMismatch,
   // strictScopeEnforcement, buildRetryCount, verificationFixRetries,
   // requirePlanApproval) MOVED to workflow settings (U4) — see
-  // MOVED_SETTINGS_KEYS. `buildTimeoutMs` and `verificationCommandTimeoutMs`
+  // MOVED_SETTINGS_KEYS. `planApprovalMode`, `buildTimeoutMs`, and `verificationCommandTimeoutMs`
   // are NOT moved and stay plain project settings. Keep verificationCommandTimeoutMs
   // undefined so fn_run_verification preserves legacy per-scope defaults until a
   // project opts into a single default budget.

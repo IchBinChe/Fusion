@@ -93,6 +93,25 @@ export function MergeSection({ scopeBanner, form, setForm, integrationBranchOpti
         </details>
       </div>
       <div className="form-group">
+        {/*
+          FNXC:PlanApproval 2026-06-26-00:00:
+          Operators need one project-scoped control beside review/merge policy to force all tasks to auto-approve or require manual plan approval without editing each workflow.
+        */}
+        <label htmlFor="planApprovalMode">{t("settings.merge.planApprovalMode", "Plan approval mode")}</label>
+        <select id="planApprovalMode" className="select" value={form.planApprovalMode ?? "workflow"} onChange={(e) => {
+            const nextMode = e.target.value as Settings["planApprovalMode"];
+            setForm((f) => ({ ...f, planApprovalMode: nextMode }));
+        }} data-testid="plan-approval-mode-select">
+          <option value="workflow">{t("settings.merge.planApprovalModeWorkflow", "Use workflow setting")}</option>
+          <option value="auto-approve-all">{t("settings.merge.planApprovalModeAutoApproveAll", "Auto-approve all tasks")}</option>
+          <option value="require-all">{t("settings.merge.planApprovalModeRequireAll", "Require approval for all tasks")}</option>
+        </select>
+        <details className="settings-option-details">
+          <summary>{t("settings.merge.moreDetails", "More details")}</summary>
+          <small>{t("settings.merge.planApprovalModeHelp", "Project-wide override for the planning approval gate. Leave on workflow to use each workflow's Require plan approval setting, or force all approved specs to bypass or wait for manual approval.")}</small>
+        </details>
+      </div>
+      <div className="form-group">
         <label htmlFor="maxAutoMergeRetries">{t("settings.merge.autoMergeConflictRetries", "Auto-merge conflict retries")}</label>
         {/*
           FNXC:AutoMergeRetries 2026-06-17-04:20:

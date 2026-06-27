@@ -3911,6 +3911,11 @@ export interface ProjectSettings {
    *  remain in triage with status "awaiting-approval" until a user approves
    *  or rejects the plan. Default: false. */
   requirePlanApproval?: boolean;
+  /**
+   * FNXC:PlanApproval 2026-06-26-00:00:
+   * Per-project setting to control plan approval for every task: workflow defers to the per-workflow requirePlanApproval setting, auto-approve-all bypasses approval for all tasks, and require-all parks every approved spec for manual approval.
+   */
+  planApprovalMode?: "workflow" | "auto-approve-all" | "require-all";
   /** Controls task-worker execution mode.
    *  - true (default): spawn short-lived `executor-FN-XXXX` ephemeral workers per task
    *  - false: disable ephemeral workers; scheduler auto-assigns dispatchable tasks

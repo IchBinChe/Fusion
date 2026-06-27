@@ -15,14 +15,16 @@ function jsonResponse(body: unknown, ok = true): Response {
   } as Response;
 }
 
-function makeProps(): MergeSectionProps {
+function makeProps(overrides: Partial<MergeSectionProps["form"]> = {}): MergeSectionProps {
   return {
     scopeBanner: null,
     form: {
       autoMerge: true,
+      planApprovalMode: "workflow",
       merger: { mode: "ai" },
       testMode: false,
       mergeStrategy: "direct",
+      ...overrides,
     } as MergeSectionProps["form"],
     setForm: vi.fn(),
     integrationBranchOptions: ["main"],
@@ -36,6 +38,25 @@ describe("MergeSection legacy auto-merge stamp cleanup", () => {
     vi.restoreAllMocks();
     window.innerWidth = 1024;
     vi.spyOn(window, "confirm").mockReturnValue(true);
+  });
+
+  it("renders and updates the project-scoped plan approval mode select", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ candidates: [], count: 0 })));
+    const props = makeProps({ planApprovalMode: "require-all" });
+
+    render(<MergeSection {...props} />);
+
+    const select = screen.getByTestId("plan-approval-mode-select") as HTMLSelectElement;
+    expect(select.value).toBe("require-all");
+    expect(screen.getByRole("option", { name: "Use workflow setting" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Auto-approve all tasks" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Require approval for all tasks" })).toBeInTheDocument();
+
+    fireEvent.change(select, { target: { value: "auto-approve-all" } });
+
+    expect(props.setForm).toHaveBeenCalledWith(expect.any(Function));
+    const updater = vi.mocked(props.setForm).mock.calls.at(-1)?.[0] as (state: MergeSectionProps["form"]) => MergeSectionProps["form"];
+    expect(updater(props.form).planApprovalMode).toBe("auto-approve-all");
   });
 
   it("renders the store-provided candidate list without client-side filtering", async () => {

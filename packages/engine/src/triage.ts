@@ -23,6 +23,7 @@ import {
   sortTasksByPriorityThenAgeAndId,
   compareTaskIdNumeric,
   resolveAgentMemoryInclusionMode,
+  resolvePlanApprovalRequired,
   extractIntentSignature,
   findNearDuplicates,
   isNearDuplicateCanonicalInactive,
@@ -491,6 +492,7 @@ export class TriageProcessor {
     // Merge per-task effective workflow settings (U3, KTD-3) so requirePlanApproval
     // resolves from the workflow. Behavior-inert when nothing is customized.
     const settings = await mergeEffectiveSettings(this.store, task, await this.store.getSettings());
+    const approvalRequired = resolvePlanApprovalRequired(settings);
     const promptPath = join(this.rootDir, ".fusion", "tasks", task.id, "PROMPT.md");
     const written = await readFile(promptPath, "utf-8").catch((err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
@@ -504,7 +506,7 @@ export class TriageProcessor {
     }
 
     await this.finalizeApprovedTask(task, written, settings, {
-      recoveryLogAction: settings.requirePlanApproval
+      recoveryLogAction: approvalRequired
         ? "Auto-recovered approved specification stuck in planning — awaiting manual approval"
         : "Auto-recovered approved specification stuck in planning — moved to todo",
     });
@@ -2420,7 +2422,11 @@ export class TriageProcessor {
       return;
     }
 
-    if (settings.requirePlanApproval) {
+    /*
+    FNXC:PlanApproval 2026-06-26-00:00:
+    Project planApprovalMode has precedence over the workflow-resolved requirePlanApproval value so operators can force auto-approval or manual approval for every task in this project.
+    */
+    if (resolvePlanApprovalRequired(settings)) {
       const approvalUpdates: Record<string, unknown> = { status: "awaiting-approval" };
       if (shouldApplyPromptDeclaredTitle && promptDeclaredTitle) {
         approvalUpdates.title = promptDeclaredTitle;

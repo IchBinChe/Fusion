@@ -17,6 +17,8 @@ export type {
 } from "./branch-assignment.js";
 export { customProviderRegistryKey } from "./custom-provider-key.js";
 export { redactSecrets } from "./redact-secrets.js";
+export { resolvePlanApprovalRequired } from "./plan-approval.js";
+export type { PlanApprovalMode } from "./plan-approval.js";
 export { isActiveNearDuplicateColumn, isNearDuplicateCanonicalInactive } from "./near-duplicate-canonical.js";
 export type { NearDuplicateCanonicalState } from "./near-duplicate-canonical.js";
 export * from "./frontend-ux-policy.js";

@@ -222,9 +222,9 @@ Important execution nuance:
 ## 1) Summary
 
 - **localStorage keys in runtime dashboard code:** **20**
-- **Backend settings keys defined in `@fusion/core`:** **78** total
+- **Backend settings keys defined in `@fusion/core`:** **79** total
   - **Global settings:** 17 (`GlobalSettings`)
-  - **Project settings:** 61 (`ProjectSettings`)
+  - **Project settings:** 62 (`ProjectSettings`)
 - **SQLite tables in project DB schema (`packages/core/src/db.ts`):** **47** (including migration-created tables)
 - **Issues identified:** **9**
   - High: 2
@@ -320,6 +320,7 @@ API endpoints reviewed:
 | `groupOverlappingFiles` | Project | `GET/PUT /api/settings` | Serialize overlapping file work |
 | `overlapIgnorePaths` | Project | `GET/PUT /api/settings` | Project-relative file/directory paths ignored by overlap blocking |
 | `autoMerge` | Project | `GET/PUT /api/settings` | Enable auto merge |
+| `planApprovalMode` | Project | `GET/PUT /api/settings` | Project-wide plan approval override: `workflow`, `auto-approve-all`, or `require-all` |
 | `mergeStrategy` | Project | `GET/PUT /api/settings` | Direct vs PR merge strategy |
 | `worktreeInitCommand` | Project | `GET/PUT /api/settings` | Command run on worktree init |
 | `testCommand` | Project | `GET/PUT /api/settings` | Project test command |

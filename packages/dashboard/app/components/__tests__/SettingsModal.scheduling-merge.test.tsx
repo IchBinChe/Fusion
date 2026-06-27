@@ -1257,6 +1257,23 @@ describe("SettingsModal", () => {
         expect(payload.pushAfterMerge).toBe(true);
         expect(payload.pushRemote).toBe("upstream main");
       });
+
+      it("round-trips plan approval mode through project settings save", async () => {
+        const select = screen.getByLabelText("Plan approval mode");
+        expect(select).toHaveValue("workflow");
+
+        await settingsModalUser.selectOptions(select, "require-all");
+        await settingsModalUser.click(screen.getByText("Save"));
+
+        await waitFor(() => {
+          expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
+        });
+
+        const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
+        expect(payload.planApprovalMode).toBe("require-all");
+        expect(mockUpdateGlobalSettings).toHaveBeenCalledTimes(1);
+        expect(mockUpdateGlobalSettings.mock.calls[0][0]).not.toHaveProperty("planApprovalMode");
+      });
     });
 
     describe("verificationFixRetries (moved to workflow settings)", () => {

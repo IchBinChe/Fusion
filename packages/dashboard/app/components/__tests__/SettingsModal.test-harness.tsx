@@ -95,6 +95,7 @@ export const defaultSettings = {
   ignoreHiddenOverlapPaths: true,
   overlapIgnorePaths: [],
   autoMerge: true,
+  planApprovalMode: "workflow",
   mergeStrategy: "direct",
   merger: { mode: "deterministic" },
   directMergeCommitStrategy: "auto",

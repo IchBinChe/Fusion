@@ -725,6 +725,7 @@ export function SettingsModal({
     ignoreHiddenOverlapPaths: true,
     overlapIgnorePaths: [],
     autoMerge: true,
+    planApprovalMode: "workflow",
     mergeStrategy: "direct",
     maxAutoMergeRetries: 3,
     mergeIntegrationWorktree: "reuse-task-worktree",

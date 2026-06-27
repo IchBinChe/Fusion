@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   getOrCreateProjectStore,
   countRunningAgentsInRegisteredProjectStores,
+  countRunningAgentsInStore,
   evictProjectStore,
   evictAllProjectStores,
   listRegisteredProjectStores,
@@ -366,8 +367,18 @@ describe("countRunningAgentsInRegisteredProjectStores", () => {
     createdStores.length = 0;
   });
 
-  function installTaskList(store: TaskStore, columns: string[]) {
-    const tasks = columns.map((column, index) => ({ id: `FN-${index + 1}`, column }));
+  type SeedTask = {
+    column: string;
+    status?: string;
+    paused?: boolean;
+  };
+
+  function installTaskList(store: TaskStore, seedTasks: Array<string | SeedTask>) {
+    const tasks = seedTasks.map((seedTask, index) => (
+      typeof seedTask === "string"
+        ? { id: `FN-${index + 1}`, column: seedTask }
+        : { id: `FN-${index + 1}`, ...seedTask }
+    ));
     const listTasks = vi.fn().mockImplementation(async (options?: { column?: string }) => (
       options?.column ? tasks.filter((task) => task.column === options.column) : tasks
     ));
@@ -385,7 +396,7 @@ describe("countRunningAgentsInRegisteredProjectStores", () => {
     const counts = await countRunningAgentsInRegisteredProjectStores(["proj_open", "proj_unopened"]);
 
     expect(counts).toEqual({ proj_open: 2 });
-    expect(listTasks).toHaveBeenCalledWith({ column: "in-progress", slim: true });
+    expect(listTasks).toHaveBeenCalledWith({ slim: true });
     expect(createdStores).toHaveLength(1);
     expect(openEntry?.watchMock).not.toHaveBeenCalled();
   });
@@ -402,7 +413,7 @@ describe("countRunningAgentsInRegisteredProjectStores", () => {
     const counts = await countRunningAgentsInRegisteredProjectStores(["proj_zero", "proj_unopened"]);
 
     expect(counts).toEqual({ proj_zero: 0 });
-    expect(zeroListTasks).toHaveBeenCalledWith({ column: "in-progress", slim: true });
+    expect(zeroListTasks).toHaveBeenCalledWith({ slim: true });
     expect(ignoredListTasks).not.toHaveBeenCalled();
     expect(createdStores).toHaveLength(2);
     expect(zeroEntry?.watchMock).not.toHaveBeenCalled();
@@ -419,8 +430,58 @@ describe("countRunningAgentsInRegisteredProjectStores", () => {
     const counts = await countRunningAgentsInRegisteredProjectStores(["proj_a", "proj_b"]);
 
     expect(counts).toEqual({ proj_a: 1, proj_b: 2 });
-    expect(listTasksA).toHaveBeenCalledWith({ column: "in-progress", slim: true });
-    expect(listTasksB).toHaveBeenCalledWith({ column: "in-progress", slim: true });
+    expect(listTasksA).toHaveBeenCalledWith({ slim: true });
+    expect(listTasksB).toHaveBeenCalledWith({ slim: true });
+    expect(createdStores).toHaveLength(2);
+  });
+
+  it("counts an actively triaging planning task even when no executors are running", async () => {
+    const store = await getOrCreateProjectStore("proj_triage_only");
+    const listTasks = installTaskList(store, [
+      { column: "triage", status: "planning" },
+      "todo",
+    ]);
+
+    await expect(countRunningAgentsInStore(store)).resolves.toBe(1);
+    expect(listTasks).toHaveBeenCalledWith({ slim: true });
+  });
+
+  it("sums in-progress executors and active triage agents while excluding inactive triage states", async () => {
+    const store = await getOrCreateProjectStore("proj_mixed");
+    installTaskList(store, [
+      "in-progress",
+      { column: "triage", status: "planning" },
+      { column: "triage", status: "planning", paused: true },
+      { column: "triage", status: "triaged" },
+      { column: "triage" },
+      "todo",
+    ]);
+
+    await expect(countRunningAgentsInStore(store)).resolves.toBe(2);
+  });
+
+  it("returns per-project active triage and executor counts for multiple already-open stores", async () => {
+    const storeA = await getOrCreateProjectStore("proj_triage_a");
+    const storeB = await getOrCreateProjectStore("proj_triage_b");
+    const listTasksA = installTaskList(storeA, [
+      "in-progress",
+      { column: "triage", status: "planning" },
+      { column: "triage", status: "waiting" },
+    ]);
+    const listTasksB = installTaskList(storeB, [
+      { column: "triage", status: "planning" },
+      { column: "triage", status: "planning" },
+      { column: "triage", status: "planning", paused: true },
+      "done",
+    ]);
+    vi.clearAllMocks();
+
+    const counts = await countRunningAgentsInRegisteredProjectStores(["proj_triage_a", "proj_triage_b"]);
+
+    expect(counts).toEqual({ proj_triage_a: 2, proj_triage_b: 2 });
+    expect(Object.values(counts).reduce((sum, count) => sum + count, 0)).toBe(4);
+    expect(listTasksA).toHaveBeenCalledWith({ slim: true });
+    expect(listTasksB).toHaveBeenCalledWith({ slim: true });
     expect(createdStores).toHaveLength(2);
   });
 });

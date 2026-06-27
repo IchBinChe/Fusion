@@ -112,7 +112,8 @@ Central health tracking keeps mutable project metrics, including:
 
 ## Global Concurrency Management
 
-A singleton central record enforces system-wide limits so one project cannot monopolize all execution slots. `globalConcurrency.currentlyActive` remains persisted slot bookkeeping maintained by acquire/free flows; live read-only running-agent displays derive `currentlyActive` and per-project active counts from `in-progress` tasks in already-open project stores, while the persisted `globalMaxConcurrent` cap and `queuedCount` continue to come from central concurrency state. The slot acquire/free limiter semantics and DB column names are unchanged.
+<!-- FNXC:GlobalConcurrencyControls 2026-06-26-18:35: Live global-concurrency readouts must count both in-progress executors and active triage planners because both hold concurrency slots; paused or non-planning triage rows stay excluded. -->
+A singleton central record enforces system-wide limits so one project cannot monopolize all execution slots. `globalConcurrency.currentlyActive` remains persisted slot bookkeeping maintained by acquire/free flows; live read-only running-agent displays derive `currentlyActive` and per-project active counts from in-progress tasks plus triage tasks with `status === "planning"` that are not paused in already-open project stores, while the persisted `globalMaxConcurrent` cap and `queuedCount` continue to come from central concurrency state. The slot acquire/free limiter semantics and DB column names are unchanged.
 
 ## Plugin Scope in Multi-Project Mode
 

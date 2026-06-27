@@ -158,9 +158,16 @@ export function listRegisteredProjectStores(): Array<{ projectId: string; store:
   return Array.from(storeCache.entries(), ([projectId, store]) => ({ projectId, store }));
 }
 
+/**
+ * FNXC:GlobalConcurrencyControls 2026-06-26-18:20:
+ * The live running-agent count must include actively-triaging agents because `triage` + `planning` tasks hold a global concurrency slot just like in-progress executors. Mirror the `maxTriageConcurrent` liveness predicate from `triage.ts` so the footer and Command Center do not under-count planning work.
+ */
 export async function countRunningAgentsInStore(store: TaskStore): Promise<number> {
-  const tasks = await store.listTasks({ column: "in-progress", slim: true });
-  return tasks.length;
+  const tasks = await store.listTasks({ slim: true });
+  return tasks.filter((task) => (
+    task.column === "in-progress" ||
+    (task.column === "triage" && task.status === "planning" && !task.paused)
+  )).length;
 }
 
 /**

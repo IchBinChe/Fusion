@@ -125,4 +125,4 @@ Use OS temp by default because visual probes are disposable scratch:
     display-info.json
 ```
 
-Use `.context/compound-engineering/ce-brainstorm-visual/<run-id>/` only when the user explicitly wants to inspect, preserve, or curate the sketches after the session. The final requirements doc in `docs/brainstorms/` is the durable artifact.
+Use `.context/compound-engineering/ce-brainstorm-visual/<run-id>/` only when the user explicitly wants to inspect, preserve, or curate the sketches after the session. The requirements-only unified plan in `docs/plans/` is the durable artifact.

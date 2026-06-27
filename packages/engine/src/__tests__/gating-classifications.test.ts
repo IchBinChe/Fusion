@@ -7,6 +7,7 @@ import {
   COORDINATION_EXEMPT_TOOLS,
   FILE_WRITE_DELETE_FN_TOOLS,
   NETWORK_API_TOOLS,
+  PERMANENT_AGENT_TASK_MUTATION_TOOLS,
   READONLY_FN_TOOLS,
   TASK_AGENT_MUTATION_TOOLS,
   classifyGitCommand,
@@ -94,11 +95,22 @@ const gitCases = [
 ] as const;
 
 const ACTION_MUTATION_PERMANENT_READONLY_TOOLS = new Set([
-  "fn_task_create",
   "fn_delegate_task",
   "fn_task_import_github",
   "fn_task_import_github_issue",
 ]);
+
+const policyMatrix = [
+  [unrestrictedPolicy, "allow"],
+  [approvalRequiredPolicy, "require-approval"],
+  [blockedPolicy, "block"],
+] as const;
+
+const permanentReadonlySiblingTaskCreationTools = [
+  "fn_delegate_task",
+  "fn_task_import_github",
+  "fn_task_import_github_issue",
+] as const;
 
 describe("gating-classifications parity", () => {
   it("locks coordination exempt membership", () => {
@@ -157,6 +169,50 @@ describe("gating-classifications parity", () => {
       category: "task_agent_mutation",
       disposition: "block",
     });
+    expect(resolvePermanentAgentToolDecision({ toolName, args: {}, gating: { permissionPolicy: blockedPolicy } })).toMatchObject({
+      category: "none",
+      disposition: "allow",
+      recognized: true,
+    });
+  });
+
+  it("governs fn_task_create as task_agent_mutation in both gate paths", () => {
+    expect(READONLY_FN_TOOLS.has("fn_task_create")).toBe(false);
+    expect(TASK_AGENT_MUTATION_TOOLS.has("fn_task_create")).toBe(true);
+    expect(ACTION_GATE_TASK_AGENT_MANAGEMENT_TOOLS.has("fn_task_create")).toBe(true);
+    expect(PERMANENT_AGENT_TASK_MUTATION_TOOLS.has("fn_task_create")).toBe(true);
+    expect(classifyPermanentAgentToolCall("fn_task_create")).toEqual({
+      category: "task_agent_mutation",
+      recognized: true,
+    });
+
+    for (const [permissionPolicy, disposition] of policyMatrix) {
+      expect(resolvePermanentAgentToolDecision({
+        toolName: "fn_task_create",
+        args: {},
+        gating: { permissionPolicy },
+      })).toMatchObject({
+        category: "task_agent_mutation",
+        disposition,
+        recognized: true,
+      });
+      expect(evaluateAgentActionGate({
+        agentId: "a1",
+        toolName: "fn_task_create",
+        args: {},
+        permissionPolicy,
+      })).toMatchObject({
+        category: "task_agent_mutation",
+        disposition,
+      });
+    }
+  });
+
+  it.each(permanentReadonlySiblingTaskCreationTools)("keeps sibling task creation tool %s permanent-readonly", (toolName) => {
+    expect(READONLY_FN_TOOLS.has(toolName)).toBe(true);
+    expect(ACTION_GATE_TASK_AGENT_MANAGEMENT_TOOLS.has(toolName)).toBe(true);
+    expect(PERMANENT_AGENT_TASK_MUTATION_TOOLS.has(toolName)).toBe(false);
+    expect(classifyPermanentAgentToolCall(toolName)).toEqual({ category: "none", recognized: true });
     expect(resolvePermanentAgentToolDecision({ toolName, args: {}, gating: { permissionPolicy: blockedPolicy } })).toMatchObject({
       category: "none",
       disposition: "allow",

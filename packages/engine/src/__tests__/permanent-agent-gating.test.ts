@@ -20,7 +20,6 @@ const FN_7111_GOVERNED_TOOLS = [
 
 const FN_3548_COORDINATION_TOOLS = [
   "fn_heartbeat_done",
-  "fn_task_create",
   "fn_task_log",
   "fn_task_document_write",
   "fn_task_document_read",
@@ -53,7 +52,7 @@ describe("permanent-agent-gating", () => {
   });
 
   it("classifies shared fn tools by behavior", () => {
-    expect(classifyPermanentAgentToolCall("fn_task_create").category).toBe("none");
+    expect(classifyPermanentAgentToolCall("fn_task_create").category).toBe("task_agent_mutation");
     expect(classifyPermanentAgentToolCall("fn_delegate_task").category).toBe("none");
     expect(classifyPermanentAgentToolCall("fn_update_agent_config").category).toBe("task_agent_mutation");
     expect(classifyPermanentAgentToolCall("fn_task_import_github").category).toBe("none");

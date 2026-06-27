@@ -36,13 +36,17 @@ export const COMMAND_EXECUTION_FN_TOOLS: ReadonlySet<string> = new Set([
 
 /**
  * FNXC:ToolGovernance 2026-06-27-11:24:
- * FN-7126 classifies task creation/delegation/import as task_agent_mutation in the action gate because they mutate the board and must honor operator approval/block policy. Keep the same tools in READONLY_FN_TOOLS for the permanent-agent gate, where they remain recognized `none` coordination primitives.
+ * FN-7126 classifies task creation/delegation/import as task_agent_mutation in the action gate because they mutate the board and must honor operator approval/block policy. In the permanent-agent gate, delegate/import tools remain recognized `none` coordination primitives while fn_task_create is governed separately as a board mutation.
+ *
+ * FNXC:ToolGovernance 2026-06-27-12:31:
+ * FN-7132 requires every live board-creation tool to avoid read-only classification in all gate paths. Classify fn_task_create as task_agent_mutation for both action and permanent agents so locked-down policies can block task-row creation; keep delegate and GitHub import tools in the action-only bucket until their permanent-agent coordination semantics are intentionally revisited.
  *
  * FNXC:ToolGovernance 2026-06-27-16:51:
  * Identity reflection stays out of this action-gate mutation-only list because it is heartbeat-critical coordination, not a task-board mutation. Keep it in COORDINATION_EXEMPT_TOOLS and READONLY_FN_TOOLS so exported mutation sets do not contradict action-gate exemption semantics.
  */
+const PERMANENT_AND_ACTION_TASK_AGENT_TOOLS = ["fn_task_create"] as const;
 const ACTION_GATE_TASK_AGENT_ONLY_TOOLS = [
-  "fn_task_create",
+  ...PERMANENT_AND_ACTION_TASK_AGENT_TOOLS,
   "fn_delegate_task",
   "fn_task_import_github",
   "fn_task_import_github_issue",
@@ -92,6 +96,7 @@ export const ACTION_GATE_TASK_AGENT_MANAGEMENT_TOOLS: ReadonlySet<string> = new 
 
 export const PERMANENT_AGENT_TASK_MUTATION_TOOLS: ReadonlySet<string> = new Set([
   ...SHARED_TASK_AGENT_TOOLS,
+  ...PERMANENT_AND_ACTION_TASK_AGENT_TOOLS,
   ...PERMANENT_TASK_AGENT_ONLY_TOOLS,
 ]);
 
@@ -122,7 +127,6 @@ export const READONLY_FN_TOOLS: ReadonlySet<string> = new Set([
   "fn_task_search",
   // FNXC:ToolGovernance 2026-06-27-00:00: `fn_task_get` is a deprecated recognition-only alias. It is no longer registered as a live tool, but historical/in-flight calls must still classify as read-only instead of falling through to unknown-tool handling.
   "fn_task_get",
-  "fn_task_create",
   "fn_task_document_write",
   "fn_task_document_read",
   "fn_delegate_task",

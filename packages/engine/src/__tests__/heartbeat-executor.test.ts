@@ -3030,8 +3030,8 @@ describe("executeHeartbeat", () => {
       expect(callArgs.systemPrompt).toContain("fn_task_document_write");
       expect(callArgs.tools).toBe("coding");
       // fn_artifact_register/list/view, agent config/provisioning, goals/evaluations/identity,
-      // workflow discovery, bounded research, clarification, web fetch, memory, and fn_heartbeat_done.
-      expect(callArgs.customTools).toHaveLength(29);
+      // task read discovery, workflow discovery, bounded research, clarification, web fetch, memory, and fn_heartbeat_done.
+      expect(callArgs.customTools).toHaveLength(32);
       expect(callArgs.customTools![0]!.name).toBe("fn_task_create");
       expect(callArgs.customTools![1]!.name).toBe("fn_task_log");
       expect(callArgs.customTools![2]!.name).toBe("fn_task_document_write");
@@ -3049,19 +3049,22 @@ describe("executeHeartbeat", () => {
       expect(callArgs.customTools![14]!.name).toBe("fn_goal_show");
       expect(callArgs.customTools![15]!.name).toBe("fn_read_evaluations");
       expect(callArgs.customTools![16]!.name).toBe("fn_update_identity");
-      expect(callArgs.customTools![17]!.name).toBe("fn_workflow_list");
-      expect(callArgs.customTools![18]!.name).toBe("fn_workflow_get");
-      expect(callArgs.customTools![19]!.name).toBe("fn_trait_list");
-      expect(callArgs.customTools![20]!.name).toBe("fn_ask_question");
-      expect(callArgs.customTools![21]!.name).toBe("fn_research_run");
-      expect(callArgs.customTools![22]!.name).toBe("fn_research_list");
-      expect(callArgs.customTools![23]!.name).toBe("fn_research_get");
-      expect(callArgs.customTools![24]!.name).toBe("fn_web_fetch");
-      expect(callArgs.customTools![25]!.name).toBe("fn_memory_search");
-      expect(callArgs.customTools![26]!.name).toBe("fn_memory_get");
-      expect(callArgs.customTools![27]!.name).toBe("fn_memory_append");
+      expect(callArgs.customTools![17]!.name).toBe("fn_task_list");
+      expect(callArgs.customTools![18]!.name).toBe("fn_task_show");
+      expect(callArgs.customTools![19]!.name).toBe("fn_task_search");
+      expect(callArgs.customTools![20]!.name).toBe("fn_workflow_list");
+      expect(callArgs.customTools![21]!.name).toBe("fn_workflow_get");
+      expect(callArgs.customTools![22]!.name).toBe("fn_trait_list");
+      expect(callArgs.customTools![23]!.name).toBe("fn_ask_question");
+      expect(callArgs.customTools![24]!.name).toBe("fn_research_run");
+      expect(callArgs.customTools![25]!.name).toBe("fn_research_list");
+      expect(callArgs.customTools![26]!.name).toBe("fn_research_get");
+      expect(callArgs.customTools![27]!.name).toBe("fn_web_fetch");
+      expect(callArgs.customTools![28]!.name).toBe("fn_memory_search");
+      expect(callArgs.customTools![29]!.name).toBe("fn_memory_get");
+      expect(callArgs.customTools![30]!.name).toBe("fn_memory_append");
       // fn_heartbeat_done is last (terminal tool)
-      expect(callArgs.customTools![28]!.name).toBe("fn_heartbeat_done");
+      expect(callArgs.customTools![31]!.name).toBe("fn_heartbeat_done");
     });
 
     it("loads workspace memory into system prompt and identity snapshot when inline memory is empty", async () => {

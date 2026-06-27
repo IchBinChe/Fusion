@@ -11,8 +11,9 @@ import { appendFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/p
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, relative, resolve } from "node:path";
+import * as fusionCore from "@fusion/core";
 import type { AgentState, AgentCapability, AgentUpdateInput, Artifact, ArtifactCreateInput, ArtifactWithTask, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore, WorkflowSettingDefinition, GoalStatus } from "@fusion/core";
-import { listTraits, isBuiltinWorkflowId, AgentStore, validateColumnAgentBindings, ColumnAgentBindingError, stripApprovalBypassFlags, WorkflowSettingRejectionError, resolveEffectiveSettingsById, resolveWorkflowIrById, findOrphanedSettingValues, BUILTIN_WORKFLOW_SETTINGS } from "@fusion/core";
+import { listTraits, isBuiltinWorkflowId, AgentStore, validateColumnAgentBindings, ColumnAgentBindingError, stripApprovalBypassFlags, WorkflowSettingRejectionError, resolveEffectiveSettingsById, resolveWorkflowIrById, findOrphanedSettingValues, BUILTIN_WORKFLOW_SETTINGS, MAX_TASK_LIST_TEXT_CHARS } from "@fusion/core";
 import { promoteHeldTask } from "./hold-release.js";
 import { DASHBOARD_USER_ID, canAgentTakeImplementationTaskForExplicitRouting, dailyMemoryPath, ensureOpenClawMemoryFiles, extractAgentProvisioningRequest, formatRoleMismatchReason, getMemoryBackendCapabilities, getProjectMemory, isEphemeralAgent, memoryLongTermPath, normalizeMessageParticipant, reconcileDeterministicDuplicate, resolveAgentProvisioningPolicy, resolveMemoryBackend, resolveResearchSettings, resolveTaskGithubTracking, runDeterministicDuplicateGuard, scheduleQmdProjectMemoryRefresh, searchProjectMemory, shouldSkipBackgroundQmdRefresh } from "@fusion/core";
 import { ResearchOrchestrator } from "./research-orchestrator.js";
@@ -56,6 +57,19 @@ export const taskCreateParams = Type.Object({
 export const taskLogParams = Type.Object({
   message: Type.String({ description: "What happened" }),
   outcome: Type.Optional(Type.String({ description: "Result or consequence (optional)" })),
+});
+
+export const taskListParams = Type.Object({});
+
+export const taskShowParams = Type.Object({
+  id: Type.String({ description: "Task ID (e.g. FN-001)" }),
+});
+
+export const taskSearchParams = Type.Object({
+  query: Type.String({ minLength: 1, description: "Search query" }),
+  includeDone: Type.Optional(Type.Boolean({ description: "Include done tasks (default true)" })),
+  includeArchived: Type.Optional(Type.Boolean({ description: "Include archived tasks (default true)" })),
+  limit: Type.Optional(Type.Number({ minimum: 1, maximum: 50, description: "Max results (default 20, max 50)" })),
 });
 
 export const acquireRepoWorktreeParams = Type.Object({
@@ -983,6 +997,151 @@ export function createTaskCreateTool(
       }
     },
   };
+}
+
+type TaskListClamp = (lines: string[], opts?: { maxChars?: number }) => string;
+type TaskListFormatter = (
+  lines: string[],
+  opts?: { maxChars?: number; clamp?: TaskListClamp },
+) => string;
+
+function inlineTaskReadListFallback(
+  lines: string[],
+  opts: { maxChars?: number } = {},
+): string {
+  const maxChars = Math.max(1, Math.floor(opts.maxChars ?? MAX_TASK_LIST_TEXT_CHARS));
+  try {
+    const text = lines.join("\n");
+    if (text.length <= maxChars) {
+      return text;
+    }
+    return text.slice(0, Math.max(0, maxChars - 1)) + "…";
+  } catch {
+    return "";
+  }
+}
+
+function resolveTaskReadListFormatter(core: { formatTaskListText?: unknown }): TaskListFormatter {
+  return typeof core.formatTaskListText === "function"
+    ? (core.formatTaskListText as TaskListFormatter)
+    : inlineTaskReadListFallback;
+}
+
+function formatTaskReadLines(lines: string[], emptyStateText: string): string {
+  if (lines.length === 0) {
+    return emptyStateText;
+  }
+  const formatter = resolveTaskReadListFormatter(fusionCore);
+  const text = formatter(lines, { clamp: fusionCore.clampTaskListText });
+  return text.trim().length > 0 ? text : emptyStateText;
+}
+
+function formatTaskSummaryLine(task: { id: string; column: string; title?: string | null; description: string; dependencies: string[] }): string {
+  const desc = task.title || task.description.slice(0, 80) || "(no description)";
+  const deps = task.dependencies.length ? ` [deps: ${task.dependencies.join(", ")}]` : "";
+  return `${task.id} (${task.column}): ${desc}${deps}`;
+}
+
+/**
+ * FNXC:AgentTooling 2026-06-27-14:05:
+ * Shared read-only task discovery factories must return host-safe text and be reusable by triage, chat/planning, and heartbeat surfaces. Heartbeat agents now receive task read tools through this single store-backed implementation instead of bespoke copies, while model-visible legacy `fn_task_get` surfaces remain separately pinned by drift tests.
+ */
+export function createTaskListTool(store: TaskStore): ToolDefinition {
+  return {
+    name: "fn_task_list",
+    label: "List Tasks",
+    description:
+      "List active tasks that aren't done or archived. Returns ID, description, column, " +
+      "and dependencies for each. Use to discover work and check for duplicates.",
+    parameters: taskListParams,
+    execute: async () => {
+      const tasks = await store.listTasks({ slim: true, includeArchived: false });
+      const active = tasks.filter((task) => task.column !== "done");
+      const lines = active.map(formatTaskSummaryLine);
+      return {
+        content: [{ type: "text" as const, text: formatTaskReadLines(lines, "No active tasks.") }],
+        details: { count: active.length },
+      };
+    },
+  };
+}
+
+export function createTaskSearchTool(store: TaskStore): ToolDefinition {
+  return {
+    name: "fn_task_search",
+    label: "Search Tasks",
+    description:
+      "Keyword search across tasks, including done and archived tasks by default. " +
+      "Use for duplicate detection and work discovery before filing new tasks.",
+    parameters: taskSearchParams,
+    execute: async (_id: string, params: Static<typeof taskSearchParams>) => {
+      const query = params.query.trim();
+      if (query.length === 0) {
+        return {
+          content: [{ type: "text" as const, text: "No tasks matched." }],
+          details: { count: 0 },
+        };
+      }
+      const limit = Math.min(50, Math.max(1, Math.floor(params.limit ?? 20)));
+      const results = await store.searchTasks(query, {
+        slim: true,
+        includeArchived: params.includeArchived ?? true,
+        limit,
+      });
+      const includeDone = params.includeDone ?? true;
+      const filtered = includeDone ? results : results.filter((task) => task.column !== "done");
+      const lines = filtered.map(formatTaskSummaryLine);
+      const text = formatTaskReadLines(
+        lines.length > 0 ? [`Search results for "${query}" (${filtered.length}):`, ...lines] : [],
+        "No tasks matched.",
+      );
+      return {
+        content: [{ type: "text" as const, text }],
+        details: { count: filtered.length },
+      };
+    },
+  };
+}
+
+export function createTaskShowTool(store: TaskStore): ToolDefinition {
+  return {
+    name: "fn_task_show",
+    label: "Show Task",
+    description: "Show full details for a task including its PROMPT.md content.",
+    parameters: taskShowParams,
+    execute: async (_id: string, params: Static<typeof taskShowParams>) => {
+      try {
+        const task = await store.getTask(params.id);
+        const parts = [
+          `ID: ${task.id}`,
+          task.title ? `Title: ${task.title}` : null,
+          `Column: ${task.column}`,
+          `Status: ${task.status ?? task.column}`,
+          `Description: ${task.description || "(no description)"}`,
+          task.dependencies.length ? `Dependencies: ${task.dependencies.join(", ")}` : null,
+          Array.isArray(task.steps) && task.steps.length
+            ? `Steps:\n${task.steps.map((step, index) => `  ${index}. ${step.name} — ${step.status}`).join("\n")}`
+            : null,
+          "",
+          "PROMPT.md:",
+          task.prompt || "(not yet specified)",
+        ].filter((part): part is string => typeof part === "string");
+        return {
+          content: [{ type: "text" as const, text: parts.join("\n") || `Task ${params.id} has no details.` }],
+          details: { taskId: task.id },
+        };
+      } catch {
+        return {
+          content: [{ type: "text" as const, text: `Task ${params.id} not found.` }],
+          details: {},
+        };
+      }
+    },
+  };
+}
+
+export function createTaskReadTools(store: TaskStore): ToolDefinition[] {
+  return [createTaskListTool(store), createTaskShowTool(store), createTaskSearchTool(store)];
 }
 
 /**

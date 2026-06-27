@@ -23,7 +23,7 @@ import { ApprovalRequestStore, buildExecutionMemoryInstructions, isEphemeralAgen
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "@earendil-works/pi-ai";
 import { createHash } from "node:crypto";
-import { createTaskCreateTool, createTaskLogToolWithContext, createTaskDocumentWriteTool, createTaskDocumentReadTool, createArtifactRegisterTool, createArtifactListTool, createArtifactViewTool, createListAgentsTool, createDelegateTaskTool, createGetAgentConfigTool, createUpdateAgentConfigTool, createAgentCreateTool, createAgentDeleteTool, createSendMessageTool, createReadMessagesTool, createPostRoomMessageTool, createMemoryTools, createGoalRetrievalTools, createReadEvaluationsTool, createUpdateIdentityTool, createReflectOnPerformanceTool, createWebFetchTool, createWorkflowListTool, createWorkflowGetTool, createTraitListTool, createAskQuestionTool, createResearchTools, readAgentMemoryWorkspaceLongTerm, taskCreateParams } from "./agent-tools.js";
+import { createTaskCreateTool, createTaskLogToolWithContext, createTaskDocumentWriteTool, createTaskDocumentReadTool, createTaskReadTools, createArtifactRegisterTool, createArtifactListTool, createArtifactViewTool, createListAgentsTool, createDelegateTaskTool, createGetAgentConfigTool, createUpdateAgentConfigTool, createAgentCreateTool, createAgentDeleteTool, createSendMessageTool, createReadMessagesTool, createPostRoomMessageTool, createMemoryTools, createGoalRetrievalTools, createReadEvaluationsTool, createUpdateIdentityTool, createReflectOnPerformanceTool, createWebFetchTool, createWorkflowListTool, createWorkflowGetTool, createTraitListTool, createAskQuestionTool, createResearchTools, readAgentMemoryWorkspaceLongTerm, taskCreateParams } from "./agent-tools.js";
 import { AgentLogger } from "./agent-logger.js";
 import {
   resolveAgentInstructionsWithRatings,
@@ -484,10 +484,11 @@ You are not expected to implement large code changes in no-task mode.
 Your job:
 1. Review your context — check messages, memory, and project state.
 2. Do ONE useful action: analyze, create follow-up tasks, delegate work, or update memory.
-3. Use fn_task_create to spawn follow-up work — but first scan the board/context for an existing open task covering the same work; do not duplicate.
-4. Use fn_list_agents and fn_delegate_task to coordinate with other agents.
-5. Use fn_get_agent_config and fn_update_agent_config to read/tune direct-report agents for better routing outcomes.
-6. Call fn_heartbeat_done when finished with an optional summary of what was accomplished.
+3. Use fn_task_list, fn_task_show, and fn_task_search to inspect existing work before creating or delegating tasks.
+4. Use fn_task_create to spawn follow-up work — but first scan the board/context for an existing open task covering the same work; do not duplicate.
+5. Use fn_list_agents and fn_delegate_task to coordinate with other agents.
+6. Use fn_get_agent_config and fn_update_agent_config to read/tune direct-report agents for better routing outcomes.
+7. Call fn_heartbeat_done when finished with an optional summary of what was accomplished.
 
 Examples of ONE useful action:
 - DO: create a clearly scoped task for a newly discovered reliability issue.
@@ -499,6 +500,7 @@ Examples of ONE useful action:
 Keep work lightweight — this is a single-pass ambient check, not a full implementation run.
 You have coding-capable workspace tools (read/write/edit/bash within worktree boundaries) plus:
 - fn_task_create
+- fn_task_list, fn_task_show, and fn_task_search
 - fn_list_agents and fn_delegate_task
 - fn_get_agent_config and fn_update_agent_config (for direct reports only)
 - fn_agent_create and fn_agent_delete (for direct reports only)
@@ -3418,6 +3420,9 @@ export class HeartbeatMonitor {
   /**
    * FNXC:AgentTooling 2026-06-27-04:20:
    * Permanent/custom heartbeat agents should receive the full safe coordination and work-discovery surface they may need; risky actions are governed at call time by AgentPermissionPolicy through wrapToolsWithActionGate, not by hiding tools from the session. Only expose mutating factories here when their tool names are classified by the action gate or are intentional benign coordination primitives.
+   *
+   * FNXC:AgentTooling 2026-06-27-14:21:
+   * Read-only task discovery tools are part of this shared heartbeat-safe surface so both no-task and task-scoped permanent/custom heartbeat runs can list, show, and search tasks for duplicate avoidance without bespoke tool copies.
    */
   private createSharedHeartbeatWorkTools(taskStore: TaskStore): ToolDefinition[] {
     const rootDir = this.rootDir ?? process.cwd();
@@ -3428,6 +3433,7 @@ export class HeartbeatMonitor {
     }).filter((tool) => tool.name !== "fn_research_cancel");
 
     return [
+      ...createTaskReadTools(taskStore),
       createWorkflowListTool(taskStore),
       createWorkflowGetTool(taskStore),
       createTraitListTool(),

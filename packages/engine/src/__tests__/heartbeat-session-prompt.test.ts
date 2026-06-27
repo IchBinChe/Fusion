@@ -113,6 +113,9 @@ describe("createHeartbeatTools", () => {
 
     const REQUIRED_NO_TASK_TOOLS = [
       "fn_task_create",
+      "fn_task_list",
+      "fn_task_show",
+      "fn_task_search",
       "fn_list_agents",
       "fn_delegate_task",
       "fn_get_agent_config",
@@ -180,7 +183,7 @@ describe("createHeartbeatTools", () => {
 
     const tools = monitor.createHeartbeatTools("agent-001", mockTaskStore, "FN-001");
 
-    expect(tools).toHaveLength(24);
+    expect(tools).toHaveLength(27);
     expect(tools[0]!.name).toBe("fn_task_create");
     expect(tools[1]!.name).toBe("fn_task_log");
     expect(tools[2]!.name).toBe("fn_task_document_write");
@@ -199,6 +202,9 @@ describe("createHeartbeatTools", () => {
     expect(tools[15]!.name).toBe("fn_read_evaluations");
     expect(tools[16]!.name).toBe("fn_update_identity");
     expect(tools.slice(17).map((tool) => tool.name)).toEqual([
+      "fn_task_list",
+      "fn_task_show",
+      "fn_task_search",
       "fn_workflow_list",
       "fn_workflow_get",
       "fn_trait_list",

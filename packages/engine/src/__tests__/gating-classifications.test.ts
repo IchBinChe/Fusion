@@ -125,7 +125,11 @@ describe("gating-classifications parity", () => {
         "fn_task_document_read",
         "fn_task_document_write",
         "fn_task_done",
+        "fn_task_get",
+        "fn_task_list",
         "fn_task_log",
+        "fn_task_search",
+        "fn_task_show",
         "fn_update_identity",
         "fn_workflow_list",
         "grep",
@@ -208,6 +212,17 @@ describe("gating-classifications parity", () => {
     expect(permanent).toEqual({ category: "none", recognized: true });
     expect(action).toMatchObject({ category: "exempt", disposition: "allow" });
     expect((COORDINATION_EXEMPT_TOOLS as readonly string[]).includes("fn_workflow_list")).toBe(true);
+  });
+
+  it.each(["fn_task_search", "fn_task_get", "fn_task_list", "fn_task_show"] as const)("classifies task read tool %s as read-only", (toolName) => {
+    expect(READONLY_FN_TOOLS.has(toolName)).toBe(true);
+    expect((COORDINATION_EXEMPT_TOOLS as readonly string[]).includes(toolName)).toBe(true);
+    expect(classifyPermanentAgentToolCall(toolName)).toEqual({ category: "none", recognized: true });
+    expect(evaluateAgentActionGate({ agentId: "a1", toolName, args: {}, permissionPolicy: blockedPolicy })).toMatchObject({
+      category: "exempt",
+      disposition: "allow",
+      operation: toolName,
+    });
   });
 
   it("keeps fn_* category equivalence mappings across gates", () => {

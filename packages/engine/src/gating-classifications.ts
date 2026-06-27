@@ -112,6 +112,9 @@ export const READONLY_FN_TOOLS: ReadonlySet<string> = new Set([
   "fn_artifact_view",
   "fn_task_list",
   "fn_task_show",
+  // FNXC:ToolGovernance 2026-06-27-14:16: Task search and legacy task-get surfaces are read-only duplicate-discovery tools; classify them positively so heartbeat/triage calls never rely on the unknown-tool exempt fallback.
+  "fn_task_search",
+  "fn_task_get",
   "fn_task_create",
   "fn_task_document_write",
   "fn_task_document_read",
@@ -161,6 +164,14 @@ export const COORDINATION_EXEMPT_TOOLS = [
   "fn_artifact_view",
   "fn_task_document_write",
   "fn_task_document_read",
+  /**
+   * FNXC:ToolGovernance 2026-06-27-15:22:
+   * Task list/show/search/get are read-only discovery tools. Put them on the action-gate exempt registry, not only READONLY_FN_TOOLS, because evaluateAgentActionGate recognizes coordination exemptions directly and otherwise unknown fn_task_* reads silently fall through to exempt allow.
+   */
+  "fn_task_list",
+  "fn_task_show",
+  "fn_task_search",
+  "fn_task_get",
   "fn_memory_search",
   "fn_memory_get",
   "fn_read_messages",

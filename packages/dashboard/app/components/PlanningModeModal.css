@@ -766,6 +766,14 @@ An empty footer must NOT reserve vertical space or paint its divider band. When 
   margin-top: var(--space-lg);
 }
 
+.planning-other-answer {
+  margin-top: var(--space-sm);
+}
+
+.planning-other-answer .planning-textarea {
+  min-height: calc(var(--space-md) * 5);
+}
+
 .planning-comment-label {
   display: block;
   margin-bottom: var(--space-xs);
@@ -1627,7 +1635,8 @@ Tablet embedded Planning keeps the desktop two-pane shell, so the summary footer
     font-size: 16px;
   }
 
-  .planning-comment-section .planning-textarea {
+  .planning-comment-section .planning-textarea,
+  .planning-other-answer .planning-textarea {
     min-height: calc(var(--space-md) * 5);
   }
 

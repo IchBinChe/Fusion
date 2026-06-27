@@ -424,6 +424,206 @@ describe("PlanningModeModal", () => {
       );
     });
 
+    it("allows Other-only answers for single-select planning questions", async () => {
+      window.sessionStorage.setItem("fusion-tab-id", "tab-self");
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />,
+      );
+
+      fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), {
+        target: { value: "Build auth system" },
+      });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      await waitFor(() => {
+        expect(screen.getByText("What is the scope?")).toBeDefined();
+      });
+
+      const continueButton = screen.getByRole("button", { name: "Continue" });
+      fireEvent.click(screen.getByTestId("planning-option-other"));
+      expect(continueButton).toBeDisabled();
+
+      const otherInput = screen.getByTestId("planning-other-input");
+      fireEvent.change(otherInput, { target: { value: "  Make this a design spike  " } });
+      expect(continueButton).toBeEnabled();
+      fireEvent.click(continueButton);
+
+      await waitFor(() => {
+        expect(mockRespondToPlanning).toHaveBeenCalledWith(
+          "session-123",
+          { _other: "Make this a design spike" },
+          undefined,
+          "tab-self",
+        );
+      });
+    });
+
+    it("clears stale Other text when switching back to a provided planning option", async () => {
+      window.sessionStorage.setItem("fusion-tab-id", "tab-self");
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />,
+      );
+
+      fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), {
+        target: { value: "Build auth system" },
+      });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      await waitFor(() => {
+        expect(screen.getByText("What is the scope?")).toBeDefined();
+      });
+
+      const continueButton = screen.getByRole("button", { name: "Continue" });
+      fireEvent.click(screen.getByTestId("planning-option-other"));
+      fireEvent.change(screen.getByTestId("planning-other-input"), { target: { value: "   " } });
+      expect(continueButton).toBeDisabled();
+      fireEvent.change(screen.getByTestId("planning-other-input"), { target: { value: "Ignore suggested scope" } });
+      expect(continueButton).toBeEnabled();
+
+      fireEvent.click(screen.getByText("Small"));
+      expect(screen.queryByTestId("planning-other-input")).toBeNull();
+      fireEvent.click(continueButton);
+
+      await waitFor(() => {
+        expect(mockRespondToPlanning).toHaveBeenCalledWith(
+          "session-123",
+          { "q-scope": "small" },
+          undefined,
+          "tab-self",
+        );
+      });
+    });
+
+    it("allows Other-only answers for multi-select planning questions", async () => {
+      window.sessionStorage.setItem("fusion-tab-id", "tab-self");
+      mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
+        setTimeout(() => {
+          handlers.onQuestion?.({
+            id: "q-priorities",
+            type: "multi_select",
+            question: "Which priorities matter?",
+            options: [
+              { id: "speed", label: "Speed" },
+              { id: "quality", label: "Quality" },
+            ],
+          });
+        }, 10);
+        return {
+          close: vi.fn(),
+          isConnected: vi.fn().mockReturnValue(true),
+        };
+      });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />,
+      );
+
+      fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), {
+        target: { value: "Build auth system" },
+      });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Which priorities matter?")).toBeDefined();
+      });
+
+      const continueButton = screen.getByRole("button", { name: "Continue" });
+      fireEvent.click(screen.getByTestId("planning-option-other"));
+      expect(continueButton).toBeDisabled();
+
+      const otherInput = screen.getByTestId("planning-other-input");
+      fireEvent.change(otherInput, { target: { value: "  Challenge the premise  " } });
+      expect(continueButton).toBeEnabled();
+      fireEvent.click(continueButton);
+
+      await waitFor(() => {
+        expect(mockRespondToPlanning).toHaveBeenCalledWith(
+          "session-123",
+          { _other: "Challenge the premise" },
+          undefined,
+          "tab-self",
+        );
+      });
+    });
+
+    it("combines provided options with Other text for multi-select planning questions on mobile", async () => {
+      window.sessionStorage.setItem("fusion-tab-id", "tab-self");
+      mockViewport("mobile");
+      mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
+        setTimeout(() => {
+          handlers.onQuestion?.({
+            id: "q-priorities",
+            type: "multi_select",
+            question: "Which priorities matter?",
+            options: [
+              { id: "speed", label: "Speed" },
+              { id: "quality", label: "Quality" },
+            ],
+          });
+        }, 10);
+        return {
+          close: vi.fn(),
+          isConnected: vi.fn().mockReturnValue(true),
+        };
+      });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />,
+      );
+
+      fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), {
+        target: { value: "Build auth system" },
+      });
+      fireEvent.click(screen.getByText("Start Planning"));
+
+      await waitFor(() => {
+        expect(screen.getByText("Which priorities matter?")).toBeDefined();
+      });
+
+      const continueButton = screen.getByRole("button", { name: "Continue" });
+      fireEvent.click(screen.getByText("Speed"));
+      fireEvent.click(screen.getByTestId("planning-option-other"));
+      const otherInput = screen.getByTestId("planning-other-input");
+      fireEvent.change(otherInput, { target: { value: "  Preserve operator control  " } });
+      expect(continueButton).toBeEnabled();
+      fireEvent.click(continueButton);
+
+      await waitFor(() => {
+        expect(mockRespondToPlanning).toHaveBeenCalledWith(
+          "session-123",
+          { "q-priorities": ["speed"], _other: "Preserve operator control" },
+          undefined,
+          "tab-self",
+        );
+      });
+    });
+
     it("shows stop action in loading and stops generation", async () => {
       let streamHandlers: any;
       const closeSpy = vi.fn();

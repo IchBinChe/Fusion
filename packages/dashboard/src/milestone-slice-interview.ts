@@ -653,12 +653,13 @@ export function getRateLimitResetTime(ip: string): Date | null {
 /**
  * Format user response as a message for the AI agent.
  */
-function formatResponseForAgent(
+export function formatResponseForAgent(
   question: PlanningQuestion,
   responses: Record<string, unknown>
 ): string {
   const responseValue = responses[question.id];
   const comment = typeof responses._comment === "string" ? responses._comment.trim() : "";
+  const other = typeof responses._other === "string" ? responses._other.trim() : "";
 
   let formatted: string;
 
@@ -667,6 +668,14 @@ function formatResponseForAgent(
       formatted = `Question: ${question.question}\n\nAnswer: ${responseValue}`;
       break;
     case "single_select":
+      /*
+      FNXC:PlanningInterview 2026-06-26-00:00:
+      GitHub #1794 requires milestone/slice Other-only single-select answers to reach the agent as the user's own answer rather than an undefined fallback or unwanted provided option.
+      */
+      if (other.length > 0) {
+        formatted = `Question: ${question.question}\n\nSelected: ${other} (user's own answer)`;
+        break;
+      }
       if (typeof responseValue === "string") {
         const option = question.options?.find((o) => o.id === responseValue);
         formatted = `Question: ${question.question}\n\nSelected: ${option?.label || responseValue}`;
@@ -675,11 +684,18 @@ function formatResponseForAgent(
       formatted = `Question: ${question.question}\n\nAnswer: ${responseValue}`;
       break;
     case "multi_select":
-      if (Array.isArray(responseValue)) {
-        const selected = responseValue.map((id) => {
+      if (Array.isArray(responseValue) || other.length > 0) {
+        const selected = Array.isArray(responseValue) ? responseValue.map((id) => {
           const option = question.options?.find((o) => o.id === id);
           return option?.label || id;
-        });
+        }) : [];
+        /*
+        FNXC:PlanningInterview 2026-06-26-00:00:
+        Milestone/slice multi-select Other answers are additive context; append the free-text answer to selected labels and keep Other-only payloads explicit for the agent.
+        */
+        if (other.length > 0) {
+          selected.push(`${other} (user's own answer)`);
+        }
         formatted = `Question: ${question.question}\n\nSelected: ${selected.join(", ")}`;
         break;
       }
@@ -767,7 +783,41 @@ export async function createTargetInterviewAgent(
   });
 }
 
-function formatInterviewHistory(
+function formatTargetInterviewHistoryAnswer(question: PlanningQuestion, responseValue: unknown, other: string): string {
+  switch (question.type) {
+    case "single_select": {
+      if (other.length > 0) {
+        return `${other} (user's own answer)`;
+      }
+      if (typeof responseValue === "string") {
+        const option = question.options?.find((candidate) => candidate.id === responseValue);
+        return option?.label || responseValue;
+      }
+      return String(responseValue ?? "");
+    }
+    case "multi_select": {
+      const selected = Array.isArray(responseValue) ? responseValue.map((id) => {
+        if (typeof id !== "string") {
+          return String(id);
+        }
+        const option = question.options?.find((candidate) => candidate.id === id);
+        return option?.label || id;
+      }) : [];
+      if (other.length > 0) {
+        selected.push(`${other} (user's own answer)`);
+      }
+      return selected.length > 0 ? selected.join(", ") : String(responseValue ?? "");
+    }
+    case "confirm":
+      return responseValue === true ? "Yes" : "No";
+    case "text":
+      return typeof responseValue === "string" ? responseValue : String(responseValue ?? "");
+    default:
+      return JSON.stringify(responseValue ?? null);
+  }
+}
+
+export function formatInterviewHistory(
   history: Array<{ question: PlanningQuestion; response: unknown }>,
 ): string {
   if (history.length === 0) {
@@ -782,10 +832,11 @@ function formatInterviewHistory(
           : undefined;
       const responseValue = responseRecord ? responseRecord[question.id] : response;
       const comment = typeof responseRecord?._comment === "string" ? responseRecord._comment.trim() : "";
+      const other = typeof responseRecord?._other === "string" ? responseRecord._other.trim() : "";
 
       const lines = [
         `Q: ${question.question}`,
-        `A: ${typeof responseValue === "string" ? responseValue : JSON.stringify(responseValue ?? null)}`,
+        `A: ${formatTargetInterviewHistoryAnswer(question, responseValue, other)}`,
       ];
 
       if (comment.length > 0) {

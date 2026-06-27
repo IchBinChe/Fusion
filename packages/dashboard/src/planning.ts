@@ -2421,12 +2421,13 @@ export function stopGeneration(sessionId: string): boolean {
 /**
  * Format user response as a message for the AI agent.
  */
-function formatResponseForAgent(
+export function formatResponseForAgent(
   question: PlanningQuestion,
   responses: Record<string, unknown>
 ): string {
   const responseValue = responses[question.id];
   const comment = typeof responses._comment === "string" ? responses._comment.trim() : "";
+  const other = typeof responses._other === "string" ? responses._other.trim() : "";
 
   let formatted: string;
 
@@ -2436,6 +2437,14 @@ function formatResponseForAgent(
       break;
 
     case "single_select":
+      /*
+      FNXC:PlanningInterview 2026-06-26-00:00:
+      GitHub #1794 requires Other-only single-select answers to reach the planning agent as the user's own answer instead of forcing a provided option id or rendering an undefined fallback.
+      */
+      if (other.length > 0) {
+        formatted = `Question: ${question.question}\n\nSelected: ${other} (user's own answer)`;
+        break;
+      }
       if (typeof responseValue === "string") {
         const option = question.options?.find((o) => o.id === responseValue);
         formatted = `Question: ${question.question}\n\nSelected: ${option?.label || responseValue}`;
@@ -2445,11 +2454,18 @@ function formatResponseForAgent(
       break;
 
     case "multi_select":
-      if (Array.isArray(responseValue)) {
-        const selected = responseValue.map((id) => {
+      if (Array.isArray(responseValue) || other.length > 0) {
+        const selected = Array.isArray(responseValue) ? responseValue.map((id) => {
           const option = question.options?.find((o) => o.id === id);
           return option?.label || id;
-        });
+        }) : [];
+        /*
+        FNXC:PlanningInterview 2026-06-26-00:00:
+        Multi-select Other answers are additive agent context; append the free-text answer to the selected list and keep Other-only payloads from collapsing to a blank/undefined answer.
+        */
+        if (other.length > 0) {
+          selected.push(`${other} (user's own answer)`);
+        }
         formatted = `Question: ${question.question}\n\nSelected: ${selected.join(", ")}`;
         break;
       }
@@ -2493,30 +2509,34 @@ function disposeSessionAgentForRetry(session: Session): void {
   session.agent = undefined;
 }
 
-function formatInterviewAnswer(question: PlanningQuestion, responseValue: unknown): string {
+function formatInterviewAnswer(question: PlanningQuestion, responseValue: unknown, other = ""): string {
   switch (question.type) {
     case "text":
       return typeof responseValue === "string" ? responseValue : String(responseValue ?? "");
 
     case "single_select":
+      if (other.length > 0) {
+        return `${other} (user's own answer)`;
+      }
       if (typeof responseValue === "string") {
         const option = question.options?.find((candidate) => candidate.id === responseValue);
         return option?.label || responseValue;
       }
       return String(responseValue ?? "");
 
-    case "multi_select":
-      if (Array.isArray(responseValue)) {
-        const selected = responseValue.map((id) => {
-          if (typeof id !== "string") {
-            return String(id);
-          }
-          const option = question.options?.find((candidate) => candidate.id === id);
-          return option?.label || id;
-        });
-        return selected.join(", ");
+    case "multi_select": {
+      const selected = Array.isArray(responseValue) ? responseValue.map((id) => {
+        if (typeof id !== "string") {
+          return String(id);
+        }
+        const option = question.options?.find((candidate) => candidate.id === id);
+        return option?.label || id;
+      }) : [];
+      if (other.length > 0) {
+        selected.push(`${other} (user's own answer)`);
       }
-      return String(responseValue ?? "");
+      return selected.length > 0 ? selected.join(", ") : String(responseValue ?? "");
+    }
 
     case "confirm":
       return responseValue === true ? "Yes" : "No";
@@ -2543,8 +2563,9 @@ export function formatInterviewQA(
         : undefined;
     const responseValue = responseRecord ? responseRecord[question.id] : response;
     const comment = typeof responseRecord?._comment === "string" ? responseRecord._comment.trim() : "";
+    const other = typeof responseRecord?._other === "string" ? responseRecord._other.trim() : "";
 
-    const answerLine = `**Q: ${question.question}**\nA: ${formatInterviewAnswer(question, responseValue)}`;
+    const answerLine = `**Q: ${question.question}**\nA: ${formatInterviewAnswer(question, responseValue, other)}`;
     return comment.length > 0 ? `${answerLine}\nComment: ${comment}` : answerLine;
   });
 

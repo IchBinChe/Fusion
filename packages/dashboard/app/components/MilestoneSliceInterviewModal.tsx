@@ -36,6 +36,8 @@ import { useViewportMode } from "../hooks/useViewportMode";
 import { getSessionTabId } from "../utils/getSessionTabId";
 
 const WARNING_ICON = "⚠️";
+const MILESTONE_SLICE_OTHER_RESPONSE_KEY = "_other";
+const MILESTONE_SLICE_OTHER_OPTION_ID = "__other__";
 
 interface MilestoneSliceInterviewModalProps {
   isOpen: boolean;
@@ -645,9 +647,12 @@ interface InterviewQuestionFormProps {
 
 function InterviewQuestionForm({ question, progress, historyEntries, onSubmit }: InterviewQuestionFormProps) {
   const { t } = useTranslation("app");
+  const questionOptions = question.options ?? [];
   const [response, setResponse] = useState<QuestionResponse>({});
   const [textValue, setTextValue] = useState("");
   const [commentValue, setCommentValue] = useState("");
+  const [otherValue, setOtherValue] = useState("");
+  const [isOtherSelected, setIsOtherSelected] = useState(false);
 
   const handleSubmit = useCallback(() => {
     let nextResponse: QuestionResponse;
@@ -656,6 +661,24 @@ function InterviewQuestionForm({ question, progress, historyEntries, onSubmit }:
       nextResponse = { [question.id]: textValue };
     } else if (question.type === "confirm") {
       nextResponse = { [question.id]: response[question.id] === true };
+    } else if (question.type === "single_select") {
+      const trimmedOther = otherValue.trim();
+      /*
+      FNXC:PlanningInterview 2026-06-26-00:00:
+      GitHub #1794 requires milestone and slice interviews to let users decline every AI-provided single-select option and submit their own answer through `_other`.
+      */
+      nextResponse = isOtherSelected && trimmedOther.length > 0
+        ? { [MILESTONE_SLICE_OTHER_RESPONSE_KEY]: trimmedOther }
+        : response;
+    } else if (question.type === "multi_select") {
+      const trimmedOther = otherValue.trim();
+      /*
+      FNXC:PlanningInterview 2026-06-26-00:00:
+      Milestone and slice multi-select questions must support Other-only answers and Other-plus-option answers without forcing users into suggested choices they reject.
+      */
+      nextResponse = isOtherSelected && trimmedOther.length > 0
+        ? { ...response, [MILESTONE_SLICE_OTHER_RESPONSE_KEY]: trimmedOther }
+        : response;
     } else {
       nextResponse = response;
     }
@@ -666,12 +689,14 @@ function InterviewQuestionForm({ question, progress, historyEntries, onSubmit }:
     }
 
     onSubmit(nextResponse);
-  }, [commentValue, question, response, textValue, onSubmit]);
+  }, [commentValue, isOtherSelected, otherValue, question, response, textValue, onSubmit]);
 
   useEffect(() => {
     setResponse({});
     setTextValue("");
     setCommentValue("");
+    setOtherValue("");
+    setIsOtherSelected(false);
   }, [question.id]);
 
   const isValid = () => {
@@ -679,9 +704,17 @@ function InterviewQuestionForm({ question, progress, historyEntries, onSubmit }:
       case "text":
         return textValue.trim().length > 0;
       case "single_select":
-        return response[question.id] !== undefined;
+        /*
+        FNXC:PlanningInterview 2026-06-26-00:00:
+        Continue is valid for milestone/slice single-select questions when the user writes a non-empty Other answer, even with no provided option selected.
+        */
+        return response[question.id] !== undefined || (isOtherSelected && otherValue.trim().length > 0);
       case "multi_select":
-        return Array.isArray(response[question.id] as unknown) && (response[question.id] as unknown[]).length > 0;
+        /*
+        FNXC:PlanningInterview 2026-06-26-00:00:
+        Continue is valid for milestone/slice multi-select questions when Other has non-whitespace text, including the Other-only case.
+        */
+        return (Array.isArray(response[question.id] as unknown) && (response[question.id] as unknown[]).length > 0) || (isOtherSelected && otherValue.trim().length > 0);
       case "confirm":
         return response[question.id] !== undefined;
       default:
@@ -735,16 +768,20 @@ function InterviewQuestionForm({ question, progress, historyEntries, onSubmit }:
                 />
               )}
 
-              {question.type === "single_select" && question.options && (
+              {question.type === "single_select" && (
                 <div className="planning-radio-group" role="radiogroup">
-                  {question.options.map((option) => (
+                  {questionOptions.map((option) => (
                     <label key={option.id} className="planning-option planning-option--radio">
                       <input
                         type="radio"
                         name={question.id}
                         value={option.id}
-                        checked={response[question.id] === option.id}
-                        onChange={() => setResponse({ [question.id]: option.id })}
+                        checked={response[question.id] === option.id && !isOtherSelected}
+                        onChange={() => {
+                          setIsOtherSelected(false);
+                          setOtherValue("");
+                          setResponse({ [question.id]: option.id });
+                        }}
                       />
                       <div className="planning-option-content">
                         <span className="planning-option-label">{option.label}</span>
@@ -754,12 +791,40 @@ function InterviewQuestionForm({ question, progress, historyEntries, onSubmit }:
                       </div>
                     </label>
                   ))}
+                  {/* FNXC:PlanningInterview 2026-06-26-00:00: The synthetic Other radio keeps milestone/slice interviews redirectable when every provided answer is wrong for the user's intent. */}
+                  <label className="planning-option planning-option--radio" data-testid="planning-option-other">
+                    <input
+                      type="radio"
+                      name={question.id}
+                      value={MILESTONE_SLICE_OTHER_OPTION_ID}
+                      checked={isOtherSelected}
+                      onChange={() => {
+                        setIsOtherSelected(true);
+                        setResponse({});
+                      }}
+                    />
+                    <div className="planning-option-content">
+                      <span className="planning-option-label">{t("interview.otherOptionLabel", "Other (write your own)")}</span>
+                    </div>
+                  </label>
+                  {isOtherSelected && (
+                    <div className="planning-other-answer">
+                      <textarea
+                        className="planning-textarea"
+                        data-testid="planning-other-input"
+                        rows={2}
+                        placeholder={t("interview.otherOptionPlaceholder", "Write your own answer...")}
+                        value={otherValue}
+                        onChange={(e) => setOtherValue(e.target.value)}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 
-              {question.type === "multi_select" && question.options && (
+              {question.type === "multi_select" && (
                 <div className="planning-checkbox-group">
-                  {question.options.map((option) => {
+                  {questionOptions.map((option) => {
                     const selected = (response[question.id] as string[]) || [];
                     return (
                       <label key={option.id} className="planning-option planning-option--checkbox">
@@ -783,6 +848,35 @@ function InterviewQuestionForm({ question, progress, historyEntries, onSubmit }:
                       </label>
                     );
                   })}
+                  {/* FNXC:PlanningInterview 2026-06-26-00:00: The synthetic Other checkbox lets milestone/slice users submit their own answer by itself or alongside provided options. */}
+                  <label className="planning-option planning-option--checkbox" data-testid="planning-option-other">
+                    <input
+                      type="checkbox"
+                      value={MILESTONE_SLICE_OTHER_OPTION_ID}
+                      checked={isOtherSelected}
+                      onChange={(e) => {
+                        setIsOtherSelected(e.target.checked);
+                        if (!e.target.checked) {
+                          setOtherValue("");
+                        }
+                      }}
+                    />
+                    <div className="planning-option-content">
+                      <span className="planning-option-label">{t("interview.otherOptionLabel", "Other (write your own)")}</span>
+                    </div>
+                  </label>
+                  {isOtherSelected && (
+                    <div className="planning-other-answer">
+                      <textarea
+                        className="planning-textarea"
+                        data-testid="planning-other-input"
+                        rows={2}
+                        placeholder={t("interview.otherOptionPlaceholder", "Write your own answer...")}
+                        value={otherValue}
+                        onChange={(e) => setOtherValue(e.target.value)}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 

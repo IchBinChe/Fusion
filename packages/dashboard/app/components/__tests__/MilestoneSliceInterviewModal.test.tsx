@@ -454,6 +454,319 @@ describe("MilestoneSliceInterviewModal", () => {
   });
 
   describe("comment input", () => {
+    it("submits trimmed Other-only answers for single-select milestone questions", async () => {
+      mockStartMilestoneInterview.mockResolvedValue({ sessionId: "session-123" });
+
+      render(
+        <MilestoneSliceInterviewModal
+          isOpen={true}
+          onClose={vi.fn()}
+          onApplied={vi.fn()}
+          targetType="milestone"
+          targetId="MS-001"
+          targetTitle="Test Milestone"
+          projectId="test-project"
+        />,
+      );
+
+      fireEvent.click(screen.getByText("Start Interview"));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Preparing next question/)).toBeDefined();
+      });
+
+      act(() => {
+        streamHandlers.onQuestion(SAMPLE_QUESTION);
+      });
+
+      await screen.findByText("What is the target scope?");
+      const continueButton = screen.getByRole("button", { name: /Continue/ });
+      fireEvent.click(screen.getByTestId("planning-option-other"));
+      expect(continueButton).toBeDisabled();
+
+      fireEvent.change(screen.getByTestId("planning-other-input"), {
+        target: { value: "  Split this differently  " },
+      });
+      expect(continueButton).toBeEnabled();
+      fireEvent.click(continueButton);
+
+      await waitFor(() => {
+        expect(mockRespondToMilestoneInterview).toHaveBeenCalledWith(
+          "session-123",
+          { _other: "Split this differently" },
+          "test-project",
+          "test-tab-id",
+        );
+      });
+    });
+
+    it("renders Other for single-select milestone questions with no provided options", async () => {
+      mockStartMilestoneInterview.mockResolvedValue({ sessionId: "session-123" });
+
+      render(
+        <MilestoneSliceInterviewModal
+          isOpen={true}
+          onClose={vi.fn()}
+          onApplied={vi.fn()}
+          targetType="milestone"
+          targetId="MS-001"
+          targetTitle="Test Milestone"
+          projectId="test-project"
+        />,
+      );
+
+      fireEvent.click(screen.getByText("Start Interview"));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Preparing next question/)).toBeDefined();
+      });
+
+      act(() => {
+        streamHandlers.onQuestion({
+          id: "open_scope",
+          type: "single_select",
+          question: "What is the target scope?",
+        });
+      });
+
+      await screen.findByText("What is the target scope?");
+      const continueButton = screen.getByRole("button", { name: /Continue/ });
+      expect(screen.getByTestId("planning-option-other")).toBeInTheDocument();
+      fireEvent.click(screen.getByTestId("planning-option-other"));
+      expect(continueButton).toBeDisabled();
+
+      fireEvent.change(screen.getByTestId("planning-other-input"), {
+        target: { value: "  Define a custom scope  " },
+      });
+      expect(continueButton).toBeEnabled();
+      fireEvent.click(continueButton);
+
+      await waitFor(() => {
+        expect(mockRespondToMilestoneInterview).toHaveBeenCalledWith(
+          "session-123",
+          { _other: "Define a custom scope" },
+          "test-project",
+          "test-tab-id",
+        );
+      });
+    });
+
+    it("clears stale Other text when unchecking Other in multi-select slice questions", async () => {
+      mockStartSliceInterview.mockResolvedValue({ sessionId: "slice-session-123" });
+
+      render(
+        <MilestoneSliceInterviewModal
+          isOpen={true}
+          onClose={vi.fn()}
+          onApplied={vi.fn()}
+          targetType="slice"
+          targetId="SL-001"
+          targetTitle="Test Slice"
+          projectId="test-project"
+        />,
+      );
+
+      fireEvent.click(screen.getByText("Start Interview"));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Preparing next question/)).toBeDefined();
+      });
+
+      act(() => {
+        streamHandlers.onQuestion({
+          id: "priorities",
+          type: "multi_select",
+          question: "Which priorities matter?",
+          options: [
+            { id: "speed", label: "Speed" },
+            { id: "quality", label: "Quality" },
+          ],
+        });
+      });
+
+      await screen.findByText("Which priorities matter?");
+      const continueButton = screen.getByRole("button", { name: /Continue/ });
+      fireEvent.click(screen.getByTestId("planning-option-other"));
+      fireEvent.change(screen.getByTestId("planning-other-input"), { target: { value: "   " } });
+      expect(continueButton).toBeDisabled();
+      fireEvent.change(screen.getByTestId("planning-other-input"), {
+        target: { value: "Keep this manual" },
+      });
+      expect(continueButton).toBeEnabled();
+
+      fireEvent.click(screen.getByText("Speed"));
+      fireEvent.click(screen.getByTestId("planning-option-other"));
+      expect(screen.queryByTestId("planning-other-input")).toBeNull();
+      fireEvent.click(continueButton);
+
+      await waitFor(() => {
+        expect(mockRespondToSliceInterview).toHaveBeenCalledWith(
+          "slice-session-123",
+          { priorities: ["speed"] },
+          "test-project",
+          "test-tab-id",
+        );
+      });
+    });
+
+    it("submits Other-only answers for multi-select slice questions", async () => {
+      mockStartSliceInterview.mockResolvedValue({ sessionId: "slice-session-123" });
+
+      render(
+        <MilestoneSliceInterviewModal
+          isOpen={true}
+          onClose={vi.fn()}
+          onApplied={vi.fn()}
+          targetType="slice"
+          targetId="SL-001"
+          targetTitle="Test Slice"
+          projectId="test-project"
+        />,
+      );
+
+      fireEvent.click(screen.getByText("Start Interview"));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Preparing next question/)).toBeDefined();
+      });
+
+      act(() => {
+        streamHandlers.onQuestion({
+          id: "priorities",
+          type: "multi_select",
+          question: "Which priorities matter?",
+          options: [
+            { id: "speed", label: "Speed" },
+            { id: "quality", label: "Quality" },
+          ],
+        });
+      });
+
+      await screen.findByText("Which priorities matter?");
+      const continueButton = screen.getByRole("button", { name: /Continue/ });
+      fireEvent.click(screen.getByTestId("planning-option-other"));
+      expect(continueButton).toBeDisabled();
+
+      fireEvent.change(screen.getByTestId("planning-other-input"), {
+        target: { value: "  Reframe around dependencies  " },
+      });
+      expect(continueButton).toBeEnabled();
+      fireEvent.click(continueButton);
+
+      await waitFor(() => {
+        expect(mockRespondToSliceInterview).toHaveBeenCalledWith(
+          "slice-session-123",
+          { _other: "Reframe around dependencies" },
+          "test-project",
+          "test-tab-id",
+        );
+      });
+    });
+
+    it("renders Other for multi-select slice questions with no provided options", async () => {
+      mockStartSliceInterview.mockResolvedValue({ sessionId: "slice-session-123" });
+
+      render(
+        <MilestoneSliceInterviewModal
+          isOpen={true}
+          onClose={vi.fn()}
+          onApplied={vi.fn()}
+          targetType="slice"
+          targetId="SL-001"
+          targetTitle="Test Slice"
+          projectId="test-project"
+        />,
+      );
+
+      fireEvent.click(screen.getByText("Start Interview"));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Preparing next question/)).toBeDefined();
+      });
+
+      act(() => {
+        streamHandlers.onQuestion({
+          id: "open_priorities",
+          type: "multi_select",
+          question: "Which priorities matter?",
+        });
+      });
+
+      await screen.findByText("Which priorities matter?");
+      const continueButton = screen.getByRole("button", { name: /Continue/ });
+      expect(screen.getByTestId("planning-option-other")).toBeInTheDocument();
+      fireEvent.click(screen.getByTestId("planning-option-other"));
+      expect(continueButton).toBeDisabled();
+
+      fireEvent.change(screen.getByTestId("planning-other-input"), {
+        target: { value: "  Ask customers first  " },
+      });
+      expect(continueButton).toBeEnabled();
+      fireEvent.click(continueButton);
+
+      await waitFor(() => {
+        expect(mockRespondToSliceInterview).toHaveBeenCalledWith(
+          "slice-session-123",
+          { _other: "Ask customers first" },
+          "test-project",
+          "test-tab-id",
+        );
+      });
+    });
+
+    it("combines provided options with Other text for multi-select slice questions", async () => {
+      mockStartSliceInterview.mockResolvedValue({ sessionId: "slice-session-123" });
+
+      render(
+        <MilestoneSliceInterviewModal
+          isOpen={true}
+          onClose={vi.fn()}
+          onApplied={vi.fn()}
+          targetType="slice"
+          targetId="SL-001"
+          targetTitle="Test Slice"
+          projectId="test-project"
+        />,
+      );
+
+      fireEvent.click(screen.getByText("Start Interview"));
+
+      await waitFor(() => {
+        expect(screen.getByText(/Preparing next question/)).toBeDefined();
+      });
+
+      act(() => {
+        streamHandlers.onQuestion({
+          id: "priorities",
+          type: "multi_select",
+          question: "Which priorities matter?",
+          options: [
+            { id: "speed", label: "Speed" },
+            { id: "quality", label: "Quality" },
+          ],
+        });
+      });
+
+      await screen.findByText("Which priorities matter?");
+      const continueButton = screen.getByRole("button", { name: /Continue/ });
+      fireEvent.click(screen.getByText("Speed"));
+      fireEvent.click(screen.getByTestId("planning-option-other"));
+      fireEvent.change(screen.getByTestId("planning-other-input"), {
+        target: { value: "  Preserve manual review  " },
+      });
+      expect(continueButton).toBeEnabled();
+      fireEvent.click(continueButton);
+
+      await waitFor(() => {
+        expect(mockRespondToSliceInterview).toHaveBeenCalledWith(
+          "slice-session-123",
+          { priorities: ["speed"], _other: "Preserve manual review" },
+          "test-project",
+          "test-tab-id",
+        );
+      });
+    });
+
     it("shows comment textarea and submits _comment in milestone interview", async () => {
       mockStartMilestoneInterview.mockResolvedValue({ sessionId: "session-123" });
 

@@ -617,6 +617,250 @@ describe("MissionInterviewModal", () => {
     });
   });
 
+  it("submits trimmed Other-only answers for single-select mission questions", async () => {
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("What do you want to build?"), {
+      target: { value: "Build a mission planning workflow" },
+    });
+    fireEvent.click(screen.getByText("Start Interview"));
+
+    await waitFor(() => {
+      expect(streamHandlers).toBeDefined();
+    });
+
+    act(() => {
+      streamHandlers.onQuestion?.(SAMPLE_QUESTION);
+    });
+
+    const continueButton = await screen.findByRole("button", { name: "Continue" });
+    fireEvent.click(screen.getByTestId("planning-option-other"));
+    expect(continueButton).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId("planning-other-input"), {
+      target: { value: "  Start with discovery instead  " },
+    });
+    expect(continueButton).toBeEnabled();
+    fireEvent.click(continueButton);
+
+    await waitFor(() => {
+      expect(mockRespondToMissionInterview).toHaveBeenCalledWith(
+        "mission-session-1",
+        { _other: "Start with discovery instead" },
+        undefined,
+        expect.any(String),
+      );
+    });
+  });
+
+  it("renders Other for single-select mission questions with no provided options", async () => {
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("What do you want to build?"), {
+      target: { value: "Build a mission planning workflow" },
+    });
+    fireEvent.click(screen.getByText("Start Interview"));
+
+    await waitFor(() => {
+      expect(streamHandlers).toBeDefined();
+    });
+
+    act(() => {
+      streamHandlers.onQuestion?.({
+        id: "open_scope",
+        type: "single_select",
+        question: "What scope should we use?",
+      });
+    });
+
+    const continueButton = await screen.findByRole("button", { name: "Continue" });
+    expect(screen.getByTestId("planning-option-other")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("planning-option-other"));
+    expect(continueButton).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId("planning-other-input"), {
+      target: { value: "  Define a custom scope  " },
+    });
+    expect(continueButton).toBeEnabled();
+    fireEvent.click(continueButton);
+
+    await waitFor(() => {
+      expect(mockRespondToMissionInterview).toHaveBeenCalledWith(
+        "mission-session-1",
+        { _other: "Define a custom scope" },
+        undefined,
+        expect.any(String),
+      );
+    });
+  });
+
+  it("clears stale Other text when switching back to a provided mission option", async () => {
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("What do you want to build?"), {
+      target: { value: "Build a mission planning workflow" },
+    });
+    fireEvent.click(screen.getByText("Start Interview"));
+
+    await waitFor(() => {
+      expect(streamHandlers).toBeDefined();
+    });
+
+    act(() => {
+      streamHandlers.onQuestion?.(SAMPLE_QUESTION);
+    });
+
+    const continueButton = await screen.findByRole("button", { name: "Continue" });
+    fireEvent.click(screen.getByTestId("planning-option-other"));
+    fireEvent.change(screen.getByTestId("planning-other-input"), { target: { value: "   " } });
+    expect(continueButton).toBeDisabled();
+    fireEvent.change(screen.getByTestId("planning-other-input"), {
+      target: { value: "Plan a discovery mission" },
+    });
+    expect(continueButton).toBeEnabled();
+
+    fireEvent.click(screen.getByText("MVP"));
+    expect(screen.queryByTestId("planning-other-input")).toBeNull();
+    fireEvent.click(continueButton);
+
+    await waitFor(() => {
+      expect(mockRespondToMissionInterview).toHaveBeenCalledWith(
+        "mission-session-1",
+        { scope: "mvp" },
+        undefined,
+        expect.any(String),
+      );
+    });
+  });
+
+  it("submits Other-only answers for multi-select mission questions", async () => {
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("What do you want to build?"), {
+      target: { value: "Build a mission planning workflow" },
+    });
+    fireEvent.click(screen.getByText("Start Interview"));
+
+    await waitFor(() => {
+      expect(streamHandlers).toBeDefined();
+    });
+
+    act(() => {
+      streamHandlers.onQuestion?.({
+        id: "priorities",
+        type: "multi_select",
+        question: "Which priorities matter?",
+        options: [
+          { id: "speed", label: "Speed" },
+          { id: "quality", label: "Quality" },
+        ],
+      });
+    });
+
+    const continueButton = await screen.findByRole("button", { name: "Continue" });
+    fireEvent.click(screen.getByTestId("planning-option-other"));
+    expect(continueButton).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId("planning-other-input"), {
+      target: { value: "  Add field research first  " },
+    });
+    expect(continueButton).toBeEnabled();
+    fireEvent.click(continueButton);
+
+    await waitFor(() => {
+      expect(mockRespondToMissionInterview).toHaveBeenCalledWith(
+        "mission-session-1",
+        { _other: "Add field research first" },
+        undefined,
+        expect.any(String),
+      );
+    });
+  });
+
+  it("renders Other for multi-select mission questions with no provided options", async () => {
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("What do you want to build?"), {
+      target: { value: "Build a mission planning workflow" },
+    });
+    fireEvent.click(screen.getByText("Start Interview"));
+
+    await waitFor(() => {
+      expect(streamHandlers).toBeDefined();
+    });
+
+    act(() => {
+      streamHandlers.onQuestion?.({
+        id: "open_priorities",
+        type: "multi_select",
+        question: "Which priorities matter?",
+      });
+    });
+
+    const continueButton = await screen.findByRole("button", { name: "Continue" });
+    expect(screen.getByTestId("planning-option-other")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("planning-option-other"));
+    expect(continueButton).toBeDisabled();
+
+    fireEvent.change(screen.getByTestId("planning-other-input"), {
+      target: { value: "  Ask customers first  " },
+    });
+    expect(continueButton).toBeEnabled();
+    fireEvent.click(continueButton);
+
+    await waitFor(() => {
+      expect(mockRespondToMissionInterview).toHaveBeenCalledWith(
+        "mission-session-1",
+        { _other: "Ask customers first" },
+        undefined,
+        expect.any(String),
+      );
+    });
+  });
+
+  it("combines provided options with Other text for multi-select mission questions", async () => {
+    renderModal();
+
+    fireEvent.change(screen.getByLabelText("What do you want to build?"), {
+      target: { value: "Build a mission planning workflow" },
+    });
+    fireEvent.click(screen.getByText("Start Interview"));
+
+    await waitFor(() => {
+      expect(streamHandlers).toBeDefined();
+    });
+
+    act(() => {
+      streamHandlers.onQuestion?.({
+        id: "priorities",
+        type: "multi_select",
+        question: "Which priorities matter?",
+        options: [
+          { id: "speed", label: "Speed" },
+          { id: "quality", label: "Quality" },
+        ],
+      });
+    });
+
+    const continueButton = await screen.findByRole("button", { name: "Continue" });
+    fireEvent.click(screen.getByText("Speed"));
+    fireEvent.click(screen.getByTestId("planning-option-other"));
+    fireEvent.change(screen.getByTestId("planning-other-input"), {
+      target: { value: "  Preserve operator review  " },
+    });
+    expect(continueButton).toBeEnabled();
+    fireEvent.click(continueButton);
+
+    await waitFor(() => {
+      expect(mockRespondToMissionInterview).toHaveBeenCalledWith(
+        "mission-session-1",
+        { priorities: ["speed"], _other: "Preserve operator review" },
+        undefined,
+        expect.any(String),
+      );
+    });
+  });
+
   it("restores persisted goal from localStorage on open", () => {
     mockGetMissionGoal.mockReturnValue("Previous mission goal");
 

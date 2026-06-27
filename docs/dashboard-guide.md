@@ -736,11 +736,13 @@ Workflow behavior:
 - If no workflow is selected, or workflow columns are unavailable, mission-created tasks continue to use the project default workflow.
 
 <!-- FNXC:MissionInterviewDocs 2026-06-25-15:55: FN-6975 made the Plan Mission with AI workspace movable/resizable on desktop while preserving mobile's fixed full-screen flow, and stream failures now surface one recoverable retry state instead of leaving the modal spinning. -->
+<!-- FNXC:PlanningInterview 2026-06-26-00:00: GitHub #1794 requires structured planning, mission, milestone, and slice interview questions to let users reject all provided single-select/multi-select options by choosing Other and writing their own answer. -->
 
 Plan Mission with AI modal behavior:
 - On desktop, the modal opens as a floating workspace that can be dragged by its title bar and resized from the window edges/corners.
 - On mobile, the mission interview keeps the fixed full-screen/sheet-style layout so touch users retain the original focused flow.
 - If the mission interview stream reports a terminal failure, the modal closes the failed stream, shows one normalized error, and offers retry without duplicating late error/complete events.
+- Structured single-select and multi-select interview questions include **Other (write your own)** so users can decline all suggested options, submit a free-text answer, or combine that text with selected multi-select options.
 
 ## Roadmaps View
 

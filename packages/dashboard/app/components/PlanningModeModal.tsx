@@ -156,6 +156,9 @@ function normalizePlanningSummary(summary: PlanningSummary): PlanningSummary {
   };
 }
 
+const PLANNING_OTHER_RESPONSE_KEY = "_other";
+const PLANNING_OTHER_OPTION_ID = "__other__";
+
 function normalizeQuestionOptions(question: PlanningQuestion): PlanningQuestion {
   if (question.type !== "single_select" && question.type !== "multi_select") {
     return question;
@@ -2430,6 +2433,8 @@ function QuestionForm({ question: rawQuestion, progress, historyEntries, onSubmi
   const [response, setResponse] = useState<QuestionResponse>({});
   const [textValue, setTextValue] = useState("");
   const [commentValue, setCommentValue] = useState("");
+  const [otherValue, setOtherValue] = useState("");
+  const [isOtherSelected, setIsOtherSelected] = useState(false);
   const { ref: textAnswerAutosizeRef } = useAutosizeTextarea({
     value: textValue,
     minHeight: 120,
@@ -2442,6 +2447,12 @@ function QuestionForm({ question: rawQuestion, progress, historyEntries, onSubmi
     maxHeight: 640,
     deps: [question.id],
   });
+  const { ref: otherAutosizeRef } = useAutosizeTextarea({
+    value: otherValue,
+    minHeight: 80,
+    maxHeight: 640,
+    deps: [question.id],
+  });
 
   const handleSubmit = useCallback(() => {
     let nextResponse: QuestionResponse;
@@ -2450,6 +2461,24 @@ function QuestionForm({ question: rawQuestion, progress, historyEntries, onSubmi
       nextResponse = { [question.id]: textValue };
     } else if (question.type === "confirm") {
       nextResponse = { [question.id]: response[question.id] === true };
+    } else if (question.type === "single_select") {
+      const trimmedOther = otherValue.trim();
+      /*
+      FNXC:PlanningInterview 2026-06-26-00:00:
+      GitHub #1794 requires dashboard planning interviews to let users reject every AI-provided single-select option and submit their own framing instead. Store that answer under the reserved `_other` key so agent prompts and history can distinguish it from an option id.
+      */
+      nextResponse = isOtherSelected && trimmedOther.length > 0
+        ? { [PLANNING_OTHER_RESPONSE_KEY]: trimmedOther }
+        : response;
+    } else if (question.type === "multi_select") {
+      const trimmedOther = otherValue.trim();
+      /*
+      FNXC:PlanningInterview 2026-06-26-00:00:
+      Multi-select planning questions can combine provided choices with a user-authored Other answer. Preserve selected option ids and append `_other` only while the Other checkbox is active and non-empty.
+      */
+      nextResponse = isOtherSelected && trimmedOther.length > 0
+        ? { ...response, [PLANNING_OTHER_RESPONSE_KEY]: trimmedOther }
+        : response;
     } else {
       nextResponse = response;
     }
@@ -2460,13 +2489,15 @@ function QuestionForm({ question: rawQuestion, progress, historyEntries, onSubmi
     }
 
     onSubmit(nextResponse);
-  }, [commentValue, question, response, textValue, onSubmit]);
+  }, [commentValue, isOtherSelected, otherValue, question, response, textValue, onSubmit]);
 
   // Reset state when question changes
   useEffect(() => {
     setResponse({});
     setTextValue("");
     setCommentValue("");
+    setOtherValue("");
+    setIsOtherSelected(false);
   }, [question.id]);
 
   const isValid = () => {
@@ -2474,9 +2505,17 @@ function QuestionForm({ question: rawQuestion, progress, historyEntries, onSubmi
       case "text":
         return textValue.trim().length > 0;
       case "single_select":
-        return response[question.id] !== undefined;
+        /*
+        FNXC:PlanningInterview 2026-06-26-00:00:
+        The Other radio is a first-class valid answer only when it has non-whitespace text; the Continue button must not force an unwanted provided option.
+        */
+        return response[question.id] !== undefined || (isOtherSelected && otherValue.trim().length > 0);
       case "multi_select":
-        return Array.isArray(response[question.id] as unknown) && (response[question.id] as unknown[]).length > 0;
+        /*
+        FNXC:PlanningInterview 2026-06-26-00:00:
+        The Other checkbox may be the only multi-select answer, but empty Other text is incomplete so users do not submit a blank custom answer.
+        */
+        return (Array.isArray(response[question.id] as unknown) && (response[question.id] as unknown[]).length > 0) || (isOtherSelected && otherValue.trim().length > 0);
       case "confirm":
         return response[question.id] !== undefined;
       default:
@@ -2538,8 +2577,12 @@ function QuestionForm({ question: rawQuestion, progress, historyEntries, onSubmi
                         type="radio"
                         name={question.id}
                         value={option.id}
-                        checked={response[question.id] === option.id}
-                        onChange={() => setResponse({ [question.id]: option.id })}
+                        checked={response[question.id] === option.id && !isOtherSelected}
+                        onChange={() => {
+                          setIsOtherSelected(false);
+                          setOtherValue("");
+                          setResponse({ [question.id]: option.id });
+                        }}
                       />
                       <div className="planning-option-content">
                         <span className="planning-option-label">{option.label}</span>
@@ -2549,6 +2592,34 @@ function QuestionForm({ question: rawQuestion, progress, historyEntries, onSubmi
                       </div>
                     </label>
                   ))}
+                  {/* FNXC:PlanningInterview 2026-06-26-00:00: The synthetic Other radio must appear beside provided options so planning users can decline all suggested answers without leaving the structured question flow. */}
+                  <label className="planning-option planning-option--radio" data-testid="planning-option-other">
+                    <input
+                      type="radio"
+                      name={question.id}
+                      value={PLANNING_OTHER_OPTION_ID}
+                      checked={isOtherSelected}
+                      onChange={() => {
+                        setIsOtherSelected(true);
+                        setResponse({});
+                      }}
+                    />
+                    <div className="planning-option-content">
+                      <span className="planning-option-label">{t("planning.otherOptionLabel", "Other (write your own)")}</span>
+                    </div>
+                  </label>
+                  {isOtherSelected && (
+                    <div className="planning-other-answer">
+                      <textarea
+                        ref={otherAutosizeRef}
+                        className="planning-textarea"
+                        data-testid="planning-other-input"
+                        placeholder={t("planning.otherOptionPlaceholder", "Write your own answer...")}
+                        value={otherValue}
+                        onChange={(e) => setOtherValue(e.target.value)}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2578,6 +2649,35 @@ function QuestionForm({ question: rawQuestion, progress, historyEntries, onSubmi
                       </label>
                     );
                   })}
+                  {/* FNXC:PlanningInterview 2026-06-26-00:00: The synthetic Other checkbox is additive for multi-select so users can mix provided answers with their own answer or use only their own answer. */}
+                  <label className="planning-option planning-option--checkbox" data-testid="planning-option-other">
+                    <input
+                      type="checkbox"
+                      value={PLANNING_OTHER_OPTION_ID}
+                      checked={isOtherSelected}
+                      onChange={(e) => {
+                        setIsOtherSelected(e.target.checked);
+                        if (!e.target.checked) {
+                          setOtherValue("");
+                        }
+                      }}
+                    />
+                    <div className="planning-option-content">
+                      <span className="planning-option-label">{t("planning.otherOptionLabel", "Other (write your own)")}</span>
+                    </div>
+                  </label>
+                  {isOtherSelected && (
+                    <div className="planning-other-answer">
+                      <textarea
+                        ref={otherAutosizeRef}
+                        className="planning-textarea"
+                        data-testid="planning-other-input"
+                        placeholder={t("planning.otherOptionPlaceholder", "Write your own answer...")}
+                        value={otherValue}
+                        onChange={(e) => setOtherValue(e.target.value)}
+                      />
+                    </div>
+                  )}
                 </div>
               )}
 

@@ -8,6 +8,7 @@ const { mockCreateFnAgent } = vi.hoisted(() => ({
 
 vi.mock("@fusion/engine", () => ({
   listCliAdapterDescriptors: () => [],
+  resolveMcpServersForStore: async () => ({ servers: [] }),
   buildSessionSkillContextSync: (_agent: unknown, sessionPurpose: string, projectRootDir: string, pluginRunner?: { getPluginSkills?: () => Array<{ pluginId: string; skill: { name: string; enabled?: boolean } }> }) => {
     const requestedSkillNames = ["fusion"];
     for (const contribution of pluginRunner?.getPluginSkills?.() ?? []) {
@@ -51,6 +52,8 @@ import {
   SLICE_INTERVIEW_SYSTEM_PROMPT,
   stopMilestoneSliceInterviewGeneration,
   GENERATION_TIMEOUT_MS,
+  formatInterviewHistory,
+  formatResponseForAgent,
   type MilestoneInterviewSummary,
   type SliceInterviewSummary,
 } from "../milestone-slice-interview.js";
@@ -76,6 +79,50 @@ function createQuestionJson(id = "q-1"): string {
     },
   });
 }
+
+describe("milestone/slice interview formatter Other answers", () => {
+  const singleSelectQuestion = {
+    id: "scope",
+    type: "single_select" as const,
+    question: "What scope should this slice use?",
+    options: [
+      { id: "mvp", label: "MVP" },
+      { id: "full", label: "Full launch" },
+    ],
+  };
+
+  const multiSelectQuestion = {
+    id: "priorities",
+    type: "multi_select" as const,
+    question: "Which priorities matter?",
+    options: [
+      { id: "speed", label: "Speed" },
+      { id: "quality", label: "Quality" },
+    ],
+  };
+
+  it("formats Other-only single-select answers for the target interview agent and history replay", () => {
+    const response = { _other: "Split this by rollout risk" };
+
+    expect(formatResponseForAgent(singleSelectQuestion, response)).toContain(
+      "Selected: Split this by rollout risk (user's own answer)",
+    );
+    expect(formatInterviewHistory([{ question: singleSelectQuestion, response }])).toContain(
+      "A: Split this by rollout risk (user's own answer)",
+    );
+  });
+
+  it("appends Other text to multi-select answers for the target interview agent and history replay", () => {
+    const response = { priorities: ["speed"], _other: "Keep QA manual" };
+
+    expect(formatResponseForAgent(multiSelectQuestion, response)).toContain(
+      "Selected: Speed, Keep QA manual (user's own answer)",
+    );
+    expect(formatInterviewHistory([{ question: multiSelectQuestion, response }])).toContain(
+      "A: Speed, Keep QA manual (user's own answer)",
+    );
+  });
+});
 
 function createMilestoneCompleteJson(): string {
   return JSON.stringify({
@@ -315,7 +362,7 @@ describe("milestone-slice-interview module", () => {
       const session = getTargetInterviewSession(sessionId);
       expect(session).toBeDefined();
       expect(session?.targetType).toBe("milestone");
-      const createFnAgentCallArg = mockCreateFnAgent.mock.calls.at(-1)?.[0] as { customTools?: Array<{ name: string }> };
+      const createFnAgentCallArg = await waitForCreateFnAgentOptions() as { customTools?: Array<{ name: string }> };
       const customToolNames = createFnAgentCallArg.customTools?.map((tool) => tool.name) ?? [];
       expect(customToolNames).toContain("fn_task_list");
       expect(customToolNames).toContain("fn_task_get");

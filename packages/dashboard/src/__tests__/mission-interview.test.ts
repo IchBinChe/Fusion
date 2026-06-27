@@ -8,6 +8,7 @@ const { mockCreateFnAgent } = vi.hoisted(() => ({
 
 vi.mock("@fusion/engine", () => ({
   listCliAdapterDescriptors: () => [],
+  resolveMcpServersForStore: async () => ({ servers: [] }),
   buildSessionSkillContextSync: (_agent: unknown, sessionPurpose: string, projectRootDir: string, pluginRunner?: { getPluginSkills?: () => Array<{ pluginId: string; skill: { name: string; enabled?: boolean } }> }) => {
     const requestedSkillNames = ["fusion"];
     for (const contribution of pluginRunner?.getPluginSkills?.() ?? []) {
@@ -46,6 +47,8 @@ import {
   stopMissionInterviewGeneration,
   submitMissionInterviewResponse,
   GENERATION_TIMEOUT_MS,
+  formatMissionInterviewHistory,
+  formatResponseForAgent,
 } from "../mission-interview.js";
 import {
   setDiagnosticsSink,
@@ -74,6 +77,50 @@ function createQuestionJson(id = "q-1"): string {
     },
   });
 }
+
+describe("mission interview formatter Other answers", () => {
+  const singleSelectQuestion = {
+    id: "scope",
+    type: "single_select" as const,
+    question: "What scope should this mission use?",
+    options: [
+      { id: "mvp", label: "MVP" },
+      { id: "full", label: "Full launch" },
+    ],
+  };
+
+  const multiSelectQuestion = {
+    id: "priorities",
+    type: "multi_select" as const,
+    question: "Which priorities matter?",
+    options: [
+      { id: "speed", label: "Speed" },
+      { id: "quality", label: "Quality" },
+    ],
+  };
+
+  it("formats Other-only single-select answers for the mission agent and history replay", () => {
+    const response = { _other: "Interview stakeholders first" };
+
+    expect(formatResponseForAgent(singleSelectQuestion, response)).toContain(
+      "Selected: Interview stakeholders first (user's own answer)",
+    );
+    expect(formatMissionInterviewHistory([{ question: singleSelectQuestion, response }])).toContain(
+      "A: Interview stakeholders first (user's own answer)",
+    );
+  });
+
+  it("appends Other text to multi-select answers for the mission agent and history replay", () => {
+    const response = { priorities: ["quality"], _other: "Keep launch reversible" };
+
+    expect(formatResponseForAgent(multiSelectQuestion, response)).toContain(
+      "Selected: Quality, Keep launch reversible (user's own answer)",
+    );
+    expect(formatMissionInterviewHistory([{ question: multiSelectQuestion, response }])).toContain(
+      "A: Quality, Keep launch reversible (user's own answer)",
+    );
+  });
+});
 
 function createCompleteJson(): string {
   return JSON.stringify({

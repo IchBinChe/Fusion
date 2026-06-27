@@ -16,13 +16,19 @@ import type {
   AgentLogEntry,
   TaskIdIntegrityReport,
 } from "@fusion/core";
-import { AgentStore, ChatStore } from "@fusion/core";
+import { AgentStore, ChatStore, setRunningAgentCountSource } from "@fusion/core";
 import type { AuthStorageLike, ModelRegistryLike } from "./routes.js";
 import { createApiRoutes } from "./routes.js";
 import { createSSE, disconnectSSEClient, markSSEClientAlive } from "./sse.js";
 import { rateLimit, RATE_LIMITS } from "./rate-limit.js";
 import { ApiError, sendErrorResponse } from "./api-error.js";
-import { getOrCreateProjectStore, evictAllProjectStores, setOnProjectFirstCreated } from "./project-store-resolver.js";
+import {
+  countRunningAgentsInRegisteredProjectStores,
+  countRunningAgentsInStore,
+  getOrCreateProjectStore,
+  evictAllProjectStores,
+  setOnProjectFirstCreated,
+} from "./project-store-resolver.js";
 import { getOrCreateScopedChatStore } from "./chat-project-services.js";
 import { getTerminalService, STALE_SESSION_THRESHOLD_MS } from "./terminal-service.js";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -826,6 +832,37 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
   if (options?.onProjectFirstAccessed) {
     setOnProjectFirstCreated(options.onProjectFirstAccessed);
   }
+  /*
+  FNXC:GlobalConcurrencyControls 2026-06-26-17:22:
+  Dashboard bootstrap wires CentralCore's live running-agent source to the already-open project-store cache. This avoids duplicating route-local counting while preserving the read-path rule that unopened projects are not initialized just to compute global concurrency counts.
+
+  FNXC:GlobalConcurrencyControls 2026-06-26-23:41:
+  The default in-process TaskStore is already open but is intentionally not part of the secondary project-store cache. Include it by central default project id, and include any engine-manager stores already resident in memory, so live reads cover every already-open store without calling getOrCreateProjectStore(), watch(), or runtime startup paths.
+  */
+  setRunningAgentCountSource(async (projectIds) => {
+    const requestedProjectIds = new Set(projectIds);
+    const counts = await countRunningAgentsInRegisteredProjectStores(projectIds);
+
+    if (options?.engineManager) {
+      await Promise.all(projectIds.map(async (projectId) => {
+        if (counts[projectId] !== undefined) {
+          return;
+        }
+        const engine = options.engineManager?.getEngine(projectId);
+        if (!engine) {
+          return;
+        }
+        counts[projectId] = await countRunningAgentsInStore(engine.getTaskStore());
+      }));
+    }
+
+    const defaultProjectId = await options?.centralCore?.getDefaultProjectId?.();
+    if (defaultProjectId && requestedProjectIds.has(defaultProjectId)) {
+      counts[defaultProjectId] = await countRunningAgentsInStore(store);
+    }
+
+    return counts;
+  });
 
   const app = express();
   app.locals.hybridExecutor = options?.hybridExecutor;
@@ -2444,6 +2481,7 @@ export function setupBadgeWebSocket(
     wss.close();
     // Clean up cached project-scoped stores (stop watchers, close DB connections)
     evictAllProjectStores();
+    setRunningAgentCountSource(undefined);
     dashboardApp.terminalWsServer = null;
     dashboardApp.badgeWsServer = null;
     dashboardApp.badgeWsManager = null;

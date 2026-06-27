@@ -12,6 +12,7 @@ import { EventEmitter } from "node:events";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   getOrCreateProjectStore,
+  countRunningAgentsInRegisteredProjectStores,
   evictProjectStore,
   evictAllProjectStores,
   listRegisteredProjectStores,
@@ -351,5 +352,75 @@ describe("project-store-resolver", () => {
     expect(sseMessages[1]).toContain("Updated title");
     expect(sseMessages[2]).toContain("task:moved");
     expect(sseMessages[2]).toContain('"to":"todo"');
+  });
+});
+
+describe("countRunningAgentsInRegisteredProjectStores", () => {
+  beforeEach(() => {
+    evictAllProjectStores();
+    createdStores.length = 0;
+  });
+
+  afterEach(() => {
+    evictAllProjectStores();
+    createdStores.length = 0;
+  });
+
+  function installTaskList(store: TaskStore, columns: string[]) {
+    const tasks = columns.map((column, index) => ({ id: `FN-${index + 1}`, column }));
+    const listTasks = vi.fn().mockImplementation(async (options?: { column?: string }) => (
+      options?.column ? tasks.filter((task) => task.column === options.column) : tasks
+    ));
+    (store as TaskStore & { listTasks: typeof listTasks }).listTasks = listTasks;
+    return listTasks;
+  }
+
+  it("counts in-progress tasks from already-open stores without opening unopened projects", async () => {
+    const openStore = await getOrCreateProjectStore("proj_open");
+    const listTasks = installTaskList(openStore, ["todo", "in-progress", "in-progress", "done"]);
+    const openEntry = createdStores.find((entry) => entry.projectId === "proj_open");
+    expect(openEntry).toBeDefined();
+    vi.clearAllMocks();
+
+    const counts = await countRunningAgentsInRegisteredProjectStores(["proj_open", "proj_unopened"]);
+
+    expect(counts).toEqual({ proj_open: 2 });
+    expect(listTasks).toHaveBeenCalledWith({ column: "in-progress", slim: true });
+    expect(createdStores).toHaveLength(1);
+    expect(openEntry?.watchMock).not.toHaveBeenCalled();
+  });
+
+  it("excludes cached stores that are not requested and reports zero for open stores with no running tasks", async () => {
+    const zeroStore = await getOrCreateProjectStore("proj_zero");
+    const ignoredStore = await getOrCreateProjectStore("proj_ignored");
+    const zeroListTasks = installTaskList(zeroStore, ["todo", "in-review", "done"]);
+    const ignoredListTasks = installTaskList(ignoredStore, ["in-progress", "in-progress"]);
+    const zeroEntry = createdStores.find((entry) => entry.projectId === "proj_zero");
+    const ignoredEntry = createdStores.find((entry) => entry.projectId === "proj_ignored");
+    vi.clearAllMocks();
+
+    const counts = await countRunningAgentsInRegisteredProjectStores(["proj_zero", "proj_unopened"]);
+
+    expect(counts).toEqual({ proj_zero: 0 });
+    expect(zeroListTasks).toHaveBeenCalledWith({ column: "in-progress", slim: true });
+    expect(ignoredListTasks).not.toHaveBeenCalled();
+    expect(createdStores).toHaveLength(2);
+    expect(zeroEntry?.watchMock).not.toHaveBeenCalled();
+    expect(ignoredEntry?.watchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns per-project counts for multiple already-open stores", async () => {
+    const storeA = await getOrCreateProjectStore("proj_a");
+    const storeB = await getOrCreateProjectStore("proj_b");
+    const listTasksA = installTaskList(storeA, ["in-progress", "todo"]);
+    const listTasksB = installTaskList(storeB, ["todo", "in-progress", "in-progress"]);
+    vi.clearAllMocks();
+
+    const counts = await countRunningAgentsInRegisteredProjectStores(["proj_a", "proj_b"]);
+
+    expect(counts).toEqual({ proj_a: 1, proj_b: 2 });
+    expect(listTasksA).toHaveBeenCalledWith({ column: "in-progress", slim: true });
+    expect(listTasksB).toHaveBeenCalledWith({ column: "in-progress", slim: true });
+    expect(createdStores).toHaveLength(2);
   });
 });

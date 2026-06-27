@@ -110,7 +110,7 @@ Central health tracking keeps mutable project metrics, including:
 
 ## Global Concurrency Management
 
-A singleton central record enforces system-wide limits so one project cannot monopolize all execution slots.
+A singleton central record enforces system-wide limits so one project cannot monopolize all execution slots. Slot acquire/release bookkeeping remains separate from read-only running-agent displays: live read surfaces derive `currentlyActive` and per-project active counts from `in-progress` tasks in already-open project stores, while the persisted `globalMaxConcurrent` cap and `queuedCount` continue to come from central concurrency state.
 
 ## Plugin Scope in Multi-Project Mode
 

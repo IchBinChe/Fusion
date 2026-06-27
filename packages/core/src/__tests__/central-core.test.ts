@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { CentralCore } from "../central-core.js";
+import { setRunningAgentCountSource } from "../live-agent-count.js";
 import { NodeDiscovery } from "../node-discovery.js";
 import { NodeConnection, type ConnectionResult } from "../node-connection.js";
 import { getAppVersion } from "../app-version.js";
@@ -32,6 +33,7 @@ describe("CentralCore", () => {
   });
 
   afterEach(async () => {
+    setRunningAgentCountSource(undefined);
     await central.close();
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -2662,6 +2664,110 @@ describe("CentralCore", () => {
 
     it("should throw when releasing for non-existent project", async () => {
       await expect(central.releaseGlobalSlot("nonexistent")).rejects.toThrow("not found");
+    });
+
+    async function registerProjectForLiveCount(name: string) {
+      const projectPath = join(tempDir, name);
+      mkdirSync(projectPath);
+      projectPaths.push(projectPath);
+      return central.registerProject({ name, path: projectPath });
+    }
+
+    it("derives live running-agent counts from a side-effect-safe source across project data states", async () => {
+      const projectA = await registerProjectForLiveCount("live-count-a");
+      const projectB = await registerProjectForLiveCount("live-count-b");
+      const unopenedProject = await registerProjectForLiveCount("live-count-unopened");
+      await central.updateGlobalConcurrency({ globalMaxConcurrent: 2 });
+
+      const source = vi.fn(async (projectIds: readonly string[]) => {
+        expect(projectIds).toEqual([projectA.id, projectB.id, unopenedProject.id]);
+        return {
+          [projectA.id]: 3,
+          [projectB.id]: 2,
+          [unopenedProject.id]: 0,
+        };
+      });
+
+      const counts = await central.getLiveRunningAgentCounts({ source });
+
+      expect(source).toHaveBeenCalledOnce();
+      expect(counts).toEqual({
+        currentlyActive: 5,
+        projectsActive: {
+          [projectA.id]: 3,
+          [projectB.id]: 2,
+        },
+      });
+      expect(counts.currentlyActive).toBeGreaterThan(2);
+    });
+
+    it.each([
+      { name: "zero in-progress", perProject: { a: 0 }, expected: { currentlyActive: 0, projectsActive: {} } },
+      { name: "one in-progress", perProject: { a: 1 }, expected: { currentlyActive: 1, projectsActive: { a: 1 } } },
+      { name: "multiple in one project", perProject: { a: 4 }, expected: { currentlyActive: 4, projectsActive: { a: 4 } } },
+      { name: "multiple projects", perProject: { a: 2, b: 3, c: 0 }, expected: { currentlyActive: 5, projectsActive: { a: 2, b: 3 } } },
+    ])("normalizes live running-agent count data state: $name", async ({ perProject, expected }) => {
+      await registerProjectForLiveCount("live-count-state");
+
+      await expect(central.getLiveRunningAgentCounts({ source: async () => perProject })).resolves.toEqual(expected);
+    });
+
+    it("falls back to persisted slot and health bookkeeping when no live source is registered", async () => {
+      const project = await registerProjectForLiveCount("live-count-fallback");
+      await central.acquireGlobalSlot(project.id);
+      await central.acquireGlobalSlot(project.id);
+
+      const persisted = await central.getGlobalConcurrencyState();
+      const counts = await central.getLiveRunningAgentCounts();
+
+      expect(counts).toEqual({
+        currentlyActive: persisted.currentlyActive,
+        projectsActive: persisted.projectsActive,
+      });
+      expect(counts.projectsActive).toEqual({ [project.id]: 2 });
+    });
+
+    it("does not mutate slot or health bookkeeping during a live-count read", async () => {
+      const project = await registerProjectForLiveCount("live-count-no-mutation");
+      await central.acquireGlobalSlot(project.id);
+      await central.updateGlobalConcurrency({ queuedCount: 4 });
+      const beforeGlobal = await central.getGlobalConcurrencyState();
+      const beforeHealth = await central.getProjectHealth(project.id);
+      const watchSpy = vi.fn();
+      const engineStartSpy = vi.fn();
+
+      const counts = await central.getLiveRunningAgentCounts({
+        source: async () => {
+          expect(watchSpy).not.toHaveBeenCalled();
+          expect(engineStartSpy).not.toHaveBeenCalled();
+          return { [project.id]: 7 };
+        },
+      });
+
+      expect(counts).toEqual({ currentlyActive: 7, projectsActive: { [project.id]: 7 } });
+      expect(await central.getGlobalConcurrencyState()).toEqual(beforeGlobal);
+      expect(await central.getProjectHealth(project.id)).toEqual(beforeHealth);
+      expect(watchSpy).not.toHaveBeenCalled();
+      expect(engineStartSpy).not.toHaveBeenCalled();
+    });
+
+    it("keeps acquire and release slot bookkeeping isolated from live count reads", async () => {
+      const project = await registerProjectForLiveCount("live-count-limiter-isolation");
+      const source = vi.fn(async () => ({ [project.id]: 5 }));
+      await central.acquireGlobalSlot(project.id);
+
+      expect((await central.getGlobalConcurrencyState()).currentlyActive).toBe(1);
+      expect(await central.getLiveRunningAgentCounts({ source })).toEqual({
+        currentlyActive: 5,
+        projectsActive: { [project.id]: 5 },
+      });
+
+      await central.releaseGlobalSlot(project.id);
+      expect((await central.getGlobalConcurrencyState()).currentlyActive).toBe(0);
+      expect(await central.getLiveRunningAgentCounts({ source })).toEqual({
+        currentlyActive: 5,
+        projectsActive: { [project.id]: 5 },
+      });
     });
   });
 

@@ -97,6 +97,12 @@ import {
   ensureGitRepositoryForProjectPath,
   type GitRepositoryEnsureOutcome,
 } from "./git-repository.js";
+import {
+  deriveRunningAgentCounts,
+  getRunningAgentCountSource,
+  type RunningAgentCountSource,
+  type RunningAgentCounts,
+} from "./live-agent-count.js";
 // ── Event Types ───────────────────────────────────────────────────────────
 
 export interface CentralCoreEvents {
@@ -2647,6 +2653,28 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
       queuedCount: row.queuedCount,
       projectsActive,
     };
+  }
+
+  /**
+   * Read live running-agent counts through the side-effect-safe host seam.
+   * Falls back to persisted concurrency/health bookkeeping when no host source
+   * is registered so headless core callers keep their previous semantics.
+   */
+  async getLiveRunningAgentCounts(options?: { source?: RunningAgentCountSource }): Promise<RunningAgentCounts> {
+    this.ensureInitialized();
+
+    const source = options?.source ?? getRunningAgentCountSource();
+    if (!source) {
+      const state = await this.getGlobalConcurrencyState();
+      return {
+        currentlyActive: state.currentlyActive,
+        projectsActive: state.projectsActive,
+      };
+    }
+
+    const projectIds = (await this.listProjects()).map((project) => project.id);
+    const perProject = await source(projectIds);
+    return deriveRunningAgentCounts(perProject);
   }
 
   /**

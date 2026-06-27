@@ -12,7 +12,7 @@ import express from "express";
 import { createServer, setupTerminalWebSocket } from "../server.js";
 import { toSessionTag } from "../terminal-websocket-diagnostics.js";
 import { RATE_LIMITS } from "../rate-limit.js";
-import { Database, TaskStore } from "@fusion/core";
+import { Database, TaskStore, getRunningAgentCountSource, setRunningAgentCountSource, type CentralCore } from "@fusion/core";
 import { get as performGet, request as performRequest } from "../test-request.js";
 
 // Mock terminal-service before any imports that use it
@@ -190,11 +190,54 @@ async function flushStartupCleanupTasks(): Promise<void> {
 }
 
 describe("createServer options", () => {
+  afterEach(() => {
+    setRunningAgentCountSource(undefined);
+  });
+
   it("round-trips hybridExecutor on app locals", () => {
     const store = createMockStore();
     const hybridExecutor = { initialize: vi.fn(), shutdown: vi.fn() } as unknown as import("@fusion/engine").HybridExecutor;
     const app = createServer(store, { hybridExecutor });
     expect(app.locals.hybridExecutor).toBe(hybridExecutor);
+  });
+
+  it("registers live counts for the already-open default store by central project id", async () => {
+    const store = createMockStore({
+      listTasks: vi.fn().mockResolvedValue([{ id: "FN-1" }, { id: "FN-2" }]),
+    });
+    const centralCore = {
+      getDefaultProjectId: vi.fn().mockResolvedValue("proj_default"),
+    };
+
+    createServer(store, { centralCore: centralCore as unknown as CentralCore });
+    const source = getRunningAgentCountSource();
+
+    expect(source).toBeDefined();
+    if (!source) throw new Error("expected running-agent count source");
+    await expect(source(["proj_default", "proj_unopened"])).resolves.toEqual({ proj_default: 2 });
+    expect(store.listTasks).toHaveBeenCalledWith({ column: "in-progress", slim: true });
+  });
+
+  it("registers live counts for already-open engine-manager stores without starting engines", async () => {
+    const store = createMockStore();
+    const engineStore = createMockStore({
+      listTasks: vi.fn().mockResolvedValue([{ id: "FN-3" }]),
+    });
+    const getEngine = vi.fn((projectId: string) => projectId === "proj_engine"
+      ? { getTaskStore: vi.fn(() => engineStore) }
+      : undefined);
+    const engineManager = { getEngine };
+
+    createServer(store, { engineManager: engineManager as unknown as import("@fusion/engine").ProjectEngineManager });
+    const source = getRunningAgentCountSource();
+
+    expect(source).toBeDefined();
+    if (!source) throw new Error("expected running-agent count source");
+    await expect(source(["proj_engine", "proj_unopened"])).resolves.toEqual({ proj_engine: 1 });
+    expect(getEngine).toHaveBeenCalledWith("proj_engine");
+    expect(getEngine).toHaveBeenCalledWith("proj_unopened");
+    expect(engineStore.listTasks).toHaveBeenCalledWith({ column: "in-progress", slim: true });
+    expect(store.listTasks).not.toHaveBeenCalled();
   });
 });
 

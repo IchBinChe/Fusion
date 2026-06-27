@@ -405,6 +405,13 @@ export {
   type AgentMessage,
 } from "./ai-engine-loader.js";
 export {
+  setRunningAgentCountSource,
+  getRunningAgentCountSource,
+  deriveRunningAgentCounts,
+  type RunningAgentCountSource,
+  type RunningAgentCounts,
+} from "./live-agent-count.js";
+export {
   setTaskCreatedHook,
   getTaskCreatedHook,
   type TaskCreatedHook,

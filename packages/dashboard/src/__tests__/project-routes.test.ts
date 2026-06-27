@@ -24,6 +24,7 @@ const {
   mockGetProjectHealth,
   mockGetRecentActivity,
   mockGetGlobalConcurrencyState,
+  mockGetLiveRunningAgentCounts,
   mockUpdateGlobalConcurrency,
   mockInit,
   mockClose,
@@ -94,6 +95,10 @@ const {
     queuedCount: 0,
     projectsActive: { proj_test123: 2 },
   }),
+  mockGetLiveRunningAgentCounts: vi.fn().mockResolvedValue({
+    currentlyActive: 2,
+    projectsActive: { proj_test123: 2 },
+  }),
   mockUpdateGlobalConcurrency: vi.fn().mockResolvedValue({
     globalMaxConcurrent: 10,
     currentlyActive: 2,
@@ -158,6 +163,7 @@ vi.mock("@fusion/core", async () => {
       getProjectHealth: mockGetProjectHealth,
       getRecentActivity: mockGetRecentActivity,
       getGlobalConcurrencyState: mockGetGlobalConcurrencyState,
+      getLiveRunningAgentCounts: mockGetLiveRunningAgentCounts,
       updateGlobalConcurrency: mockUpdateGlobalConcurrency,
       reconcileProjectStatuses: mockReconcileProjectStatuses,
       listNodes: mockListNodes,
@@ -176,6 +182,7 @@ vi.mock("@fusion/core", async () => {
 // Mock project-store-resolver for multi-project health tests
 vi.mock("../project-store-resolver.js", () => ({
   getOrCreateProjectStore: mockGetOrCreateProjectStore,
+  countRunningAgentsInRegisteredProjectStores: vi.fn().mockResolvedValue({}),
   invalidateAllGlobalSettingsCaches: vi.fn(),
 }));
 
@@ -1241,6 +1248,7 @@ describe("GET /api/global-concurrency route handler", () => {
   it("omits projects and reports zero when no tasks are in progress", async () => {
     const storeA = storeWithColumns(["todo", "in-review", "done", "archived"]);
     mockListProjects.mockResolvedValue([project("proj_a")]);
+    mockGetLiveRunningAgentCounts.mockResolvedValue({ currentlyActive: 0, projectsActive: {} });
     mockGetOrCreateProjectStore.mockResolvedValue(storeA);
 
     const app = await createApp(new MockStoreForRoutes());
@@ -1253,7 +1261,9 @@ describe("GET /api/global-concurrency route handler", () => {
       queuedCount: 7,
       projectsActive: {},
     });
-    expect(storeA.listTasks).toHaveBeenCalledWith({ slim: true });
+    expect(mockGetLiveRunningAgentCounts).toHaveBeenCalledWith();
+    expect(mockGetOrCreateProjectStore).not.toHaveBeenCalled();
+    expect(storeA.listTasks).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1300,6 +1310,7 @@ describe("GET /api/global-concurrency route handler", () => {
     const storesByProject = new Map(
       Object.entries(stores).map(([projectId, columns]) => [projectId, storeWithColumns(columns)]),
     );
+    mockGetLiveRunningAgentCounts.mockResolvedValue({ currentlyActive: expectedTotal, projectsActive: expectedProjects });
     mockGetOrCreateProjectStore.mockImplementation(async (projectId: string) => storesByProject.get(projectId) ?? storeWithColumns([]));
 
     const app = await createApp(new MockStoreForRoutes());
@@ -1314,9 +1325,10 @@ describe("GET /api/global-concurrency route handler", () => {
     });
     expect((res.body as { currentlyActive: number }).currentlyActive).toBeGreaterThanOrEqual(expectedTotal);
     expect((res.body as { projectsActive: Record<string, number> }).projectsActive).not.toHaveProperty("stale_project");
-    for (const [projectId, mockStore] of storesByProject) {
-      expect(mockGetOrCreateProjectStore).toHaveBeenCalledWith(projectId);
-      expect(mockStore.listTasks).toHaveBeenCalledWith({ slim: true });
+    expect(mockGetLiveRunningAgentCounts).toHaveBeenCalledWith();
+    expect(mockGetOrCreateProjectStore).not.toHaveBeenCalled();
+    for (const [, mockStore] of storesByProject) {
+      expect(mockStore.listTasks).not.toHaveBeenCalled();
     }
   });
 });

@@ -158,6 +158,30 @@ export function listRegisteredProjectStores(): Array<{ projectId: string; store:
   return Array.from(storeCache.entries(), ([projectId, store]) => ({ projectId, store }));
 }
 
+export async function countRunningAgentsInStore(store: TaskStore): Promise<number> {
+  const tasks = await store.listTasks({ column: "in-progress", slim: true });
+  return tasks.length;
+}
+
+/**
+ * FNXC:GlobalConcurrencyControls 2026-06-26-17:22:
+ * The dashboard live-count source is restricted to already-open project stores so global concurrency reads never open a project, start a watcher, or start an engine/runtime just to answer currently-active counts.
+ */
+export async function countRunningAgentsInRegisteredProjectStores(projectIds: readonly string[]): Promise<Record<string, number>> {
+  const requestedProjectIds = new Set(projectIds);
+  const counts: Record<string, number> = {};
+
+  await Promise.all(listRegisteredProjectStores().map(async ({ projectId, store }) => {
+    if (!requestedProjectIds.has(projectId)) {
+      return;
+    }
+
+    counts[projectId] = await countRunningAgentsInStore(store);
+  }));
+
+  return counts;
+}
+
 export function onProjectStoreRegistered(listener: (projectId: string, store: TaskStore) => void): () => void {
   projectRegisteredListeners.add(listener);
   return () => {

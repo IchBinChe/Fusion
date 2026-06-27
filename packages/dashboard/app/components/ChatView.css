@@ -1917,19 +1917,28 @@ Tablet Chat View has enough message-pane width for assistant prose, markdown, to
 }
 
 /* === Chat Pending Message === */
+/*
+FNXC:ChatComposer 2026-06-27-00:00:
+The single queued-message banner spans the composer above the input row, and the divider below it makes the queued state visually distinct without rendering an empty rule when no pending message exists.
+*/
 .chat-pending-message {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
-  margin-top: var(--space-xs);
+  width: 100%;
   padding: var(--space-xs) var(--space-sm);
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--todo) 10%, transparent);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 0.75rem;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.chat-pending-divider {
+  width: 100%;
+  border-top: 1px solid var(--border);
 }
 
 .chat-pending-message span {
@@ -1946,7 +1955,7 @@ Tablet Chat View has enough message-pane width for assistant prose, markdown, to
   padding: var(--space-xs);
   line-height: 1;
   flex-shrink: 0;
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .chat-pending-message-dismiss:hover {
@@ -1975,6 +1984,10 @@ Tablet Chat View has enough message-pane width for assistant prose, markdown, to
    thread takes the full viewport. The thread already renders a back
    button (ChevronLeft) on mobile to flip back to the session list. */
 @media (max-width: 768px) {
+  .chat-pending-message {
+    align-items: flex-start;
+  }
+
   .chat-view__body {
     flex-direction: column;
   }

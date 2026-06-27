@@ -3057,6 +3057,27 @@ export function ChatView({ projectId, addToast, floating = false, onPopOut, onMa
           ))}
         </div>
       )}
+      {pendingMessage && (
+        <>
+          {/*
+          FNXC:ChatComposer 2026-06-27-00:00:
+          The single-slot queued chat message must appear above the input box, separated by a divider, so users can notice the pending send without changing the one-pending-message queue model.
+          */}
+          <div className="chat-pending-message" data-testid="chat-pending-indicator">
+            <span>{t("chat.queuedMessage", "Queued: {{preview}}", { preview: pendingPreview })}</span>
+            <button
+              type="button"
+              className="chat-pending-message-dismiss"
+              aria-label={t("chat.dismissQueuedMessage", "Dismiss queued message")}
+              data-testid="chat-pending-dismiss"
+              onClick={clearPendingMessage}
+            >
+              ×
+            </button>
+          </div>
+          <div className="chat-pending-divider" aria-hidden="true" />
+        </>
+      )}
       <div className="chat-input-row">
         <button
           type="button"
@@ -3128,20 +3149,6 @@ export function ChatView({ projectId, addToast, floating = false, onPopOut, onMa
             }}
             loading={fileMention.loading}
           />
-          {pendingMessage && (
-            <div className="chat-pending-message" data-testid="chat-pending-indicator">
-              <span>{t("chat.queuedMessage", "Queued: {{preview}}", { preview: pendingPreview })}</span>
-              <button
-                type="button"
-                className="chat-pending-message-dismiss"
-                aria-label={t("chat.dismissQueuedMessage", "Dismiss queued message")}
-                data-testid="chat-pending-dismiss"
-                onClick={clearPendingMessage}
-              >
-                ×
-              </button>
-            </div>
-          )}
         </div>
         {isStreaming ? (
           <button

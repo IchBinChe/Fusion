@@ -732,21 +732,48 @@ describe("ChatView core interactions", () => {
     expect(screen.getByTestId("chat-send-btn")).toBeInTheDocument();
   });
 
-  it("renders pending message indicator and dismisses it", async () => {
+  it("renders pending message indicator above the input row and dismisses it", async () => {
     const clearPendingMessage = vi.fn();
+    const activeSession = activeSessionFixture;
     setupMockChat({
-      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+      activeSession,
       messages: [],
       pendingMessage: "Queued while streaming",
       clearPendingMessage,
     });
 
-    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+    const { rerender } = await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
-    expect(screen.getByTestId("chat-pending-indicator")).toHaveTextContent("Queued: Queued while streaming");
+    const indicators = screen.getAllByTestId("chat-pending-indicator");
+    expect(indicators).toHaveLength(1);
+    const indicator = indicators[0];
+    expect(indicator).toHaveTextContent("Queued: Queued while streaming");
+
+    const input = screen.getByTestId("chat-input");
+    const inputArea = input.closest(".chat-input-area");
+    const inputRow = input.closest(".chat-input-row");
+    const inputWrapper = input.closest(".chat-input-wrapper");
+    expect(inputArea).not.toBeNull();
+    expect(inputRow).not.toBeNull();
+    expect(inputWrapper).not.toBeNull();
+    expect(inputArea).toContainElement(indicator);
+    expect(inputWrapper).not.toContainElement(indicator);
+    expect(indicator.compareDocumentPosition(inputRow!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(inputArea!.querySelector(".chat-pending-divider")).toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId("chat-pending-dismiss"));
     expect(clearPendingMessage).toHaveBeenCalledTimes(1);
+
+    setupMockChat({
+      activeSession,
+      messages: [],
+      pendingMessage: "",
+      clearPendingMessage,
+    });
+    rerender(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    expect(screen.queryByTestId("chat-pending-indicator")).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-input").closest(".chat-input-area")!.querySelector(".chat-pending-divider")).not.toBeInTheDocument();
   });
 
   it("textarea is enabled during streaming", async () => {

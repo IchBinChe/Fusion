@@ -95,6 +95,36 @@ describe("GitHubImportModal", () => {
     expect(source).toContain(".github-import-preview-pane.mobile.active .github-import-pane-content {\n    flex: 1;\n    min-height: 0;\n    overflow-y: auto;\n    overscroll-behavior: contain;");
   });
 
+  it("makes the embedded import body fill the pane outside the mobile media block", () => {
+    const source = readFileSync(resolve(__dirname, "../GitHubImportModal.css"), "utf8");
+    const topLevelEmbeddedBodyRules = Array.from(
+      source.matchAll(/(?:^|\n)\.github-import-modal--embedded \.github-import-modal__body\s*\{[^}]*\}/g),
+      (match) => match[0],
+    );
+
+    // FNXC:GitHubImport 2026-06-28-00:00: Issues and Pull Requests share `.github-import-workspace`, so the base embedded body fill rule protects both tabs in wide two-pane and narrow stacked layouts before the <=640px media override applies.
+    expect(topLevelEmbeddedBodyRules.some((rule) => rule.includes("flex: 1;") && rule.includes("min-height: 0;") && rule.includes("overflow-y: auto;"))).toBe(true);
+
+    const mobileEmbeddedBodyRule = source.match(/@media \(max-width: 640px\) \{[\s\S]*?\.github-import-modal--embedded \.github-import-modal__body\s*\{[^}]*\}/)?.[0] ?? "";
+    expect(mobileEmbeddedBodyRule).toContain("flex: 1;");
+    expect(mobileEmbeddedBodyRule).toContain("overflow-y: auto;");
+  });
+
+  it("keeps the non-embedded modal body and dialog sizing rules unchanged", () => {
+    const source = readFileSync(resolve(__dirname, "../GitHubImportModal.css"), "utf8");
+    const baseModalBodyRule = source.match(/(?:^|\n)\.github-import-modal__body\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(baseModalBodyRule).toContain("display: flex;");
+    expect(baseModalBodyRule).toContain("flex-direction: column;");
+    expect(baseModalBodyRule).toContain("padding: var(--space-lg) var(--space-xl);");
+    expect(baseModalBodyRule).toContain("overflow-y: auto;");
+    expect(baseModalBodyRule).toContain("min-height: 0;");
+    expect(baseModalBodyRule).not.toContain("flex: 1;");
+    expect(source).toContain(".github-import-modal:not(.github-import-modal--embedded) {");
+    expect(source).toContain(".modal-overlay:has(.github-import-modal:not(.github-import-modal--embedded)) {");
+    expect(source).toContain(".modal.github-import-modal:not(.github-import-modal--embedded) {");
+  });
+
   it("styles import type tabs like the Artifacts button bar", () => {
     const source = readFileSync(resolve(__dirname, "../GitHubImportModal.css"), "utf8");
     const tabsRule = source.match(/\.github-import-tabs\s*\{[^}]*\}/)?.[0] ?? "";

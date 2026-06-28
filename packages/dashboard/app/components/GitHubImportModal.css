@@ -1510,8 +1510,12 @@ Fix (embedded variant only — modal path untouched): turn the embedded root int
 /*
 FNXC:RightDockEmbedding 2026-06-22-01:00:
 Embedded Import Tasks must scroll vertically so a long preview is fully reachable. The view body is the scroll container; in the stacked (narrow) layout the preview takes its natural (content) height and the body scrolls, so the preview can be much taller than the viewport. In the wide two-pane layout the preview keeps its own internal scroll.
+
+FNXC:GitHubImport 2026-06-28-00:00:
+Issues and Pull Requests share this embedded body/workspace chain, so the body must flex-fill the main-content pane at all widths. Keeping the fix scoped to `.github-import-modal--embedded` preserves the non-embedded dialog path byte-for-byte while eliminating blank space below short/idle workspaces.
 */
 .github-import-modal--embedded .github-import-modal__body {
+  flex: 1;
   min-height: 0;
   overflow-y: auto;
 }

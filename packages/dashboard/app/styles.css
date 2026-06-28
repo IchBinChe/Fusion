@@ -299,6 +299,7 @@ svg.spinning {
   --in-progress-rgb: 0, 229, 255;
   --in-review: #3fb950;
   --done: #8b949e;
+  --color-merged: #a371f7;
 
   --color-success: #3fb950;
   --color-error: #f85149;
@@ -548,6 +549,7 @@ svg.spinning {
   --in-progress-rgb: 0, 188, 212;
   --in-review: #1a7f37;
   --done: #6e7781;
+  --color-merged: #8250df;
   --color-success: #1a7f37;
   --color-error: #cf222e;
   --color-muted: #6e7781;
@@ -2171,7 +2173,10 @@ input[type="range"]:focus-visible {
   box-shadow: var(--focus-ring-strong);
 }
 
-/* GitHub badge theme-aware colors */
+/*
+ FNXC:PRBadgeStatusColor 2026-06-27-00:00:
+ PR badge modifiers map live GitHub status to theme tokens in both dark and light roots: open=green, draft=gray, merged=purple, closed=red, and conflicting/blocked=red-caution via --color-error. The existing mobile .card-github-badge base rule controls badge sizing, so modifiers need no breakpoint-specific overrides.
+*/
 .card-github-badge--open {
   background: color-mix(in srgb, var(--in-review) 20%, transparent);
   color: var(--in-review);
@@ -2181,8 +2186,12 @@ input[type="range"]:focus-visible {
   color: var(--color-error);
 }
 .card-github-badge--merged {
-  background: color-mix(in srgb, var(--in-progress) 20%, transparent);
-  color: var(--in-progress);
+  background: color-mix(in srgb, var(--color-merged) 20%, transparent);
+  color: var(--color-merged);
+}
+.card-github-badge--conflicting {
+  background: color-mix(in srgb, var(--color-error) 20%, transparent);
+  color: var(--color-error);
 }
 .card-github-badge--draft {
   background: color-mix(in srgb, var(--text-muted) 18%, transparent);

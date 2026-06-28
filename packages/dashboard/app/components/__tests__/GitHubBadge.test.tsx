@@ -18,6 +18,7 @@ describe("GitHubBadge PR state + rollup", () => {
   it.each([
     { name: "open", prInfo: { status: "open" as const }, expectedClass: "card-github-badge--open" },
     { name: "draft", prInfo: { status: "open" as const, isDraft: true }, expectedClass: "card-github-badge--draft" },
+    { name: "conflicting", prInfo: { status: "open" as const, mergeable: "conflicting" as const }, expectedClass: "card-github-badge--conflicting" },
     { name: "merged", prInfo: { status: "merged" as const }, expectedClass: "card-github-badge--merged" },
     { name: "closed", prInfo: { status: "closed" as const }, expectedClass: "card-github-badge--closed" },
   ])("applies $name modifier class", ({ prInfo, expectedClass }) => {

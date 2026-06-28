@@ -634,7 +634,10 @@ describe("TaskCard", () => {
     }
   });
 
-  it("renders Nx PR badge label when multiple PRs are linked", () => {
+  it.each([
+    { name: "merged", primaryPr: { status: "merged" as const }, expectedClass: "card-github-badge--merged" },
+    { name: "conflicting", primaryPr: { status: "open" as const, mergeable: "conflicting" as const }, expectedClass: "card-github-badge--conflicting" },
+  ])("renders Nx PR badge label and resolver class for $name primary PR", ({ primaryPr, expectedClass }) => {
     render(
       <TaskCard
         task={makeTask({
@@ -647,6 +650,7 @@ describe("TaskCard", () => {
             headBranch: "fusion/fn-001",
             baseBranch: "main",
             commentCount: 0,
+            ...primaryPr,
           } as any,
           prInfos: [
             {
@@ -657,6 +661,7 @@ describe("TaskCard", () => {
               headBranch: "fusion/fn-001",
               baseBranch: "main",
               commentCount: 0,
+              ...primaryPr,
             },
             {
               url: "https://github.com/owner/repo/pull/99",
@@ -674,7 +679,9 @@ describe("TaskCard", () => {
       />,
     );
 
-    expect(screen.getByRole("link", { name: /2x #42/i })).toBeDefined();
+    const badge = screen.getByRole("link", { name: /2x #42/i });
+    expect(badge).toBeDefined();
+    expect(badge).toHaveClass(expectedClass);
   });
 
   it("clicking PR badge link does not open the task detail modal", () => {
@@ -1946,7 +1953,7 @@ describe("TaskCard", () => {
     );
 
     const stepNames = Array.from(container.querySelectorAll(".card-step-name")).map((el) => el.textContent);
-    // WS-003 has no result → name falls back to the humanized workflow id; all others resolve from result.workflowStepName.
+    // WS-003 has no result → name falls back to the display-normalized id; all others resolve from result.workflowStepName.
     expect(stepNames).toEqual([
       "Step 0",
       "Step 1",
@@ -2032,7 +2039,7 @@ describe("TaskCard", () => {
     );
 
     const stepNames = Array.from(container.querySelectorAll(".card-step-name")).map((el) => el.textContent);
-    // Blank result name → fall back to the humanized id; WS-003 (no result) → humanized id.
+    // Blank result name → display-normalized id; WS-003 (no result) → display-normalized id.
     expect(stepNames).toEqual(["WS 002", "WS 003"]);
   });
 
@@ -4539,6 +4546,32 @@ describe("TaskCard memo comparator provenance behavior", () => {
   it("returns false when baseBranch changes", () => {
     const previousTask = makeTask({ branch: "fusion/fn-001", baseBranch: "main" });
     const nextTask = makeTask({ branch: "fusion/fn-001", baseBranch: "release/2026-05" });
+
+    expect(
+      __test_areTaskCardPropsEqual(
+        { task: previousTask, onOpenDetail: noop, addToast: noop } as any,
+        { task: nextTask, onOpenDetail: noop, addToast: noop } as any,
+      ),
+    ).toBe(false);
+  });
+
+  it.each([
+    { name: "mergeable", patch: { mergeable: "conflicting" } },
+    { name: "draft", patch: { draft: true } },
+    { name: "isDraft", patch: { isDraft: true } },
+  ])("returns false when multi-PR badge $name color input changes", ({ patch }) => {
+    const basePr = {
+      url: "https://github.com/owner/repo/pull/42",
+      number: 42,
+      status: "open" as const,
+      title: "PR",
+      headBranch: "fusion/fn-001",
+      baseBranch: "main",
+      commentCount: 0,
+    };
+    const secondPr = { ...basePr, url: "https://github.com/owner/repo/pull/99", number: 99, title: "PR 2" };
+    const previousTask = makeTask({ prInfos: [basePr, secondPr] as any });
+    const nextTask = makeTask({ prInfos: [{ ...basePr, ...patch }, secondPr] as any });
 
     expect(
       __test_areTaskCardPropsEqual(

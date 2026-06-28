@@ -28,6 +28,7 @@ import { getInReviewStallCopy, shouldShowInReviewStallBadge } from "../utils/inR
 import { getStalePausedReviewCopy, shouldShowStalePausedReviewBadge } from "../utils/stalePausedReviewCopy";
 import { getTaskAgeStalenessCopy, shouldShowTaskAgeStalenessBadge } from "../utils/taskAgeStalenessCopy";
 import { getUnifiedTaskProgress } from "../utils/taskProgress";
+import { getPrBadgeModifierClass } from "../utils/prBadgeClass";
 import { getActiveRuntimeMs, getEndToEndDurationMs, getTimedDurationMs, getWorkflowRuntimeMs, parseTimestampToMs } from "../utils/taskTiming";
 import type { ToastType } from "../hooks/useToast";
 import { useConfirm } from "../hooks/useConfirm";
@@ -678,7 +679,11 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     ((previousTask.prInfos?.length ?? 0) === (nextTask.prInfos?.length ?? 0)) &&
     (previousTask.prInfos ?? []).every((pr, index) => {
       const nextPr = nextTask.prInfos?.[index];
-      return nextPr?.number === pr.number && nextPr?.status === pr.status;
+      /*
+      FNXC:PRBadgeStatusColor 2026-06-27-12:00:
+      Multi-PR badge rendering depends on the same live PR fields as getPrBadgeModifierClass, so memoization must compare the full badge payload instead of only number/status to repaint draft and conflict color changes.
+      */
+      return areTaskBadgeInfosEqual(pr, nextPr);
     }) &&
     areTaskBadgeInfosEqual(previousTask.issueInfo, nextTask.issueInfo)
   );
@@ -1959,7 +1964,7 @@ function TaskCardComponent({
         {(livePrInfo || liveIssueInfo) && (
           <>
             {livePrInfo && (task.prInfos?.length ?? 0) >= 2 ? (
-              <a className={`card-github-badge card-github-badge--${livePrInfo.status}`} title={t("tasks.prBadgeTitle", "PR #{{number}}: {{title}}", { number: livePrInfo.number, title: livePrInfo.title })} href={livePrInfo.url} target="_blank" rel="noopener noreferrer">
+              <a className={`card-github-badge ${getPrBadgeModifierClass(livePrInfo)}`} title={t("tasks.prBadgeTitle", "PR #{{number}}: {{title}}", { number: livePrInfo.number, title: livePrInfo.title })} href={livePrInfo.url} target="_blank" rel="noopener noreferrer">
                 <GitPullRequest size={10} />
                 <span>{`${task.prInfos?.length}x #${livePrInfo.number}`}</span>
               </a>

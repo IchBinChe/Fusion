@@ -1,6 +1,8 @@
+import { Boxes } from "lucide-react";
 import { describe, expect, it } from "vitest";
 import manifest from "../../manifest.json";
 import packageJson from "../../package.json";
+import { COMPOUND_ENGINEERING_VIEW_HEADER_ICON } from "../dashboard/CompoundEngineeringView.js";
 import plugin from "../index.js";
 import { COMPOUND_ENGINEERING_SKILLS } from "../skills.js";
 import { settingsSchema } from "../settings.js";
@@ -31,6 +33,18 @@ describe("compound engineering plugin manifest", () => {
       },
     ]);
     expect(manifest.dashboardViews).toEqual(plugin.dashboardViews);
+  });
+
+  it("keeps the Compound Engineering icon invariant aligned across source surfaces", () => {
+    const runtimeIcon = plugin.dashboardViews?.[0]?.icon;
+    const manifestIcon = manifest.dashboardViews?.[0]?.icon;
+
+    expect(runtimeIcon).toBe("Boxes");
+    expect(manifestIcon).toBe(runtimeIcon);
+    expect(COMPOUND_ENGINEERING_VIEW_HEADER_ICON).toBe(runtimeIcon);
+    expect(runtimeIcon).not.toBe("Sparkles");
+    expect(runtimeIcon).not.toBe("Grid3X3");
+    expect(Boxes).toBeDefined();
   });
 
   it("registers the session orchestration routes (U5)", () => {

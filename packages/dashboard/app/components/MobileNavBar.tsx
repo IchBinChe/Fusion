@@ -36,7 +36,7 @@ import type { PluginDashboardViewEntry } from "../api";
 import { useViewportMode } from "./Header";
 import type { TaskView } from "../hooks/useViewState";
 import { buildPluginTaskViewId, isPluginViewId } from "../plugins/pluginViewRegistry";
-import { getPluginNavIcon } from "./pluginNavIcon";
+import { getPluginDashboardViewNavIcon } from "./pluginNavIcon";
 
 export interface PublishedMobileNavHeightInput {
   navOffsetHeight: number;
@@ -440,7 +440,7 @@ export function MobileNavBar({
 
         {topLevelPrimaryPluginViews.map((entry) => {
           const pluginTaskView = buildPluginTaskViewId(entry.pluginId, entry.view.viewId);
-          const PluginIcon = getPluginNavIcon(entry.view.icon);
+          const PluginIcon = getPluginDashboardViewNavIcon(entry);
           return (
             <button
               key={`${entry.pluginId}:${entry.view.viewId}`}
@@ -790,7 +790,7 @@ export function MobileNavBar({
 
             {overflowPluginViews.map((entry) => {
                 const pluginTaskView = buildPluginTaskViewId(entry.pluginId, entry.view.viewId);
-                const PluginIcon = getPluginNavIcon(entry.view.icon);
+                const PluginIcon = getPluginDashboardViewNavIcon(entry);
                 return (
                   <button
                     key={`${entry.pluginId}:${entry.view.viewId}`}

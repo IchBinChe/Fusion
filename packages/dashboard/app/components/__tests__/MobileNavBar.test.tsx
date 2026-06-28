@@ -643,14 +643,14 @@ describe("MobileNavBar", () => {
     expect(screen.queryByTestId("mobile-more-item-roadmaps")).toBeNull();
   });
 
-  it("renders Compound Engineering primary plugin only in the More sheet while Command Center is the first tab", () => {
+  it("renders Compound Engineering primary plugin only in More with the pinned Boxes icon", () => {
     const { container } = render(
       <MobileNavBar
         {...createDefaultProps()}
         pluginDashboardViews={[
           {
             pluginId: "fusion-plugin-compound-engineering",
-            view: { viewId: "compound-engineering", label: "Compound Engineering", componentPath: "./CompoundEngineeringView", icon: "Boxes", placement: "primary", order: 36 },
+            view: { viewId: "compound-engineering", label: "Compound Engineering", componentPath: "./CompoundEngineeringView", icon: "Sparkles", placement: "primary", order: 36 },
           },
         ]}
       />,
@@ -662,7 +662,11 @@ describe("MobileNavBar", () => {
     expect(screen.queryByTestId("mobile-nav-tab-plugin-fusion-plugin-compound-engineering-compound-engineering")).toBeNull();
 
     fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
-    expect(screen.getByTestId("mobile-more-item-plugin-fusion-plugin-compound-engineering-compound-engineering")).toBeDefined();
+    const compoundItem = screen.getByTestId("mobile-more-item-plugin-fusion-plugin-compound-engineering-compound-engineering");
+    expect(compoundItem).toBeDefined();
+    expect(compoundItem.querySelector(".lucide-boxes")).not.toBeNull();
+    expect(compoundItem.querySelector(".lucide-sparkles")).toBeNull();
+    expect(compoundItem.querySelector(".lucide-grid-3x3")).toBeNull();
     expect(screen.queryAllByTestId("mobile-more-item-plugin-fusion-plugin-compound-engineering-compound-engineering")).toHaveLength(1);
     expect(screen.queryByTestId("mobile-more-item-command-center")).toBeNull();
   });

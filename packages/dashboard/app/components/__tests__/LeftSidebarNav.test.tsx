@@ -422,7 +422,7 @@ describe("LeftSidebarNav", () => {
     expect(screen.getByTestId("sidebar-nav-plugin-fusion-plugin-overflow-overflow-view")).toBeDefined();
   });
 
-  it("renders plugin labels without view suffix and shortens Compound Engineering", () => {
+  it("renders plugin labels without view suffix and pins Compound Engineering to the Boxes sidebar icon", () => {
     renderSidebar({
       pluginDashboardViews: [
         ...pluginViews,
@@ -432,6 +432,7 @@ describe("LeftSidebarNav", () => {
             viewId: "compound",
             label: "Compound Engineering",
             componentPath: "./CompoundEngineering",
+            icon: "Sparkles",
             placement: "primary",
             order: 0,
           },
@@ -449,6 +450,9 @@ describe("LeftSidebarNav", () => {
     expect(compoundPlugin).toHaveAttribute("title", "Compound Eng");
     expect(compoundPlugin).toHaveTextContent("Compound Eng");
     expect(compoundPlugin).not.toHaveTextContent("Compound Engineering");
+    expect(compoundPlugin.querySelector(".lucide-boxes")).not.toBeNull();
+    expect(compoundPlugin.querySelector(".lucide-sparkles")).toBeNull();
+    expect(compoundPlugin.querySelector(".lucide-grid-3x3")).toBeNull();
   });
 
   it.each<[TaskView, string]>([

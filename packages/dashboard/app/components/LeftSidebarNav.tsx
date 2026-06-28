@@ -31,7 +31,7 @@ import {
 import type { ProjectInfo, PluginDashboardViewEntry } from "../api";
 import type { TaskView } from "../hooks/useViewState";
 import { buildPluginTaskViewId } from "../plugins/pluginViewRegistry";
-import { getPluginNavIcon } from "./pluginNavIcon";
+import { getPluginDashboardViewNavIcon } from "./pluginNavIcon";
 import { GithubIcon } from "./GithubIcon";
 
 export interface LeftSidebarExperimentalFeatures {
@@ -241,7 +241,7 @@ export function LeftSidebarNav({
 
   const mapPluginEntry = useCallback(
     (entry: PluginDashboardViewEntry): SidebarNavEntry => {
-      const PluginIcon = getPluginNavIcon(entry.view.icon);
+      const PluginIcon = getPluginDashboardViewNavIcon(entry);
       const targetView = getPluginEntryView(entry);
       return {
         id: `plugin-${entry.pluginId}-${entry.view.viewId}`,

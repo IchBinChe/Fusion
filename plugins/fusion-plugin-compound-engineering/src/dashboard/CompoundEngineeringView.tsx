@@ -14,6 +14,7 @@ import type { CeArtifactEntry, CeArtifactGroup } from "../artifacts/discovery.js
 import type { CeSession, CeSessionStatus } from "../session/session-store.js";
 
 const CE_PLUGIN_ID = "fusion-plugin-compound-engineering";
+export const COMPOUND_ENGINEERING_VIEW_HEADER_ICON = "Boxes";
 
 /**
  * FNXC:CompoundEngineeringUI 2026-06-17-00:52:
@@ -369,7 +370,7 @@ export function CompoundEngineeringView(props: CompoundEngineeringViewProps) {
   FNXC:CompoundEngineering 2026-06-28-00:00:
   Compound Engineering uses Boxes for its nav and view header icon because Sparkles collides with Insights in the left sidebar. Keep this header aligned with the plugin dashboardViews icon so desktop, mobile, and in-view surfaces share the same no-overlap glyph.
   */
-  const HeaderIcon = LucideIcons.Boxes;
+  const HeaderIcon = LucideIcons[COMPOUND_ENGINEERING_VIEW_HEADER_ICON];
 
   if (ceSession.session) {
     return (

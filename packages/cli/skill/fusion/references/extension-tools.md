@@ -63,7 +63,7 @@ Attach a file to a task. Supports images (png, jpg, gif, webp) and text files (t
 
 ### fn_task_pause
 
-Pause a task — stops all automated agent and scheduler interaction for this task.
+Pause a task for explicit user-requested manual control — stops all automated agent and scheduler interaction. Agents should not pause tasks to handle failures or blockers; use retry, create/delegate follow-up work, or let the task surface as failed instead.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

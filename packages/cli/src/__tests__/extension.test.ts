@@ -1197,6 +1197,14 @@ describe.skipIf(!SHOULD_RUN_LEGACY_EXTENSION_INTEGRATION)("fn pi extension (lega
   });
 
   describe("fn_task_pause / unpause", () => {
+    it("FN-7188 describes pause as user-requested manual control, not failure handling", () => {
+      const pauseTool = api.tools.get("fn_task_pause")!;
+
+      expect(pauseTool.description).toContain("explicit user-requested manual control");
+      expect(pauseTool.description).toContain("should not pause tasks to handle failures or blockers");
+      expect(pauseTool.description).toContain("let the task surface as failed");
+    });
+
     it("pauses and unpauses a task", async () => {
       const createTool = api.tools.get("fn_task_create")!;
       await createTool.execute(

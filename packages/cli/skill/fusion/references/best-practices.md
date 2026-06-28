@@ -33,7 +33,7 @@ For work larger than L, use missions to break it into phases.
 | Vague idea needing refinement | `fn_task_plan` |
 | Large project with phases | `fn_mission_create` + hierarchy |
 | Task failed, needs retry | `fn_task_retry` |
-| Task needs manual intervention | `fn_task_pause` |
+| User explicitly requests manual control | `fn_task_pause` |
 | Completed task needs follow-up | `fn_task_refine` |
 | Clean up done tasks | `fn_task_archive` |
 | Import external work | `fn_task_import_github*` |
@@ -49,10 +49,10 @@ For work larger than L, use missions to break it into phases.
 ## Working with the AI Engine
 
 - **Don't fight the automation** — let triage, scheduler, and executor do their jobs
-- **Pause if needed** — use `fn_task_pause` when you want manual control
+- **Pause only on explicit user request** — use `fn_task_pause` for user-driven manual control, never as agent failure or blocker handling
 - **Steer don't micromanage** — use steering comments (via CLI `fn task steer`) to guide the AI without rewriting the spec
 - **Check progress** — use `fn_task_show` to monitor step completion
-- **Let it fail and retry** — if a task fails, check the log, then `fn_task_retry`
+- **Let it fail and retry** — if a task fails, check the log, then `fn_task_retry` or create a focused follow-up task instead of pausing it
 
 ## Mission Planning Tips
 

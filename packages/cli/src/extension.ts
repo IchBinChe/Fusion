@@ -1043,12 +1043,18 @@ export default function kbExtension(pi: ExtensionAPI) {
 
   // ── fn_task_pause ────────────────────────────────────────────────
 
+  /*
+   * FNXC:AgentPauseGuidance 2026-06-28-00:05:
+   * Pause is a user-requested manual-control lever, not an agent failure-handling response.
+   * Tool guidance must steer agents toward retry, follow-up work, or normal failure surfacing instead of stranding tasks in paused state.
+   */
   pi.registerTool({
     name: "fn_task_pause",
     label: "fn: Pause Task",
     description:
-      "Pause a task — stops all automated agent and scheduler interaction for this task.",
-    promptSnippet: "Pause a Fusion task (stops automation)",
+      "Pause a task for explicit user-requested manual control — stops all automated agent and scheduler interaction. Agents should not pause tasks to handle failures or blockers; use retry, create/delegate follow-up work, or let the task surface as failed instead.",
+    promptSnippet:
+      "Pause a Fusion task only for explicit user-requested manual control; do not use for failure/blocker handling",
     parameters: Type.Object({
       id: Type.String({ description: "Task ID (e.g. FN-001)" }),
     }),

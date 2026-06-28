@@ -17,7 +17,7 @@ All skill/extension tool invocations in this catalog use the public `fn_*` names
 | `fn_task_list` | List all tasks on the Fusion board, grouped by column. |
 | `fn_task_show` | Show full details for a task including steps, progress, and log entries. |
 | `fn_task_attach` | Attach a file to a task. Supports images (png, jpg, gif, webp) and text files (txt, log, json, yaml, yml, toml, csv, xml). |
-| `fn_task_pause` | Pause a task — stops all automated agent and scheduler interaction for this task. |
+| `fn_task_pause` | Pause a task for explicit user-requested manual control — stops all automated agent and scheduler interaction. Agents should not pause tasks to handle failures or blockers; use retry, create/delegate follow-up work, or let the task surface as failed instead. |
 | `fn_task_unpause` | Unpause a task — resumes automated agent and scheduler interaction. |
 | `fn_task_retry` | Retry a failed task — clears the error state. Non-review failures move to todo; in-review execution failures move to todo preserving progress; in-review merge failures stay in-place for auto-merge retry. |
 | `fn_task_duplicate` | Duplicate an existing task, creating a fresh copy in planning. Copies the title and description but resets all execution state. The AI planning agent will replan the new task. |

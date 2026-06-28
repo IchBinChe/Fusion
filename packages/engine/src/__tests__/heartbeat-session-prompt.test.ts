@@ -102,6 +102,16 @@ describe("createHeartbeatTools", () => {
     expect(HEARTBEAT_NO_TASK_SYSTEM_PROMPT).toContain("coding-capable workspace tools");
   });
 
+  it.each([
+    ["task-scoped", HEARTBEAT_SYSTEM_PROMPT],
+    ["no-task", HEARTBEAT_NO_TASK_SYSTEM_PROMPT],
+  ])("FN-7188 keeps no-pause-on-failure guidance in %s heartbeat prompt", (_variant, promptText) => {
+    expect(promptText).toMatch(/do NOT call fn_task_pause to handle/i);
+    expect(promptText).toContain("Pausing is reserved for explicit user requests for manual control");
+    expect(promptText).toMatch(/failed or blocked|failure or blocker/);
+    expect(promptText).not.toContain("fn_task_retry");
+  });
+
   describe("FN-5053 no-task heartbeat prompt/tool alignment", () => {
     const FORBIDDEN_NO_TASK_TOOLS = [
       "fn_task_log",

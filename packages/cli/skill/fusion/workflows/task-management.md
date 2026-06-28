@@ -60,7 +60,7 @@ Use `fn_task_show` with the task ID:
 
 | Action | Tool | Notes |
 |--------|------|-------|
-| Pause automation | `fn_task_pause` | Stops scheduler and executor from touching the task |
+| Pause automation | `fn_task_pause` | Stops scheduler and executor from touching the task; use only when the user explicitly requests manual control, not for failure/blocker handling |
 | Resume automation | `fn_task_unpause` | Re-enables automated processing |
 | Retry failed task | `fn_task_retry` | Clears error, moves back to todo |
 | Duplicate task | `fn_task_duplicate` | Creates fresh copy in triage |

@@ -370,6 +370,11 @@ export function taskRelevanceScore(agent: Agent, task: RelevanceScorableTask): n
  * This is an ambient heartbeat: task implementation runs in a separate executor path.
  * The heartbeat handles coordination, communication, memory, and routing only.
  */
+/*
+FNXC:AgentPauseGuidance 2026-06-28-00:05:
+Coordination agents must not pause tasks to handle failures or blockers because a pause suppresses scheduler and self-healing recovery.
+Only use task pause when the user explicitly requests manual control; otherwise log blockers, route follow-up work, or let the task surface as failed.
+*/
 export const HEARTBEAT_SYSTEM_PROMPT = `You are a heartbeat agent running in a short execution window.
 
 ## Your Role
@@ -392,6 +397,8 @@ Your job:
 - Surface the blocker concretely with fn_task_log.
 - Chase the dependency: comment on the blocking task, send a message to the responsible agent, or ping an owner.
 - Look for unblocking work you can spawn or delegate right now.
+- Do NOT call fn_task_pause to handle a failed or blocked task. Pausing is reserved for explicit user requests for manual control.
+- If the task needs recovery, create/delegate focused follow-up work with fn_task_create or fn_delegate_task, log the needed operator action, or let the task surface as failed.
 - Pivot to other relevant coordination work if the blocker cannot be immediately resolved.
 
 **If your bound task is not blocked:**
@@ -428,8 +435,8 @@ Prefer fn_delegate_task when immediate ownership by a specific agent materially 
 
 ## Common Patterns
 
-- **Blocked task:** log the concrete blocker, chase the dependency via fn_send_message, create a narrowly scoped unblocker task if needed.
-- **Stuck task with no blockedBy:** log the observation and create a follow-up task to investigate the root cause.
+- **Blocked task:** log the concrete blocker, chase the dependency via fn_send_message, create a narrowly scoped unblocker task if needed; do not pause it unless the user explicitly requested manual control.
+- **Stuck task with no blockedBy:** log the observation and create a follow-up task to investigate the root cause; do not use fn_task_pause as failure handling.
 - **Completed task with follow-up risk:** create explicit follow-up task(s) for residual risk instead of burying notes in a long log.
 - **New user/agent comments:** summarize what changed, identify required action, and route via task creation/delegation.
 - **Dependency drift:** log the mismatch and create reconciliation tasks with clear dependencies.
@@ -526,6 +533,7 @@ If unsure who should do the work, prefer fn_task_create and let scheduler routin
 
 ## Common Patterns
 
+- **Failed or blocked task:** do NOT call fn_task_pause to handle the failure or blocker. Pausing is reserved for explicit user requests for manual control; instead surface the blocker through available task or message context, create/delegate follow-up work, or let the task surface as failed.
 - **Unowned risk discovered:** create one focused task with concrete acceptance language.
 - **Known specialist needed:** list agents, then delegate to matching role/capability.
 - **Repeated confusion across runs:** append a concise memory entry so future agents avoid the same mistake.

@@ -1,5 +1,5 @@
 import "./ExecutorStatusBar.css";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import {
@@ -121,6 +121,13 @@ export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, staleH
   const { stats, loading, error } = useExecutorStats(tasks, projectId, taskStuckTimeoutMs, lastFetchTimeMs);
   const [isProjectPathVisible, setIsProjectPathVisible] = useState(false);
   const engineControlMenuRef = useRef<EngineControlMenuHandle>(null);
+  const hasRenderedPopulatedStatsRef = useRef(false);
+
+  useEffect(() => {
+    if (!loading && !error) {
+      hasRenderedPopulatedStatsRef.current = true;
+    }
+  }, [error, loading]);
 
   const stateDisplay = useMemo(() => getStateDisplay(stats.executorState, t), [stats.executorState, t]);
 
@@ -173,7 +180,11 @@ export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, staleH
     );
   }
 
-  if (loading && stats.runningTaskCount === 0) {
+  /*
+   * FNXC:ExecutorStatusBar 2026-06-27-00:00:
+   * The loading subtree is initial-load-only. Once the populated footer has mounted, a heartbeat poll must keep this branch suppressed so EngineControlMenu stays mounted and an open concurrency popover survives routine stats refreshes (FN-7163).
+   */
+  if (loading && stats.runningTaskCount === 0 && !hasRenderedPopulatedStatsRef.current) {
     return (
       <div className="executor-status-bar executor-status-bar--loading" role="status" aria-label={t("executor.status", "Executor status")}>
         <LoadingSpinner className="executor-status-bar__loading-text" label={t("executor.loading", "Loading...")} />

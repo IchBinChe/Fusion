@@ -16,6 +16,16 @@ vi.mock("../../api", async () => {
 describe("useExecutorStats", () => {
   const mockFetchExecutorStats = apiModule.fetchExecutorStats as ReturnType<typeof vi.fn>;
 
+  function createDeferredStats() {
+    let resolve!: (value: Awaited<ReturnType<typeof apiModule.fetchExecutorStats>>) => void;
+    let reject!: (reason?: unknown) => void;
+    const promise = new Promise<Awaited<ReturnType<typeof apiModule.fetchExecutorStats>>>((promiseResolve, promiseReject) => {
+      resolve = promiseResolve;
+      reject = promiseReject;
+    });
+    return { promise, resolve, reject };
+  }
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
@@ -389,6 +399,83 @@ describe("useExecutorStats", () => {
 
       expect(mockFetchExecutorStats).toHaveBeenCalledWith(undefined);
     });
+
+    it("treats a project switch as a fresh initial load without showing prior project stats", async () => {
+      const projectBFetch = createDeferredStats();
+      mockFetchExecutorStats
+        .mockResolvedValueOnce({
+          globalPause: false,
+          enginePaused: false,
+          maxConcurrent: 9,
+          lastActivityAt: "2026-04-01T12:00:00.000Z",
+        })
+        .mockReturnValueOnce(projectBFetch.promise);
+
+      const { result, rerender } = renderHook(
+        ({ projectId }) => useExecutorStats([], projectId),
+        { initialProps: { projectId: "project-a" } }
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      expect(result.current.loading).toBe(false);
+      expect(result.current.stats.maxConcurrent).toBe(9);
+
+      rerender({ projectId: "project-b" });
+
+      expect(result.current.loading).toBe(true);
+      expect(result.current.stats.maxConcurrent).toBe(2);
+      expect(result.current.stats.lastActivityAt).toBeUndefined();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      expect(mockFetchExecutorStats).toHaveBeenLastCalledWith("project-b");
+      expect(result.current.loading).toBe(true);
+
+      await act(async () => {
+        projectBFetch.resolve({
+          globalPause: false,
+          enginePaused: false,
+          maxConcurrent: 6,
+          lastActivityAt: "2026-04-01T12:05:00.000Z",
+        });
+        await projectBFetch.promise;
+      });
+
+      expect(result.current.loading).toBe(false);
+      expect(result.current.stats.maxConcurrent).toBe(6);
+      expect(result.current.stats.lastActivityAt).toBe("2026-04-01T12:05:00.000Z");
+    });
+
+    it("does not inherit transient-failure debounce state across project switches", async () => {
+      mockFetchExecutorStats
+        .mockResolvedValueOnce({
+          globalPause: false,
+          enginePaused: false,
+          maxConcurrent: 9,
+        })
+        .mockRejectedValueOnce(new Error("Load failed"));
+
+      const { result, rerender } = renderHook(
+        ({ projectId }) => useExecutorStats([], projectId),
+        { initialProps: { projectId: "project-a" } }
+      );
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      expect(result.current.error).toBeNull();
+
+      rerender({ projectId: "project-b" });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      expect(result.current.loading).toBe(false);
+      expect(result.current.error).toBe("Load failed");
+    });
   });
 
   describe("reactive task updates", () => {
@@ -423,6 +510,66 @@ describe("useExecutorStats", () => {
   });
 
   describe("refresh function", () => {
+    it("reports loading only for the initial unresolved fetch", async () => {
+      const initialFetch = createDeferredStats();
+      mockFetchExecutorStats.mockReturnValueOnce(initialFetch.promise);
+
+      const { result } = renderHook(() => useExecutorStats([]));
+
+      expect(result.current.loading).toBe(true);
+
+      await act(async () => {
+        initialFetch.resolve({
+          globalPause: false,
+          enginePaused: false,
+          maxConcurrent: 4,
+          lastActivityAt: "2026-04-01T12:00:00.000Z",
+        });
+        await initialFetch.promise;
+      });
+
+      expect(result.current.loading).toBe(false);
+    });
+
+    it("keeps loading false during post-success background heartbeat refreshes", async () => {
+      const backgroundFetch = createDeferredStats();
+      mockFetchExecutorStats
+        .mockResolvedValueOnce({
+          globalPause: false,
+          enginePaused: false,
+          maxConcurrent: 4,
+          lastActivityAt: "2026-04-01T12:00:00.000Z",
+        })
+        .mockReturnValueOnce(backgroundFetch.promise);
+
+      const { result } = renderHook(() => useExecutorStats([]));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      expect(result.current.loading).toBe(false);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+
+      expect(mockFetchExecutorStats).toHaveBeenCalledTimes(2);
+      expect(result.current.loading).toBe(false);
+
+      await act(async () => {
+        backgroundFetch.resolve({
+          globalPause: false,
+          enginePaused: false,
+          maxConcurrent: 7,
+          lastActivityAt: "2026-04-01T12:05:00.000Z",
+        });
+        await backgroundFetch.promise;
+      });
+
+      expect(result.current.loading).toBe(false);
+      expect(result.current.stats.maxConcurrent).toBe(7);
+    });
+
     it("manually refreshes stats", async () => {
       const { result } = renderHook(() => useExecutorStats([]));
 

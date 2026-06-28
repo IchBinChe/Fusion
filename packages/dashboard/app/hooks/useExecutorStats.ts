@@ -111,24 +111,28 @@ function deriveStatsFromTasks(tasks: Task[], taskStuckTimeoutMs?: number, lastFe
  * - Derives executorState from globalPause and enginePaused flags, with globalPause mapping to "stopped"
  * - Returns ExecutorStats object with reactive updates
  */
+const DEFAULT_API_DATA: Pick<ExecutorStats, "maxConcurrent" | "lastActivityAt"> & {
+  globalPause: boolean;
+  enginePaused: boolean;
+} = {
+  globalPause: false,
+  enginePaused: false,
+  maxConcurrent: 2,
+};
+
 export function useExecutorStats(tasks: Task[], projectId?: string, taskStuckTimeoutMs?: number, lastFetchTimeMs?: number): UseExecutorStatsResult {
 
-  const [apiData, setApiData] = useState<{
-    globalPause: boolean;
-    enginePaused: boolean;
-    maxConcurrent: number;
-    lastActivityAt?: string;
-  }>({
-    globalPause: false,
-    enginePaused: false,
-    maxConcurrent: 2,
-  });
+  const [apiDataState, setApiDataState] = useState<{
+    projectId?: string;
+    data: typeof DEFAULT_API_DATA;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [errorState, setErrorState] = useState<{ projectId?: string; message: string } | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const hasFetchedStatsRef = useRef(false);
   const consecutiveFailuresRef = useRef(0);
+  const activeProjectIdRef = useRef(projectId);
   const visibilitySuspension = useTabVisibilitySuspension();
 
   const shouldSuppressVisibilityResumeError = useCallback((errorMessage: string): boolean => {
@@ -143,13 +147,35 @@ export function useExecutorStats(tasks: Task[], projectId?: string, taskStuckTim
     abortRef.current = new AbortController();
 
     try {
-      setLoading(true);
-      const data = await fetchExecutorStats(projectId);
+      if (activeProjectIdRef.current !== projectId) {
+        activeProjectIdRef.current = projectId;
+        hasFetchedStatsRef.current = false;
+        consecutiveFailuresRef.current = 0;
+        setErrorState(null);
+      }
+      /*
+       * FNXC:ExecutorStatusBar 2026-06-27-00:00:
+       * Routine 5s heartbeat polls must not re-enter the loading state after the first successful stats fetch. The footer loading branch swaps the root subtree while idle, which unmounts EngineControlMenu, closes an open concurrency popover, and makes the footer blink (FN-7163).
+       *
+       * FNXC:ExecutorStatusBar 2026-06-27-17:30:
+       * Project switches are a new initial load, not a heartbeat. Reset the per-project fetched/failure guard before fetching so project B cannot inherit project A's stats or transient-error debounce state.
+       */
+      if (!hasFetchedStatsRef.current) {
+        setLoading(true);
+      }
+      const requestProjectId = projectId;
+      const data = await fetchExecutorStats(requestProjectId);
+      if (activeProjectIdRef.current !== requestProjectId) {
+        return;
+      }
       consecutiveFailuresRef.current = 0;
       hasFetchedStatsRef.current = true;
-      setError(null);
-      setApiData(data);
+      setErrorState(null);
+      setApiDataState({ projectId: requestProjectId, data });
     } catch (err) {
+      if (activeProjectIdRef.current !== projectId) {
+        return;
+      }
       if (err instanceof Error && err.name === "AbortError") {
         // Ignore abort errors
         return;
@@ -161,12 +187,12 @@ export function useExecutorStats(tasks: Task[], projectId?: string, taskStuckTim
       if (hasFetchedStatsRef.current && isLikelyTabSuspensionError(errorMessage)) {
         consecutiveFailuresRef.current += 1;
         if (consecutiveFailuresRef.current >= TRANSIENT_FAILURE_THRESHOLD) {
-          setError(errorMessage);
+          setErrorState({ projectId, message: errorMessage });
         }
         return;
       }
       consecutiveFailuresRef.current = 0;
-      setError(errorMessage);
+      setErrorState({ projectId, message: errorMessage });
     } finally {
       setLoading(false);
     }
@@ -203,6 +229,11 @@ export function useExecutorStats(tasks: Task[], projectId?: string, taskStuckTim
     };
   }, [refresh]);
 
+  const currentProjectApiDataState = apiDataState && apiDataState.projectId === projectId ? apiDataState : null;
+  const apiData = currentProjectApiDataState?.data ?? DEFAULT_API_DATA;
+  const error = errorState && errorState.projectId === projectId ? errorState.message : null;
+  const effectiveLoading = loading || (!error && !currentProjectApiDataState);
+
   // Derive stats from tasks and API data
   const taskStats = deriveStatsFromTasks(tasks, taskStuckTimeoutMs, lastFetchTimeMs);
   const executorState = deriveExecutorState(
@@ -220,7 +251,7 @@ export function useExecutorStats(tasks: Task[], projectId?: string, taskStuckTim
 
   return {
     stats,
-    loading,
+    loading: effectiveLoading,
     error,
     refresh,
   };

@@ -532,6 +532,82 @@ describe("ExecutorStatusBar", () => {
       expect(statusBar).toHaveClass("executor-status-bar--loading");
     });
 
+    it("renders the populated idle footer instead of loading when loaded data has zero running tasks", () => {
+      vi.mocked(mockUseExecutorStats).mockReturnValue({
+        stats: { ...defaultStats, executorState: "idle", runningTaskCount: 0, queuedTaskCount: 0 },
+        loading: false,
+        error: null,
+        refresh: vi.fn(),
+      });
+
+      render(<ExecutorStatusBar tasks={emptyTasks} />);
+
+      const statusBar = screen.getByRole("status");
+      expect(statusBar).toHaveTextContent("Idle");
+      expect(statusBar).toHaveTextContent("Queued");
+      expect(statusBar).not.toHaveClass("executor-status-bar--loading");
+      expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+      expect(screen.getByTestId("engine-control-menu-trigger")).toBeInTheDocument();
+    });
+
+    it("keeps an open concurrency popover mounted across idle heartbeat rerenders", async () => {
+      const user = userEvent.setup();
+      const idleStats = { ...defaultStats, executorState: "idle" as const, runningTaskCount: 0, queuedTaskCount: 0 };
+      vi.mocked(mockUseExecutorStats).mockReturnValue({
+        stats: idleStats,
+        loading: false,
+        error: null,
+        refresh: vi.fn(),
+      });
+
+      const { rerender } = render(<ExecutorStatusBar tasks={emptyTasks} lastFetchTimeMs={1000} />);
+
+      await user.click(screen.getByTestId("engine-control-menu-trigger"));
+      expect(screen.getByTestId("engine-control-menu")).toBeInTheDocument();
+
+      vi.mocked(mockUseExecutorStats).mockReturnValue({
+        stats: { ...idleStats, lastActivityAt: "2026-06-27T21:40:00.000Z" },
+        loading: false,
+        error: null,
+        refresh: vi.fn(),
+      });
+      rerender(<ExecutorStatusBar tasks={[...emptyTasks]} lastFetchTimeMs={6000} />);
+
+      expect(screen.getByRole("status")).not.toHaveClass("executor-status-bar--loading");
+      expect(screen.getByTestId("engine-control-menu")).toBeInTheDocument();
+    });
+
+    it("does not swap to loading or close the popover if a future idle heartbeat reports loading with data", async () => {
+      viewportModeMock.value = "mobile";
+      const user = userEvent.setup();
+      const idleStats = { ...defaultStats, executorState: "idle" as const, runningTaskCount: 0, queuedTaskCount: 0 };
+      vi.mocked(mockUseExecutorStats).mockReturnValue({
+        stats: idleStats,
+        loading: false,
+        error: null,
+        refresh: vi.fn(),
+      });
+
+      const { rerender } = render(<ExecutorStatusBar tasks={emptyTasks} />);
+
+      await user.click(screen.getByTestId("engine-control-menu-trigger"));
+      expect(screen.getByTestId("engine-control-menu")).toBeInTheDocument();
+
+      vi.mocked(mockUseExecutorStats).mockReturnValue({
+        stats: { ...idleStats, lastActivityAt: "2026-06-27T21:45:00.000Z" },
+        loading: true,
+        error: null,
+        refresh: vi.fn(),
+      });
+      rerender(<ExecutorStatusBar tasks={emptyTasks} />);
+
+      const statusBar = screen.getByRole("status");
+      expect(statusBar).toHaveTextContent("Idle");
+      expect(statusBar).not.toHaveClass("executor-status-bar--loading");
+      expect(screen.queryByText("Loading...")).not.toBeInTheDocument();
+      expect(screen.getByTestId("engine-control-menu")).toBeInTheDocument();
+    });
+
     it("does not show loading text when not loading", () => {
       render(<ExecutorStatusBar tasks={emptyTasks} />);
 

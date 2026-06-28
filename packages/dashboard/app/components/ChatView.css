@@ -1034,6 +1034,16 @@ Tablet Chat View has enough message-pane width for assistant prose, markdown, to
   }
 }
 
+/*
+FNXC:ChatView 2026-06-28-14:47:
+Narrow chat hosts need full-width bubbles for prose, code, tool output, failures, streams, and attachments in already-constrained columns. Key this to the ChatView container width, not the viewport, so Quick Chat popups and the right dock on desktop viewports match phone-width Chat View behavior.
+*/
+@container chat-view (max-width: 30rem) {
+  .chat-message {
+    max-width: 100%;
+  }
+}
+
 .chat-message-avatar {
   display: flex;
   align-items: center;
@@ -2239,7 +2249,7 @@ Queued-message banners stack above the composer input with a capped scroll area,
   }
 
   .chat-message {
-    max-width: 90%;
+    max-width: 100%;
   }
 
   .chat-message-failure-details summary,

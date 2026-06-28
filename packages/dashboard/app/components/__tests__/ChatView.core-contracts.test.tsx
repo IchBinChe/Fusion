@@ -424,10 +424,10 @@ describe("ChatView CSS — failure bubble contracts", () => {
   });
 });
 
-describe("ChatView CSS — tablet assistant bubble width", () => {
+describe("ChatView CSS — responsive bubble width", () => {
   const css = loadAllAppCss();
 
-  it("widens assistant, streaming, and failure bubbles on tablet containers while preserving user and mobile caps", async () => {
+  it("widens assistant, streaming, and failure bubbles on tablet containers while preserving desktop and mobile rules", async () => {
     const baseMessageRule = css.match(/\.chat-message\s*\{([^}]*)\}/);
     const userRule = css.match(/\.chat-message--user\s*\{([^}]*)\}/);
     const tabletRule = css.match(
@@ -441,7 +441,21 @@ describe("ChatView CSS — tablet assistant bubble width", () => {
       /\.chat-message--assistant,\s*\.chat-message--streaming,\s*\.chat-message--failure\s*\{[^}]*max-width:\s*88%/,
     );
     expect(tabletRule?.[1]).not.toMatch(/\.chat-message--user\s*\{[^}]*max-width/);
-    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.chat-message\s*\{[^}]*max-width:\s*90%/);
+    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.chat-message\s*\{[^}]*max-width:\s*100%/);
+  });
+
+  it("makes all chat message variants full-width in narrow chat-view containers without changing desktop or tablet caps", async () => {
+    const baseMessageRule = css.match(/\.chat-message\s*\{([^}]*)\}/);
+    const narrowRule = css.match(/@container\s+chat-view\s+\(max-width:\s*30rem\)\s*\{([\s\S]*?)\n\}/);
+    const tabletRule = css.match(
+      /@container\s+chat-view\s+\(min-width:\s*48\.0625rem\)\s+and\s+\(max-width:\s*64rem\)\s*\{([\s\S]*?)\n\}/,
+    );
+
+    expect(baseMessageRule?.[1]).toContain("max-width: 75%");
+    expect(narrowRule?.[1]).toMatch(/\.chat-message\s*\{[^}]*max-width:\s*100%/);
+    expect(tabletRule?.[1]).toMatch(
+      /\.chat-message--assistant,\s*\.chat-message--streaming,\s*\.chat-message--failure\s*\{[^}]*max-width:\s*88%/,
+    );
   });
 });
 

@@ -1,5 +1,13 @@
 # @fusion-plugin-examples/reports
 
+## 0.1.32
+
+### Patch Changes
+
+- @fusion/core@0.50.0
+- @fusion/dashboard@0.50.0
+- @fusion/plugin-sdk@0.50.0
+
 ## 0.1.31
 
 ### Patch Changes

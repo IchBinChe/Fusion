@@ -1,5 +1,11 @@
 # @fusion/plugin-sdk
 
+## 0.50.0
+
+### Patch Changes
+
+- @fusion/core@0.50.0
+
 ## 0.49.0
 
 ### Patch Changes

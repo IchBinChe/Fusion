@@ -1,5 +1,192 @@
 # @runfusion/fusion
 
+## 0.50.0
+
+### Minor Changes
+
+- 0ddfe9a: summary: Add confirmation prompts before Command Center concurrency sliders save live capacity changes.
+  category: feature
+  dev: Command Center global and project concurrency sliders now confirm changed settled values before persisting.
+- 1a30ddd: summary: Agents now receive more tools, with dangerous actions governed by each agent's permission policy.
+  category: feature
+  dev: Heartbeat agent-work lane (packages/engine/src/agent-heartbeat.ts) assembles the broadened toolset; access remains gated by AgentPermissionPolicy via wrapToolsWithActionGate. Hermetic readonly lanes and automation allowedTools are unchanged.
+- e1dba3f: summary: Reject malformed workflow graphs before they can be saved or launched.
+  category: feature
+  dev: Hardens the central parseWorkflowIr/validateV2 gate (duplicate-node-id and required top-level reachability rejection) and fail-closed re-validation at the WorkflowGraphTaskRunner run boundary before any side effects (FN-7113).
+- c15d129: summary: Permanent/custom agents can use governed workflow and task-promotion tools.
+  category: feature
+  dev: Injects the FN-7111-classified mutating tools (fn_workflow_create/update/delete/settings/select, fn_task_promote) into the heartbeat agent-work lane (packages/engine/src/agent-heartbeat.ts), governed by AgentPermissionPolicy via wrapToolsWithActionGate. Executor-only tools requiring worktree/workspace context (fn_run_verification, fn_acquire_repo_worktree) remain intentionally excluded from the ambient lane. Hermetic readonly lanes and automation allowedTools are unchanged.
+- 8f0f020: summary: Permanent and custom agents can list, show, and search tasks during heartbeat runs.
+  category: feature
+  dev: Adds shared read-only task tool factories (createTaskListTool/createTaskShowTool/createTaskSearchTool/createTaskReadTools), wires them into createSharedHeartbeatWorkTools, classifies fn_task_search and the legacy task-get alias read-only, and adds cross-surface drift tests.
+- e89a58f: summary: Failed optional workflow steps now send tasks back for a bounded executor fix pass.
+  category: feature
+  dev: New `requestPreMergeOptionalStepFix` graph-executor seam wired to `sendTaskBackForFix`; bounded by `maxPostReviewFixes`/`postReviewFixCount`; falls through to prior advisory/gate behavior once the budget is exhausted. Pre-merge phase only; post-merge optional groups stay non-blocking.
+- 2db8ead: summary: Footer concurrency panel shows running-agent counts and current-use markers on global and project sliders.
+  category: feature
+  dev: useGlobalConcurrency now exposes currentlyActive and projectsActive from /api/global-concurrency; EngineControlMenu renders count readouts and a clamped slider-track dot.
+- 93b01c8: summary: Command Center Concurrency now shows running agents and current-use markers on global/project sliders.
+  category: feature
+  dev: CommandCenterControls reuses useGlobalConcurrency's currentlyActive/projectsActive (FN-7071) to render count readouts and clamped slider-track dots; no new backend routes.
+- ad31490: summary: Configured MCP servers now reach every agent surface, including heartbeat runs.
+  category: feature
+  dev: Heartbeat and other un-wired session seams now resolve MCP via resolveMcpServersForStore; see FN-7077 audit.
+- 4c48ccf: summary: Configured MCP servers now reach dashboard planning helpers like subtask breakdown, text refine, and insights.
+  category: feature
+  dev: Thread TaskStore/secrets into dashboard readonly createFnAgent helpers and forward resolveMcpServersForStore; see FN-7078.
+- d9b17de: summary: New projects now default AI merge to sync a dirty checked-out integration branch.
+  category: feature
+  dev: Flips DEFAULT_PROJECT_SETTINGS merger.allowDirtyLocalCheckoutSync from false to true; explicit persisted values still win, with no existing-project migration.
+- ae0679b: summary: Add an "Other" free-text answer to planning and mission interview questions.
+  category: feature
+  dev: single_select/multi_select questions now render a synthetic Other option backed by a reserved `_other` response key, threaded through formatResponseForAgent/history formatters in planning.ts, mission-interview.ts, and milestone-slice-interview.ts.
+- 8b22dd2: summary: Imported GitHub issues are now linked as tracked tasks when GitHub tracking is on.
+  category: feature
+  dev: At import (CLI tools, `fn task import`, dashboard routes) the created task is set `githubTracking.enabled` when `resolveTaskGithubTracking` resolves enabled; the post-create hook adopts the source issue (source_issue_linked) so no duplicate tracking issue is opened.
+- 28cdd1c: summary: Add a per-project plan-approval mode to auto-approve or require approval for all tasks.
+  category: feature
+  dev: New project setting `planApprovalMode` ("workflow" | "auto-approve-all" | "require-all"); overrides the per-workflow `requirePlanApproval` via `resolvePlanApprovalRequired` at the triage gating sites.
+- c17d745: summary: Add external notifications for CLI agent tool-permission prompts.
+  category: feature
+  dev: Adds cli-agent-awaiting-input notification delivery from CLI waiting-on-input telemetry through ntfy/webhook providers.
+- 92436d0: summary: Add a New Chat button to the mobile chat quick-switch dropdown.
+  category: feature
+  dev: New `chat-mobile-session-new` menuitem in ChatView's mobile session switcher reuses the existing setShowNewDialog/NewChatDialog path; Direct-scope only.
+- c1613ad: summary: Configured MCP servers now connect to chat and agent sessions and expose their tools.
+  category: feature
+  dev: Adds the engine mcp-session-tools module and mcp**<server>**<tool> tool namespacing.
+- 6828276: summary: Code Review and Browser Verification now cycle fixes until they pass, defaulting to up to 3 fix passes.
+  category: feature
+  dev: Raises the `maxPostReviewFixes` default from 1 to 3 — the budget governing the FN-7066 pre-merge optional-step fix loop and the self-healing in-review recovery loop. The optional step re-runs each pass and the task only proceeds once it passes (APPROVE/APPROVE_WITH_NOTES) or the budget is exhausted. Per-step configurable/unbounded budgets are tracked separately (FN-7129).
+- 39d20be: summary: Workflow steps like Code Review and Browser Verification can set their own max fix revisions.
+  category: feature
+  dev: Adds optional `maxRevisions` (number | "unbounded") to optional-group workflow nodes, resolved by `resolveOptionalStepRevisionBudget` and threaded through `requestPreMergeOptionalStepFix` plus `recoverReviewTasksWithFailedPreMergeSteps`. Overrides global `maxPostReviewFixes`; absent preserves prior behavior. The Workflow Node Editor authors it with a number input and Unbounded toggle.
+- a593cc7: summary: The Browser Verification workflow step now uses the agent-browser tool, checks availability, and logs its actions.
+  category: feature
+  dev: Adds a `requiresBrowser` flag to `WorkflowStep`, set on the built-in browser-verification inner node and threaded through `runGraphCustomNode` into `executeWorkflowStep`, which merges the `agent-browser-navigation` skill, runs a bounded non-fatal `agent-browser --version` availability preflight (async exec), and emits start/availability agent-log entries. Absent the flag, prompt-step execution is unchanged.
+- a19df33: summary: Done tasks now open on a new Summary tab showing what changed and what the agents did.
+  category: feature
+  dev: Adds the "summary" TabId + TaskSummaryTab to TaskDetailModal; done tasks resolve the implicit Chat default to Summary while explicit tab entrypoints are honored.
+- 5066f90: summary: Stack multiple queued chat messages above the composer and send them in order.
+  category: feature
+  dev: Direct and Quick Chat queued sends now persist as FIFO arrays with legacy single-string restore fallback.
+- c468c16: summary: Show an estimated token count against the model's context window in the chat thread header.
+  category: feature
+  dev: Client-side estimate via app/utils/estimateChatTokens.ts; context window from ModelInfo.contextWindow. Desktop Direct-chat header only; hidden on mobile, in rooms, and when the model context window is unknown.
+- 63d1079: summary: Done-task Summary tab now shows token usage by model with estimated cost per model and a task total.
+  category: feature
+  dev: TaskSummaryTab derives per-model USD cost client-side via costFor + global modelPricingOverrides from task.tokenUsage.perModel; unpriced models render "—" (never $0).
+- d4137f1: summary: Add optional Compound Engineering document review to the built-in CE workflow.
+  category: feature
+  dev: Bundles ce-doc-review and documents autoMerge-off CE PR routing before Fusion's merge seam.
+- e8163ab: summary: Add a per-workflow analytics tab to the Command Center dashboard.
+  category: feature
+  dev: New `aggregateWorkflowAnalytics` core aggregator + `/api/command-center/workflows` route + WorkflowArea tab; reads tasks ⨝ task_workflow_selection, no new schema.
+
+### Patch Changes
+
+- 2b9e383: summary: Mutating agent tools now obey each agent's permission policy instead of always being allowed.
+  category: security
+  dev: Classifies fn*workflow*\*, fn_task_update/promote/refine, fn_run_verification, fn_acquire_repo_worktree, and fn_research_cancel in shared gating classifications so both the action gate and permanent-agent gating govern them; closes the unrecognized-tool exempt→allow fall-through. Parity tests lock the decisions.
+- 3d26d4e: summary: The task detail tool is now named fn_task_show consistently across triage, planning, chat, and CLI surfaces.
+  category: internal
+  dev: Renames the legacy fn_task_get registration to canonical fn_task_show in createTriageTools (engine) and createPlanningBoardTools (dashboard), updates all prompt references and the FN-7118 cross-surface drift test, and retains fn_task_get in BOTH READONLY_FN_TOOLS and COORDINATION_EXEMPT_TOOLS as a deprecated recognition alias for backward-compatible action-gate classification and analytics.
+- 63b44b8: summary: Fix PR-mode auto-merge failing with "error connecting to <branch>".
+  category: fix
+  dev: processPullRequestMergeTask now resolves owner/repo via getCurrentRepo(cwd) and passes (owner, repo, number) to getPrMergeStatus at all three call sites (shared-group, per-task, retry); the local GitHubOperations interface param names corrected from base/head to owner/repo. FN-7133.
+- b1066c6: summary: Fix tasks getting stuck in review forever after a pre-merge code-review revision.
+  category: fix
+  dev: performWorkflowRerunBounce now bounces an `in-review` task back to in-progress like `in-progress`/`todo`, instead of throwing "cannot bounce to in-progress". A pre-merge optional-step REVISE reopens the last plan step and schedules the bounce, but a completion race could land the task in-review first, stranding it with a pending step that the merge gate blocks on while self-healing only re-ran the graph. Regression covered in executor-step-session.test.ts (FN-7122).
+- 525953b: summary: Fix legacy databases missing newer task columns (e.g. checkout-lease, column dwell) after upgrade.
+  category: fix
+  dev: parseCreateTableSchemasFromSql now strips `--` comments before the non-greedy CREATE TABLE body regex, so a `);` inside a schema comment can no longer truncate a parsed table body and silently drop columns from ensureSchemaCompatibility()'s backfill set.
+- 31d3f21: summary: Fusion co-author attribution now lands reliably on every commit it makes.
+  category: fix
+  dev: Inject the `Co-authored-by` trailer deterministically via the worktree commit-msg hook and the merger-ai `ensureCommitTaskMetadata` backfill (gated by `commitAuthorEnabled`), instead of relying on the agent appending it from the prompt.
+- 74d3778: summary: Phantom duplicate tasks no longer break archive with an ENOENT error.
+  category: fix
+  dev: readTaskJson reports clean not-found when no DB row and no task.json exist; reconcilePhantomCommittedReservations prunes orphaned activityLog and agents/agentRuns for committed-reservation phantoms while preserving runAuditEvents and the committed reservation.
+- 3c09008: summary: Make skill detail metadata render more compactly in the right Skills panel.
+  category: fix
+  dev: Scoped reduced font-size to `.skills-view-detail-markdown` / `.skills-view-detail-content` in SkillsView.css; shared `.mailbox-markdown` typography unchanged.
+- 7137e36: summary: Fix Files viewer previews for images, video, audio, and PDFs.
+  category: fix
+  dev: Preview URLs request inline file responses with safe MIME, nosniff, and sandbox CSP headers while downloads remain attachments.
+- 0440ae4: summary: Task creation no longer leaves orphaned reserved-ID records when a create fails partway.
+  category: fix
+  dev: createTaskWithDistributedReservation now commits the distributed_task_id_reservations row in the same SQLite transaction as the tasks-row insert, and a rollback guard reverts both the row and the reservation if post-insert task.json/PROMPT.md materialization or create validation fails, preventing committed-reservation-without-task phantoms. Adds transaction-participating allocator helpers for commit and failed-create rollback.
+- 42d9c65: summary: Concurrency panels now show the real number of running agents instead of 0 when tasks are in progress.
+  category: fix
+  dev: global-concurrency running counts (currentlyActive/projectsActive) are now derived live from in-progress task columns, mirroring the /projects/:id/health computation, instead of slot/health bookkeeping that the default in-process runtime never updates.
+- 8bcda73: summary: Concurrency panels now read running-agent counts from a single live source shared across the app.
+  category: internal
+  dev: Adds a side-effect-safe CentralCore.getLiveRunningAgentCounts() seam (DI source via setRunningAgentCountSource) that derives counts from in-progress task columns of already-open project stores without starting engines/watchers or mutating slot/health bookkeeping; GET /api/global-concurrency is rewired onto it, preserving globalMaxConcurrent/queuedCount and acquireGlobalSlot/releaseGlobalSlot semantics.
+- 5608bf5: summary: fn project list/info now show live running-agent counts from in-progress tasks.
+  category: fix
+  dev: CLI In-Flight Agents derives from `column === "in-progress"` task counts, mirroring FN-7080's dashboard route; persisted `projectHealth.inFlightAgentCount` and slot semantics are unchanged.
+- c2f8026: summary: Recover corrupt messaging indexes during send or report the exact repair command.
+  category: fix
+  dev: MessageStore now runs a scoped REINDEX messages retry on SQLite corruption during send.
+- ee3a06e: summary: Database backup automation failures now report which database and the underlying cause.
+  category: fix
+  dev: Hardens runBackupCommand + routine/cron in-process backup branches so AutomationRunResult.error is always actionable.
+- f4b25dd: summary: Stop plan-approval tasks from showing an empty-mailbox approval banner.
+  category: fix
+  dev: Fixes useApprovalBanner so the Open Mailbox banner only follows real ApprovalRequest events.
+- f34b62c: summary: The running-agents count now includes agents actively triaging tasks, not just executors.
+  category: fix
+  dev: countRunningAgentsInStore now adds triage-column tasks with status "planning" (not paused) to the live running-agent count alongside in-progress tasks, matching the maxTriageConcurrent liveness predicate; feeds getLiveRunningAgentCounts and the global-concurrency readouts.
+- a8f51e9: summary: Settings → Prompts now links to Workflow Editor prompts and clarifies prompt ownership.
+  category: feature
+  dev: PromptsSection threads onOpenWorkflowSettings and reuses MovedSettingsStub; AgentPromptsManager tabs stay in Settings.
+- 9e2fb5d: summary: Project health In-Flight Agents now counts agents actively triaging tasks.
+  category: fix
+  dev: The dashboard /projects/:id/health route and the CLI fn project list/info in-flight count now add triage-column tasks with status "planning" (not paused) to the live in-progress count, matching FN-7097's countRunningAgentsInStore predicate; persisted projectHealth.inFlightAgentCount and slot semantics are unchanged.
+- b69dd8e: summary: Align Compound Engineering brainstorm artifacts with unified plan discovery.
+  category: internal
+  dev: Private Compound Engineering plugin keeps separate brainstorm/plan stages while sharing docs/plans artifacts and legacy discovery.
+- e909d41: summary: Suppress brief footer Connecting flashes after one transient executor stats poll failure.
+  category: fix
+  dev: Debounces post-success suspension-like /api/executor/stats failures in useExecutorStats.
+- 368f1e0: summary: Show every used model in Command Center token-by-model detail charts.
+  category: fix
+  dev: Removes the Tokens detail chart cap while keeping Overview explicitly top-N.
+- 5ab4a59: summary: Preserve override column-agent models during task execution.
+  category: fix
+  dev: Engine override column-agent sessions now ignore task-level model fields during initial session creation and mid-flight re-resolution when the column agent governs.
+- c61217e: summary: Show queued Chat messages above the input box with a divider.
+  category: fix
+  dev: Moves the existing single pending-message indicator out of the textarea wrapper and covers placement with ChatView tests.
+- 59803c2: summary: The task Workflow tab now shows the configured project Executor/Reviewer/Planning model instead of "Default".
+  category: fix
+  dev: Task-detail model display now overlays the task's effective workflow setting values (where the moved per-phase model lanes live) onto getSettingsFast() via a shared core applyWorkflowSettingsOverlay helper and a new GET /api/tasks/:id/effective-settings endpoint. Engine mergeEffectiveSettings reuses the same helper unchanged. FN-7123.
+- b5378d2: summary: Add a visible close button to the footer engine-controls popover.
+  category: fix
+- 45e27f8: summary: Govern task creation and delegation with the task_agent_mutation permission policy.
+  category: fix
+  dev: fn_task_create and fn_delegate_task were action-gate exempt despite being task-board mutations; now classified task_agent_mutation in the action gate (permanent-agent gate none classification preserved).
+- c3c4216: summary: Permanent agents now obey approval/block policy when creating tasks.
+  category: fix
+  dev: Removed fn_task_create from READONLY_FN_TOOLS and classified it as task_agent_mutation in the permanent-agent gate (packages/engine/src/gating-classifications.ts); action-gate classification unchanged. fn_delegate_task and GitHub import tools intentionally left permanent-readonly.
+- 6713c99: summary: Include triage/planning model usage in Command Center Tokens by model.
+  category: fix
+  dev: Records token usage for triage primary, fallback, and spec-review subagent sessions.
+- ba599a4: summary: Fix workflow view so the Code Review and Browser Verification blocks show connected edges.
+  category: fix
+  dev: Auto-layout/fallback spacing now advances by every consecutive container node's rendered width so back-to-back optional-group/foreach/loop nodes no longer overlap adjacent handles; covered by a consecutive-container connectivity regression test.
+- 6f46fa1: summary: Show linked task columns in agent Current Task output.
+  category: fix
+  dev: Adds shared Current Task formatting for agent list/show tools across engine and CLI surfaces.
+- 9e7c57d: summary: Show linked task columns on dashboard agent task badges.
+  category: fix
+  dev: Adds transient agent taskColumn enrichment for dashboard agent list, detail, and live-agent surfaces.
+- 4f01c4d: summary: Show every token-consuming model in Command Center token breakdowns.
+  category: fix
+  dev: Backfills resolved pi session models so per-model token buckets do not fall back to unknown.
+- 661b6b8: summary: Pressing q (or Ctrl+C) in the TUI now always quits, even if a teardown step stalls.
+  category: fix
+  dev: dashboard.ts shutdown/devShutdown arm an unref'd 3s hard-exit watchdog on the first signal and force an immediate process.exit(0) on a second signal, so a hung stopAllDevServers/engine/central-core teardown can no longer leave the process alive repainting the restored shell. Each teardown step now runs through timeShutdownStep, which tracks the in-flight step so the watchdog names the exact stalling step on stderr; set FUSION_DEBUG_SHUTDOWN=1 for per-step timings (slow steps >1s are always surfaced).
+
 ## 0.49.0
 
 ### Minor Changes

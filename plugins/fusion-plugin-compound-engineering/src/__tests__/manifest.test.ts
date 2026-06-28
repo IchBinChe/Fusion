@@ -25,7 +25,7 @@ describe("compound engineering plugin manifest", () => {
         viewId: "compound-engineering",
         label: "Compound Engineering",
         componentPath: "./dashboard-view",
-        icon: "Sparkles",
+        icon: "Boxes",
         placement: "primary",
         order: 36,
       },

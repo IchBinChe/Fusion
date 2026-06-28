@@ -650,7 +650,7 @@ describe("MobileNavBar", () => {
         pluginDashboardViews={[
           {
             pluginId: "fusion-plugin-compound-engineering",
-            view: { viewId: "compound-engineering", label: "Compound Engineering", componentPath: "./CompoundEngineeringView", icon: "Sparkles", placement: "primary", order: 36 },
+            view: { viewId: "compound-engineering", label: "Compound Engineering", componentPath: "./CompoundEngineeringView", icon: "Boxes", placement: "primary", order: 36 },
           },
         ]}
       />,

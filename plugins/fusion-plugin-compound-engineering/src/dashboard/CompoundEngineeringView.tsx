@@ -20,7 +20,7 @@ const CE_PLUGIN_ID = "fusion-plugin-compound-engineering";
  * The dashboard surface keeps CE-specific data-testid values and semantics intact while adding shared Fusion classes to panels and controls so plugin layout inherits the system button/card rhythm.
  *
  * FNXC:CompoundEngineeringUI 2026-06-22-09:40:
- * The view renders the dashboard's shared ViewHeader (Sparkles icon + "Compound Engineering" title) at the top of its root container so the CE plugin surface reads with the same main-content header as native Fusion views. ViewHeader supplies the standard --space-lg top/side padding and is flex-shrink:0, so the root drops its own header padding and becomes a flex column whose content area (.ce-view-body) scrolls below the fixed header. The summary + "Start a stage" affordances move into ViewHeader's right-aligned actions slot, preserving their data-testid values (ce-summary, ce-start-action-header).
+ * The view renders the dashboard's shared ViewHeader (Boxes icon + "Compound Engineering" title) at the top of its root container so the CE plugin surface reads with the same main-content header as native Fusion views. ViewHeader supplies the standard --space-lg top/side padding and is flex-shrink:0, so the root drops its own header padding and becomes a flex column whose content area (.ce-view-body) scrolls below the fixed header. The summary + "Start a stage" affordances move into ViewHeader's right-aligned actions slot, preserving their data-testid values (ce-summary, ce-start-action-header).
  */
 
 /** Resolve a lucide icon name (from the registry) to a component, with fallback. */
@@ -365,10 +365,16 @@ export function CompoundEngineeringView(props: CompoundEngineeringViewProps) {
   // Once a session is active here, the flow renderer owns the surface until
   // closed — but the sessions panel stays visible so other sessions remain
   // one click away (switching does not stop the open one).
+  /*
+  FNXC:CompoundEngineering 2026-06-28-00:00:
+  Compound Engineering uses Boxes for its nav and view header icon because Sparkles collides with Insights in the left sidebar. Keep this header aligned with the plugin dashboardViews icon so desktop, mobile, and in-view surfaces share the same no-overlap glyph.
+  */
+  const HeaderIcon = LucideIcons.Boxes;
+
   if (ceSession.session) {
     return (
       <div className="ce-view" data-testid="compound-engineering-view" data-mobile={mobile ? "true" : "false"}>
-        <ViewHeader icon={LucideIcons.Sparkles} title="Compound Engineering" />
+        <ViewHeader icon={HeaderIcon} title="Compound Engineering" />
         <div className="ce-view-body">
           <SessionsPanel
             sessions={ceSessions.sessions}
@@ -395,7 +401,7 @@ export function CompoundEngineeringView(props: CompoundEngineeringViewProps) {
   return (
     <div className="ce-view" data-testid="compound-engineering-view" data-mobile={mobile ? "true" : "false"}>
       <ViewHeader
-        icon={LucideIcons.Sparkles}
+        icon={HeaderIcon}
         title="Compound Engineering"
         actions={
           hasAnything ? (

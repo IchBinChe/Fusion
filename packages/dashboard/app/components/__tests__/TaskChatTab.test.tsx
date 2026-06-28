@@ -2480,6 +2480,29 @@ describe("TaskChatTab", () => {
     expect(source).toContain("expanded={chatExpanded}");
   });
 
+  it("widens task chat messages in narrow host containers without changing desktop layout", () => {
+    const css = readFileSync(resolve(__dirname, "../TaskChatTab.css"), "utf8");
+    const hostRule = getCssRuleBlock(css, ".task-chat-tab");
+    const desktopGroupRule = getCssRuleBlock(css, ".task-chat-group");
+    const listSplitGroupRule = getCssRuleBlock(css, ".list-split-detail-content .task-chat-group");
+    const mobileCss = getCssAfter(css, "@media (max-width: 768px)");
+    const mobileGroupRule = getCssRuleBlock(mobileCss, ".task-chat-group");
+    const narrowHostCss = getCssAfter(css, "@container task-chat-tab (max-width: 34rem)");
+    const narrowHostGroupRule = getCssRuleBlock(narrowHostCss, ".task-chat-group");
+    const narrowHostHeaderRule = getCssRuleBlock(narrowHostCss, ".task-chat-group-header");
+    const narrowHostUserEntryRule = getCssRuleBlock(narrowHostCss, ".task-chat-entry--user");
+
+    expect(hostRule).toContain("container-type: inline-size");
+    expect(hostRule).toContain("container-name: task-chat-tab");
+    expect(desktopGroupRule).toContain("grid-template-columns: auto minmax(0, 1fr)");
+    expect(css).toContain("@container task-chat-tab (max-width: 34rem)");
+    expect(narrowHostGroupRule).toContain("grid-template-columns: 1fr");
+    expect(narrowHostHeaderRule).toContain("min-width: 0");
+    expect(narrowHostUserEntryRule).toContain("max-width: 100%");
+    expect(listSplitGroupRule).toContain("grid-template-columns: 1fr");
+    expect(mobileGroupRule).toContain("grid-template-columns: 1fr");
+  });
+
   it("stacks agent headers only inside the List View split-detail chat host", () => {
     const css = readFileSync(resolve(__dirname, "../TaskChatTab.css"), "utf8");
     const desktopGroupRule = getCssRuleBlock(css, ".task-chat-group");

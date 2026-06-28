@@ -7,6 +7,9 @@
   gap: var(--space-sm);
   min-height: 0;
   height: 100%;
+  /* FNXC:TaskDetailChat 2026-06-28-00:00: FN-7207 requires narrow task-detail chat hosts (right-side dock detail, narrow split, and floating hosts) to collapse the agent-header column and widen message bubbles based on the chat host width rather than the viewport. */
+  container-type: inline-size;
+  container-name: task-chat-tab;
 }
 
 .task-chat-expand-toggle {
@@ -217,6 +220,33 @@ List View split-pane detail can be narrow while the global viewport is desktop-s
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   background: color-mix(in srgb, var(--accent) 12%, var(--surface));
   box-shadow: var(--shadow-sm);
+}
+
+/*
+FNXC:TaskDetailChat 2026-06-28-00:00:
+FN-7207 makes the right-side dock and narrow desktop detail hosts use the same readable one-column chat layout as mobile without changing wide modal, board main-panel, or expanded chat layouts above this host-width breakpoint.
+*/
+@container task-chat-tab (max-width: 34rem) {
+  .task-chat-group {
+    grid-template-columns: 1fr;
+  }
+
+  .task-chat-group-header {
+    min-width: 0;
+  }
+
+  .task-chat-user-group {
+    align-items: stretch;
+  }
+
+  .task-chat-user-header {
+    align-self: flex-end;
+    justify-content: flex-end;
+  }
+
+  .task-chat-entry--user {
+    max-width: 100%;
+  }
 }
 
 .task-chat-tool-group,

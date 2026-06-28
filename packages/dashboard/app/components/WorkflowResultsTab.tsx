@@ -498,6 +498,30 @@ export function WorkflowResultsTab({
   }, [effectiveWorkflowId, projectId]);
 
   const selectedWorkflowSteps = enabledWorkflowSteps ?? [];
+  /*
+  FNXC:TaskWorkflowDetails 2026-06-28-12:10:
+  The configured-steps panel is read-only status truth for non-editable in-progress tasks, so it must show the effective enabled optional steps: persisted task ids plus workflow optional-group ids marked `defaultOn`. Keep edit-mode controls bound to the persisted ids so toggling a default-on step writes only the explicit task override set.
+
+  FNXC:TaskWorkflowDetails 2026-06-28-12:34:
+  Persisted enabledWorkflowSteps can store a materialized workflow-step id while optional groups resolve by templateId. Treat those ids as aliases when appending defaultOn steps so the configured panel does not count the same optional step twice.
+  */
+  const effectiveEnabledStepIds = useMemo(() => {
+    const stepIds = [...selectedWorkflowSteps];
+    const seen = new Set(stepIds);
+    for (const selectedStepId of selectedWorkflowSteps) {
+      for (const workflowStep of allWorkflowSteps) {
+        if (workflowStep.id !== selectedStepId && workflowStep.templateId !== selectedStepId) continue;
+        seen.add(workflowStep.id);
+        if (workflowStep.templateId) seen.add(workflowStep.templateId);
+      }
+    }
+    for (const step of optionalWorkflowSteps) {
+      if (!step.defaultOn || seen.has(step.templateId)) continue;
+      seen.add(step.templateId);
+      stepIds.push(step.templateId);
+    }
+    return stepIds;
+  }, [allWorkflowSteps, optionalWorkflowSteps, selectedWorkflowSteps]);
 
   const workflowStepOptions = useMemo<WorkflowStepOption[]>(() => {
     const options: WorkflowStepOption[] = allWorkflowSteps.map((step) => ({
@@ -612,7 +636,7 @@ export function WorkflowResultsTab({
   }, [onWorkflowStepsChange, selectedWorkflowSteps]);
 
   const hasResults = results.length > 0;
-  const hasConfiguredSteps = selectedWorkflowSteps.length > 0;
+  const hasConfiguredSteps = effectiveEnabledStepIds.length > 0;
 
   useEffect(() => {
     if (!canEdit) {
@@ -625,7 +649,7 @@ export function WorkflowResultsTab({
   Optional-group steps such as Code Review and Browser Verification are valid configured workflow steps but intentionally carry an empty description from the resolver. Show "Step definition not found." only when the step id is genuinely absent from the lookup, never for a found step whose description is empty.
   */
   const configuredSteps = useMemo(() => {
-    return selectedWorkflowSteps.map((stepId) => {
+    return effectiveEnabledStepIds.map((stepId) => {
       const stepInfo = workflowStepLookup.get(stepId);
       const isMissingStepDefinition = stepInfo === undefined;
       return {
@@ -637,7 +661,7 @@ export function WorkflowResultsTab({
         phase: stepInfo?.phase || "pre-merge",
       } as WorkflowStepOption;
     });
-  }, [selectedWorkflowSteps, workflowStepLookup, t]);
+  }, [effectiveEnabledStepIds, workflowStepLookup, t]);
 
   const workflowName = useMemo(() => getWorkflowName(effectiveWorkflowId, workflowDefinitions, t), [effectiveWorkflowId, workflowDefinitions, t]);
   const executionPhase = useMemo(() => getExecutionPhase(task, taskStatus, taskPausedReason, results, t), [task, taskStatus, taskPausedReason, results, t]);

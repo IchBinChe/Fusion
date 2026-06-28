@@ -67,7 +67,6 @@ export function DashboardLoader({ stage }: DashboardLoaderProps) {
       clearCache(SWR_CACHE_KEYS.EVALS_RUNS_PREFIX);
       clearCache(SWR_CACHE_KEYS.EVALS_RESULTS_PREFIX);
       clearCache(SWR_CACHE_KEYS.MISSIONS_PREFIX);
-      clearCache(SWR_CACHE_KEYS.MISSIONS_SELECTED_ID_PREFIX);
       clearCache(SWR_CACHE_KEYS.MAILBOX_INBOX_PREFIX);
       clearCache(SWR_CACHE_KEYS.MAILBOX_OUTBOX_PREFIX);
       clearCache(SWR_CACHE_KEYS.MAILBOX_UNREAD_COUNT_PREFIX);

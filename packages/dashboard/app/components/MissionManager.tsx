@@ -619,10 +619,13 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   const { t } = useTranslation("app");
   const { confirm } = useConfirm();
   const sessionTabId = useMemo(() => getSessionTabId(), []);
-  const isActive = isInline || isOpen;
+  /*
+  FNXC:Missions 2026-06-27-20:25:
+  Inline Missions can stay mounted while hidden, so tab visibility must drive active state. Re-opening the tab must reset to overview instead of preserving the previously selected mission.
+  */
+  const isActive = isOpen;
   const cacheSuffix = projectId ?? "";
   const missionsCacheKey = `${SWR_CACHE_KEYS.MISSIONS_PREFIX}${cacheSuffix}`;
-  const selectedMissionIdCacheKey = `${SWR_CACHE_KEYS.MISSIONS_SELECTED_ID_PREFIX}${cacheSuffix}`;
   const initialMissions = readCache<MissionWithSummary[]>(missionsCacheKey);
   const [missions, setMissions] = useState<MissionWithSummary[]>(() => (Array.isArray(initialMissions) ? initialMissions : []));
   const [selectedMission, setSelectedMission] = useState<MissionWithHierarchy | null>(null);
@@ -1253,23 +1256,6 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   }, [missionsCacheKey]);
 
   useEffect(() => {
-    const selectedMissionId = readCache<string | null>(selectedMissionIdCacheKey);
-    if (!selectedMissionId) {
-      return;
-    }
-    const hasMissionSummary = missions.some((mission) => mission.id === selectedMissionId);
-    if (hasMissionSummary && !selectedMission) {
-      void loadMissionDetail(selectedMissionId);
-    }
-  }, [loadMissionDetail, missions, selectedMission, selectedMissionIdCacheKey]);
-
-  useEffect(() => {
-    if (selectedMission?.id) {
-      writeCache(selectedMissionIdCacheKey, selectedMission.id, { maxBytes: 500_000 });
-    }
-  }, [selectedMission?.id, selectedMissionIdCacheKey]);
-
-  useEffect(() => {
     if (isActive) {
       loadMissions();
       loadActiveGoals();
@@ -1284,6 +1270,10 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
     }
   }, [isActive, loadActiveGoals, loadMissions]);
 
+  /*
+  FNXC:Missions 2026-06-27-00:00:
+  Entering the Missions tab must always land on the overview list with an empty detail pane. Only explicit `targetMissionId` deep links or interview resume sessions may open a specific mission automatically; do not restore the last selected mission or default-select the first mission on tab entry.
+  */
   // Auto-load target mission when specified
   const targetLoadedRef = useRef<string | null>(null);
   useEffect(() => {
@@ -1297,25 +1287,6 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   useEffect(() => {
     if (!isActive) {
       targetLoadedRef.current = null;
-    }
-  }, [isActive]);
-
-  // Default-select the first mission once the list loads (inline desktop view).
-  // Gated on `isInline` so the standalone modal flow (and unit tests that
-  // render without isInline) keep the explicit "select a mission" empty state.
-  const defaultSelectedRef = useRef(false);
-  useEffect(() => {
-    if (!isActive || !isInline || isMobile || loading) return;
-    if (defaultSelectedRef.current) return;
-    if (selectedMission || targetMissionId) return;
-    if (missions.length === 0) return;
-    defaultSelectedRef.current = true;
-    loadMissionDetail(missions[0].id);
-  }, [isActive, isInline, isMobile, loading, missions, selectedMission, targetMissionId, loadMissionDetail]);
-
-  useEffect(() => {
-    if (!isActive) {
-      defaultSelectedRef.current = false;
     }
   }, [isActive]);
 
@@ -2470,7 +2441,6 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   }, [loadMissionDetail]);
 
   const handleBackToList = useCallback(() => {
-    writeCache(selectedMissionIdCacheKey, null, { maxBytes: 500_000 });
     setSelectedMission(null);
     setSelectedMilestoneId(null);
     setValidationTelemetry(null);
@@ -2480,7 +2450,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
     setEventsFilter("all");
     setExpandedEventMetadata(new Set());
     loadMissions();
-  }, [loadMissions, selectedMissionIdCacheKey]);
+  }, [loadMissions]);
 
   const hasMoreEvents = missionEvents.length < eventsTotal;
   const autopilotState = (selectedMission?.autopilotState ?? "inactive") as AutopilotState;

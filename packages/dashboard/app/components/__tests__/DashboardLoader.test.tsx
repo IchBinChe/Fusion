@@ -93,7 +93,6 @@ describe("DashboardLoader", () => {
     expect(mockClearCache).toHaveBeenCalledWith(SWR_CACHE_KEYS.EVALS_RUNS_PREFIX);
     expect(mockClearCache).toHaveBeenCalledWith(SWR_CACHE_KEYS.EVALS_RESULTS_PREFIX);
     expect(mockClearCache).toHaveBeenCalledWith(SWR_CACHE_KEYS.MISSIONS_PREFIX);
-    expect(mockClearCache).toHaveBeenCalledWith(SWR_CACHE_KEYS.MISSIONS_SELECTED_ID_PREFIX);
     expect(mockClearCache).toHaveBeenCalledWith(SWR_CACHE_KEYS.MAILBOX_INBOX_PREFIX);
     expect(mockClearCache).toHaveBeenCalledWith(SWR_CACHE_KEYS.MAILBOX_OUTBOX_PREFIX);
     expect(mockClearCache).toHaveBeenCalledWith(SWR_CACHE_KEYS.MAILBOX_UNREAD_COUNT_PREFIX);

@@ -44,8 +44,10 @@ describe("ce-doc-review HTML report-only mode", () => {
     expect(docReviewSkill).toMatch(/same document-quality and persona-lens checks/i);
     expect(docReviewSkill).toMatch(/fall back to report-only \(`fixes_applied = 0`\)/i);
     expect(docReviewSkill).toMatch(/Append-to-Open-Questions write-back that inserts markdown/i);
-    expect(docReviewSkill).toMatch(/Malformed-checklist HTML repair remains report-only/i);
-    expect(docReviewSkill).toMatch(/successful DOM-safe helper fixes may increment `fixes_applied` only for the allowlisted operations/i);
+    expect(docReviewSkill).toMatch(/malformed checklist repair to the canonical HTML checklist representation/i);
+    expect(docReviewSkill).toMatch(/including malformed-checklist repair when the helper can prove the canonical checklist form deterministically/i);
+    expect(docReviewSkill).toMatch(/Ambiguous or non-canonical checklist-like HTML that cannot be proven safe stays report-only/i);
+    expect(docReviewSkill).toMatch(/successful DOM-safe helper fixes may increment `fixes_applied` only for the allowlisted operations, including canonical checklist repair/i);
   });
 
   it("routes ce-plan HTML artifacts through report-only review instead of a skipped envelope", () => {

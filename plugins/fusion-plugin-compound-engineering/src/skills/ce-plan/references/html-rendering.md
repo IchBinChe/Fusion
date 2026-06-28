@@ -592,6 +592,37 @@ looks identical. Compose so semantic understanding is reachable in source:
   label scheme, and the field-label vocabulary do not break across
   versions. Visual styling can change freely.
 
+### Canonical checklist representation
+
+<!--
+FNXC:CompoundEngineering 2026-06-28-08:30:
+FN-7159 defines one stable HTML checklist shape so ce-doc-review can DOM-safely repair malformed checklist markup instead of leaving all HTML checklist hygiene report-only. The checked state must be visible text, not an attribute-only fact, because downstream CE consumers read source text as the public API.
+-->
+
+Use exactly this shape for checklist content in CE HTML artifacts:
+
+```html
+<ul class="ce-checklist" aria-label="Checklist">
+  <li class="ce-checklist-item"><span class="ce-checklist-state">[ ]</span> <span class="ce-checklist-label">Unchecked item label</span></li>
+  <li class="ce-checklist-item"><span class="ce-checklist-state">[x]</span> <span class="ce-checklist-label">Checked item label</span></li>
+</ul>
+```
+
+- The container is a `<ul class="ce-checklist" aria-label="Checklist">`. An empty checklist is this same container with zero `<li>` children; do not invent an alternate empty-state wrapper.
+- Each item is exactly one direct `<li class="ce-checklist-item">` child containing exactly two visible spans in order: `<span class="ce-checklist-state">[ ]</span>` or `<span class="ce-checklist-state">[x]</span>`, then one ASCII space text node, then `<span class="ce-checklist-label">…</span>`.
+- The checked state is the visible text `[ ]` for unchecked or `[x]` for checked. Attribute-only state (`checked`, `aria-checked`, `data-checked`, CSS-generated checkmarks, icon-only checkmarks) is not canonical because semantic state must be readable in source text.
+- The label span contains the item label as visible text. Do not move label meaning into `title`, `aria-label`, `data-*`, SVG, or CSS. Inline semantic text markup inside the label is allowed only when it preserves the same visible words and does not carry checklist state.
+- Mixed-state checklists are represented by mixing `[ ]` and `[x]` item state spans. The item order is document order and is stable.
+- Already-canonical checklists are not rewritten. This exact element/class/state vocabulary is the public API for downstream consumers and DOM-safe repair; visual CSS may style it, but structure and visible state markers must remain stable across versions.
+
+For `ce-doc-review` DOM-safe repair, a checklist is **provable** only when the existing HTML is already this canonical shape or one of these unambiguous malformed variants whose canonical form can be derived without judgment:
+
+- Raw markdown checklist lines left as visible HTML body text, using `- [ ] label`, `- [x] label`, or `- [X] label` on one or more consecutive lines.
+- A `<ul>` or `<ol>` whose every direct `<li>` begins with visible `[ ]`, `[x]`, or `[X]` text followed by the item label.
+- A `<ul>` or `<ol>` whose every direct `<li>` has an `<input type="checkbox">` as its first non-whitespace child, with `checked` preserving checked state and the remaining visible text preserving the label.
+
+Anything else is malformed-or-ambiguous and stays report-only: ordinary lists, partial checklist lists, icon-only state, labels split across unrelated DOM regions, mixed checklist/non-checklist children, missing labels, duplicate hidden state copies that disagree with visible state, or content whose parse/serialize round trip is unstable. Repair may normalize only structure and visible state markers; it must not add, drop, reorder, or reword items.
+
 ## Post-compose audit
 
 Before returning the artifact, scan it for common slips:

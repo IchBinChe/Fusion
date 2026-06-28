@@ -160,7 +160,7 @@ describe("HTML mutation helper", () => {
     expect(result).toMatchObject({ ok: false, fixesApplied: 0 });
   });
 
-  it("refuses unsafe fragments and unsupported checklist repair without writing", () => {
+  it("refuses unsafe fragments and unknown checklist operations without writing", () => {
     root = makeRepo();
     const file = planPath(root);
     writeFileSync(file, BASE_HTML);
@@ -210,6 +210,139 @@ describe("HTML mutation helper", () => {
     if (result.ok) throw new Error("expected throwing validator to be refused");
     expect(result.reason).toMatch(/post-write validation failed/i);
     expect(readFileSync(file, "utf8")).toBe(BASE_HTML);
+    expect(readdirSync(root).filter((entry) => entry.includes("html-mutation"))).toEqual([]);
+  });
+
+  it("leaves empty and populated canonical checklists unchanged", () => {
+    const canonical = '<!DOCTYPE html><html><head><title>Plan</title></head><body><main><section id="implementation-units"><h2>Implementation Units</h2><ul class="ce-checklist" aria-label="Checklist"></ul><ul class="ce-checklist" aria-label="Checklist"><li class="ce-checklist-item"><span class="ce-checklist-state">[ ]</span> <span class="ce-checklist-label">Unchecked</span></li><li class="ce-checklist-item"><span class="ce-checklist-state">[x]</span> <span class="ce-checklist-label">Checked</span></li></ul></section></main></body></html>';
+
+    const result = applyHtmlMutations(canonical, [{ type: "checklist-repair" }]);
+
+    expect(result).toEqual({ ok: true, html: canonical, fixesApplied: 0 });
+  });
+
+  it("repairs raw markdown checklist text to the canonical mixed-state shape", () => {
+    const html = '<!DOCTYPE html><html><head><title>Plan</title></head><body><main><section id="definition-of-done"><h2>Definition of Done</h2>\n- [ ] Ship alpha\n- [x] Verify beta\n- [X] Archive gamma\n</section></main></body></html>';
+
+    const result = applyHtmlMutations(html, [{ type: "checklist-repair" }]);
+
+    expect(result).toMatchObject({ ok: true, fixesApplied: 1 });
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.html).toContain('<section id="definition-of-done"><h2>Definition of Done</h2><ul class="ce-checklist" aria-label="Checklist"><li class="ce-checklist-item"><span class="ce-checklist-state">[ ]</span> <span class="ce-checklist-label">Ship alpha</span></li><li class="ce-checklist-item"><span class="ce-checklist-state">[x]</span> <span class="ce-checklist-label">Verify beta</span></li><li class="ce-checklist-item"><span class="ce-checklist-state">[x]</span> <span class="ce-checklist-label">Archive gamma</span></li></ul></section>');
+    expect(result.html).not.toContain("- [ ] Ship alpha");
+
+    const second = applyHtmlMutations(result.html, [{ type: "checklist-repair" }]);
+    expect(second).toMatchObject({ ok: true, fixesApplied: 0, html: result.html });
+  });
+
+  it("repairs marker lists without adding, dropping, reordering, or rewording items", () => {
+    const html = '<!DOCTYPE html><html><head><title>Plan</title></head><body><main><section id="verification-contract"><h2>Verification Contract</h2><ol><li>[x] First &amp; ready</li><li>[ ] Second pending</li></ol></section></main></body></html>';
+
+    const result = applyHtmlMutations(html, [{ type: "checklist-repair" }]);
+
+    expect(result).toMatchObject({ ok: true, fixesApplied: 1 });
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.html).toContain('<li class="ce-checklist-item"><span class="ce-checklist-state">[x]</span> <span class="ce-checklist-label">First &amp; ready</span></li><li class="ce-checklist-item"><span class="ce-checklist-state">[ ]</span> <span class="ce-checklist-label">Second pending</span></li>');
+    expect(result.html.indexOf("First &amp; ready")).toBeLessThan(result.html.indexOf("Second pending"));
+  });
+
+  it("repairs a single checked item to the canonical shape", () => {
+    const html = '<!DOCTYPE html><html><head><title>Plan</title></head><body><main><section id="definition-of-done"><h2>Definition of Done</h2><ul><li>[x] Sole task</li></ul></section></main></body></html>';
+
+    const result = applyHtmlMutations(html, [{ type: "checklist-repair" }]);
+
+    expect(result).toMatchObject({ ok: true, fixesApplied: 1 });
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.html).toContain('<ul class="ce-checklist" aria-label="Checklist"><li class="ce-checklist-item"><span class="ce-checklist-state">[x]</span> <span class="ce-checklist-label">Sole task</span></li></ul>');
+  });
+
+  it("repairs all-unchecked and all-checked checklists without changing state", () => {
+    const unchecked = '<!DOCTYPE html><html><head><title>Plan</title></head><body><main><section id="verification-contract"><h2>Verification Contract</h2><ul><li>[ ] First</li><li>[ ] Second</li></ul></section></main></body></html>';
+    const checked = '<!DOCTYPE html><html><head><title>Plan</title></head><body><main><section id="verification-contract"><h2>Verification Contract</h2><ul><li>[x] First</li><li>[X] Second</li></ul></section></main></body></html>';
+
+    const uncheckedResult = applyHtmlMutations(unchecked, [{ type: "checklist-repair" }]);
+    const checkedResult = applyHtmlMutations(checked, [{ type: "checklist-repair" }]);
+
+    expect(uncheckedResult).toMatchObject({ ok: true, fixesApplied: 1 });
+    expect(checkedResult).toMatchObject({ ok: true, fixesApplied: 1 });
+    if (!uncheckedResult.ok) throw new Error(uncheckedResult.reason);
+    if (!checkedResult.ok) throw new Error(checkedResult.reason);
+    expect(uncheckedResult.html.match(/ce-checklist-state">\[ \]/g)).toHaveLength(2);
+    expect(uncheckedResult.html).not.toContain('ce-checklist-state">[x]');
+    expect(checkedResult.html.match(/ce-checklist-state">\[x\]/g)).toHaveLength(2);
+    expect(checkedResult.html).not.toContain('ce-checklist-state">[ ]');
+  });
+
+  it("repairs input-checkbox lists while preserving checked state and label text", () => {
+    const html = '<!DOCTYPE html><html><head><title>Plan</title></head><body><main><section id="implementation-units"><h2>Implementation Units</h2><ul><li><input type="checkbox" checked=""> Build one</li><li><input type="checkbox"> Test two</li></ul></section></main></body></html>';
+
+    const result = applyHtmlMutations(html, [{ type: "checklist-repair" }]);
+
+    expect(result).toMatchObject({ ok: true, fixesApplied: 1 });
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.html).toContain('<ul class="ce-checklist" aria-label="Checklist"><li class="ce-checklist-item"><span class="ce-checklist-state">[x]</span> <span class="ce-checklist-label">Build one</span></li><li class="ce-checklist-item"><span class="ce-checklist-state">[ ]</span> <span class="ce-checklist-label">Test two</span></li></ul>');
+    expect(result.html).not.toContain('<input type="checkbox"');
+  });
+
+  it("preserves protected regions and never turns label text into script or style markup", () => {
+    const html = '<!DOCTYPE html><html><head><title>Plan</title><style>.x{color:red}</style></head><body><main><section id="implementation-units"><h2>Implementation Units</h2><ul><li>[ ] Render &lt;script&gt; as text</li><li>[x] Render &lt;style&gt; as text</li></ul><pre>- [ ] code checklist stays raw</pre></section></main><script>const marker = "- [ ] untouched";</script></body></html>';
+
+    const result = applyHtmlMutations(html, [{ type: "checklist-repair" }]);
+
+    expect(result).toMatchObject({ ok: true, fixesApplied: 1 });
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.html).toContain('<style>.x{color:red}</style>');
+    expect(result.html).toContain('<script>const marker = "- [ ] untouched";</script>');
+    expect(result.html).toContain('<pre>- [ ] code checklist stays raw</pre>');
+    expect(result.html).toContain('Render &lt;script&gt; as text');
+    expect(result.html).toContain('Render &lt;style&gt; as text');
+    expect(result.html).not.toContain('<span class="ce-checklist-label">Render <script>');
+  });
+
+  it.each([
+    ["ordinary list", '<ul><li>First</li><li>Second</li></ul>', /no provable malformed checklist/i],
+    ["partial marker list", '<ul><li>[ ] First</li><li>Second</li></ul>', /ambiguous/i],
+    ["nested checklist list", '<ul><li><input type="checkbox" checked=""> Parent<ul><li><input type="checkbox"> Child</li></ul></li></ul>', /ambiguous/i],
+    ["id-bearing checklist-like list", '<ul id="keep"><li>[ ] First</li></ul>', /ambiguous/i],
+    ["aria-checked item", '<ul><li aria-checked="true">[ ] Ship</li></ul>', /ambiguous/i],
+    ["role-bearing item", '<ul><li role="checkbox">[ ] Task</li></ul>', /ambiguous/i],
+    ["class-bearing item", '<ul><li class="done">[ ] Task</li></ul>', /ambiguous/i],
+    ["style-bearing item", '<ul><li style="display:none">[ ] Task</li></ul>', /ambiguous/i],
+    ["conflicting input aria state", '<ul><li><input type="checkbox" checked="" aria-checked="false"> Ship</li></ul>', /ambiguous/i],
+  ])("refuses %s with report-only semantics", (_name, fragment, reason) => {
+    const html = `<!DOCTYPE html><html><head><title>Plan</title></head><body><main><section id="verification-contract"><h2>Verification Contract</h2>${fragment}</section></main></body></html>`;
+
+    const result = applyHtmlMutations(html, [{ type: "checklist-repair" }]);
+
+    expect(result).toMatchObject({ ok: false, fixesApplied: 0 });
+    if (result.ok) throw new Error("expected checklist repair to be refused");
+    expect(result.reason).toMatch(reason);
+  });
+
+  it("refuses non-round-trip-stable checklist repair and leaves the file byte-identical", () => {
+    root = makeRepo();
+    const file = planPath(root);
+    const unstable = "<html><body><main><section>- [ ] Missing close";
+    writeFileSync(file, unstable);
+
+    const result = writeHtmlMutationsToFile(file, [{ type: "checklist-repair" }], { rootDir: root });
+
+    expect(result).toMatchObject({ ok: false, fixesApplied: 0 });
+    if (result.ok) throw new Error("expected unstable checklist HTML write to be refused");
+    expect(result.reason).toMatch(/round-trip stability/i);
+    expect(readFileSync(file, "utf8")).toBe(unstable);
+  });
+
+  it("rolls back checklist repair atomically when post-write validation fails", () => {
+    root = makeRepo();
+    const file = planPath(root);
+    const html = '<!DOCTYPE html><html><head><title>Plan</title></head><body><main><section id="definition-of-done"><h2>Definition of Done</h2><ul><li>[ ] Done one</li></ul></section></main></body></html>';
+    writeFileSync(file, html);
+
+    const result = writeHtmlMutationsToFile(file, [{ type: "checklist-repair" }], { rootDir: root, validateWrittenHtml: () => false });
+
+    expect(result).toMatchObject({ ok: false, fixesApplied: 0 });
+    expect(readFileSync(file, "utf8")).toBe(html);
     expect(readdirSync(root).filter((entry) => entry.includes("html-mutation"))).toEqual([]);
   });
 

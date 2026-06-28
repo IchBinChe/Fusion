@@ -1,7 +1,7 @@
 import { lstatSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { randomUUID } from "node:crypto";
-import { parse, parseFragment, serialize, serializeOuter, type DefaultTreeAdapterTypes } from "parse5";
+import { html, parse, parseFragment, serialize, serializeOuter, type DefaultTreeAdapterTypes } from "parse5";
 
 const MAX_ARTIFACT_BYTES = 2_000_000;
 const STABLE_SECTION_IDS = new Set([
@@ -43,6 +43,19 @@ const SAFE_OPEN_QUESTION_TAGS = new Set([
 ]);
 const SAFE_OPEN_QUESTION_GLOBAL_ATTRS = new Set(["aria-label", "title"]);
 const SAFE_OPEN_QUESTION_ATTRS = new Map<string, ReadonlySet<string>>([["a", new Set(["href", "title", "aria-label"])] as const]);
+const CHECKLIST_REPAIR_BLOCK_TAGS = new Set([
+  "article",
+  "blockquote",
+  "details",
+  "div",
+  "dl",
+  "figure",
+  "ol",
+  "p",
+  "section",
+  "table",
+  "ul",
+]);
 
 type Document = DefaultTreeAdapterTypes.Document;
 type DocumentFragment = DefaultTreeAdapterTypes.DocumentFragment;
@@ -53,6 +66,7 @@ type ParentNode = DefaultTreeAdapterTypes.ParentNode;
 
 export type HtmlMutationOperation =
   | { type: "append-open-question"; itemHtml: string }
+  | { type: "checklist-repair" }
   | { type: "repair-heading-depth"; anchorId: string; fromLevel: 1 | 2 | 3 | 4 | 5 | 6; toLevel: 1 | 2 | 3 | 4 | 5 | 6 }
   | { type: "normalize-duplicate-inter-block-whitespace" }
   | { type: "replace-visible-text"; from: string; to: string; anchorId?: string };
@@ -191,6 +205,8 @@ function applySingleOperation(
   switch (operation.type) {
     case "append-open-question":
       return appendOpenQuestion(document, operation.itemHtml);
+    case "checklist-repair":
+      return repairChecklists(document);
     case "repair-heading-depth":
       return repairHeadingDepth(document, operation);
     case "normalize-duplicate-inter-block-whitespace":
@@ -220,6 +236,170 @@ function appendOpenQuestion(document: Document, itemHtml: string): { ok: true; a
   item.element.parentNode = list.element;
   list.element.childNodes.push(item.element);
   return { ok: true, applied: true };
+}
+
+/**
+ * FNXC:CompoundEngineering 2026-06-28-08:41:
+ * FN-7159 permits HTML checklist write-back only after the CE rendering contract defines one canonical source-readable shape. Repair is limited to provable markdown-marker/list/input-checkbox variants, rejects ambiguous lists and subtrees with hidden/state-bearing attributes, and delegates round-trip, protected-region, visible-text, atomic-write, and rollback safety to the shared helper contract.
+ */
+function repairChecklists(document: Document): { ok: true; applied: boolean; expectedVisibleText?: string } | HtmlMutationRefusal {
+  const repairs: Array<{ target: ChildNode; items: ChecklistItem[] }> = [];
+  let sawCanonical = false;
+  let sawAmbiguous = false;
+
+  walkNodes(document, (node, ancestors) => {
+    if (isInsideProtectedOrRawText(ancestors)) return;
+    if (isText(node)) {
+      const parsed = parseRawMarkdownChecklistText(node.value);
+      if (parsed.kind === "repair") repairs.push({ target: node, items: parsed.items });
+      if (parsed.kind === "ambiguous") sawAmbiguous = true;
+      return;
+    }
+    if (!isElement(node) || (node.tagName !== "ul" && node.tagName !== "ol")) return;
+    if (isCanonicalChecklist(node)) {
+      sawCanonical = true;
+      return;
+    }
+    const parsed = parseMalformedChecklistList(node);
+    if (parsed.kind === "repair") repairs.push({ target: node, items: parsed.items });
+    if (parsed.kind === "ambiguous") sawAmbiguous = true;
+  });
+
+  if (sawAmbiguous) return refusal("checklist repair found ambiguous or unsafe checklist-like HTML");
+  if (repairs.length === 0) {
+    return sawCanonical ? { ok: true, applied: false } : refusal("no provable malformed checklist found");
+  }
+
+  for (const repair of repairs) {
+    const parent = repair.target.parentNode;
+    if (!parent || !("childNodes" in parent)) return refusal("checklist repair target has no mutable parent");
+    const index = parent.childNodes.indexOf(repair.target);
+    if (index < 0) return refusal("checklist repair target is not attached to its parent");
+    const replacement = makeCanonicalChecklist(repair.items);
+    replacement.parentNode = parent;
+    parent.childNodes[index] = replacement;
+  }
+
+  return { ok: true, applied: true, expectedVisibleText: getVisibleText(document) };
+}
+
+interface ChecklistItem {
+  checked: boolean;
+  label: string;
+}
+
+type ChecklistParseResult = { kind: "none" } | { kind: "ambiguous" } | { kind: "repair"; items: ChecklistItem[] };
+
+function parseRawMarkdownChecklistText(value: string): ChecklistParseResult {
+  if (!/[\r\n]?\s*-\s*\[[ xX]\]/.test(value)) return { kind: "none" };
+  const lines = value.split(/\r?\n/);
+  const items: ChecklistItem[] = [];
+  for (const line of lines) {
+    if (line.trim() === "") continue;
+    const match = /^\s*-\s*\[([ xX])\]\s+(.+?)\s*$/.exec(line);
+    if (!match) return { kind: "ambiguous" };
+    items.push({ checked: match[1].toLowerCase() === "x", label: match[2] });
+  }
+  return items.length > 0 ? { kind: "repair", items } : { kind: "none" };
+}
+
+function parseMalformedChecklistList(list: Element): ChecklistParseResult {
+  if (hasUnsafeChecklistSubtree(list)) return looksChecklistLike(list) ? { kind: "ambiguous" } : { kind: "none" };
+  const items = list.childNodes.filter(isElement);
+  if (items.length === 0) return { kind: "none" };
+  if (items.some((item) => item.tagName !== "li") || list.childNodes.some((child) => !isWhitespaceText(child) && !isElement(child))) {
+    return looksChecklistLike(list) ? { kind: "ambiguous" } : { kind: "none" };
+  }
+  if (items.some(hasNestedChecklistRepairBlock)) return looksChecklistLike(list) ? { kind: "ambiguous" } : { kind: "none" };
+
+  const markerItems = items.map(parseMarkerListItem);
+  if (markerItems.every((item): item is ChecklistItem => Boolean(item))) return { kind: "repair", items: markerItems };
+  if (markerItems.some(Boolean)) return { kind: "ambiguous" };
+
+  const inputItems = items.map(parseInputCheckboxListItem);
+  if (inputItems.every((item): item is ChecklistItem => Boolean(item))) return { kind: "repair", items: inputItems };
+  if (inputItems.some(Boolean)) return { kind: "ambiguous" };
+
+  return { kind: "none" };
+}
+
+function hasNestedChecklistRepairBlock(item: Element): boolean {
+  return findElements(item, (element) => element !== item && CHECKLIST_REPAIR_BLOCK_TAGS.has(element.tagName)).length > 0;
+}
+
+function parseMarkerListItem(item: Element): ChecklistItem | null {
+  const visible = getVisibleText(item);
+  const match = /^\[([ xX])\]\s+(.+?)\s*$/.exec(visible);
+  if (!match) return null;
+  return { checked: match[1].toLowerCase() === "x", label: match[2] };
+}
+
+function parseInputCheckboxListItem(item: Element): ChecklistItem | null {
+  const first = item.childNodes.find((child) => !isWhitespaceText(child));
+  if (!first || !isElement(first) || first.tagName !== "input" || getAttr(first, "type")?.toLowerCase() !== "checkbox") return null;
+  const label = getVisibleText(item).trim();
+  if (!label) return null;
+  return { checked: hasAttr(first, "checked"), label };
+}
+
+function looksChecklistLike(root: ParentNode): boolean {
+  return /\[[ xX]\]|type=["']?checkbox/i.test(serialize(root));
+}
+
+function hasUnsafeChecklistSubtree(root: Element): boolean {
+  return findElements(root, (element) => {
+    if (PROTECTED_TAGS.has(element.tagName)) return true;
+    if (getAttr(element, "id")) return true;
+    return element.attrs.some((attr) => {
+      const name = attr.name.toLowerCase();
+      return name.startsWith("data-") || name.startsWith("on") || name.startsWith("aria-") || name === "role" || name === "class" || name === "style";
+    });
+  }).length > 0;
+}
+
+function isCanonicalChecklist(list: Element): boolean {
+  if (list.tagName !== "ul" || getAttr(list, "class") !== "ce-checklist" || getAttr(list, "aria-label") !== "Checklist") return false;
+  for (const child of list.childNodes) {
+    if (isWhitespaceText(child)) continue;
+    if (!isElement(child) || child.tagName !== "li" || getAttr(child, "class") !== "ce-checklist-item") return false;
+    const semantic = child.childNodes.filter((itemChild) => !isWhitespaceText(itemChild) || (isText(itemChild) && itemChild.value === " "));
+    if (semantic.length !== 3) return false;
+    const [state, spacer, label] = semantic;
+    if (!isElement(state) || state.tagName !== "span" || getAttr(state, "class") !== "ce-checklist-state") return false;
+    if (getVisibleText(state) !== "[ ]" && getVisibleText(state) !== "[x]") return false;
+    if (!isText(spacer) || spacer.value !== " ") return false;
+    if (!isElement(label) || label.tagName !== "span" || getAttr(label, "class") !== "ce-checklist-label" || !getVisibleText(label)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function makeCanonicalChecklist(items: readonly ChecklistItem[]): Element {
+  return makeElement(
+    "ul",
+    [
+      { name: "class", value: "ce-checklist" },
+      { name: "aria-label", value: "Checklist" },
+    ],
+    items.map((item) =>
+      makeElement("li", [{ name: "class", value: "ce-checklist-item" }], [
+        makeElement("span", [{ name: "class", value: "ce-checklist-state" }], [makeText(item.checked ? "[x]" : "[ ]")]),
+        makeText(" "),
+        makeElement("span", [{ name: "class", value: "ce-checklist-label" }], [makeText(item.label)]),
+      ]),
+    ),
+  );
+}
+
+function makeElement(tagName: string, attrs: Element["attrs"], childNodes: ChildNode[] = []): Element {
+  const element: Element = { nodeName: tagName, tagName, attrs, namespaceURI: html.NS.HTML, childNodes, parentNode: null };
+  for (const child of childNodes) child.parentNode = element;
+  return element;
+}
+
+function makeText(value: string): TextNode {
+  return { nodeName: "#text", value, parentNode: null };
 }
 
 function repairHeadingDepth(
@@ -508,6 +688,10 @@ function headingLevel(element: Element): number {
 
 function getAttr(element: Element, name: string): string | undefined {
   return element.attrs.find((attr) => attr.name === name)?.value;
+}
+
+function hasAttr(element: Element, name: string): boolean {
+  return element.attrs.some((attr) => attr.name === name);
 }
 
 function countOccurrences(text: string, needle: string): number {

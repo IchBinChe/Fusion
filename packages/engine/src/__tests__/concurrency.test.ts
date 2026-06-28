@@ -6,6 +6,7 @@ import {
   PRIORITY_MERGE,
   PRIORITY_EXECUTE,
   PRIORITY_SPECIFY,
+  persistedTopLevelAgentSlots,
   recoverIdleSemaphoreLeakCandidate,
 } from "../concurrency.js";
 
@@ -347,6 +348,23 @@ describe("AgentSemaphore", () => {
     expect(result).toEqual({ before: 1, after: 1, changed: false });
     expect(sem.activeCount).toBe(1);
     sem.release();
+  });
+
+  it("counts persisted top-level slots with the shared in-review running-agent predicate", () => {
+    const tasks = [
+      { column: "in-progress" },
+      { column: "triage", status: "planning", paused: false },
+      { column: "triage", status: "planning", paused: true },
+      { column: "in-review", status: "reviewing", paused: false },
+      { column: "in-review", status: "merging", paused: false },
+      { column: "in-review", status: "merging-pr", paused: false },
+      { column: "in-review", status: "merging-fix", paused: false },
+      { column: "in-review", status: "fixing", paused: false },
+      { column: "in-review", status: "reviewing", paused: true },
+      { column: "todo" },
+    ] as Task[];
+
+    expect(persistedTopLevelAgentSlots(tasks)).toBe(7);
   });
 
   it("recovers idle semaphore leaks only after a stable persisted-idle window", async () => {

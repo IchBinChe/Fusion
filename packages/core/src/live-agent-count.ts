@@ -1,4 +1,10 @@
+import type { Task } from "./types.js";
+
 export type RunningAgentCountSource = (projectIds: readonly string[]) => Promise<Record<string, number>> | Record<string, number>;
+
+type RunningAgentTaskShape = Pick<Task, "column" | "status" | "paused">;
+
+const ACTIVE_IN_REVIEW_AGENT_STATUSES = new Set(["merging", "merging-pr", "merging-fix", "reviewing", "fixing"]);
 
 let runningAgentCountSource: RunningAgentCountSource | undefined;
 
@@ -20,6 +26,30 @@ export function getRunningAgentCountSource(): RunningAgentCountSource | undefine
 export interface RunningAgentCounts {
   currentlyActive: number;
   projectsActive: Record<string, number>;
+}
+
+/**
+ * FNXC:GlobalConcurrencyControls 2026-06-27-00:00:
+ * FN-7160 defines live running-agent counts as top-level concurrency slot holders: in-progress executors, active unpaused triage planners, and active unpaused in-review reviewer/merger/fix agents, including PR/fix merge substates. Keep this pure predicate as the shared source of truth for engine slot accounting and all dashboard/CLI read-layer count surfaces so in-review agents cannot drift out of utilization displays again.
+ */
+export function isRunningAgentTask(task: RunningAgentTaskShape): boolean {
+  if (task.column === "in-progress") {
+    return true;
+  }
+
+  if (task.column === "triage") {
+    return task.status === "planning" && !task.paused;
+  }
+
+  if (task.column === "in-review") {
+    return ACTIVE_IN_REVIEW_AGENT_STATUSES.has(String(task.status ?? "")) && !task.paused;
+  }
+
+  return false;
+}
+
+export function countRunningAgentTasks(tasks: readonly RunningAgentTaskShape[]): number {
+  return tasks.filter(isRunningAgentTask).length;
 }
 
 export function deriveRunningAgentCounts(perProject: Record<string, number>): RunningAgentCounts {

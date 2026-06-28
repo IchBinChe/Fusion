@@ -5751,7 +5751,7 @@ export interface ProjectHealth {
   /**
    * FNXC:Concurrency 2026-06-26-23:46:
    * Persisted project-health bookkeeping refreshed only by health polling / slot accounting paths; it is not a live read-layer running-agent count.
-   * Consumers that need current running agents must derive from in-progress executors plus active triage planners (`column === "triage" && status === "planning" && !paused`) so FN-7102 project health matches FN-7097 global concurrency, and leave this stored value untouched.
+   * Consumers that need current running agents must derive from the shared top-level slot predicate: in-progress executors, active triage planners (`column === "triage" && status === "planning" && !paused`), and active in-review reviewer/merger/fix agents including PR/fix merge substates, leaving this stored value untouched.
    */
   inFlightAgentCount: number;
   /** ISO-8601 timestamp of last activity */

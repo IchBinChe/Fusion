@@ -446,7 +446,7 @@ describe("countRunningAgentsInRegisteredProjectStores", () => {
     expect(listTasks).toHaveBeenCalledWith({ slim: true });
   });
 
-  it("sums in-progress executors and active triage agents while excluding inactive triage states", async () => {
+  it("sums in-progress executors, active triage agents, and active in-review agents while excluding inactive states", async () => {
     const store = await getOrCreateProjectStore("proj_mixed");
     installTaskList(store, [
       "in-progress",
@@ -454,13 +454,20 @@ describe("countRunningAgentsInRegisteredProjectStores", () => {
       { column: "triage", status: "planning", paused: true },
       { column: "triage", status: "triaged" },
       { column: "triage" },
+      { column: "in-review", status: "reviewing", paused: false },
+      { column: "in-review", status: "merging", paused: false },
+      { column: "in-review", status: "merging-pr", paused: false },
+      { column: "in-review", status: "merging-fix", paused: false },
+      { column: "in-review", status: "fixing", paused: false },
+      { column: "in-review", status: "reviewing", paused: true },
+      { column: "in-review", status: "pending", paused: false },
       "todo",
     ]);
 
-    await expect(countRunningAgentsInStore(store)).resolves.toBe(2);
+    await expect(countRunningAgentsInStore(store)).resolves.toBe(7);
   });
 
-  it("returns per-project active triage and executor counts for multiple already-open stores", async () => {
+  it("returns per-project active triage, in-review, and executor counts for multiple already-open stores", async () => {
     const storeA = await getOrCreateProjectStore("proj_triage_a");
     const storeB = await getOrCreateProjectStore("proj_triage_b");
     const listTasksA = installTaskList(storeA, [
@@ -472,14 +479,17 @@ describe("countRunningAgentsInRegisteredProjectStores", () => {
       { column: "triage", status: "planning" },
       { column: "triage", status: "planning" },
       { column: "triage", status: "planning", paused: true },
+      { column: "in-review", status: "fixing", paused: false },
+      { column: "in-review", status: "merging-fix", paused: false },
+      { column: "in-review", status: "merging", paused: true },
       "done",
     ]);
     vi.clearAllMocks();
 
     const counts = await countRunningAgentsInRegisteredProjectStores(["proj_triage_a", "proj_triage_b"]);
 
-    expect(counts).toEqual({ proj_triage_a: 2, proj_triage_b: 2 });
-    expect(Object.values(counts).reduce((sum, count) => sum + count, 0)).toBe(4);
+    expect(counts).toEqual({ proj_triage_a: 2, proj_triage_b: 4 });
+    expect(Object.values(counts).reduce((sum, count) => sum + count, 0)).toBe(6);
     expect(listTasksA).toHaveBeenCalledWith({ slim: true });
     expect(listTasksB).toHaveBeenCalledWith({ slim: true });
     expect(createdStores).toHaveLength(2);

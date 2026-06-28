@@ -21,6 +21,7 @@ import {
   COLUMNS,
   COLUMN_LABELS,
   type Column,
+  countRunningAgentTasks,
   readProjectIdentity,
   writeProjectIdentity,
 } from "@fusion/core";
@@ -84,7 +85,7 @@ export interface ProjectInfoData {
 
 interface TaskCountSummary {
   byColumn: Record<string, number>;
-  activeTriagePlannerCount: number;
+  runningAgentCount: number;
 }
 
 /**
@@ -131,17 +132,13 @@ async function getTaskCounts(projectPath: string): Promise<TaskCountSummary> {
     for (const col of COLUMNS) {
       counts[col] = 0;
     }
-    let activeTriagePlannerCount = 0;
     for (const task of tasks) {
       counts[task.column] = (counts[task.column] || 0) + 1;
-      if (task.column === "triage" && task.status === "planning" && !task.paused) {
-        activeTriagePlannerCount += 1;
-      }
     }
-    return { byColumn: counts, activeTriagePlannerCount };
+    return { byColumn: counts, runningAgentCount: countRunningAgentTasks(tasks) };
   } catch {
     // Return empty counts if we can't read the project
-    return { byColumn: {}, activeTriagePlannerCount: 0 };
+    return { byColumn: {}, runningAgentCount: 0 };
   }
 }
 
@@ -156,9 +153,9 @@ function getLiveInFlightAgentCount(taskCounts: TaskCountSummary): number {
   /*
    * FNXC:CLIProjectHealth 2026-06-26-23:46:
    * FN-7081 confirmed central projectHealth.inFlightAgentCount is slot/health bookkeeping that can be stale or zero in the default in-process runtime.
-   * User-visible In-Flight Agents must mirror the dashboard read route and FN-7097's global running-agent count by deriving live agents from in-progress tasks plus active triage planners (`triage` + `planning` + not paused) without mutating persisted health rows.
+   * User-visible In-Flight Agents must mirror the dashboard read route and global running-agent count by deriving live agents from the shared top-level slot predicate, including active in-review reviewer/merger/fix agents, without mutating persisted health rows.
    */
-  return (taskCounts.byColumn["in-progress"] ?? 0) + taskCounts.activeTriagePlannerCount;
+  return taskCounts.runningAgentCount;
 }
 
 function buildDisplayHealth(

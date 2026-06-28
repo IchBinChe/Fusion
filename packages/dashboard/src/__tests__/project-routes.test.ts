@@ -1437,17 +1437,22 @@ describe("GET /api/projects/:id/health route handler", () => {
     // Should have computed counts from project-scoped store, not stale central data
     expect(health.projectId).toBe("proj_a");
     expect(health.activeTaskCount).toBe(4); // triage + todo + in-progress + in-review
-    expect(health.inFlightAgentCount).toBe(2); // in-progress + active triage planner
+    expect(health.inFlightAgentCount).toBe(2); // in-progress + active triage planner (plain in-review without active status is inactive)
     expect(health.totalTasksCompleted).toBe(2); // done + archived
     expect(health.status).toBe("active");
   });
 
-  it("counts only active triage planners as in-flight when no executors are running", async () => {
+  it("counts active triage planners and active in-review agents as in-flight when no executors are running", async () => {
     const tasks = [
       { id: "FN-1", column: "triage", status: "planning", paused: false },
       { id: "FN-2", column: "triage", status: "planning", paused: true },
       { id: "FN-3", column: "triage", status: "awaiting-approval", paused: false },
       { id: "FN-4", column: "todo" },
+      { id: "FN-5", column: "in-review", status: "reviewing", paused: false },
+      { id: "FN-6", column: "in-review", status: "merging", paused: false },
+      { id: "FN-7", column: "in-review", status: "fixing", paused: false },
+      { id: "FN-8", column: "in-review", status: "reviewing", paused: true },
+      { id: "FN-9", column: "in-review", status: "pending", paused: false },
     ];
 
     const mockStore = createMockStoreWithTasks(tasks);
@@ -1478,8 +1483,8 @@ describe("GET /api/projects/:id/health route handler", () => {
 
     expect(res.status).toBe(200);
     const health = res.body as Record<string, unknown>;
-    expect(health.activeTaskCount).toBe(4);
-    expect(health.inFlightAgentCount).toBe(1);
+    expect(health.activeTaskCount).toBe(9);
+    expect(health.inFlightAgentCount).toBe(4);
     expect(health.totalTasksCompleted).toBe(0);
   });
 
@@ -1490,16 +1495,19 @@ describe("GET /api/projects/:id/health route handler", () => {
       { id: "FN-2", column: "in-progress" },
       { id: "FN-3", column: "done" },
     ];
-    // Project B has 7 tasks, including one active and two inactive triage tasks.
+    // Project B has 9 active tasks, including one executor, one active triage planner, and three active in-review agents.
     const projectBTasks = [
       { id: "FN-10", column: "todo" },
       { id: "FN-11", column: "todo" },
       { id: "FN-12", column: "in-progress" },
-      { id: "FN-13", column: "in-review" },
+      { id: "FN-13", column: "in-review", status: "reviewing", paused: false },
       { id: "FN-14", column: "archived" },
       { id: "FN-15", column: "triage", status: "planning", paused: false },
       { id: "FN-16", column: "triage", status: "planning", paused: true },
       { id: "FN-17", column: "triage", status: "awaiting-approval", paused: false },
+      { id: "FN-18", column: "in-review", status: "merging", paused: false },
+      { id: "FN-19", column: "in-review", status: "fixing", paused: false },
+      { id: "FN-20", column: "in-review", status: "fixing", paused: true },
     ];
 
     const storeA = createMockStoreWithTasks(projectATasks);
@@ -1572,9 +1580,9 @@ describe("GET /api/projects/:id/health route handler", () => {
     expect(resB.status).toBe(200);
     const healthB = resB.body as Record<string, unknown>;
     
-    // Project B: 2 todo + 1 in-progress + 1 in-review + 3 triage = 7 active, 2 in-flight
-    expect(healthB.activeTaskCount).toBe(7); // 2 todo + 1 in-progress + 1 in-review + 3 triage
-    expect(healthB.inFlightAgentCount).toBe(2); // in-progress + active triage planner only
+    // Project B: 2 todo + 1 in-progress + 4 in-review + 3 triage = 10 active, 5 in-flight
+    expect(healthB.activeTaskCount).toBe(10); // 2 todo + 1 in-progress + 4 in-review + 3 triage
+    expect(healthB.inFlightAgentCount).toBe(5); // in-progress + active triage planner + active in-review agents
     expect(healthB.totalTasksCompleted).toBe(1); // archived
 
     // Verify no bleed-through: project A counts should not equal project B counts
@@ -1591,6 +1599,7 @@ describe("GET /api/projects/:id/health route handler", () => {
       { id: "FN-3", column: "in-progress" },
       { id: "FN-4", column: "done" },
       { id: "FN-5", column: "triage", status: "planning", paused: false },
+      { id: "FN-6", column: "in-review", status: "reviewing", paused: false },
     ];
 
     const mockStore = createMockStoreWithTasks(tasks);
@@ -1617,8 +1626,8 @@ describe("GET /api/projects/:id/health route handler", () => {
     
     // Should have computed counts from project store
     expect(health.projectId).toBe("proj_new");
-    expect(health.activeTaskCount).toBe(4); // todo + 2 in-progress + triage
-    expect(health.inFlightAgentCount).toBe(3); // 2 in-progress + active triage planner
+    expect(health.activeTaskCount).toBe(5); // todo + 2 in-progress + triage + in-review
+    expect(health.inFlightAgentCount).toBe(4); // 2 in-progress + active triage planner + active in-review agent
     expect(health.totalTasksCompleted).toBe(1); // done
     expect(health.status).toBe("active");
   });

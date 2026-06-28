@@ -14,7 +14,7 @@
  *   const store = await getOrCreateProjectStore(projectId);
  */
 
-import type { TaskStore } from "@fusion/core";
+import { countRunningAgentTasks, type TaskStore } from "@fusion/core";
 
 /**
  * Internal cache: projectId → TaskStore instance.
@@ -160,14 +160,11 @@ export function listRegisteredProjectStores(): Array<{ projectId: string; store:
 
 /**
  * FNXC:GlobalConcurrencyControls 2026-06-26-18:20:
- * The live running-agent count must include actively-triaging agents because `triage` + `planning` tasks hold a global concurrency slot just like in-progress executors. Mirror the `maxTriageConcurrent` liveness predicate from `triage.ts` so the footer and Command Center do not under-count planning work.
+ * The live running-agent count must include every top-level slot holder: in-progress executors, active triage planners, and active in-review reviewer/merger/fix agents. Delegate to the shared core predicate so the footer and Command Center cannot under-count in-review work.
  */
 export async function countRunningAgentsInStore(store: TaskStore): Promise<number> {
   const tasks = await store.listTasks({ slim: true });
-  return tasks.filter((task) => (
-    task.column === "in-progress" ||
-    (task.column === "triage" && task.status === "planning" && !task.paused)
-  )).length;
+  return countRunningAgentTasks(tasks);
 }
 
 /**

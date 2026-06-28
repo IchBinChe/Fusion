@@ -137,9 +137,27 @@ describe("CommandCenterControls", () => {
 
     expect(within(section).getByTestId("cc-global-running")).toHaveTextContent("3 running (all projects)");
     expect(within(section).getByTestId("cc-project-running")).toHaveTextContent("2 running (this project)");
-    expect(within(section).getByTestId("cc-global-use-marker").style.getPropertyValue("--use-pct")).toBe(`${((3 - 1) / (32 - 1)) * 100}%`);
-    expect(within(section).getByTestId("cc-project-use-marker").style.getPropertyValue("--use-pct")).toBe(`${((2 - 1) / (50 - 1)) * 100}%`);
+    expect(within(section).getByTestId("cc-global-use-marker").style.getPropertyValue("--use-pct")).toBe(`${(3 / 32) * 100}%`);
+    expect(within(section).getByTestId("cc-project-use-marker").style.getPropertyValue("--use-pct")).toBe(`${(2 / 50) * 100}%`);
     expect(within(section).queryAllByTestId(/cc-.*-use-marker/)).toHaveLength(2);
+  });
+
+  it("positions one active agent above zero on both use markers", async () => {
+    mocks.fetchGlobalConcurrency.mockResolvedValueOnce({
+      globalMaxConcurrent: 8,
+      currentlyActive: 1,
+      queuedCount: 0,
+      projectsActive: { "project-a": 1 },
+    });
+    renderControls("project-a");
+
+    await flushPromises();
+    const section = screen.getByTestId("cc-controls-concurrency");
+
+    expect(within(section).getByTestId("cc-global-use-marker").style.getPropertyValue("--use-pct")).toBe(`${(1 / 32) * 100}%`);
+    expect(within(section).getByTestId("cc-project-use-marker").style.getPropertyValue("--use-pct")).toBe(`${(1 / 50) * 100}%`);
+    expect(within(section).getByTestId("cc-global-use-marker").style.getPropertyValue("--use-pct")).not.toBe("0%");
+    expect(within(section).getByTestId("cc-project-use-marker").style.getPropertyValue("--use-pct")).not.toBe("0%");
   });
 
   it("shows truthful zero or missing project running counts only after utilization loads", async () => {

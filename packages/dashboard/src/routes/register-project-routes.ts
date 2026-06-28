@@ -1,6 +1,7 @@
 import * as fsPromises from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import {
+  countRunningAgentTasks,
   ensureMemoryFileWithBackend,
   isValidSqliteDatabaseFile,
   ProjectIdentityConflictError,
@@ -825,11 +826,9 @@ export const registerProjectRoutes: ApiRouteRegistrar = (ctx) => {
         /*
          * FNXC:GlobalConcurrencyControls 2026-06-26-23:46:
          * Project health In-Flight Agents is a live read-layer count, not persisted slot bookkeeping.
-         * Include active triage planners using the same `triage` + `planning` + not-paused predicate that gates `maxTriageConcurrent`, so project-level health matches FN-7097's global running-agent count without mutating stored health.
+         * Include all shared top-level slot holders, including active in-review reviewer/merger/fix agents, so project-level health matches global concurrency without mutating stored health.
          */
-        const inFlightAgentCount = tasks.filter(
-          (t) => t.column === "in-progress" || (t.column === "triage" && t.status === "planning" && !t.paused),
-        ).length;
+        const inFlightAgentCount = countRunningAgentTasks(tasks);
         const totalTasksCompleted = tasks.filter((t) => t.column === "done" || t.column === "archived").length;
 
         // Get central health metadata (if available) to preserve non-count fields

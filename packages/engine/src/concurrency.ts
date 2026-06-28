@@ -1,4 +1,4 @@
-import type { Task } from "@fusion/core";
+import { countRunningAgentTasks, type Task } from "@fusion/core";
 import { createLogger } from "./logger.js";
 
 const concurrencyLog = createLogger("concurrency");
@@ -18,12 +18,12 @@ interface PriorityWaiter {
 
 export const IDLE_SEMAPHORE_LEAK_REPAIR_MS = 5_000;
 
+/**
+ * FNXC:GlobalConcurrencyControls 2026-06-27-00:00:
+ * Persisted semaphore repair must use the same top-level slot predicate as dashboard and CLI live counts, including active in-review agents, so read-layer utilization and engine recovery cannot drift.
+ */
 export function persistedTopLevelAgentSlots(tasks: Task[]): number {
-  return tasks.filter((task) => (
-    task.column === "in-progress"
-    || (task.column === "triage" && task.status === "planning" && !task.paused)
-    || (task.column === "in-review" && ["merging", "reviewing", "fixing"].includes(String(task.status ?? "")))
-  )).length;
+  return countRunningAgentTasks(tasks);
 }
 
 export interface IdleSemaphoreLeakRecoveryResult {

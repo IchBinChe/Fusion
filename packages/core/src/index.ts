@@ -416,6 +416,8 @@ export {
   setRunningAgentCountSource,
   getRunningAgentCountSource,
   deriveRunningAgentCounts,
+  isRunningAgentTask,
+  countRunningAgentTasks,
   type RunningAgentCountSource,
   type RunningAgentCounts,
 } from "./live-agent-count.js";

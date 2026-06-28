@@ -64,6 +64,11 @@ vi.mock("@fusion/core", () => ({
     init: mockTaskStoreInit,
     listTasks: mockTaskStoreListTasks,
   })),
+  countRunningAgentTasks: (tasks: Array<{ column: string; status?: string; paused?: boolean }>) => tasks.filter((task) => (
+    task.column === "in-progress" ||
+    (task.column === "triage" && task.status === "planning" && !task.paused) ||
+    (task.column === "in-review" && ["merging", "merging-pr", "merging-fix", "reviewing", "fixing"].includes(String(task.status ?? "")) && !task.paused)
+  )).length,
   ensureMemoryFileWithBackend: mockEnsureMemoryFileWithBackend,
   readProjectIdentity: vi.fn().mockReturnValue(undefined),
   writeProjectIdentity: vi.fn(),
@@ -359,7 +364,7 @@ describe("project commands", () => {
     expect(output).toContain("Completed: 10");
   });
 
-  it("runProjectShow derives In-Flight Agents from live executors and triage planners when central health is stale", async () => {
+  it("runProjectShow derives In-Flight Agents from live executors, triage planners, and in-review agents when central health is stale", async () => {
     mockGetProject.mockResolvedValue({
       id: "proj-1",
       name: "demo",
@@ -387,17 +392,23 @@ describe("project commands", () => {
       { id: "FN-004", column: "triage", status: "planning", paused: false },
       { id: "FN-005", column: "triage", status: "planning", paused: true },
       { id: "FN-006", column: "triage", status: "awaiting-approval", paused: false },
+      { id: "FN-007", column: "in-review", status: "reviewing", paused: false },
+      { id: "FN-008", column: "in-review", status: "merging", paused: false },
+      { id: "FN-009", column: "in-review", status: "merging-pr", paused: false },
+      { id: "FN-010", column: "in-review", status: "merging-fix", paused: false },
+      { id: "FN-011", column: "in-review", status: "fixing", paused: false },
+      { id: "FN-012", column: "in-review", status: "reviewing", paused: true },
     ]);
 
     const { runProjectShow } = await import("../project.js");
     await runProjectShow("proj-1");
 
     const output = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
-    expect(output).toContain("In-Flight Agents: 3");
+    expect(output).toContain("In-Flight Agents: 8");
     expect(staleHealth.inFlightAgentCount).toBe(0);
   });
 
-  it("runProjectList JSON derives health.inFlightAgentCount from live executors and triage planners", async () => {
+  it("runProjectList JSON derives health.inFlightAgentCount from live executors, triage planners, and in-review agents", async () => {
     mockListProjects.mockResolvedValue([
       { id: "proj-1", name: "app-one", path: "/tmp/app-one", status: "active", isolationMode: "in-process" },
     ]);
@@ -415,18 +426,24 @@ describe("project commands", () => {
       { id: "FN-002", column: "in-progress" },
       { id: "FN-003", column: "triage", status: "planning", paused: false },
       { id: "FN-004", column: "triage", status: "triaged", paused: false },
+      { id: "FN-005", column: "in-review", status: "reviewing", paused: false },
+      { id: "FN-006", column: "in-review", status: "merging", paused: false },
+      { id: "FN-007", column: "in-review", status: "merging-pr", paused: false },
+      { id: "FN-008", column: "in-review", status: "merging-fix", paused: false },
+      { id: "FN-009", column: "in-review", status: "fixing", paused: false },
+      { id: "FN-010", column: "in-review", status: "fixing", paused: true },
     ]);
 
     const { runProjectList } = await import("../project.js");
     await runProjectList({ json: true });
 
     const parsed = JSON.parse(consoleSpy.mock.calls.map((call) => String(call[0])).join(""));
-    expect(parsed[0].health.inFlightAgentCount).toBe(3);
+    expect(parsed[0].health.inFlightAgentCount).toBe(8);
     expect(parsed[0].health.activeTaskCount).toBe(1);
     expect(mockGetProjectHealth.mock.results[0]).toBeDefined();
   });
 
-  it("runProjectList JSON keeps per-project triage planner counts isolated", async () => {
+  it("runProjectList JSON keeps per-project running-agent counts isolated", async () => {
     mockListProjects.mockResolvedValue([
       { id: "proj-1", name: "app-one", path: "/tmp/app-one", status: "active", isolationMode: "in-process" },
       { id: "proj-2", name: "app-two", path: "/tmp/app-two", status: "active", isolationMode: "in-process" },
@@ -444,18 +461,21 @@ describe("project commands", () => {
       .mockResolvedValueOnce([
         { id: "FN-001", column: "triage", status: "planning", paused: false },
         { id: "FN-002", column: "triage", status: "planning", paused: true },
+        { id: "FN-003", column: "in-review", status: "reviewing", paused: false },
       ])
       .mockResolvedValueOnce([
         { id: "FN-010", column: "in-progress" },
         { id: "FN-011", column: "triage", status: "planning", paused: false },
         { id: "FN-012", column: "triage", status: "awaiting-approval", paused: false },
+        { id: "FN-013", column: "in-review", status: "fixing", paused: false },
+        { id: "FN-014", column: "in-review", status: "merging-fix", paused: false },
       ]);
 
     const { runProjectList } = await import("../project.js");
     await runProjectList({ json: true });
 
     const parsed = JSON.parse(consoleSpy.mock.calls.map((call) => String(call[0])).join(""));
-    expect(parsed.map((project: { health: { inFlightAgentCount: number } }) => project.health.inFlightAgentCount)).toEqual([1, 2]);
+    expect(parsed.map((project: { health: { inFlightAgentCount: number } }) => project.health.inFlightAgentCount)).toEqual([2, 4]);
   });
 
   it("runProjectList table prints the live In-Flight column", async () => {
@@ -475,6 +495,7 @@ describe("project commands", () => {
       { id: "FN-001", column: "todo" },
       { id: "FN-002", column: "in-progress" },
       { id: "FN-003", column: "triage", status: "planning", paused: false },
+      { id: "FN-004", column: "in-review", status: "merging-pr", paused: false },
     ]);
 
     const { runProjectList } = await import("../project.js");
@@ -483,7 +504,7 @@ describe("project commands", () => {
     const output = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
     const projectLine = output.split("\n").find((line) => line.includes("app-one"));
     expect(output).toContain("In-Flight");
-    expect(projectLine).toContain("        2");
+    expect(projectLine).toContain("        3");
   });
 
   it("runProjectShow reports zero live In-Flight Agents when no tasks hold agent slots", async () => {
@@ -510,6 +531,8 @@ describe("project commands", () => {
       { id: "FN-002", column: "done" },
       { id: "FN-003", column: "triage", status: "planning", paused: true },
       { id: "FN-004", column: "triage", status: "waiting", paused: false },
+      { id: "FN-005", column: "in-review", status: "reviewing", paused: true },
+      { id: "FN-006", column: "in-review", status: "pending", paused: false },
     ]);
 
     const { runProjectShow } = await import("../project.js");
@@ -534,6 +557,7 @@ describe("project commands", () => {
     mockTaskStoreListTasks.mockResolvedValue([
       { id: "FN-001", column: "in-progress" },
       { id: "FN-002", column: "triage", status: "planning", paused: false },
+      { id: "FN-003", column: "in-review", status: "reviewing", paused: false },
     ]);
 
     const { runProjectShow } = await import("../project.js");
@@ -541,7 +565,7 @@ describe("project commands", () => {
 
     const output = consoleSpy.mock.calls.map((call) => String(call[0])).join("\n");
     expect(output).toContain("Health:");
-    expect(output).toContain("In-Flight Agents: 2");
+    expect(output).toContain("In-Flight Agents: 3");
   });
 
   it("runProjectShow falls back to zero In-Flight Agents when the task store is unreadable", async () => {

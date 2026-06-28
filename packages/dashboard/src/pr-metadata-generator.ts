@@ -9,6 +9,22 @@ import { createFnAgent, resolveMcpServersForStore } from "@fusion/engine";
 const execAsync = promisify(execCb);
 export const PR_METADATA_TIMEOUT_MS = 60_000;
 
+/*
+FNXC:PrMetadataGeneration 2026-06-28-00:09:
+The Create PR AI prompt must produce operator-ready metadata grounded in the commit log and diff stat while preserving the strict JSON schema consumed by parseAiResult, buildBody, and fillTemplate. Keep the schema stable so later configurable-prompt work can reuse this default without changing downstream body assembly.
+*/
+export const PR_METADATA_SYSTEM_PROMPT = [
+  "You generate GitHub pull request metadata for Fusion tasks.",
+  "Respond with STRICT JSON ONLY: no markdown fences, no commentary, no prose outside the JSON object.",
+  "Use exactly this schema: {\"title\": string, \"summary\": string, \"changes\": string, \"testing\": string, \"linkedTask\": string}.",
+  "Title: concise imperative conventional-commit style, at most 72 characters, no trailing period, with a scope when the change clearly suggests one.",
+  "Summary: 1-3 short plain-sentence paragraphs explaining what changed and why; be specific and avoid marketing fluff.",
+  "Changes: a tight markdown bullet list of concrete, verifiable changes supported by the commit log or diff stat; do not speculate.",
+  "Testing: markdown bullets naming actual verification shown in the evidence; if no testing evidence exists, say '- Not provided.' or '- Not run (not provided).'.",
+  "LinkedTask: set to the task ID exactly as provided.",
+  "Ground every field in the commit log and diff stat first, then use the task title, task description, and task prompt only as supporting context.",
+].join("\n");
+
 export interface GeneratedPrMetadata {
   title: string;
   body: string;
@@ -270,11 +286,7 @@ export async function generatePrMetadata(input: {
     const template = templateExists ? await raceWithAbort(readFile(templatePath, "utf8"), combinedSignal) : "";
 
     const model = resolveTitleSummarizerSettingsModel(settings as Partial<Settings>);
-    const systemPrompt = [
-      "Generate GitHub PR metadata.",
-      "Respond with strict JSON only.",
-      "Schema: {title, summary, changes, testing, linkedTask}",
-    ];
+    const systemPrompt = [PR_METADATA_SYSTEM_PROMPT];
     const titleGuidance = settings.prTitlePromptInstructions?.trim();
     const descriptionGuidance = settings.prDescriptionPromptInstructions?.trim();
     /*
@@ -307,15 +319,20 @@ export async function generatePrMetadata(input: {
 
     try {
       const contextPrompt = [
+        "Source-of-truth guidance:",
+        "- Ground the PR title, summary, changes, and testing in the commit log and diff stat below.",
+        "- Use task title, task description, and task prompt only to clarify intent when the git evidence supports it.",
+        "- Omit speculation; when evidence for testing or a change is absent, say so instead of inventing details.",
+        "- Return only strict JSON matching the required schema.",
         `Task ID: ${task.id}`,
         `Task title: ${task.title}`,
         `Task description: ${task.description ?? ""}`,
         `Base branch: ${baseBranch}`,
-        "Commit log:",
+        "Commit log (source of truth):",
         logOut || "(none)",
-        "Diff stat:",
+        "Diff stat (source of truth):",
         diffStatOut || "(none)",
-        "Task prompt:",
+        "Task prompt (supporting context):",
         promptContent || "(none)",
       ].join("\n\n");
 

@@ -179,6 +179,68 @@ FN-7170 hosts Create PR in FloatingWindow: desktop geometry belongs to the share
   margin-bottom: 0;
 }
 
+.pr-create-modal__field-shell {
+  position: relative;
+}
+
+.pr-create-modal__field-shell > .input:disabled {
+  cursor: wait;
+}
+
+.pr-create-modal__metadata-skeleton {
+  position: absolute;
+  inset: var(--btn-border-width);
+  pointer-events: none;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--border) 70%, var(--surface));
+  animation: pr-create-modal-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.pr-create-modal__metadata-skeleton--title {
+  inline-size: min(100%, calc(var(--space-2xl) * 7));
+}
+
+.pr-create-modal__metadata-skeleton--body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  background: color-mix(in srgb, var(--surface) 82%, var(--border));
+}
+
+.pr-create-modal__metadata-skeleton--body span {
+  display: block;
+  block-size: var(--space-md);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--border) 72%, var(--surface));
+}
+
+.pr-create-modal__metadata-skeleton--body span:nth-child(1) {
+  inline-size: 92%;
+}
+
+.pr-create-modal__metadata-skeleton--body span:nth-child(2) {
+  inline-size: 78%;
+}
+
+.pr-create-modal__metadata-skeleton--body span:nth-child(3) {
+  inline-size: 88%;
+}
+
+.pr-create-modal__metadata-skeleton--body span:nth-child(4) {
+  inline-size: 64%;
+}
+
+@keyframes pr-create-modal-skeleton-pulse {
+  0%, 100% {
+    opacity: 0.58;
+  }
+
+  50% {
+    opacity: 1;
+  }
+}
+
 .pr-create-template-hint {
   margin: 0;
   color: var(--text-muted);

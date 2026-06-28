@@ -640,7 +640,11 @@ export function PrCreateModal({
               ) : null}
             </section>
 
-            <section className="pr-create-modal__section">
+            {/**
+             * FNXC:PrCreateModal 2026-06-28-00:09:
+             * PR title/body generation must read as active description work, not as empty editable fields. Keep both fields disabled with aria-busy plus a skeleton while metadataLoading is true, then clear the affordance into AI content or the existing metadataError/manual-fallback state.
+             */}
+            <section className="pr-create-modal__section" aria-busy={metadataLoading ? "true" : undefined}>
               <div className="pr-create-modal__title-row">
                 <label className="pr-create-modal__label" htmlFor="pr-create-modal-title">{t("pr.titleLabel", "Title")}</label>
                 <div className="pr-create-modal__inline-actions">
@@ -650,10 +654,20 @@ export function PrCreateModal({
               </div>
               {metadataLoading ? <div className="pr-create-modal__loading pr-create-modal__section-loading"><span className="status-dot status-dot--pending" aria-hidden="true" />{t("pr.generatingTitle", "Generating AI title…")}</div> : null}
               {metadataError ? <div className="form-error pr-error" role="alert"><p>{metadataError}</p></div> : null}
-              <input id="pr-create-modal-title" className="input" value={title} onChange={(event) => { setTitle(event.target.value); setUserEditedTitle(true); }} />
+              <div className="pr-create-modal__field-shell">
+                <input
+                  id="pr-create-modal-title"
+                  className="input"
+                  value={title}
+                  onChange={(event) => { setTitle(event.target.value); setUserEditedTitle(true); }}
+                  disabled={metadataLoading}
+                  aria-busy={metadataLoading ? "true" : undefined}
+                />
+                {metadataLoading ? <div className="pr-create-modal__metadata-skeleton pr-create-modal__metadata-skeleton--title" data-testid="pr-title-loading-skeleton" aria-hidden="true" /> : null}
+              </div>
             </section>
 
-            <section className="pr-create-modal__section">
+            <section className="pr-create-modal__section" aria-busy={metadataLoading ? "true" : undefined}>
               <div className="pr-create-modal__title-row">
                 <label className="pr-create-modal__label" htmlFor="pr-create-modal-body">{t("pr.bodyLabel", "Body")}</label>
                 <div className="pr-create-modal__inline-actions">
@@ -675,13 +689,34 @@ export function PrCreateModal({
               {/**
                * FNXC:PrCreateModal 2026-06-28-00:00:
                * PR authors need to preview description markdown before creating the PR. The preview is render-only, uses the shared sanitized markdown pipeline, and submission/regeneration/revert always read and write the raw `body` state.
+               *
+               * FNXC:PrCreateModal 2026-06-28-00:16:
+               * While AI metadata is generating, disable raw editing and show skeleton affordances even when Preview is selected so users see that the submitted body is still pending generation.
                */}
-              {showBodyPreview ? (
+              {showBodyPreview && !metadataLoading ? (
                 <div className="pr-create-modal__body-preview markdown-body" role="region" aria-label={t("pr.bodyPreviewLabel", "Body markdown preview")}>
                   <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={sharedRehypePlugins}>{body}</ReactMarkdown>
                 </div>
               ) : (
-                <textarea id="pr-create-modal-body" className="input pr-create-modal__body-input" value={body} onChange={(event) => { setBody(event.target.value); setUserEditedBody(true); }} rows={8} />
+                <div className="pr-create-modal__field-shell">
+                  <textarea
+                    id="pr-create-modal-body"
+                    className="input pr-create-modal__body-input"
+                    value={body}
+                    onChange={(event) => { setBody(event.target.value); setUserEditedBody(true); }}
+                    rows={8}
+                    disabled={metadataLoading}
+                    aria-busy={metadataLoading ? "true" : undefined}
+                  />
+                  {metadataLoading ? (
+                    <div className="pr-create-modal__metadata-skeleton pr-create-modal__metadata-skeleton--body" data-testid="pr-body-loading-skeleton" aria-hidden="true">
+                      <span />
+                      <span />
+                      <span />
+                      <span />
+                    </div>
+                  ) : null}
+                </div>
               )}
               {templateUsed && <p className="pr-create-template-hint">{t("pr.usingTemplate", "Using <code>.github/pull_request_template.md</code>")}</p>}
             </section>
@@ -790,7 +825,7 @@ export function PrCreateModal({
 
         <div className="modal-actions">
           <button type="button" className="btn" onClick={onClose} disabled={submitting}>{t("actions.cancel", "Cancel")}</button>
-          <button type="button" className="btn btn-primary" onClick={() => void submit()} disabled={!preflight || preflightLoading || !canSubmit || !hasRequiredPrContent || submitting}>
+          <button type="button" className="btn btn-primary" onClick={() => void submit()} disabled={!preflight || preflightLoading || metadataLoading || !canSubmit || !hasRequiredPrContent || submitting}>
             {submitting ? <RefreshCw size={14} className="spin" /> : null}
             {draft ? t("pr.createDraftPr", "Create draft PR") : t("pr.createPr", "Create PR")}
           </button>

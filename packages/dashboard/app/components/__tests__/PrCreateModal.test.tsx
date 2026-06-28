@@ -87,6 +87,32 @@ function stubPointerCapture(element: HTMLElement) {
   Object.defineProperty(element, "releasePointerCapture", { configurable: true, value: vi.fn() });
 }
 
+function expectMetadataLoadingAffordance() {
+  const titleInput = screen.getByLabelText(/title/i);
+  const bodyInput = screen.getByLabelText(/body/i);
+  expect(screen.getByText(/generating ai title/i)).toBeInTheDocument();
+  expect(screen.getByText(/generating ai body/i)).toBeInTheDocument();
+  expect(screen.getByTestId("pr-title-loading-skeleton")).toBeInTheDocument();
+  expect(screen.getByTestId("pr-body-loading-skeleton")).toBeInTheDocument();
+  expect(titleInput).toBeDisabled();
+  expect(bodyInput).toBeDisabled();
+  expect(titleInput).toHaveAttribute("aria-busy", "true");
+  expect(bodyInput).toHaveAttribute("aria-busy", "true");
+}
+
+function expectMetadataLoadingCleared() {
+  const titleInput = screen.getByLabelText(/title/i);
+  const bodyInput = screen.getByLabelText(/body/i);
+  expect(screen.queryByText(/generating ai title/i)).not.toBeInTheDocument();
+  expect(screen.queryByText(/generating ai body/i)).not.toBeInTheDocument();
+  expect(screen.queryByTestId("pr-title-loading-skeleton")).not.toBeInTheDocument();
+  expect(screen.queryByTestId("pr-body-loading-skeleton")).not.toBeInTheDocument();
+  expect(titleInput).toBeEnabled();
+  expect(bodyInput).toBeEnabled();
+  expect(titleInput).not.toHaveAttribute("aria-busy");
+  expect(bodyInput).not.toHaveAttribute("aria-busy");
+}
+
 describe("PrCreateModal", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -408,7 +434,7 @@ describe("PrCreateModal", () => {
     expect(document.querySelectorAll(".pr-create-modal__commit-row")).toHaveLength(0);
   });
 
-  it("renders preflight and options before metadata resolves", async () => {
+  it("renders preflight and options while metadata shows a disabled loading affordance, then clears into AI content", async () => {
     const metadataDeferred = createDeferred<typeof metadata>();
     mocks.generatePrMetadata.mockReturnValueOnce(metadataDeferred.promise);
 
@@ -417,20 +443,19 @@ describe("PrCreateModal", () => {
     expect(await screen.findByText("Branch pushed to remote")).toBeInTheDocument();
     expect(screen.getByLabelText(/base branch/i)).toBeEnabled();
     expect(screen.getByText("Reviewers")).toBeInTheDocument();
-    expect(screen.getByText(/generating ai title/i)).toBeInTheDocument();
+    expectMetadataLoadingAffordance();
     expect(screen.getByRole("button", { name: "Create PR" })).toBeDisabled();
-
-    fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Manual PR title" } });
-    expect(screen.getByRole("button", { name: "Create PR" })).toBeDisabled();
-    fireEvent.change(screen.getByLabelText(/body/i), { target: { value: "Manual PR body" } });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Create PR" })).toBeEnabled());
 
     fireEvent.change(screen.getByPlaceholderText("Filter reviewers"), { target: { value: "rev" } });
     fireEvent.click(screen.getByRole("button", { name: /reviewer 1/i }));
     expect(screen.getByRole("button", { name: /remove reviewer 1/i })).toBeInTheDocument();
 
     metadataDeferred.resolve(metadata);
-    expect(await screen.findByDisplayValue("Manual PR title")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("AI title")).toBeInTheDocument();
+    const bodyInput = screen.getByLabelText(/body/i) as HTMLTextAreaElement;
+    expect(bodyInput.value).toContain("## Summary");
+    expectMetadataLoadingCleared();
+    expect(screen.getByRole("button", { name: "Create PR" })).toBeEnabled();
   });
 
   it("keeps submit disabled while preflight is pending or failed", async () => {
@@ -448,13 +473,20 @@ describe("PrCreateModal", () => {
     expect(screen.getByRole("button", { name: "Create PR" })).toBeDisabled();
   });
 
-  it("keeps metadata failure scoped so the modal remains usable", async () => {
-    mocks.generatePrMetadata.mockRejectedValueOnce(new Error("metadata blew up"));
+  it("clears metadata loading affordance into the error and manual fallback state", async () => {
+    const metadataDeferred = createDeferred<typeof metadata>();
+    mocks.generatePrMetadata.mockReturnValueOnce(metadataDeferred.promise);
     renderModal();
+
+    expect(await screen.findByText("Branch pushed to remote")).toBeInTheDocument();
+    expectMetadataLoadingAffordance();
+
+    metadataDeferred.reject(new Error("metadata blew up"));
 
     expect(await screen.findByText("metadata blew up")).toBeInTheDocument();
     expect(screen.getByText("Branch pushed to remote")).toBeInTheDocument();
     expect(screen.getByLabelText(/base branch/i)).toBeEnabled();
+    expectMetadataLoadingCleared();
 
     const bodyInput = screen.getByLabelText(/body/i) as HTMLTextAreaElement;
     expect(bodyInput.value).toContain("## Summary");
@@ -550,7 +582,7 @@ describe("PrCreateModal", () => {
     expect(screen.getByLabelText(/base branch/i)).toBeDisabled();
   });
 
-  it("regenerates AI content without re-blocking preflight and options", async () => {
+  it("regenerates AI content without re-blocking preflight and options while restoring the loading affordance", async () => {
     const regenerateDeferred = createDeferred<typeof metadata>();
     mocks.generatePrMetadata.mockResolvedValueOnce(metadata).mockReturnValueOnce(regenerateDeferred.promise);
     await renderModalLoaded();
@@ -560,9 +592,13 @@ describe("PrCreateModal", () => {
     fireEvent.click(screen.getAllByRole("button", { name: /^regenerate$/i })[0]);
     expect(screen.getByText("Branch pushed to remote")).toBeInTheDocument();
     expect(screen.getByLabelText(/base branch/i)).toBeEnabled();
-    expect(screen.getByText(/generating ai title/i)).toBeInTheDocument();
+    expectMetadataLoadingAffordance();
+    expect(screen.getByRole("button", { name: "Create PR" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Create PR" }));
+    expect(mocks.createPr).not.toHaveBeenCalled();
     regenerateDeferred.resolve({ title: "New title", body: "New body", templateUsed: false });
     await screen.findByDisplayValue("New title");
+    expectMetadataLoadingCleared();
     fireEvent.change(screen.getByDisplayValue("New title"), { target: { value: "edited" } });
     fireEvent.click(screen.getByRole("button", { name: /revert to ai version/i }));
     expect(screen.getByDisplayValue("New title")).toBeInTheDocument();

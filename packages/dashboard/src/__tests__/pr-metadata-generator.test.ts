@@ -30,7 +30,7 @@ vi.mock("@fusion/engine", () => ({
 }));
 
 import { createFnAgent } from "@fusion/engine";
-import { generatePrMetadata } from "../pr-metadata-generator.js";
+import { generatePrMetadata, PR_METADATA_SYSTEM_PROMPT } from "../pr-metadata-generator.js";
 
 function createTask(): Task {
   return {
@@ -71,11 +71,7 @@ function capturedSystemPrompt(): string {
   return call?.systemPrompt ?? "";
 }
 
-const BASE_PR_METADATA_SYSTEM_PROMPT = [
-  "Generate GitHub PR metadata.",
-  "Respond with strict JSON only.",
-  "Schema: {title, summary, changes, testing, linkedTask}",
-].join("\n");
+const BASE_PR_METADATA_SYSTEM_PROMPT = PR_METADATA_SYSTEM_PROMPT;
 
 describe("generatePrMetadata", () => {
   let repoRoot: string;
@@ -148,7 +144,8 @@ describe("generatePrMetadata", () => {
     });
 
     expect(capturedSystemPrompt()).toBe(BASE_PR_METADATA_SYSTEM_PROMPT);
-    expect(capturedSystemPrompt()).toContain("Schema: {title, summary, changes, testing, linkedTask}");
+    expect(capturedSystemPrompt()).toContain("\"title\": string");
+    expect(capturedSystemPrompt()).toContain("\"linkedTask\": string");
     expect(result.title).toBe("feat: add routes");
     expect(result.body).toContain("## Summary");
   });
@@ -211,6 +208,39 @@ describe("generatePrMetadata", () => {
     expect(capturedSystemPrompt()).toBe(BASE_PR_METADATA_SYSTEM_PROMPT);
     expect(result.title).toBe("feat: add routes");
     expect(result.body).toContain("## Testing");
+  });
+
+  it("sends the upgraded prompt contract and keeps all context inputs", async () => {
+    await generatePrMetadata({
+      task: createTask(),
+      repoRoot,
+      settings: {
+        titleSummarizerProvider: "anthropic",
+        titleSummarizerModelId: "claude-haiku",
+      } as never,
+    });
+
+    expect(PR_METADATA_SYSTEM_PROMPT).toContain("STRICT JSON ONLY");
+    expect(PR_METADATA_SYSTEM_PROMPT).toContain("conventional-commit style");
+    expect(PR_METADATA_SYSTEM_PROMPT).toContain("at most 72 characters");
+    expect(PR_METADATA_SYSTEM_PROMPT).toContain("commit log and diff stat first");
+    for (const field of ["title", "summary", "changes", "testing", "linkedTask"]) {
+      expect(PR_METADATA_SYSTEM_PROMPT).toContain(field);
+    }
+    expect(vi.mocked(createFnAgent)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        systemPrompt: PR_METADATA_SYSTEM_PROMPT,
+      }),
+    );
+
+    const contextPrompt = promptMock.mock.calls[0]?.[0] as string;
+    expect(contextPrompt).toContain("Ground the PR title, summary, changes, and testing in the commit log and diff stat");
+    expect(contextPrompt).toContain("Task ID: FN-4991");
+    expect(contextPrompt).toContain("Task title: Route contracts");
+    expect(contextPrompt).toContain("Task description: Implement route contracts");
+    expect(contextPrompt).toContain("Commit log (source of truth):\n\ncommit");
+    expect(contextPrompt).toContain("Diff stat (source of truth):\n\n1 file changed");
+    expect(contextPrompt).toContain("Task prompt (supporting context):\n\n# Prompt");
   });
 
   it("fills known sections when template exists and preserves unknown headings", async () => {

@@ -179,7 +179,7 @@ import {
 import { truncateAgentLogDetail } from "./agent-log-constants.js";
 import { emitUsageEvent as emitUsageEventToDb, type UsageEventInput } from "./usage-events.js";
 import { validateNodeOverrideChange } from "./node-override-guard.js";
-import { sanitizeTitle, summarizeTitle } from "./ai-summarize.js";
+import { MAX_TITLE_LENGTH, sanitizeTitle, summarizeTitle } from "./ai-summarize.js";
 import { extractTaskIdTokens, normalizeTitleForTaskId } from "./task-title-id-drift.js";
 import { resolveTitleSummarizerSettingsModel } from "./model-resolution.js";
 import { resolveEffectiveSettingsById } from "./workflow-settings-resolver.js";
@@ -5188,25 +5188,17 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     }
 
     const now = new Date().toISOString();
-    let sourceLabel: string;
-    if (sourceTask.title?.trim()) {
-      sourceLabel = sourceTask.title.trim();
-    } else {
-      const firstLine = sourceTask.description
-        .split("\n")
-        .map((line: string) => line.trim())
-        .find((line: string) => line.length > 0);
-      sourceLabel = firstLine ? firstLine.replace(/\s+/g, " ") : sourceTask.id;
-    }
+    const normalizedFeedback = feedback.trim().replace(/\s+/g, " ");
+    /**
+     * FNXC:TaskRefinement 2026-06-27-21:49:
+     * Refinement titles must encode the source task id followed by the operator-entered feedback for immediate traceability.
+     * Do not run title-id drift normalization here: the leading source-id prefix intentionally differs from the new refinement task id and must be preserved.
+     * The source-id prefix and separator count toward MAX_TITLE_LENGTH, leaving the remaining budget for feedback text.
+     */
+    const refinementTitle = `${id}: ${normalizedFeedback}`.slice(0, MAX_TITLE_LENGTH).trim();
 
     return this.createTaskWithDistributedReservation({ description: feedback.trim() }, {
       createTaskWithId: async (newId, reservationCommit) => {
-        // FN-5077: keep deterministic "Refinement" fallback when normalized refinement label is unusable (null).
-        const normalizedTitle = normalizeTitleForTaskId(`Refinement: ${sourceLabel}`, newId);
-        if (normalizedTitle.changed) {
-          const removed = extractTaskIdTokens(`Refinement: ${sourceLabel}`).filter((token) => token !== newId.toUpperCase());
-          storeLog.log(`[title-id-drift] normalized title for ${newId}: removed=[${removed.join(",")}]`);
-        }
         const sourceGithubLinked = sourceTask.githubTracking?.enabled === true || Boolean(sourceTask.githubTracking?.issue);
         // FN-5780: refinement should inherit source linking intent so unlinked tasks stay opted out from auto-create defaults.
         const refinementGithubTracking = sourceGithubLinked
@@ -5221,7 +5213,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         const newTask: Task = {
           id: newId,
           lineageId: generateTaskLineageId(),
-          title: normalizedTitle.title ?? "Refinement",
+          title: refinementTitle,
           description: `${feedback.trim()}\n\nRefines: ${id}`,
           priority: normalizeTaskPriority(sourceTask.priority),
           column: "triage",

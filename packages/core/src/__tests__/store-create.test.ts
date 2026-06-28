@@ -263,7 +263,7 @@ describe("TaskStore", () => {
       const refined = await store.refineTask(source.id, "Needs polish");
       expect(refined.sourceType).toBe("task_refine");
       expect(refined.sourceParentTaskId).toBe(source.id);
-      expect(refined.title).toBe("Refinement: Fix bug");
+      expect(refined.title).toBe(`${source.id}: Needs polish`);
     });
 
     it("FN-4898: prevents title/ID drift on duplicateTask", async () => {

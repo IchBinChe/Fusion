@@ -78,6 +78,16 @@ describe("WorkflowOptionalStepsDropdown CSS", () => {
     expect(DROPDOWN_CSS).toContain("box-shadow: var(--shadow-lg);");
   });
 
+  it("uses the dashboard accent token for option checkboxes", () => {
+    const checkboxRule = DROPDOWN_CSS.match(
+      /\.wf-optional-steps-dropdown-option input\[type="checkbox"\]\s*\{([^}]*)\}/,
+    )?.[1] ?? "";
+
+    expect(checkboxRule).toContain("accent-color: var(--todo);");
+    expect(checkboxRule).not.toMatch(/#[0-9a-f]{3,8}\b/i);
+    expect(checkboxRule).not.toMatch(/\brgba?\(/i);
+  });
+
   it("does not keep hardcoded color or px fallbacks in tokenized rules", () => {
     expect(DROPDOWN_CSS).not.toMatch(/var\(--[^,]+,\s*#/);
     expect(DROPDOWN_CSS).not.toMatch(/var\(--[^,]+,\s*\d+px/);

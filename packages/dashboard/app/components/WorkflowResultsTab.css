@@ -482,24 +482,6 @@
   color: var(--text);
 }
 
-/* Phase badge base and modifier classes */
-.phase-badge {
-  margin-inline-start: var(--space-xs);
-  font-size: calc(var(--space-sm) + var(--space-xs) * 0.75);
-  padding: var(--space-xs) var(--space-sm);
-  border-radius: var(--radius-sm);
-}
-
-.phase-badge--pre-merge {
-  background-color: color-mix(in srgb, var(--ws-pre-merge) 15%, transparent);
-  color: var(--ws-pre-merge);
-}
-
-.phase-badge--post-merge {
-  background-color: color-mix(in srgb, var(--ws-post-merge) 15%, transparent);
-  color: var(--ws-post-merge);
-}
-
 .workflow-result-meta {
   display: flex;
   gap: var(--space-sm);

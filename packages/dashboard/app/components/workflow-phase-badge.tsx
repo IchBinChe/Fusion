@@ -10,6 +10,8 @@
 import type { ReactNode } from "react";
 import type { useTranslation } from "react-i18next";
 
+import "./workflow-phase-badge.css";
+
 export function phaseBadge(
   phase: "pre-merge" | "post-merge",
   id: string,

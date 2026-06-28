@@ -36,6 +36,12 @@
   cursor: pointer;
 }
 
+/* FNXC:DashboardThemeTokens 2026-06-28-00:00: Optional-step option checkboxes must use the themed --todo accent so Quick Entry, Task Form, and Inline Create match every dashboard checkbox across dark, light, and shadcn themes. */
+.wf-optional-steps-dropdown-option input[type="checkbox"] {
+  accent-color: var(--todo);
+  cursor: pointer;
+}
+
 .wf-optional-steps-dropdown-option:hover,
 .wf-optional-steps-dropdown-option.is-active {
   background: var(--card-hover);

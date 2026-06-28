@@ -107,6 +107,7 @@ function createMockDeps() {
 
   const taskStore = {
     listTasks: vi.fn().mockResolvedValue([makeTask()]),
+    recordRunAuditEvent: vi.fn(),
   } as any;
 
   const reflectionStore = {
@@ -150,6 +151,17 @@ function createMockSession() {
     state: {},
     dispose: vi.fn(),
   } as any;
+}
+
+function expectNoReflectionProse(metadata: Record<string, unknown>) {
+  expect(metadata).not.toHaveProperty("summary");
+  expect(metadata).not.toHaveProperty("insights");
+  expect(metadata).not.toHaveProperty("suggestedImprovements");
+  expect(metadata).not.toHaveProperty("triggerDetail");
+  expect(Object.values(metadata)).not.toContain("Execution quality is strong with room to tighten feedback loops.");
+  expect(Object.values(metadata)).not.toContain("Strong execution on scoped changes");
+  expect(Object.values(metadata)).not.toContain("Run tests earlier in the cycle");
+  expect(Object.values(metadata)).not.toContain("manual check");
 }
 
 describe("AgentReflectionService", () => {
@@ -382,6 +394,29 @@ describe("AgentReflectionService", () => {
       expect(mockedCreateFnAgent).toHaveBeenCalledWith(expect.objectContaining({
         tools: "readonly",
       }));
+      expect(taskStore.recordRunAuditEvent).toHaveBeenCalledTimes(1);
+      expect(taskStore.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        agentId: "agent-1",
+        taskId: "FN-001",
+        domain: "database",
+        mutationType: "reflection:generated",
+        target: "agent-1",
+        metadata: expect.objectContaining({
+          phase: "reflection",
+          source: "manual",
+          agentId: "agent-1",
+          trigger: "manual",
+          taskId: "FN-001",
+          reflectionId: "reflection-1",
+          tasksCompleted: 1,
+          tasksFailed: 0,
+          avgDurationMs: 3_600_000,
+          commonErrorCount: 1,
+          insightCount: 1,
+          suggestedImprovementCount: 1,
+        }),
+      }));
+      expectNoReflectionProse(taskStore.recordRunAuditEvent.mock.calls[0][0].metadata);
     });
 
     it("returns null when no meaningful data exists", async () => {
@@ -395,6 +430,21 @@ describe("AgentReflectionService", () => {
       expect(reflection).toBeNull();
       expect(mockedCreateFnAgent).not.toHaveBeenCalled();
       expect(reflectionStore.createReflection).not.toHaveBeenCalled();
+      expect(taskStore.recordRunAuditEvent).toHaveBeenCalledTimes(1);
+      expect(taskStore.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        agentId: "agent-1",
+        domain: "database",
+        mutationType: "reflection:skipped",
+        target: "agent-1",
+        metadata: expect.objectContaining({
+          phase: "reflection",
+          source: "manual",
+          agentId: "agent-1",
+          trigger: "manual",
+          reason: "no-history",
+        }),
+      }));
+      expectNoReflectionProse(taskStore.recordRunAuditEvent.mock.calls[0][0].metadata);
     });
 
     it("returns null on AI session failure", async () => {
@@ -406,6 +456,21 @@ describe("AgentReflectionService", () => {
 
       expect(reflection).toBeNull();
       expect(reflectionStore.createReflection).not.toHaveBeenCalled();
+      expect(taskStore.recordRunAuditEvent).toHaveBeenCalledTimes(1);
+      expect(taskStore.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        agentId: "agent-1",
+        domain: "database",
+        mutationType: "reflection:failed",
+        target: "agent-1",
+        metadata: expect.objectContaining({
+          phase: "reflection",
+          source: "manual",
+          agentId: "agent-1",
+          trigger: "manual",
+          errorClass: "Error",
+        }),
+      }));
+      expectNoReflectionProse(taskStore.recordRunAuditEvent.mock.calls[0][0].metadata);
     });
 
     it("persists reflection via reflectionStore.createReflection", async () => {
@@ -433,6 +498,40 @@ describe("AgentReflectionService", () => {
         taskId: "FN-777",
         triggerDetail: "post-task reflection",
       }));
+      expect(taskStore.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "reflection:generated",
+        metadata: expect.objectContaining({
+          source: "post-task",
+          trigger: "post-task",
+          taskId: "FN-777",
+        }),
+      }));
+    });
+
+    it("keeps successful reflection generation best-effort when audit persistence fails", async () => {
+      const { agentStore, taskStore, reflectionStore } = createMockDeps();
+      const session = createMockSession();
+      taskStore.recordRunAuditEvent.mockRejectedValue(new Error("audit unavailable"));
+
+      mockedCreateFnAgent.mockImplementation(async (options: any) => {
+        options.onText?.(JSON.stringify({
+          insights: ["Insight A"],
+          suggestedImprovements: ["Improve B"],
+          summary: "Summary C",
+        }));
+        return { session };
+      });
+      mockedPromptWithFallback.mockResolvedValue(undefined);
+
+      const service = new AgentReflectionService({ agentStore, taskStore, reflectionStore, rootDir: tempRoot });
+      const reflection = await service.generateReflection("agent-1", "user-requested", {
+        taskId: "FN-999",
+      });
+
+      expect(reflection).not.toBeNull();
+      expect(reflection?.trigger).toBe("user-requested");
+      expect(reflectionStore.createReflection).toHaveBeenCalledTimes(1);
+      expect(taskStore.recordRunAuditEvent).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -13,6 +13,18 @@ Executor, heartbeat, and planning runs emit one goal-injection diagnostic with o
 - `goalIds` / `goalCount` describe the active goals injected into the prompt; `provenanceGoalIds` additively records mission-derived task provenance and does not affect prompt selection.
 - Guardrail: diagnostics persist goal IDs/counts only; never prompt text, goal titles, or goal descriptions.
 
+## Agent performance reflection telemetry
+
+Agent reflection generation emits one run-audit event for every `AgentReflectionService.generateReflection` attempt, covering manual dashboard requests, executor/post-task tools, heartbeat tools, and self-improve callers from the shared service seam.
+
+- Run-audit events (`database` domain, target `agentId`):
+  - `reflection:generated` metadata: `{ agentId, trigger, taskId?, reflectionId, tasksCompleted?, tasksFailed?, avgDurationMs?, commonErrorCount, insightCount, suggestedImprovementCount }`.
+  - `reflection:skipped` metadata: `{ agentId, trigger, taskId?, reason: "no-history" }`.
+  - `reflection:failed` metadata: `{ agentId, trigger, taskId?, errorClass }`.
+- Trigger taxonomy is preserved from `ReflectionTrigger`: `manual`, `periodic`, `post-task`, and `user-requested`.
+- The events use synthetic run context with phase `reflection` and source equal to the trigger so they correlate in the run-audit stream without requiring caller-specific wiring.
+- Guardrail: reflection diagnostics persist IDs, counts, reasons, and error classes only; never prompt text, reflection summaries, insight strings, suggested-improvement text, or free-form trigger details.
+
 ## Insight run sweeper (`[insight-sweeper]`)
 
 The dashboard insight router runs stale-run recovery sweeps for `project_insight_runs` rows stuck in `pending`/`running` without a live controller owner.

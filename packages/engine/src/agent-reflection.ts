@@ -15,6 +15,7 @@ import type {
 import { createLogger } from "./logger.js";
 import { createFnAgent, promptWithFallback } from "./pi.js";
 import { resolveMcpServersForStore } from "./mcp-resolution.js";
+import { createRunAuditor, generateSyntheticRunId, type EngineRunContext, type RunAuditor } from "./run-audit.js";
 
 const reflectionLog = createLogger("reflection");
 
@@ -93,12 +94,24 @@ export class AgentReflectionService {
     trigger: ReflectionTrigger,
     options: { taskId?: string; triggerDetail?: string } = {},
   ): Promise<AgentReflection | null> {
+    const runContext: EngineRunContext = {
+      runId: generateSyntheticRunId("reflection", agentId),
+      agentId,
+      ...(options.taskId ? { taskId: options.taskId } : {}),
+      phase: "reflection",
+      source: trigger,
+    };
+    const auditor = createRunAuditor(this.taskStore, runContext);
+
     try {
       const context = await this.buildReflectionContext(agentId);
       const recentRuns = await this.agentStore.getRecentRuns(agentId, DEFAULT_OUTCOME_LIMIT);
 
       if (context.recentOutcomes.length === 0 && recentRuns.length === 0) {
         reflectionLog.log(`Skipping reflection for ${agentId}: no recent tasks or heartbeat runs`);
+        await this.emitReflectionAudit(auditor, "reflection:skipped", agentId, trigger, options, {
+          reason: "no-history",
+        });
         return null;
       }
 
@@ -135,7 +148,7 @@ export class AgentReflectionService {
       const parsed = this.parseReflectionResponse(responseText);
       const metrics = this.buildReflectionMetrics(context.recentOutcomes, context.performanceSummary, recentRuns);
 
-      return await this.reflectionStore.createReflection({
+      const reflection = await this.reflectionStore.createReflection({
         agentId,
         trigger,
         triggerDetail: options.triggerDetail,
@@ -145,9 +158,54 @@ export class AgentReflectionService {
         suggestedImprovements: parsed.suggestedImprovements,
         summary: parsed.summary,
       });
+
+      await this.emitReflectionAudit(auditor, "reflection:generated", agentId, trigger, options, {
+        reflectionId: reflection.id,
+        ...(metrics.tasksCompleted !== undefined ? { tasksCompleted: metrics.tasksCompleted } : {}),
+        ...(metrics.tasksFailed !== undefined ? { tasksFailed: metrics.tasksFailed } : {}),
+        ...(metrics.avgDurationMs !== undefined ? { avgDurationMs: metrics.avgDurationMs } : {}),
+        commonErrorCount: metrics.commonErrors?.length ?? 0,
+        insightCount: parsed.insights.length,
+        suggestedImprovementCount: parsed.suggestedImprovements.length,
+      });
+
+      return reflection;
     } catch (error) {
+      await this.emitReflectionAudit(auditor, "reflection:failed", agentId, trigger, options, {
+        errorClass: error instanceof Error ? error.name : typeof error,
+      });
       reflectionLog.error(`Failed to generate reflection for ${agentId}: ${(error as Error).message}`);
       return null;
+    }
+  }
+
+  private async emitReflectionAudit(
+    auditor: RunAuditor,
+    type: "reflection:generated" | "reflection:skipped" | "reflection:failed",
+    agentId: string,
+    trigger: ReflectionTrigger,
+    options: { taskId?: string; triggerDetail?: string },
+    metadata: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      /*
+      FNXC:AgentReflectionTelemetry 2026-06-27-00:00:
+      Emitting from AgentReflectionService.generateReflection covers manual dashboard, executor post-task/in-session tool, heartbeat tool, and self-improve callers through one seam. Keep the payload ids/counts/outcomes-only so run-audit can diagnose reflection activity without storing reflection prose, triggerDetail, or prompt text.
+      */
+      await auditor.database({
+        type,
+        target: agentId,
+        metadata: {
+          agentId,
+          trigger,
+          ...(options.taskId ? { taskId: options.taskId } : {}),
+          ...metadata,
+        },
+      });
+    } catch (auditError) {
+      reflectionLog.warn(
+        `Failed to record reflection telemetry for ${agentId}: ${auditError instanceof Error ? auditError.message : String(auditError)}`,
+      );
     }
   }
 

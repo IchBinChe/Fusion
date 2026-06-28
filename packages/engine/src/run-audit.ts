@@ -587,6 +587,47 @@ export type DatabaseMutationType =
    * ```
    */
   | "session:runtime-resolved"
+  /**
+   * FNXC:AgentReflectionTelemetry 2026-06-27-00:00:
+   * Agent performance reflection attempts must emit durable telemetry for every generated, skipped, or failed outcome. Metadata carries ids, trigger taxonomy, counts, and outcomes only; never persist reflection summaries, insight strings, suggested-improvement text, triggerDetail, or prompt text.
+   *
+   * Metadata shape for `reflection:generated`:
+   * ```ts
+   * {
+   *   agentId: string;
+   *   trigger: "manual" | "periodic" | "post-task" | "user-requested";
+   *   taskId?: string;
+   *   reflectionId: string;
+   *   tasksCompleted?: number;
+   *   tasksFailed?: number;
+   *   avgDurationMs?: number;
+   *   commonErrorCount: number;
+   *   insightCount: number;
+   *   suggestedImprovementCount: number;
+   * }
+   * ```
+   * Metadata shape for `reflection:skipped`:
+   * ```ts
+   * {
+   *   agentId: string;
+   *   trigger: "manual" | "periodic" | "post-task" | "user-requested";
+   *   taskId?: string;
+   *   reason: "no-history";
+   * }
+   * ```
+   * Metadata shape for `reflection:failed`:
+   * ```ts
+   * {
+   *   agentId: string;
+   *   trigger: "manual" | "periodic" | "post-task" | "user-requested";
+   *   taskId?: string;
+   *   errorClass: string;
+   * }
+   * ```
+   */
+  | "reflection:generated"
+  | "reflection:skipped"
+  | "reflection:failed"
   | "task:in-review-stall-deadlock-disposed"
   | "task:in-review-stall-terminal-provider-error"
   | "task:finalize-unproven-blocked"

@@ -6435,24 +6435,47 @@ export function acceptTaskReview(taskId: string, projectId?: string): Promise<Ta
 }
 
 function mapTaskReviewDataToLegacy(data: TaskReviewData): TaskReviewResponse {
+  const fetchedAt = data.fetchedAt ?? undefined;
+  const canonicalItems = data.items.map((item) => ({
+    id: item.itemId,
+    body: item.body,
+    author: { login: item.author },
+    createdAt: item.createdAt ?? new Date(0).toISOString(),
+    updatedAt: item.updatedAt ?? undefined,
+    path: item.filePath,
+    threadId: item.threadId,
+    htmlUrl: item.url,
+    state: item.reviewState ?? undefined,
+    summary: item.title ?? undefined,
+    isResolved: item.isResolved,
+    ...(typeof item.line === "number" ? { line: item.line } : {}),
+  }));
+
   return {
     reviewState: {
       source: data.mode,
       summary: data.summary ?? undefined,
-      items: data.items.map((item) => ({
-        id: item.itemId,
-        body: item.body,
-        author: { login: item.author },
-        createdAt: item.createdAt ?? new Date(0).toISOString(),
-        updatedAt: item.updatedAt ?? undefined,
-        path: item.filePath,
-        threadId: item.threadId,
-        htmlUrl: item.url,
-        state: item.reviewState ?? undefined,
-        isResolved: item.isResolved,
-      })),
-      addressing: [],
-      lastRefreshedAt: data.fetchedAt ?? undefined,
+      items: canonicalItems,
+      addressing: data.items
+        .filter((item) => item.progressStatus != null)
+        .map((item) => ({
+          itemId: item.itemId,
+          status: item.progressStatus ?? "queued",
+          selectedAt: item.createdAt ?? fetchedAt ?? new Date(0).toISOString(),
+          snapshot: {
+            itemId: item.itemId,
+            sourceMode: item.sourceMode,
+            source: item.sourceMode === "pull-request" ? "pr-review" : "reviewer-agent",
+            summary: item.title || item.body.slice(0, 120),
+            body: item.body,
+            authorLogin: item.author,
+            filePath: item.filePath,
+            lineNumber: item.line,
+            threadId: item.threadId,
+            url: item.url,
+          },
+        })),
+      lastRefreshedAt: fetchedAt,
       refreshStatus: "ready",
       refreshSource: "initial-load",
     },

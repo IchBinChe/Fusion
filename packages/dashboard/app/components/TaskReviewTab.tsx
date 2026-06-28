@@ -1,7 +1,7 @@
 import "./TaskReviewTab.css";
-import { getErrorMessage, type Task, type TaskDetail } from "@fusion/core";
+import { getErrorMessage, type PrCheckStatus, type Task, type TaskDetail, type TaskReviewSummary } from "@fusion/core";
 import { resolveEffectiveAutoMerge } from "../../../core/src/task-merge";
-import { Bot, GitPullRequest, User } from "lucide-react";
+import { Bot, ExternalLink, GitPullRequest, User } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { fetchTaskReview, refreshTaskReview, reviseTaskReviewItems, updateTask } from "../api";
@@ -84,6 +84,26 @@ function formatRefreshSource(source?: "manual" | "auto" | "initial-load", t?: (k
   return t?.("taskReview.refreshSourceInitialLoad", "Initial load") ?? "Initial load";
 }
 
+function summarizeChecks(checks: PrCheckStatus[] | undefined, t: (key: string, defaultValue: string, options?: Record<string, unknown>) => string): string {
+  const safeChecks = checks ?? [];
+  if (safeChecks.length === 0) return t("taskReview.noChecksReported", "No checks reported");
+  const requiredChecks = safeChecks.filter((check) => check.required).length;
+  const successfulChecks = safeChecks.filter((check) => check.state === "success").length;
+  const blockingChecks = safeChecks.filter((check) => check.required && check.state !== "success" && check.state !== "skipped" && check.state !== "neutral").length;
+  return t("taskReview.checksSummary", "{{successful}}/{{total}} checks passing · {{required}} required · {{blocking}} blocking", {
+    successful: successfulChecks,
+    total: safeChecks.length,
+    required: requiredChecks,
+    blocking: blockingChecks,
+  });
+}
+
+function getCheckTone(check: PrCheckStatus): "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED" {
+  if (check.state === "success" || check.state === "skipped" || check.state === "neutral") return "APPROVED";
+  if (check.state === "pending" || check.state === "stale") return "REVIEW_REQUIRED";
+  return "CHANGES_REQUESTED";
+}
+
 function getDisplayReviewItems(review: ReviewState): DisplayReviewItem[] {
   const addressingById = new Map(review.addressing.map((record) => [record.itemId, record] as const));
   const items = review.items.map((item) => {
@@ -144,6 +164,7 @@ export function TaskReviewTab({
   const [isSavingAutoMergePreference, setIsSavingAutoMergePreference] = useState(false);
 
   const isPrMode = review?.source === "pull-request";
+  const prSummary = isPrMode ? review?.summary as TaskReviewSummary | undefined : undefined;
   const displayItems = useMemo(() => (review ? getDisplayReviewItems(review) : []), [review]);
   const filteredDisplayItems = useMemo(() => {
     if (authorTypeFilter === "all") return displayItems;
@@ -298,7 +319,7 @@ export function TaskReviewTab({
             author: item.item.author?.login,
             summary: item.item.summary ?? item.item.body.slice(0, 120),
             body: item.item.body,
-            url: typeof itemRecord.url === "string" ? itemRecord.url : undefined,
+            url: item.item.htmlUrl ?? (typeof itemRecord.url === "string" ? itemRecord.url : undefined),
           };
         });
 
@@ -397,6 +418,51 @@ export function TaskReviewTab({
           source: formatRefreshSource(review?.refreshSource, t),
         })}</span>
       </div>
+      {/*
+        FNXC:TaskReviewTab 2026-06-27-23:38:
+        PR-linked tasks need Review-tab context that is already present in the GitHub review payload: decision, reviewers, checks, blockers, and per-item author/state/GitHub links. Keep this branch gated to pull-request mode so reviewer-agent reviews retain their established direct-mode layout.
+      */}
+      {isPrMode ? (
+        <section className="task-review-tab__pr-summary" aria-label={t("taskReview.prSummaryAria", "Pull request review summary")}>
+          <div className="task-review-tab__pr-summary-section">
+            <div className="task-review-tab__pr-summary-label">{t("taskReview.reviewers", "Reviewers")}</div>
+            {prSummary?.reviewers?.length ? (
+              <ul className="task-review-tab__pill-list" aria-label={t("taskReview.reviewers", "Reviewers")}>
+                {prSummary.reviewers.map((reviewer) => (
+                  <li key={`${reviewer.login}-${reviewer.state}`} className="task-review-tab__pill-list-item">
+                    <span className="task-review-tab__reviewer-login">{reviewer.login}</span>
+                    <span className={`task-review-tab__decision task-review-tab__decision--${reviewer.state}`}>{reviewer.state}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="task-review-tab__meta">{t("taskReview.noReviewers", "No reviewers reported")}</div>
+            )}
+          </div>
+          <div className="task-review-tab__pr-summary-section">
+            <div className="task-review-tab__pr-summary-label">{t("taskReview.checks", "Checks")}</div>
+            <div className="task-review-tab__meta">{summarizeChecks(prSummary?.checks, t)}</div>
+            {prSummary?.checks?.length ? (
+              <ul className="task-review-tab__pill-list" aria-label={t("taskReview.checks", "Checks")}>
+                {prSummary.checks.map((check) => (
+                  <li key={`${check.name}-${check.state}`} className="task-review-tab__pill-list-item">
+                    <span className="task-review-tab__check-name">{check.name}</span>
+                    <span className={`task-review-tab__decision task-review-tab__decision--${getCheckTone(check)}`}>{check.state}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+          {prSummary?.blockingReasons?.length ? (
+            <div className="task-review-tab__pr-summary-section">
+              <div className="task-review-tab__pr-summary-label">{t("taskReview.blockingReasons", "Blocking reasons")}</div>
+              <ul className="task-review-tab__blockers">
+                {prSummary.blockingReasons.map((reason) => <li key={reason}>{reason}</li>)}
+              </ul>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
       {loading ? <div className="task-review-tab__meta"><LoadingSpinner label={t("taskReview.loadingData", "Loading review data…")} /></div> : null}
       {!loading && error ? <div className="task-review-tab__error">{error}</div> : null}
       {!loading && !error && !isPrMode && displayItems.length === 0 ? <div className="task-review-tab__empty">{emptyMessage ?? t("taskReview.noFeedbackDirect", "No reviewer feedback yet — this task has not produced reviewer-agent feedback in direct mode.")}</div> : null}
@@ -409,6 +475,10 @@ export function TaskReviewTab({
             const authorType = authorInfo.authorIsBot ? "bot" : "human";
             const avatarKey = `${item.id}:${authorInfo.author}`;
             const showAvatarImg = Boolean(authorInfo.authorAvatarUrl && !brokenAvatars.has(avatarKey));
+            const prAuthor = isPrMode ? item.item?.author?.login ?? item.addressing?.snapshot?.authorLogin : undefined;
+            const prState = isPrMode ? item.item?.state : undefined;
+            const prUrl = isPrMode ? item.item?.htmlUrl ?? item.addressing?.snapshot?.url : undefined;
+            const summaryPrefix = item.path && !isPrMode ? `${item.path}: ` : "";
 
             return (
               <li key={item.id} className="task-review-tab__item card" data-review-comment-author-type={authorType}>
@@ -417,7 +487,7 @@ export function TaskReviewTab({
                     <div className="task-review-tab__item-header">
                       <div className="task-review-tab__item-selection">
                         <input id={checkboxId} type="checkbox" checked={selected.includes(item.id)} onChange={() => toggleSelected(item.id)} />
-                        <span className="task-review-tab__item-summary">{item.path ? `${item.path}: ` : ""}{item.summary}</span>
+                        <span className="task-review-tab__item-summary">{summaryPrefix}{item.summary}</span>
                       </div>
                       <span className={`task-review-tab__status task-review-tab__status--${item.status}`}>{item.status}</span>
                     </div>
@@ -449,6 +519,22 @@ export function TaskReviewTab({
                     <time className="task-review-tab__comment-time" dateTime={item.createdAt} title={item.createdAt}>{formatTimestamp(item.createdAt, t)}</time>
                   </div>
                   <div className="task-review-tab__item-meta-list">
+                    {isPrMode ? (
+                      <div className="task-review-tab__pr-item-meta" aria-label={t("taskReview.prItemMeta", "Pull request review item metadata")}>
+                        {prAuthor ? <span className="task-review-tab__meta">{t("taskReview.itemAuthor", "Author: {{author}}", { author: prAuthor })}</span> : null}
+                        {prState ? <span className={`task-review-tab__decision task-review-tab__decision--${prState}`}>{prState}</span> : null}
+                        <span className="task-review-tab__meta">{formatTimestamp(item.createdAt, t)}</span>
+                        {item.path ? <span className="task-review-tab__meta">{item.path}</span> : null}
+                        {prUrl ? (
+                          <a className="task-review-tab__github-link" href={prUrl} target="_blank" rel="noopener noreferrer">
+                            {t("taskReview.viewOnGitHub", "View on GitHub")}
+                            <ExternalLink aria-hidden="true" />
+                          </a>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="task-review-tab__meta">{formatTimestamp(item.createdAt, t)}</div>
+                    )}
                     {item.addressing ? (
                       <div className="task-review-tab__meta">
                         {t("taskReview.selectedAt", "Selected: {{timestamp}}", { timestamp: formatTimestamp(item.addressing.selectedAt, t) })}

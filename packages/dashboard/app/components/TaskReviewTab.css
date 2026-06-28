@@ -345,6 +345,92 @@ The Review tab mirrors the Import-from-GitHub comment provenance model: avatar, 
   margin-top: var(--space-xs);
 }
 
+/*
+FNXC:TaskReviewTab 2026-06-27-23:38:
+PR-linked tasks must expose decision-adjacent reviewers/checks/blockers plus item author/state/GitHub links without overflowing the task-detail modal. These scoped flex rows wrap using design tokens so desktop and mobile Review tabs preserve the existing hierarchy.
+*/
+.task-review-tab__pr-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  min-width: 0;
+  padding: var(--space-md);
+  border: var(--btn-border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 72%, var(--card));
+}
+
+.task-review-tab__pr-summary-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.task-review-tab__pr-summary-label {
+  color: var(--text);
+  font-family: var(--font-primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.4;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.task-review-tab__pill-list,
+.task-review-tab__pr-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+}
+
+.task-review-tab__pill-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.task-review-tab__pill-list-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.task-review-tab__reviewer-login,
+.task-review-tab__check-name {
+  min-width: 0;
+  max-width: 100%;
+  color: var(--text);
+  font-family: var(--font-primary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.task-review-tab__github-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+  color: var(--color-primary);
+  font-family: var(--font-primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.task-review-tab__github-link svg {
+  width: 1em;
+  height: 1em;
+  flex-shrink: 0;
+}
+
 .task-review-tab__empty {
   overflow-wrap: anywhere;
 }
@@ -416,6 +502,21 @@ The Review tab mirrors the Import-from-GitHub comment provenance model: avatar, 
 
   .task-review-tab__comment-meta {
     align-items: flex-start;
+  }
+
+  .task-review-tab__pr-summary,
+  .task-review-tab__pr-item-meta {
+    align-items: stretch;
+  }
+
+  .task-review-tab__pill-list,
+  .task-review-tab__pill-list-item,
+  .task-review-tab__pr-item-meta {
+    width: 100%;
+  }
+
+  .task-review-tab__github-link {
+    max-width: 100%;
   }
 
   .task-review-tab__status,

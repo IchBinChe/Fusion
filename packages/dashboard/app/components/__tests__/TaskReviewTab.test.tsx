@@ -3,7 +3,7 @@ FNXC:DashboardTests 2026-06-14-08:31:
 FN-6441 rescued this orphaned component test after standalone dashboard-app execution passed without assertion, timeout, or source-code changes. Keep it registered through the app backfill lane so task-review UI regressions cannot silently fall out of quality coverage again.
 */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render as rtlRender, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render as rtlRender, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { TaskReviewTab } from "../TaskReviewTab";
 import { makeTask } from "./TaskDetailModal.test-helpers";
 import { loadAllAppCss } from "../../test/cssFixture";
@@ -47,6 +47,7 @@ describe("TaskReviewTab", () => {
 
     await renderWithAct(<TaskReviewTab task={makeTask({ reviewState: undefined })} addToast={vi.fn()} />);
     expect(await screen.findByText("No reviewer feedback yet — this task has not produced reviewer-agent feedback in direct mode.")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Pull request review summary")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Request revision" })).toBeDisabled();
   });
 
@@ -67,7 +68,7 @@ describe("TaskReviewTab", () => {
     await renderWithAct(<TaskReviewTab task={task} addToast={addToast} />);
     fireEvent.click(await screen.findByRole("button", { name: "Refresh" }));
     expect(apiMocks.refreshTaskReview).toHaveBeenCalledWith(task.id, undefined);
-    expect(await screen.findByText("APPROVED")).toBeInTheDocument();
+    expect((await screen.findAllByText("APPROVED")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("Looks good").length).toBeGreaterThan(0);
     expect(addToast).toHaveBeenCalledWith("Review refreshed", "success");
   });
@@ -127,6 +128,139 @@ describe("TaskReviewTab", () => {
     await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} />);
 
     expect(await screen.findByText("No review items yet.")).toBeInTheDocument();
+    expect(screen.getByText("No reviewers reported")).toBeInTheDocument();
+    expect(screen.getByText("No checks reported")).toBeInTheDocument();
+  });
+
+  it("renders PR decision, reviewers, checks, blockers, and per-item GitHub metadata", async () => {
+    const task = makeTask({
+      reviewState: {
+        source: "pull-request",
+        summary: {
+          reviewDecision: "CHANGES_REQUESTED",
+          reviewers: [{ login: "octocat", state: "CHANGES_REQUESTED", submittedAt: "2026-06-27T12:00:00.000Z" }],
+          blockingReasons: ["1 required review requesting changes"],
+          checks: [
+            { name: "lint", required: true, state: "success" },
+            { name: "test", required: true, state: "failure", detailsUrl: "https://github.example/checks/test" },
+          ],
+        },
+        items: [
+          {
+            id: "review-1",
+            body: "Please fix the failing branch.",
+            author: { login: "octocat" },
+            createdAt: "2026-06-27T12:00:00.000Z",
+            path: "src/parser.ts",
+            summary: "Review CHANGES_REQUESTED",
+            state: "CHANGES_REQUESTED",
+            htmlUrl: "https://github.example/reviews/1",
+          },
+          {
+            id: "comment-1",
+            body: "Nit: rename this variable.",
+            author: { login: "hubot" },
+            createdAt: "2026-06-27T12:05:00.000Z",
+            summary: "PR comment",
+            state: "COMMENTED",
+            htmlUrl: "https://github.example/comments/1",
+          },
+        ],
+        addressing: [],
+      },
+    });
+
+    apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
+    const { container } = await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} />);
+
+    expect(await screen.findByText("CHANGES_REQUESTED · 2 review item(s)")).toBeInTheDocument();
+    const summary = screen.getByLabelText("Pull request review summary");
+    expect(within(summary).getByText("octocat")).toBeInTheDocument();
+    expect(within(summary).getByText("1/2 checks passing · 2 required · 1 blocking")).toBeInTheDocument();
+    expect(within(summary).getByText("lint")).toBeInTheDocument();
+    expect(within(summary).getByText("test")).toBeInTheDocument();
+    expect(within(summary).getByText("1 required review requesting changes")).toBeInTheDocument();
+    expect(screen.getByText("Author: octocat")).toBeInTheDocument();
+    expect(screen.getByText("Author: hubot")).toBeInTheDocument();
+    expect(screen.getByText("src/parser.ts")).toBeInTheDocument();
+    expect(screen.getAllByText("COMMENTED").length).toBeGreaterThan(0);
+    const githubLinks = screen.getAllByRole("link", { name: /View on GitHub/ });
+    expect(githubLinks.map((link) => link.getAttribute("href"))).toEqual(["https://github.example/reviews/1", "https://github.example/comments/1"]);
+    expect(githubLinks[0]).toHaveAttribute("target", "_blank");
+    expect(githubLinks[0]).toHaveAttribute("rel", "noopener noreferrer");
+    expect(container.querySelectorAll(".task-review-tab__summary-group .task-review-tab__decision")).toHaveLength(1);
+  });
+
+  it.each([
+    ["APPROVED", "APPROVED · 0 review item(s)", true],
+    ["CHANGES_REQUESTED", "CHANGES_REQUESTED · 0 review item(s)", true],
+    ["REVIEW_REQUIRED", "REVIEW_REQUIRED · 0 review item(s)", true],
+    [null, "REVIEW_REQUIRED · 0 review item(s)", false],
+  ] as const)("renders PR decision state %s without undefined badges", async (decision, summaryText, hasDecisionBadge) => {
+    const task = makeTask({
+      reviewState: {
+        source: "pull-request",
+        summary: { reviewDecision: decision, reviewers: [], blockingReasons: [], checks: [] },
+        items: [],
+        addressing: [],
+      },
+    });
+
+    apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
+    const { container } = await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} />);
+
+    expect(await screen.findByText(summaryText)).toBeInTheDocument();
+    expect(screen.queryByText("undefined")).not.toBeInTheDocument();
+    expect(container.querySelectorAll(".task-review-tab__summary-group .task-review-tab__decision")).toHaveLength(hasDecisionBadge ? 1 : 0);
+  });
+
+  it("renders PR items when optional path, state, URL, or body are missing", async () => {
+    const task = makeTask({
+      reviewState: {
+        source: "pull-request",
+        summary: { reviewDecision: "REVIEW_REQUIRED", reviewers: [], blockingReasons: [], checks: [] },
+        items: [
+          {
+            id: "comment-with-empty-body",
+            body: "",
+            author: { login: "code-review-bot" },
+            createdAt: "2026-06-27T12:10:00.000Z",
+            summary: "PR comment by code-review-bot",
+          },
+        ],
+        addressing: [],
+      },
+    });
+
+    apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
+    await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} />);
+
+    expect(await screen.findByText("PR comment by code-review-bot")).toBeInTheDocument();
+    expect(screen.getByText("Author: code-review-bot")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /View on GitHub/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("undefined")).not.toBeInTheDocument();
+  });
+
+  it("toggles markdown/plain rendering for PR items without affecting selection", async () => {
+    const task = makeTask({
+      reviewState: {
+        source: "pull-request",
+        summary: { reviewDecision: "APPROVED", reviewers: [], blockingReasons: [], checks: [] },
+        items: [{ id: "markdown-pr-item", body: "**bold PR body**", author: { login: "octocat" }, createdAt: new Date().toISOString(), summary: "PR markdown item", state: "APPROVED" }],
+        addressing: [],
+      },
+    });
+
+    apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
+    const { container } = await renderWithAct(<TaskReviewTab task={task} addToast={vi.fn()} />);
+
+    await screen.findByText("PR markdown item");
+    expect(container.querySelector("strong")?.textContent).toBe("bold PR body");
+    const checkbox = screen.getByRole("checkbox");
+    fireEvent.click(screen.getByTestId("task-review-markdown-toggle"));
+    await waitFor(() => expect(container.querySelector("pre.task-review-tab__body")?.textContent).toContain("**bold PR body**"));
+    fireEvent.click(container.querySelector("pre.task-review-tab__body") as HTMLElement);
+    expect(checkbox).not.toBeChecked();
   });
 
   it("shows load error when initial review fetch fails", async () => {
@@ -475,7 +609,7 @@ describe("TaskReviewTab", () => {
             summary: "Parser guard is missing",
             threadId: "thread-1",
             line: 42,
-            url: "https://example.test/thread/1",
+            htmlUrl: "https://example.test/thread/1",
           },
         ],
         addressing: [{ itemId: "ri-1", status: "queued", selectedAt: new Date().toISOString() }],
@@ -689,6 +823,9 @@ describe("TaskReviewTab", () => {
     expect(baseBodyRule).toMatch(/overflow-wrap\s*:\s*anywhere\s*;/);
     expect(baseBodyRule).toMatch(/overflow-x\s*:\s*auto\s*;/);
     expect(taskReviewCss).toMatch(/\.task-review-tab__item\s*\{[^}]*padding\s*:\s*var\(--card-padding\)\s*;[^}]*\}/);
+    expect(taskReviewCss).toMatch(/\.task-review-tab__pr-summary\s*\{[^}]*gap\s*:\s*var\(--space-md\)\s*;[^}]*\}/);
+    expect(taskReviewCss).toMatch(/\.task-review-tab__pr-item-meta\s*\{[^}]*flex-wrap\s*:\s*wrap\s*;[^}]*\}/);
+    expect(mobileCss).toMatch(/\.task-review-tab__pill-list,\s*\.task-review-tab__pill-list-item,\s*\.task-review-tab__pr-item-meta\s*\{[^}]*width\s*:\s*100%\s*;[^}]*\}/);
   });
 
   it("preserves review header structure across sources and empty or populated states", async () => {

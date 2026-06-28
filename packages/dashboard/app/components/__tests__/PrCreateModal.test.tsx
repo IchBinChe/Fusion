@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { act } from "react";
 import type { ComponentProps } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PrCreateModal } from "../PrCreateModal";
 import type { PrInfo } from "@fusion/core";
 
@@ -90,6 +90,7 @@ function stubPointerCapture(element: HTMLElement) {
 describe("PrCreateModal", () => {
   beforeEach(() => {
     localStorage.clear();
+    vi.useRealTimers();
     vi.clearAllMocks();
     mocks.generatePrMetadata.mockResolvedValue(metadata);
     mocks.fetchPrPreflight.mockResolvedValue(preflight);
@@ -97,6 +98,10 @@ describe("PrCreateModal", () => {
     mocks.createPr.mockResolvedValue({ number: 12, title: "AI title", url: "url", status: "open", headBranch: "h", baseBranch: "main", commentCount: 0 } as PrInfo);
     mocks.pushPrBranch.mockResolvedValue({ result: { pushed: true, head: "fusion/fn-4756", message: "Pushed fusion/fn-4756 to origin." }, preflight });
     mocks.resolvePrConflicts.mockResolvedValue({ result: { resolved: true, pushed: true, conflictedFiles: ["a.ts"], message: "resolved" }, preflight });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("renders nothing when closed", () => {
@@ -354,6 +359,32 @@ describe("PrCreateModal", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Create PR" })).toBeEnabled());
   });
 
+  it("times out hung metadata generation into the manual fallback state", async () => {
+    vi.useFakeTimers();
+    mocks.generatePrMetadata.mockReturnValueOnce(new Promise(() => {}));
+
+    renderModal();
+
+    expect(screen.getByText(/generating ai title/i)).toBeInTheDocument();
+    expect(screen.getByText(/generating ai body/i)).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(15001);
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    vi.useRealTimers();
+
+    expect(await screen.findByText("Timed out generating PR metadata")).toBeInTheDocument();
+    expect(screen.queryByText(/generating ai title/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/generating ai body/i)).not.toBeInTheDocument();
+
+    const bodyInput = screen.getByLabelText(/body/i) as HTMLTextAreaElement;
+    expect(bodyInput.value).toContain("## Summary");
+    expect(bodyInput.value).toContain("Closes FN-4756");
+  });
+
   it("requires a non-empty body before submitting manual PR metadata", async () => {
     mocks.generatePrMetadata.mockRejectedValueOnce(new Error("metadata blew up"));
     renderModal();
@@ -398,12 +429,15 @@ describe("PrCreateModal", () => {
     expect(screen.getByRole("button", { name: "Create PR" })).toBeEnabled();
   });
 
-  it("renders empty option and preview states without throwing", async () => {
+  it("renders empty option and preview states collapsed by default without throwing", async () => {
     mocks.fetchPrPreflight.mockResolvedValueOnce({ ...preflight, commits: [], changedFiles: [] });
     mocks.fetchPrOptions.mockResolvedValueOnce({ ...options, baseBranches: [], reviewers: [], assignees: [], labels: [] });
 
     await renderModalLoaded();
 
+    const preview = document.querySelector(".pr-create-collapsible");
+    expect(preview).toBeInstanceOf(HTMLDetailsElement);
+    expect(preview).not.toHaveAttribute("open");
     expect(screen.getByText("No commits found.")).toBeInTheDocument();
     expect(screen.getByText("No changed files detected.")).toBeInTheDocument();
     expect(screen.getByLabelText(/base branch/i)).toBeDisabled();
@@ -595,9 +629,30 @@ describe("PrCreateModal", () => {
     expect(screen.getByTestId("floating-window-pr-create")).toBeInTheDocument();
   });
 
-  it("closes on escape", async () => {
+  it("keeps self-removing inner controls from closing the floating modal", async () => {
     const { onClose } = await renderModalLoaded();
+
+    fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Edited title" } });
+    fireEvent.click(screen.getByRole("button", { name: /revert to ai version/i }));
+
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Create Pull Request" })).toBeInTheDocument();
+    expect(screen.getByDisplayValue("AI title")).toBeInTheDocument();
+  });
+
+  it("closes on escape, header close, and cancel", async () => {
+    const escapeHandles = await renderModalLoaded();
     fireEvent.keyDown(document, { key: "Escape" });
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(escapeHandles.onClose).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    const headerHandles = await renderModalLoaded();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(headerHandles.onClose).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    const cancelHandles = await renderModalLoaded();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(cancelHandles.onClose).toHaveBeenCalledTimes(1);
   });
 });

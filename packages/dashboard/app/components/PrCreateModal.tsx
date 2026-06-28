@@ -38,6 +38,27 @@ type PreflightCheck = {
   warning?: boolean;
 };
 
+const PR_METADATA_TIMEOUT_MS = 15000;
+
+/*
+FNXC:PrCreateModal 2026-06-27-23:48:
+AI PR metadata generation must never leave the Create PR dialog in a permanent loading state. Bound the call to the same 15s budget as PR view fetches, then route timeout failures through the existing metadata error/manual-body fallback path so users can recover manually.
+*/
+async function withPrMetadataTimeout<T>(promise: Promise<T>): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error("Timed out generating PR metadata")), PR_METADATA_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
 /*
 FNXC:PrCreateModal 2026-06-23-00:00:
 The Create PR modal must stay manually usable after metadata generation fails, but non-interactive GitHub PR creation cannot accept a title-only payload. Seed an editable body fallback with the required sections so users can complete or revise the PR instead of submitting an empty body.
@@ -217,7 +238,7 @@ export function PrCreateModal({
       setUserEditedBody(false);
     }
     try {
-      const metadata = await generatePrMetadata(taskId, projectId);
+      const metadata = await withPrMetadataTimeout(generatePrMetadata(taskId, projectId));
       if (requestId !== requestSeqRef.current.metadata) {
         return;
       }
@@ -360,7 +381,7 @@ export function PrCreateModal({
     setMetadataLoading(true);
     setMetadataError(null);
     try {
-      const metadata = await generatePrMetadata(taskId, projectId);
+      const metadata = await withPrMetadataTimeout(generatePrMetadata(taskId, projectId));
       if (requestId !== requestSeqRef.current.metadata) {
         return;
       }
@@ -510,6 +531,9 @@ export function PrCreateModal({
       {/**
        * FNXC:PrCreateModal 2026-06-27-00:00:
        * FN-7170 moves Create PR onto the shared FloatingWindow shell so it matches Plan Mission, Automations, and New Task: desktop users can drag the embedded modal header and resize from every FloatingWindow edge/corner, mobile stays full-screen through CSS, and geometry persists with persistGeometryKey="floating-window:pr-create". Overlay click-to-dismiss is intentionally dropped because FloatingWindow is non-blocking/click-through; close remains available via X, Cancel, and Escape.
+       *
+       * FNXC:PrCreateModal 2026-06-27-23:48:
+       * Do not reintroduce a naive overlay onClick target check here. Before FloatingWindow, self-removing buttons and resize-grip releases could retarget synthesized clicks to the backdrop and close the dialog; the floating shell avoids that footgun by having no backdrop-dismiss path for Create PR.
        */}
       <div
         ref={modalRef}
@@ -654,7 +678,11 @@ export function PrCreateModal({
               includeColor
             />
 
-            <details className="pr-create-collapsible" open>
+            {/**
+             * FNXC:PrCreateModal 2026-06-27-23:48:
+             * The diff and commit preview defaults collapsed so long commit/file lists do not push the editable PR form below the fold. Users can expand the summary on demand without changing the preview content.
+             */}
+            <details className="pr-create-collapsible">
               <summary>{t("pr.previewTitle", "Diff & commit preview")}</summary>
               <div className="pr-create-modal__preview">
                 <h4>{t("pr.commitsLabel", "Commits")}</h4>

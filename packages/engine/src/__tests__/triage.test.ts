@@ -1206,6 +1206,20 @@ describe("fast-mode triage", () => {
   });
 });
 
+const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+const WEBP_BYTES = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x01, 0x02, 0x03, 0x04, 0x57, 0x45, 0x42, 0x50]);
+
+function attachmentFixture(overrides: Partial<TaskDetail["attachments"][number]>): TaskDetail["attachments"][number] {
+  return {
+    filename: "1234567890-image.png",
+    originalName: "image.png",
+    mimeType: "image/png",
+    size: 100,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
 describe("readAttachmentContents", () => {
   let testDir = "";
   const taskId = "FN-TEST";
@@ -1284,31 +1298,52 @@ describe("readAttachmentContents", () => {
   });
 
   it("reads image as base64 content", async () => {
-    const attachments = [
-      {
-        filename: "1234567890-image.png",
-        originalName: "image.png",
-        mimeType: "image/png" as const,
-        size: 100,
-        createdAt: "2026-01-01T00:00:00.000Z",
-      },
-    ];
+    const attachments = [attachmentFixture({ filename: "1234567890-image.png", originalName: "image.png", mimeType: "image/png" })];
 
-    // Write fake PNG data (just some bytes)
-    const imageData = Buffer.from([0x89, 0x50, 0x4e, 0x47]); // PNG magic bytes
     await writeFile(
       join(testDir, ".fusion", "tasks", taskId, "attachments", "1234567890-image.png"),
-      imageData,
+      PNG_BYTES,
     );
 
     const result = await readAttachmentContents(testDir, taskId, attachments);
 
     expect(result.attachmentContents).toHaveLength(1);
-    expect(result.attachmentContents[0].text).toBeNull();
+    expect(result.attachmentContents[0]).toMatchObject({ originalName: "image.png", mimeType: "image/png", text: null });
     expect(result.imageContents).toHaveLength(1);
     expect(result.imageContents[0].type).toBe("image");
     expect(result.imageContents[0].mimeType).toBe("image/png");
-    expect(result.imageContents[0].data).toBe(imageData.toString("base64"));
+    expect(result.imageContents[0].data).toBe(PNG_BYTES.toString("base64"));
+  });
+
+  it("corrects a webp-labeled PNG image block to image/png", async () => {
+    const attachments = [attachmentFixture({ filename: "mismatch.webp", originalName: "mismatch.webp", mimeType: "image/webp" })];
+    await writeFile(join(testDir, ".fusion", "tasks", taskId, "attachments", "mismatch.webp"), PNG_BYTES);
+
+    const result = await readAttachmentContents(testDir, taskId, attachments);
+
+    expect(result.attachmentContents).toEqual([{ originalName: "mismatch.webp", mimeType: "image/webp", text: null }]);
+    expect(result.imageContents).toEqual([{ type: "image", data: PNG_BYTES.toString("base64"), mimeType: "image/png" }]);
+  });
+
+  it("corrects a png-labeled WEBP image block to image/webp", async () => {
+    const attachments = [attachmentFixture({ filename: "mismatch.png", originalName: "mismatch.png", mimeType: "image/png" })];
+    await writeFile(join(testDir, ".fusion", "tasks", taskId, "attachments", "mismatch.png"), WEBP_BYTES);
+
+    const result = await readAttachmentContents(testDir, taskId, attachments);
+
+    expect(result.attachmentContents).toEqual([{ originalName: "mismatch.png", mimeType: "image/png", text: null }]);
+    expect(result.imageContents).toEqual([{ type: "image", data: WEBP_BYTES.toString("base64"), mimeType: "image/webp" }]);
+  });
+
+  it("falls back to stored image mime type for unrecognized bytes", async () => {
+    const unknownBytes = Buffer.from([0x01, 0x02, 0x03, 0x04]);
+    const attachments = [attachmentFixture({ filename: "unknown.webp", originalName: "unknown.webp", mimeType: "image/webp" })];
+    await writeFile(join(testDir, ".fusion", "tasks", taskId, "attachments", "unknown.webp"), unknownBytes);
+
+    const result = await readAttachmentContents(testDir, taskId, attachments);
+
+    expect(result.attachmentContents).toEqual([{ originalName: "unknown.webp", mimeType: "image/webp", text: null }]);
+    expect(result.imageContents).toEqual([{ type: "image", data: unknownBytes.toString("base64"), mimeType: "image/webp" }]);
   });
 
   it("skips unreadable attachments", async () => {

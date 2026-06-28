@@ -10,6 +10,9 @@ import {
 } from "../chat-attachment-content.js";
 
 const roots: string[] = [];
+const PNG_BYTES = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+const WEBP_BYTES = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x01, 0x02, 0x03, 0x04, 0x57, 0x45, 0x42, 0x50]);
+const UNKNOWN_IMAGE_BYTES = Buffer.from([0x01, 0x02, 0x03, 0x04]);
 
 function attachment(overrides: Partial<ChatAttachment>): ChatAttachment {
   return {
@@ -50,22 +53,65 @@ describe("readChatAttachmentContents", () => {
     expect(formatChatAttachmentContents(result.attachmentContents)).toContain("hello from attachment");
   });
 
-  it("converts image attachments to base64 content blocks", async () => {
+  it("converts matching image attachments to base64 content blocks", async () => {
     const root = await makeRoot();
     await mkdir(join(root, ".fusion", "chat-attachments", "session-1"), { recursive: true });
-    await writeFile(join(root, ".fusion", "chat-attachments", "session-1", "image.png"), Buffer.from([1, 2, 3, 4]));
+    await writeFile(join(root, ".fusion", "chat-attachments", "session-1", "image.png"), PNG_BYTES);
 
     const result = await readChatAttachmentContents(root, { kind: "session", sessionId: "session-1" }, [
-      attachment({ filename: "image.png", originalName: "image.png", mimeType: "image/png", size: 4 }),
+      attachment({ filename: "image.png", originalName: "image.png", mimeType: "image/png", size: PNG_BYTES.length }),
     ]);
 
     expect(result.attachmentContents).toEqual([
       { originalName: "image.png", mimeType: "image/png", text: null },
     ]);
     expect(result.imageContents).toEqual([
-      { type: "image", data: Buffer.from([1, 2, 3, 4]).toString("base64"), mimeType: "image/png" },
+      { type: "image", data: PNG_BYTES.toString("base64"), mimeType: "image/png" },
     ]);
     expect(formatChatAttachmentContents(result.attachmentContents)).toBe("");
+  });
+
+  it("corrects session webp-labeled PNG image blocks to image/png", async () => {
+    const root = await makeRoot();
+    const diagnostics = { warn: vi.fn() };
+    await mkdir(join(root, ".fusion", "chat-attachments", "session-1"), { recursive: true });
+    await writeFile(join(root, ".fusion", "chat-attachments", "session-1", "mismatch.webp"), PNG_BYTES);
+
+    const result = await readChatAttachmentContents(root, { kind: "session", sessionId: "session-1" }, [
+      attachment({ filename: "mismatch.webp", originalName: "mismatch.webp", mimeType: "image/webp", size: PNG_BYTES.length }),
+    ], diagnostics);
+
+    expect(result.attachmentContents).toEqual([{ originalName: "mismatch.webp", mimeType: "image/webp", text: null }]);
+    expect(result.imageContents).toEqual([{ type: "image", data: PNG_BYTES.toString("base64"), mimeType: "image/png" }]);
+    expect(diagnostics.warn).toHaveBeenCalledWith(expect.stringContaining("from image/webp to image/png"));
+  });
+
+  it("corrects room png-labeled WEBP image blocks to image/webp", async () => {
+    const root = await makeRoot();
+    const diagnostics = { warn: vi.fn() };
+    await mkdir(join(root, ".fusion", "chat-room-attachments", "room-1"), { recursive: true });
+    await writeFile(join(root, ".fusion", "chat-room-attachments", "room-1", "mismatch.png"), WEBP_BYTES);
+
+    const result = await readChatAttachmentContents(root, { kind: "room", roomId: "room-1" }, [
+      attachment({ filename: "mismatch.png", originalName: "mismatch.png", mimeType: "image/png", size: WEBP_BYTES.length }),
+    ], diagnostics);
+
+    expect(result.attachmentContents).toEqual([{ originalName: "mismatch.png", mimeType: "image/png", text: null }]);
+    expect(result.imageContents).toEqual([{ type: "image", data: WEBP_BYTES.toString("base64"), mimeType: "image/webp" }]);
+    expect(diagnostics.warn).toHaveBeenCalledWith(expect.stringContaining("room room-1 from image/png to image/webp"));
+  });
+
+  it("falls back to stored image mime type for unrecognized session bytes", async () => {
+    const root = await makeRoot();
+    await mkdir(join(root, ".fusion", "chat-attachments", "session-1"), { recursive: true });
+    await writeFile(join(root, ".fusion", "chat-attachments", "session-1", "unknown.webp"), UNKNOWN_IMAGE_BYTES);
+
+    const result = await readChatAttachmentContents(root, { kind: "session", sessionId: "session-1" }, [
+      attachment({ filename: "unknown.webp", originalName: "unknown.webp", mimeType: "image/webp", size: UNKNOWN_IMAGE_BYTES.length }),
+    ]);
+
+    expect(result.attachmentContents).toEqual([{ originalName: "unknown.webp", mimeType: "image/webp", text: null }]);
+    expect(result.imageContents).toEqual([{ type: "image", data: UNKNOWN_IMAGE_BYTES.toString("base64"), mimeType: "image/webp" }]);
   });
 
   it("returns mixed text and image contents together", async () => {

@@ -1,4 +1,4 @@
-import type { ChatAttachment } from "@fusion/core";
+import { detectImageMimeFromBytes, type ChatAttachment } from "@fusion/core";
 import { readFile } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { CHAT_ALLOWED_MIME_TYPES } from "./routes/chat-attachment-config.js";
@@ -109,10 +109,15 @@ export async function readChatAttachmentContents(
     try {
       if (IMAGE_MIME_TYPES.has(attachment.mimeType)) {
         const data = await readFile(filePath);
+        const detectedMimeType = detectImageMimeFromBytes(data);
+        const imageMimeType = detectedMimeType ?? attachment.mimeType;
+        if (detectedMimeType && detectedMimeType !== attachment.mimeType) {
+          diagnostics?.warn(`Corrected chat image attachment media type for '${attachment.filename}' in ${getScopeLabel(scope)} from ${attachment.mimeType} to ${detectedMimeType}`);
+        }
         imageContents.push({
           type: "image",
           data: data.toString("base64"),
-          mimeType: attachment.mimeType,
+          mimeType: imageMimeType,
         });
         attachmentContents.push({
           originalName: attachment.originalName,

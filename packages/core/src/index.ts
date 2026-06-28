@@ -16,6 +16,8 @@ export type {
   EntryPointBranchAssignment,
 } from "./branch-assignment.js";
 export { customProviderRegistryKey } from "./custom-provider-key.js";
+export { detectImageMimeFromBytes } from "./image-mime.js";
+export type { DetectedImageMime } from "./image-mime.js";
 export { redactSecrets } from "./redact-secrets.js";
 export { resolvePlanApprovalRequired } from "./plan-approval.js";
 export type { PlanApprovalMode } from "./plan-approval.js";

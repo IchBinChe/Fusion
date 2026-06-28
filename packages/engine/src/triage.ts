@@ -27,6 +27,7 @@ import {
   extractIntentSignature,
   findNearDuplicates,
   isNearDuplicateCanonicalInactive,
+  detectImageMimeFromBytes,
   applyFrontendUxCriteria,
   extractEffectiveWriteScopeFromPrompt,
   MAX_TASK_LIST_TEXT_CHARS,
@@ -2754,10 +2755,15 @@ export async function readAttachmentContents(
     try {
       if (IMAGE_MIME_TYPES.has(att.mimeType)) {
         const data = await readFile(filePath);
+        const detectedMimeType = detectImageMimeFromBytes(data);
+        const imageMimeType = detectedMimeType ?? att.mimeType;
+        if (detectedMimeType && detectedMimeType !== att.mimeType) {
+          planLog.warn(`${taskId}: corrected image attachment media type for '${att.filename}' (${att.originalName}) from ${att.mimeType} to ${detectedMimeType}`);
+        }
         imageContents.push({
           type: "image",
           data: data.toString("base64"),
-          mimeType: att.mimeType,
+          mimeType: imageMimeType,
         });
         attachmentContents.push({
           originalName: att.originalName,

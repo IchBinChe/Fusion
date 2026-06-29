@@ -191,6 +191,8 @@ describe("TaskDocumentsTab", () => {
     });
 
     expect(screen.getByRole("img", { name: "Image artifact" })).toHaveAttribute("src", "/api/artifacts/artifact-image/media");
+    expect(screen.getByRole("button", { name: "Expand image artifact Image artifact" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Expand image artifact Video artifact/ })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Video artifact: Video artifact").tagName).toBe("VIDEO");
     expect(screen.getByLabelText("Audio artifact: Audio artifact").tagName).toBe("AUDIO");
     expect(screen.getByTestId("artifact-document-preview")).toHaveTextContent("Inline document preview");
@@ -200,6 +202,54 @@ describe("TaskDocumentsTab", () => {
     expect(document.querySelector(".documents-artifact-gallery--mobile")).not.toBeNull();
     expect(mockUseArtifacts).toHaveBeenCalledWith({ projectId: "project-1", taskId: "KB-001" });
     expect(mockArtifactMediaUrl).toHaveBeenCalledWith("artifact-image", "project-1");
+  });
+
+  it("opens image artifacts in a task-detail lightbox and restores focus on close", async () => {
+    mockFetchTaskDocuments.mockResolvedValue([]);
+    mockUseArtifacts.mockReturnValue({
+      artifacts: mockArtifacts,
+      loading: false,
+      error: null,
+      refresh: vi.fn().mockResolvedValue(undefined),
+    });
+
+    render(<TaskDocumentsTab taskId="KB-001" addToast={addToast} projectId="project-1" />);
+
+    const expandButton = await screen.findByRole("button", { name: "Expand image artifact Image artifact" });
+    expandButton.focus();
+    fireEvent.click(expandButton);
+
+    const dialog = screen.getByRole("dialog", { name: "Artifact media preview" });
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getAllByRole("img", { name: "Image artifact" })[1]).toHaveAttribute("src", "/api/artifacts/artifact-image/media");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close artifact preview" }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Artifact media preview" })).not.toBeInTheDocument();
+    });
+    expect(expandButton).toHaveFocus();
+  });
+
+  it("closes the image artifact lightbox with Escape", async () => {
+    mockFetchTaskDocuments.mockResolvedValue([]);
+    mockUseArtifacts.mockReturnValue({
+      artifacts: mockArtifacts,
+      loading: false,
+      error: null,
+      refresh: vi.fn().mockResolvedValue(undefined),
+    });
+
+    render(<TaskDocumentsTab taskId="KB-001" addToast={addToast} projectId="project-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Expand image artifact Image artifact" }));
+    expect(screen.getByRole("dialog", { name: "Artifact media preview" })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Artifact media preview" })).not.toBeInTheDocument();
+    });
   });
 
   it("surfaces artifact fetch errors", async () => {

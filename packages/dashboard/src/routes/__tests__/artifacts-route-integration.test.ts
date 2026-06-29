@@ -84,6 +84,44 @@ describe("artifacts route integration", () => {
     expect(Buffer.from(res.body as string, "utf8")).toEqual(imageBytes);
   });
 
+  it("a global image artifact still streams from the managed global artifacts directory", async () => {
+    const imageBytes = Buffer.from("PNG-FN-7143-global-image-bytes", "utf8");
+    const artifact = await store.registerArtifact({
+      type: "image",
+      title: "Global screenshot",
+      mimeType: "image/png",
+      data: imageBytes,
+      authorId: "agent-7143",
+      authorType: "agent",
+    });
+
+    const res = await REQUEST(app, "GET", `/api/artifacts/${artifact.id}/media`);
+
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toBe("image/png");
+    expect(Buffer.from(res.body as string, "utf8")).toEqual(imageBytes);
+  });
+
+  it("a URI-only image artifact whose file is missing still returns 404", async () => {
+    const task = await store.createTask({
+      title: "Missing screenshot",
+      description: "Preserve existing missing media semantics",
+    });
+    const artifact = await store.registerArtifact({
+      type: "image",
+      title: "Missing screenshot",
+      mimeType: "image/png",
+      uri: "artifacts/missing.png",
+      authorId: "agent-7143",
+      authorType: "agent",
+      taskId: task.id,
+    });
+
+    const res = await REQUEST(app, "GET", `/api/artifacts/${artifact.id}/media`);
+
+    expect(res.status).toBe(404);
+  });
+
   it("a task with no artifacts lists as empty", async () => {
     const task = await store.createTask({
       title: "Render screenshot",

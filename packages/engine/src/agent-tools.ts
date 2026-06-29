@@ -123,6 +123,7 @@ export const artifactRegisterParams = Type.Object({
   mimeType: Type.Optional(Type.String({ description: "Optional MIME type, e.g. text/markdown or image/png." })),
   uri: Type.Optional(Type.String({ description: "Optional URI/path reference when content is stored elsewhere." })),
   content: Type.Optional(Type.String({ description: "Optional inline text content for document/text artifacts." })),
+  dataBase64: Type.Optional(Type.String({ description: "Optional base64-encoded binary payload for image artifacts, e.g. PNG bytes; omit content and uri when provided." })),
   taskId: Type.Optional(Type.String({ description: "Optional associated task ID (e.g. 'FN-001')." })),
 });
 
@@ -146,6 +147,7 @@ export const chatArtifactRegisterParams = Type.Object({
   mimeType: Type.Optional(Type.String({ description: "Optional MIME type, e.g. text/markdown or image/png." })),
   uri: Type.Optional(Type.String({ description: "Optional URI/path reference when content is stored elsewhere." })),
   content: Type.Optional(Type.String({ description: "Optional inline text content for document/text artifacts." })),
+  dataBase64: Type.Optional(Type.String({ description: "Optional base64-encoded binary payload for image artifacts, e.g. PNG bytes; omit content and uri when provided." })),
   task_id: Type.String({ description: "Associated task ID (e.g. 'FN-001')." }),
 });
 
@@ -1350,7 +1352,7 @@ export function createArtifactRegisterTool(store: TaskStore, authorId: string, m
     label: "Register Artifact",
     description:
       "Register an artifact (document, image, video, audio, or other) so other agents and tasks can discover it. " +
-      "Provide either inline content or a uri/path reference; optionally associate it with a taskId.",
+      "Provide inline content, a uri/path reference, or dataBase64 image bytes; optionally associate it with a taskId.",
     parameters: artifactRegisterParams,
     execute: async (_id: string, params: Static<typeof artifactRegisterParams>) => registerArtifactForAgent(store, authorId, params, messageStore),
   };
@@ -1397,7 +1399,7 @@ export function createChatArtifactTools(store: TaskStore, messageStore?: Message
       name: "fn_artifact_register",
       label: "Register Artifact",
       description:
-        "Register an artifact for a specific task so other agents can discover it. Requires task_id and notifies the dashboard inbox best-effort.",
+        "Register an artifact for a specific task so other agents can discover it. Requires task_id, accepts dataBase64 image bytes, and notifies the dashboard inbox best-effort.",
       parameters: chatArtifactRegisterParams,
       execute: async (_id: string, params: Static<typeof chatArtifactRegisterParams>) => registerArtifactForAgent(
         store,
@@ -1409,6 +1411,7 @@ export function createChatArtifactTools(store: TaskStore, messageStore?: Message
           mimeType: params.mimeType,
           uri: params.uri,
           content: params.content,
+          dataBase64: params.dataBase64,
           taskId: params.task_id,
         },
         messageStore,
@@ -1439,19 +1442,21 @@ async function registerArtifactForAgent(
   params: Static<typeof artifactRegisterParams>,
   messageStore?: MessageStore,
 ) {
-  const input: ArtifactCreateInput = {
-    type: params.type,
-    title: params.title,
-    description: params.description,
-    mimeType: params.mimeType,
-    uri: params.uri,
-    content: params.content,
-    authorId,
-    authorType: "agent",
-    taskId: params.taskId,
-  };
-
   try {
+    const data = decodeArtifactDataBase64(params);
+    const input: ArtifactCreateInput = {
+      type: params.type,
+      title: params.title,
+      description: params.description,
+      mimeType: params.mimeType,
+      uri: params.uri,
+      content: params.content,
+      data,
+      authorId,
+      authorType: "agent",
+      taskId: params.taskId,
+    };
+
     const artifact: Artifact = await store.registerArtifact(input);
     notifyArtifactRegistered(messageStore, artifact, authorId);
     return {
@@ -1471,6 +1476,37 @@ async function registerArtifactForAgent(
       details: {},
     };
   }
+}
+
+/**
+ * FNXC:ArtifactRegistry 2026-06-29-00:00:
+ * Agents need a portable way to create task-scoped image artifacts without reading arbitrary local files. `dataBase64` decodes inside the tool and then uses TaskStore's existing binary persistence path so registry rows continue to store only managed artifact URIs.
+ */
+function decodeArtifactDataBase64(params: Static<typeof artifactRegisterParams>): Buffer | undefined {
+  const encoded = params.dataBase64?.trim();
+  if (!encoded) {
+    return undefined;
+  }
+
+  if (params.uri || params.content) {
+    throw new Error("dataBase64 cannot be combined with uri or content; provide exactly one artifact payload source.");
+  }
+
+  if (params.type === "image" && !params.mimeType?.startsWith("image/")) {
+    throw new Error("image artifacts registered with dataBase64 require an image/* mimeType such as image/png.");
+  }
+
+  const normalized = encoded.replace(/\s+/g, "");
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(normalized) || normalized.length % 4 !== 0) {
+    throw new Error("dataBase64 must be valid base64-encoded artifact bytes.");
+  }
+
+  const data = Buffer.from(normalized, "base64");
+  if (data.length === 0 || data.toString("base64").replace(/=+$/, "") !== normalized.replace(/=+$/, "")) {
+    throw new Error("dataBase64 must decode to non-empty artifact bytes.");
+  }
+
+  return data;
 }
 
 function notifyArtifactRegistered(messageStore: MessageStore | undefined, artifact: Artifact, authorId: string): void {

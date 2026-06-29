@@ -24,6 +24,7 @@ import {
 import { WorkflowGraphTaskRunner, type WorkflowGraphTaskRunResult } from "./workflow-graph-task-runner.js";
 import { ensureWorkflowCompletionSummary } from "./workflow-completion-summary.js";
 import { createCodeNodeRunner } from "./code-node-runner.js";
+import { resolveReviewCheckoutCwd } from "./review-checkout.js";
 import { getActiveNotificationService } from "./notifier.js";
 import type { ParseStepsHandlerDeps, CodeNodeRunner } from "./workflow-node-handlers.js";
 import type { WorkflowBranchPersistence, WorkflowBranchRunState } from "./workflow-graph-branches.js";
@@ -6135,6 +6136,7 @@ export class TaskExecutor {
         const detail = await this.store.getTask(seamTask.id);
         // Worktree isolation (KTD-11): review the instance's OWN worktree when set.
         const worktreePath = active.worktreePath || detail.worktree || this.rootDir;
+        const reviewCwd = resolveReviewCheckoutCwd(detail, worktreePath);
         const stepName = detail.steps[stepIndex]?.name ?? `Step ${stepIndex}`;
         const promptContent = detail.prompt ?? "";
         // Merge per-task effective workflow settings (U3, KTD-3) so the validator
@@ -6190,9 +6192,9 @@ export class TaskExecutor {
           return sem ? sem.runNested(invoke) : invoke();
         };
         const invokeReviewer = () =>
-          this.workspaceConfig
+          this.workspaceConfig && reviewCwd === worktreePath
             ? this.reviewWorkspacePerRepo(detail, (cwd) => runForCwd(cwd))
-            : runForCwd(worktreePath);
+            : runForCwd(reviewCwd);
 
         let review: { verdict: ReviewVerdict; review: string; summary: string };
         try {
@@ -12634,6 +12636,7 @@ export class TaskExecutor {
           const latestDetailForReview = await store.getTask(taskId);
           const userComments = selectUserCommentsForAgentContext(latestDetailForReview);
           const settings = await mergeEffectiveSettings(store, latestDetailForReview, await store.getSettings());
+          const reviewCwd = resolveReviewCheckoutCwd(latestDetailForReview, worktreePath);
           // Run the reviewer via semaphore.runNested so its slot accounting
           // is honest: activeCount transiently bumps to reflect the second
           // agent session, but the reviewer doesn't enter the wait queue
@@ -12693,9 +12696,9 @@ export class TaskExecutor {
             const invoke = () => invokeReviewerForCwd(cwd);
             return sem ? sem.runNested(invoke) : invoke();
           };
-          const result = this.workspaceConfig
+          const result = this.workspaceConfig && reviewCwd === worktreePath
             ? await this.reviewWorkspacePerRepo(currentTask, (cwd) => runForCwd(cwd))
-            : await runForCwd(worktreePath);
+            : await runForCwd(reviewCwd);
 
           await store.logEntry(
             taskId,

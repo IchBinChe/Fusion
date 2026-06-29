@@ -14,6 +14,10 @@ the cwd of each call. Coverage:
 */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ReviewResult } from "../reviewer.js";
 
 // Narrow AI seam: only reviewStep (the agent boundary) is mocked. Everything else is the real executor.
@@ -32,6 +36,14 @@ const mockedReviewStep = vi.mocked(mockedReviewStepFn);
 const ROOT = "/tmp/ws-root"; // NON-git workspace root — must never be a review cwd in workspace mode.
 const WT_A = "/tmp/ws-root/repo-a/.worktrees/fn-1";
 const WT_B = "/tmp/ws-root/repo-b/.worktrees/fn-1";
+const cleanupDirs: string[] = [];
+
+function makeGitCheckout(): string {
+  const dir = mkdtempSync(join(tmpdir(), "fusion-review-checkout-"));
+  cleanupDirs.push(dir);
+  execFileSync("git", ["init", "-b", "main"], { cwd: dir, stdio: "ignore" });
+  return dir;
+}
 
 function makeStore(task: Task): TaskStore & EventEmitter {
   const emitter = new EventEmitter();
@@ -93,6 +105,10 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.clearAllMocks();
+  while (cleanupDirs.length > 0) {
+    const dir = cleanupDirs.pop();
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 describe("U2 KTD3 — reviewWorkspacePerRepo conjunction + tagging (the shared loop both call sites use)", () => {
@@ -212,6 +228,27 @@ describe("U2 KTD3 — in-session fn_review_step (createReviewStepTool) loops per
     await tool.execute("call-1", { step: 1, type: "code", step_name: "Step 1", baseline: "base" });
     expect(seen).toEqual([WT_A]);
   });
+
+  it("explicit external review checkout overrides the Atlas task worktree for fn_review_step", async () => {
+    const externalCheckout = makeGitCheckout();
+    const expectedCheckout = realpathSync(externalCheckout);
+    const task = makeTask({ customFields: { reviewCheckoutPath: externalCheckout } } as any);
+    const store = makeStore(task);
+    const executor = new TaskExecutor(store, ROOT);
+    const seen = scriptReviewByCwd({ [externalCheckout]: { verdict: "APPROVE", review: "external ok", summary: "external" } });
+    const tool = (executor as any).createReviewStepTool(
+      task.id,
+      WT_A,
+      "PROMPT",
+      new Map(),
+      { current: null },
+      new Map(),
+      task,
+      undefined,
+    );
+    await tool.execute("call-1", { step: 1, type: "code", step_name: "Step 1", baseline: "base" });
+    expect(seen).toEqual([expectedCheckout]);
+  });
 });
 
 describe("U2 KTD3 — step-inversion review seam (executor.ts:5668) loops per sub-repo", () => {
@@ -243,5 +280,18 @@ describe("U2 KTD3 — step-inversion review seam (executor.ts:5668) loops per su
     const context = { [FOREACH_ACTIVE_CONTEXT_KEY]: { stepIndex: 1, worktreePath: WT_A, baselineSha: "base" } } as any;
     await seams.stepReview!(task as any, context, { type: "code", advisory: true } as any);
     expect(seen).toEqual([WT_A]);
+  });
+
+  it("explicit external review checkout overrides the active graph worktree", async () => {
+    const externalCheckout = makeGitCheckout();
+    const expectedCheckout = realpathSync(externalCheckout);
+    const task = makeTask({ worktree: WT_A, customFields: { reviewCheckoutPath: externalCheckout } } as any);
+    const store = makeStore(task);
+    const executor = new TaskExecutor(store, ROOT);
+    const seen = scriptReviewByCwd({ [externalCheckout]: { verdict: "APPROVE", review: "external", summary: "external" } });
+    const seams = executor.createAuthoritativeWorkflowSeams({ autoMerge: false } as any);
+    const context = { [FOREACH_ACTIVE_CONTEXT_KEY]: { stepIndex: 1, worktreePath: WT_A, baselineSha: "base" } } as any;
+    await seams.stepReview!(task as any, context, { type: "code", advisory: true } as any);
+    expect(seen).toEqual([expectedCheckout]);
   });
 });

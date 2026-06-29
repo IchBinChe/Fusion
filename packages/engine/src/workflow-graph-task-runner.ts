@@ -13,6 +13,7 @@ import {
   WORKFLOW_NODE_ENGINE_PAUSE_ABORT_KIND,
   WorkflowGraphExecutor,
   type WorkflowGraphExecutorDeps,
+  type WorkflowNodePreparationRequirement,
   type WorkflowNodeAbortKind,
   type WorkflowNodeOutcome,
   type WorkflowTaskProjection,
@@ -74,6 +75,12 @@ export interface WorkflowGraphTaskRunnerDeps {
   seams: WorkflowLegacySeams;
   primitives?: WorkflowRuntimePrimitives;
   runCustomNode: WorkflowCustomNodeRunner;
+  /** Workflow-node prerequisite fulfillment, invoked after graph-level classification. */
+  prepareNodeExecution?: (
+    node: WorkflowIr["nodes"][number],
+    task: TaskDetail,
+    requirement: WorkflowNodePreparationRequirement,
+  ) => void | Promise<void>;
   maxRetriesPerNode?: number;
   /** Optional diagnostics hook (audit/log emission). Never throws into the run. */
   onEvent?: (event: { type: "start" | "terminal" | "fallback"; taskId: string; detail: string }) => void;
@@ -266,6 +273,7 @@ export class WorkflowGraphTaskRunner {
         seams: wrappedSeams,
         primitives: wrappedPrimitives,
         runCustomNode: wrappedRunCustomNode,
+        prepareNodeExecution: this.deps.prepareNodeExecution,
         maxRetriesPerNode: this.deps.maxRetriesPerNode,
         branchPersistence: this.deps.branchPersistence,
         branchSemaphore: this.deps.branchSemaphore,

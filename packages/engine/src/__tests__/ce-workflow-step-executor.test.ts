@@ -24,9 +24,10 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BUILTIN_WORKFLOWS } from "@fusion/core";
+import { BUILTIN_WORKFLOWS, type WorkflowIr } from "@fusion/core";
 import "./executor-test-helpers.js";
 import { TaskExecutor } from "../executor.js";
+import { WorkflowGraphExecutor } from "../workflow-graph-executor.js";
 import {
   createMockStore,
   mockedCreateFnAgent,
@@ -204,7 +205,7 @@ describe("CE workflow-step executor integration", () => {
       expect(captured.step.prompt).toContain("Plan the work.");
     });
 
-    it("acquires a task worktree when the first CE coding-mode node runs before execute", async () => {
+    it("lets the graph prepare a task worktree before the first CE coding-mode node runs", async () => {
       const store = createMockStore();
       let live = baseStepTask({
         worktree: undefined,
@@ -242,7 +243,29 @@ describe("CE workflow-step executor integration", () => {
         },
       };
 
-      const result = await (executor as any).runGraphCustomNode(node, { id: "FN-CE-1" }, await store.getSettings(), undefined);
+      const ir: WorkflowIr = {
+        version: "v2",
+        name: "ce-plan-test",
+        columns: [{ id: "in-progress", name: "In Progress", traits: [] }],
+        nodes: [
+          { id: "start", kind: "start" },
+          node as any,
+          { id: "end", kind: "end" },
+        ],
+        edges: [
+          { from: "start", to: "plan" },
+          { from: "plan", to: "end", condition: "success" },
+        ],
+      };
+      const settings = await store.getSettings();
+      const graph = new WorkflowGraphExecutor({
+        prepareNodeExecution: (graphNode, task, requirement) =>
+          (executor as any).prepareGraphNodeExecution(graphNode, task, settings, requirement),
+        runCustomNode: (graphNode, task, context) =>
+          (executor as any).runGraphCustomNode(graphNode, task, settings, undefined, context),
+      });
+
+      const result = await graph.run(live as any, settings, ir);
 
       expect(result.outcome).toBe("success");
       expect((executor as any).createWorktree).toHaveBeenCalled();

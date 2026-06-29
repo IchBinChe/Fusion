@@ -76,6 +76,11 @@ export interface WorkflowNodeExecutionContext {
 
 export type WorkflowNodeHandler = (node: WorkflowIrNode, context: WorkflowNodeExecutionContext) => Promise<WorkflowNodeResult>;
 
+export interface WorkflowNodePreparationRequirement {
+  requiresWorktree: boolean;
+  reason?: string;
+}
+
 export interface WorkflowGraphExecutorDeps {
   handlers?: Partial<Record<WorkflowIrNode["kind"], WorkflowNodeHandler>>;
   /** Workflow-native runtime primitives. When present, default nodes call these
@@ -84,6 +89,15 @@ export interface WorkflowGraphExecutorDeps {
   seams?: WorkflowLegacySeams;
   /** Executes custom (non-seam) prompt/script/gate nodes. */
   runCustomNode?: WorkflowCustomNodeRunner;
+  /*
+   * FNXC:WorkflowExecution 2026-06-29-09:43:
+   * Workflow nodes own lifecycle prerequisites. The graph classifies a node's execution requirements (for example a coding/script node needing a task worktree) before dispatching the handler; executor adapters only fulfill that request with concrete git/session mechanics.
+   */
+  prepareNodeExecution?: (
+    node: WorkflowIrNode,
+    task: TaskDetail,
+    requirement: WorkflowNodePreparationRequirement,
+  ) => void | Promise<void>;
   /** Step-inversion (U12, KTD-12): dependencies for the `parse-steps` node
    *  handler (artifact read, projection write, pin-protection probe, audit).
    *  Absent → a parse-steps node fails cleanly. */
@@ -1061,6 +1075,7 @@ export class WorkflowGraphExecutor {
       // Fail-fast cancellation: a branch or top-level graph abort mid-retry stops re-trying.
       if (signal?.aborted) return this.withEnginePauseAbortContext(node, { outcome: "failure", value: "aborted" });
       try {
+        await this.prepareNodeExecution(node, task);
         const pluginResult = await this.executePluginNodeHandler(node, task, workflow, context, signal);
         if (pluginResult) {
           const projected = await this.publishTaskProjectionFromResult(task.id, node, pluginResult);
@@ -1092,6 +1107,29 @@ export class WorkflowGraphExecutor {
       contextPatch: {
         [`node:${node.id}:error`]: lastError instanceof Error ? lastError.message : String(lastError),
       },
+    };
+  }
+
+  private async prepareNodeExecution(node: WorkflowIrNode, task: TaskDetail): Promise<void> {
+    const requirement = this.classifyNodePreparation(node);
+    if (!requirement.requiresWorktree) return;
+    await this.deps.prepareNodeExecution?.(node, task, requirement);
+  }
+
+  private classifyNodePreparation(node: WorkflowIrNode): WorkflowNodePreparationRequirement {
+    const cfg = node.config ?? {};
+    const executorKind = typeof cfg.executor === "string" ? cfg.executor : "model";
+    const hasScriptName = typeof cfg.scriptName === "string" && cfg.scriptName.trim().length > 0;
+    const hasCliCommand = executorKind === "cli" && typeof cfg.cliCommand === "string" && cfg.cliCommand.trim().length > 0;
+    const requiresWorktree =
+      cfg.toolMode === "coding"
+      || node.kind === "script"
+      || executorKind === "cli-agent"
+      || hasScriptName
+      || hasCliCommand;
+    return {
+      requiresWorktree,
+      reason: requiresWorktree ? "write-capable-node" : undefined,
     };
   }
 

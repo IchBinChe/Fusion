@@ -39,7 +39,7 @@ import {
   type WorkflowLegacySeams,
 } from "./workflow-node-handlers.js";
 import { MERGE_REGION_KINDS, WORKFLOW_NODE_ENGINE_PAUSE_ABORT_KIND } from "./workflow-graph-executor.js";
-import type { WorkflowNodeResult } from "./workflow-graph-executor.js";
+import type { WorkflowNodePreparationRequirement, WorkflowNodeResult } from "./workflow-graph-executor.js";
 import type {
   AuditPrimitiveInput,
   PreparedWorktree,
@@ -4564,6 +4564,8 @@ export class TaskExecutor {
         runId: resolvedRunId,
         primitives: this.createAuthoritativeWorkflowPrimitives(settings),
         seams: this.createAuthoritativeWorkflowSeams(settings),
+        prepareNodeExecution: (node, nodeTask, requirement) =>
+          this.prepareGraphNodeExecution(node, nodeTask, settings, requirement),
         runCustomNode: (node, nodeTask) =>
           this.runGraphCustomNode(node, nodeTask, settings, resolveBindingForNode(node.id)),
         publishTaskProjection: async (taskId, patch) => {
@@ -6550,6 +6552,22 @@ export class TaskExecutor {
     }
   }
 
+  private async prepareGraphNodeExecution(
+    node: WorkflowIrNode,
+    nodeTask: TaskDetail,
+    settings: Settings,
+    requirement: WorkflowNodePreparationRequirement,
+  ): Promise<void> {
+    if (!requirement.requiresWorktree) return;
+    const live = await this.store.getTask(nodeTask.id);
+    if (live.worktree) return;
+    /*
+    FNXC:WorkflowExecution 2026-06-29-09:50:
+    The workflow graph decides which nodes require pre-execution lifecycle resources. This adapter only fulfills a graph-declared worktree requirement with executor-owned git mechanics; custom-node handlers remain ordinary node execution and no longer decide when to bootstrap task isolation.
+    */
+    await this.ensureGraphCustomNodeWorktree(live, settings, node.id);
+  }
+
   private async finalizeMergeConfirmedWorkflowGraphTask(taskId: string, reason: string): Promise<boolean> {
     const live = await this.store.getTask(taskId).catch(() => null);
     if (!live || live.mergeDetails?.mergeConfirmed !== true || live.column === "done") return false;
@@ -6666,7 +6684,7 @@ export class TaskExecutor {
     // executeWorkflowStep / model machinery. It is write-capable (the agent edits
     // the worktree), so it requires a task worktree like any coding node.
     if (executorKind === "cli-agent") {
-      return this.runCliAgentNode(node, live, cfg);
+      return this.runCliAgentNode(node, await this.store.getTask(live.id), cfg);
     }
 
     // Fast mode bypasses pre-merge automated review/validation gates. Custom
@@ -6696,13 +6714,7 @@ export class TaskExecutor {
     // main checkout and cross-contaminate other tasks. Reject such nodes until a
     // worktree exists. Read-only nodes (default toolMode) are safe against root.
     const writeCapable = cfg.toolMode === "coding" || node.kind === "script" || Boolean(scriptName) || Boolean(rawCliCommand);
-    /*
-    FNXC:CompoundEngineering 2026-06-29-08:18:
-    Compound engineering starts with a coding-mode `ce-plan` skill node so it can load CE spawn tools before implementation. The graph custom-node path must therefore bootstrap the task worktree itself; requiring an earlier execute seam makes the built-in CE workflow fail at node `plan` before it can start.
-    */
-    const executionTarget = writeCapable && !live.worktree
-      ? await this.ensureGraphCustomNodeWorktree(live, settings, node.id)
-      : live;
+    const executionTarget = writeCapable ? await this.store.getTask(live.id) : live;
     if (writeCapable && !executionTarget.worktree && !this.workspaceConfig) {
       return { outcome: "failure", value: "no-worktree-for-write-node" };
     }

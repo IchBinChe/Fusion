@@ -89,7 +89,18 @@ describe("recoverPausedAbortFailures", () => {
     const recovered = await manager.recoverPausedAbortFailures();
 
     expect(recovered).toBe(1);
-    expect(store.updateTask).toHaveBeenCalledWith("FN-7000", { status: null, error: null });
+    expect(store.updateTask).toHaveBeenCalledWith("FN-7000", {
+      status: null,
+      error: null,
+      workflowTransitionNotification: {
+        kind: "recovery-requeue",
+        column: "todo",
+        transitionId: "recovery-requeue:FN-7000:pause-abort-active-work",
+        nodeId: "pause-abort-recovery-router",
+        reason: "pause-abort-active-work",
+        createdAt: "2026-06-20T02:30:00.000Z",
+      },
+    });
     // Already in todo — must NOT be moved.
     expect(store.moveTask).not.toHaveBeenCalled();
     // FNXC:WorkflowLifecycle A1 releases via the wired clearPhantomExecutorBinding,
@@ -117,11 +128,26 @@ describe("recoverPausedAbortFailures", () => {
     const recovered = await manager.recoverPausedAbortFailures();
 
     expect(recovered).toBe(1);
+    expect(store.updateTask).toHaveBeenNthCalledWith(1, "FN-7001", { status: null, error: null });
     expect(store.moveTask).toHaveBeenCalledWith(
       "FN-7001",
       "todo",
       { preserveProgress: true, moveSource: "engine", recoveryRehome: true },
     );
+    expect(store.updateTask).toHaveBeenNthCalledWith(2, "FN-7001", {
+      workflowTransitionNotification: {
+        kind: "recovery-requeue",
+        column: "todo",
+        transitionId: "recovery-requeue:FN-7001:pause-abort-active-work",
+        nodeId: "pause-abort-recovery-router",
+        reason: "pause-abort-active-work",
+        createdAt: "2026-06-20T02:30:00.000Z",
+      },
+    });
+    expect((store.updateTask as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0])
+      .toBeLessThan((store.moveTask as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0]);
+    expect((store.moveTask as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0])
+      .toBeLessThan((store.updateTask as ReturnType<typeof vi.fn>).mock.invocationCallOrder[1]);
   });
 
   it("clears a completed in-review pause-abort park without moving it backward", async () => {
@@ -143,6 +169,10 @@ describe("recoverPausedAbortFailures", () => {
 
     expect(recovered).toBe(1);
     expect(store.updateTask).toHaveBeenCalledWith("FN-7002", { status: null, error: null });
+    expect(store.updateTask).not.toHaveBeenCalledWith(
+      "FN-7002",
+      expect.objectContaining({ workflowTransitionNotification: expect.anything() }),
+    );
     expect(store.moveTask).not.toHaveBeenCalled();
     expect(clearBinding).toHaveBeenCalledWith("FN-7002");
     expect(store.logEntry).toHaveBeenCalledWith(

@@ -735,27 +735,34 @@ export class NotificationService {
       };
     }
 
-    if (task.status !== "failed" && this.isManualMergeHold(task)) {
+    const typedWorkflowTransition = this.workflowTransitionNotificationMarker(task);
+    if (task.status !== "failed" && (this.isManualMergeHold(task) || typedWorkflowTransition?.kind === "manual-merge-hold")) {
       return {
         event: "workflow-notify",
         metadata: {
-          notificationDedupeKey: `workflow-transition:${task.id}:manual-merge-hold`,
+          notificationDedupeKey: typedWorkflowTransition?.transitionId
+            ? `workflow-transition:${task.id}:${typedWorkflowTransition.transitionId}`
+            : `workflow-transition:${task.id}:manual-merge-hold`,
           notificationKind: "manual_merge_hold",
           title: `Manual merge needed for ${task.id}`,
           message: "Workflow is holding for manual merge action.",
           pausedReason: task.pausedReason,
+          ...(typedWorkflowTransition?.nodeId ? { nodeId: typedWorkflowTransition.nodeId } : {}),
+          ...(typedWorkflowTransition?.reason ? { reason: typedWorkflowTransition.reason } : {}),
         },
       };
     }
 
-    if (this.isWorkflowRecoveryRequeue(task)) {
+    if (task.status !== "failed" && typedWorkflowTransition?.kind === "recovery-requeue") {
       return {
         event: "workflow-notify",
         metadata: {
-          notificationDedupeKey: `workflow-transition:${task.id}:recovery-requeue`,
+          notificationDedupeKey: `workflow-transition:${task.id}:${typedWorkflowTransition.transitionId}`,
           notificationKind: "workflow_recovery_requeue",
           title: `Workflow requeued ${task.id}`,
           message: "Workflow recovery moved the task back to todo for another execution pass.",
+          ...(typedWorkflowTransition.nodeId ? { nodeId: typedWorkflowTransition.nodeId } : {}),
+          ...(typedWorkflowTransition.reason ? { reason: typedWorkflowTransition.reason } : {}),
         },
       };
     }
@@ -778,22 +785,15 @@ export class NotificationService {
     if (task.column !== "in-review") {
       return false;
     }
-    if (task.pausedReason === "manual-hold") {
-      return true;
-    }
-    const latest = this.latestLogAction(task).toLowerCase();
-    return latest.includes("manual-required")
-      || latest.includes("manual merge required")
-      || latest.includes("merge-manual-hold");
+    return task.pausedReason === "manual-hold";
   }
 
-  private isWorkflowRecoveryRequeue(task: Task): boolean {
-    if (task.column !== "todo" || task.status === "failed") {
-      return false;
+  private workflowTransitionNotificationMarker(task: Task): Task["workflowTransitionNotification"] | undefined {
+    const marker = task.workflowTransitionNotification;
+    if (!marker || marker.column !== task.column) {
+      return undefined;
     }
-    const latest = this.latestLogAction(task).toLowerCase();
-    return latest.includes("workflow")
-      && (latest.includes("requeued") || latest.includes("moved back to todo"));
+    return marker;
   }
 
   private latestLogAction(task: Task): string {

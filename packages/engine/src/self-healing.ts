@@ -7177,7 +7177,10 @@ export class SelfHealingManager {
             continue;
           }
 
-          await this.store.updateTask(task.id, { status: null, error: null });
+          await this.store.updateTask(task.id, {
+            status: null,
+            error: null,
+          });
           await this.store.logEntry(
             task.id,
             "Auto-recovered: stale merge status cleared; merge will be retried",
@@ -9148,13 +9151,37 @@ export class SelfHealingManager {
             continue;
           }
 
-          await this.store.updateTask(task.id, { status: null, error: null });
+          const workflowTransitionNotification = route.kind === "node-requeue"
+            ? {
+                /*
+                 * FNXC:WorkflowNotifications 2026-06-29-12:47:
+                 * Recovery-driven workflow notifications should be keyed by
+                 * typed task state, not by human-readable recovery log text.
+                 * Stamp the target column so stale markers cannot describe
+                 * later task movement.
+                 */
+                kind: "recovery-requeue" as const,
+                column: "todo" as const,
+                transitionId: `recovery-requeue:${task.id}:pause-abort-active-work`,
+                nodeId: "pause-abort-recovery-router",
+                reason: route.reason,
+                createdAt: new Date().toISOString(),
+              }
+            : undefined;
+          await this.store.updateTask(task.id, {
+            status: null,
+            error: null,
+            ...(fresh.column === "todo" && workflowTransitionNotification
+              ? { workflowTransitionNotification }
+              : {}),
+          });
           if (route.kind === "node-requeue" && fresh.column !== "todo") {
             await this.store.moveTask(task.id, "todo", {
               preserveProgress: true,
               moveSource: "engine",
               recoveryRehome: true,
             });
+            await this.store.updateTask(task.id, { workflowTransitionNotification });
           }
           // Release any in-memory worktree ownership the leaked park may still
           // pin, so the requeued task does not re-block the concurrency gate.

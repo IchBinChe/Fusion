@@ -476,7 +476,14 @@ describe("NotificationService workflow transition notifications", () => {
       paused: false,
       pausedReason: undefined,
       status: undefined,
-      log: [{ timestamp: new Date().toISOString(), action: "Workflow graph failed at node 'review' with incomplete steps - moved back to todo for execution resume" }],
+      workflowTransitionNotification: {
+        kind: "recovery-requeue",
+        column: "todo",
+        transitionId: "recovery-requeue:FN-7203:pause-abort-active-work",
+        nodeId: "recovery-router",
+        reason: "pause-abort-active-work",
+        createdAt: new Date().toISOString(),
+      },
     }));
 
     await vi.waitFor(() => {
@@ -499,11 +506,103 @@ describe("NotificationService workflow transition notifications", () => {
       expect.objectContaining({
         taskId: "FN-7203",
         metadata: expect.objectContaining({
-          notificationDedupeKey: "workflow-transition:FN-7203:recovery-requeue",
+          notificationDedupeKey: "workflow-transition:FN-7203:recovery-requeue:FN-7203:pause-abort-active-work",
           notificationKind: "workflow_recovery_requeue",
+          nodeId: "recovery-router",
+          reason: "pause-abort-active-work",
         }),
       }),
     );
+    await service.stop();
+  });
+
+  it("emits manual merge hold notifications from current typed markers", async () => {
+    const { store, service, sendNotification } = await setup();
+
+    store.emit("task:updated", task({
+      id: "FN-7209",
+      column: "in-review",
+      paused: false,
+      pausedReason: undefined,
+      workflowTransitionNotification: {
+        kind: "manual-merge-hold",
+        column: "in-review",
+        transitionId: "manual-hold:merge-request:FN-7209",
+        nodeId: "merge-manual-hold",
+        reason: "merge-request-manual-required",
+        createdAt: new Date().toISOString(),
+      },
+    }));
+
+    await vi.waitFor(() => {
+      expect(sendNotification).toHaveBeenCalledTimes(1);
+    });
+    expect(sendNotification).toHaveBeenCalledWith(
+      "workflow-notify",
+      expect.objectContaining({
+        taskId: "FN-7209",
+        metadata: expect.objectContaining({
+          notificationDedupeKey: "workflow-transition:FN-7209:manual-hold:merge-request:FN-7209",
+          notificationKind: "manual_merge_hold",
+          nodeId: "merge-manual-hold",
+          reason: "merge-request-manual-required",
+        }),
+      }),
+    );
+    await service.stop();
+  });
+
+  it("does not infer workflow recovery notifications from log text or stale typed markers", async () => {
+    const { store, service, sendNotification } = await setup();
+
+    store.emit("task:updated", task({
+      id: "FN-7207",
+      column: "todo",
+      status: undefined,
+      log: [{ timestamp: new Date().toISOString(), action: "Workflow graph moved back to todo for execution resume" }],
+    }));
+    store.emit("task:updated", task({
+      id: "FN-7208",
+      column: "in-progress",
+      status: undefined,
+      workflowTransitionNotification: {
+        kind: "recovery-requeue",
+        column: "todo",
+        transitionId: "stale-recovery",
+        createdAt: new Date().toISOString(),
+      },
+    }));
+
+    await Promise.resolve();
+
+    expect(sendNotification).not.toHaveBeenCalled();
+    await service.stop();
+  });
+
+  it("does not infer manual merge hold notifications from log text or stale typed markers", async () => {
+    const { store, service, sendNotification } = await setup();
+
+    store.emit("task:updated", task({
+      id: "FN-7210",
+      column: "in-review",
+      paused: false,
+      pausedReason: undefined,
+      log: [{ timestamp: new Date().toISOString(), action: "Workflow merge-manual-hold reached manual-required" }],
+    }));
+    store.emit("task:updated", task({
+      id: "FN-7211",
+      column: "todo",
+      workflowTransitionNotification: {
+        kind: "manual-merge-hold",
+        column: "in-review",
+        transitionId: "stale-manual-hold",
+        createdAt: new Date().toISOString(),
+      },
+    }));
+
+    await Promise.resolve();
+
+    expect(sendNotification).not.toHaveBeenCalled();
     await service.stop();
   });
 
@@ -523,6 +622,31 @@ describe("NotificationService workflow transition notifications", () => {
       expect(sendNotification).toHaveBeenCalledTimes(1);
     });
     expect(sendNotification).toHaveBeenCalledWith("failed", expect.objectContaining({ taskId: "FN-7204" }));
+    expect(sendNotification).not.toHaveBeenCalledWith("workflow-notify", expect.anything());
+    await service.stop();
+  });
+
+  it("does not add a recovery-requeue workflow notification when the failed status already represents the task update", async () => {
+    const { store, service, sendNotification } = await setup({ failureNotificationMode: "all" });
+
+    store.emit("task:updated", task({
+      id: "FN-7212",
+      column: "todo",
+      status: "failed",
+      workflowTransitionNotification: {
+        kind: "recovery-requeue",
+        column: "todo",
+        transitionId: "recovery-requeue:FN-7212:pause-abort-active-work",
+        nodeId: "pause-abort-recovery-router",
+        reason: "pause-abort-active-work",
+        createdAt: new Date().toISOString(),
+      },
+    }));
+
+    await vi.waitFor(() => {
+      expect(sendNotification).toHaveBeenCalledTimes(1);
+    });
+    expect(sendNotification).toHaveBeenCalledWith("failed", expect.objectContaining({ taskId: "FN-7212" }));
     expect(sendNotification).not.toHaveBeenCalledWith("workflow-notify", expect.anything());
     await service.stop();
   });

@@ -1080,6 +1080,19 @@ export interface TaskLogEntry {
   runContext?: RunMutationContext;
 }
 
+export type WorkflowTransitionNotificationKind =
+  | "manual-merge-hold"
+  | "recovery-requeue";
+
+export interface WorkflowTransitionNotificationMarker {
+  kind: WorkflowTransitionNotificationKind;
+  column: ColumnId;
+  transitionId: string;
+  nodeId?: string;
+  reason?: string;
+  createdAt: string;
+}
+
 export type ActivityEventType =
   | "task:created"
   | "task:moved"
@@ -2221,6 +2234,16 @@ export interface Task {
   /** Server-computed stale paused todo diagnostic signal. Undefined when no rule matches.
    *  Diagnostic-only: must not trigger automatic state mutation. */
   stalePausedTodo?: StalePausedTodoSignal;
+  /*
+   * FNXC:WorkflowNotifications 2026-06-29-12:44:
+   * Workflow transition notifications should use typed task state instead of
+   * parsing human-readable task log text. Producers set this marker when a
+   * workflow transition needs operator notification; NotificationService only
+   * consumes it while the task remains in the recorded target column. The marker
+   * column prevents stale task movement from triggering a later notification,
+   * and transitionId provides stable dedupe across repeated task:updated events.
+   */
+  workflowTransitionNotification?: WorkflowTransitionNotificationMarker;
   /** Heuristic stalled-review diagnostic signal (legacy compatibility contract). */
   stalledReview?: StalledReviewSignal;
   /** Durable aggregate token usage totals for the task. Undefined when no usage has been recorded yet. */

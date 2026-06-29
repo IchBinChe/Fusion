@@ -45,7 +45,7 @@ import {
 import { classifyError, extractMissingModulePath, isNonContinuableSessionError, isOperatorActionableAgentError, isStaleWorktreeModuleResolutionError } from "./transient-error-detector.js";
 import { classifyForeignOnlyContamination, deriveTaskIdFromFusionBranch, inspectBranchConflict, listUniqueBranchCommits } from "./branch-conflicts.js";
 import { createRunAuditor, generateSyntheticRunId, type DatabaseMutationType, type RunAuditor } from "./run-audit.js";
-import { finalizeProvenAutoMergeTask } from "./auto-merge-finalization.js";
+import { finalizeProvenAutoMergeTask, validateWorkflowDoneMergeProof } from "./auto-merge-finalization.js";
 import { AutoRecoveryDispatcher } from "./auto-recovery.js";
 import { activeSessionRegistry, executingTaskLock } from "./active-session-registry.js";
 /*
@@ -7692,6 +7692,23 @@ export class SelfHealingManager {
             const liveShortstat = await this.readShortstatForSha(storedSha, task.mergeDetails?.rebaseBaseSha);
             const liveLandedFiles = await this.readLandedFilesForSha(storedSha, task.mergeDetails?.rebaseBaseSha);
             const currentLandedFiles = task.mergeDetails?.landedFiles;
+            const confirmedProofVerdict = await validateWorkflowDoneMergeProof({
+              ...task,
+              mergeDetails: {
+                ...task.mergeDetails,
+                landedFiles: liveLandedFiles ?? currentLandedFiles,
+                mergeConfirmed: true,
+              },
+            } as Task, { rootDir: this.options.rootDir });
+            if (!confirmedProofVerdict.ok) {
+              /*
+              FNXC:WorkflowMerge 2026-06-29-10:42:
+              Done-task metadata repair is not allowed to convert stale workflow proof into truth. If the branch still carries files outside the recorded landed commit, or the workflow still has pending steps, leave the row unchanged so workflow retry/recovery can resume the merge path instead of hiding unmerged work.
+              */
+              log.warn(`recoverDoneTaskMergeMetadata: skipped ${task.id} — invalid done merge proof (${confirmedProofVerdict.reason})`);
+              await this.store.logEntry(task.id, `Done-task merge metadata repair skipped: invalid workflow merge proof (${confirmedProofVerdict.reason})`).catch(() => undefined);
+              continue;
+            }
             const landedFilesMismatch = Boolean(
               liveLandedFiles && (
                 !currentLandedFiles ||
@@ -7765,6 +7782,20 @@ export class SelfHealingManager {
             deletions: landed.deletions ?? 0,
           };
           const landedFiles = await this.readLandedFilesForSha(landed.sha, task.mergeDetails?.rebaseBaseSha ?? landed.rebaseBaseSha);
+          const repairedProofVerdict = await validateWorkflowDoneMergeProof({
+            ...task,
+            mergeDetails: {
+              ...task.mergeDetails,
+              commitSha: landed.sha,
+              landedFiles: landedFiles ?? task.mergeDetails?.landedFiles,
+              mergeConfirmed: true,
+            },
+          } as Task, { rootDir: this.options.rootDir });
+          if (!repairedProofVerdict.ok) {
+            log.warn(`recoverDoneTaskMergeMetadata: skipped ${task.id} — invalid repaired merge proof (${repairedProofVerdict.reason})`);
+            await this.store.logEntry(task.id, `Done-task merge metadata repair skipped: invalid repaired workflow merge proof (${repairedProofVerdict.reason})`).catch(() => undefined);
+            continue;
+          }
 
           const needsRepair =
             task.mergeDetails?.commitSha !== landed.sha ||

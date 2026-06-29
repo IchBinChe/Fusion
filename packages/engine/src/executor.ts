@@ -5789,6 +5789,7 @@ export class TaskExecutor {
               store: this.store,
               taskId: task.id,
               result,
+              rootDir: this.rootDir,
               audit: createRunAuditor(this.store, {
                 runId: ctx.run.runId,
                 agentId: "executor",
@@ -6618,6 +6619,7 @@ export class TaskExecutor {
         reason: live.mergeDetails?.noOpReason,
         mergeConfirmed: true,
       } as MergeResult,
+      rootDir: this.rootDir,
       audit: createRunAuditor(this.store, {
         runId: generateSyntheticRunId("workflow-graph-merge-finalize", taskId),
         agentId: "executor",

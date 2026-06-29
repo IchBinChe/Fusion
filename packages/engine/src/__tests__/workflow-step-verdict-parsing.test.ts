@@ -28,6 +28,21 @@ describe("inferWorkflowStepVerdictFromProse", () => {
     expect(inferWorkflowStepVerdictFromProse("looks good")).toEqual({ verdict: "APPROVE", notes: "" });
   });
 
+  it("infers explicit markdown verdicts from reviewer-style output", () => {
+    expect(inferWorkflowStepVerdictFromProse("## Spec Review\n\n### Verdict: APPROVE\n\nThe plan is ready.")).toEqual({
+      verdict: "APPROVE",
+      notes: "",
+    });
+    expect(inferWorkflowStepVerdictFromProse("Status: APPROVE_WITH_NOTES\n\nProceed with notes.")).toEqual({
+      verdict: "APPROVE_WITH_NOTES",
+      notes: "",
+    });
+    expect(inferWorkflowStepVerdictFromProse("Verdict: REVISE\n\nFix the plan.")).toEqual({
+      verdict: "REVISE",
+      notes: "",
+    });
+  });
+
   it("returns null for unrelated prose", () => {
     expect(inferWorkflowStepVerdictFromProse("lorem ipsum")).toBeNull();
   });

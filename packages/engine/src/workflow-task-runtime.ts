@@ -1,6 +1,5 @@
 import type { Settings, TaskDetail, WorkflowIr, WorkflowIrArtifact, WorkflowIrNode, WorkflowWorkItem, WorkflowWorkItemState } from "@fusion/core";
 import {
-  BUILTIN_CODING_WORKFLOW_IR,
   getBuiltinWorkflow,
   isBuiltinWorkflowId,
   parseWorkflowIr,
@@ -319,7 +318,14 @@ interface WorkflowRuntimeTarget {
 }
 
 function builtinCodingTarget(): WorkflowRuntimeTarget {
-  return { workflowId: "builtin:coding", ir: BUILTIN_CODING_WORKFLOW_IR };
+  /*
+   * FNXC:WorkflowBuiltins 2026-06-29-02:18:
+   * Runtime defaulting must follow the built-in catalog entry for `builtin:coding`; importing the legacy coding IR here would bypass the renamed default workflow and strand unselected tasks on the old monolithic graph.
+   */
+  const builtin = getBuiltinWorkflow("builtin:coding");
+  if (!builtin) throw new Error("workflow-missing: builtin:coding");
+  const ir = typeof builtin.ir === "string" ? parseWorkflowIr(builtin.ir) : builtin.ir;
+  return { workflowId: "builtin:coding", ir };
 }
 
 function buildWorkflowRuntimeSettings(

@@ -165,6 +165,28 @@ describe("WorkflowGraphExecutor optional-group", () => {
     expect(disabledResult.outcome).toBe("success");
   });
 
+  it("runs default-on optional groups when the task has no explicit optional-step selection", async () => {
+    const ir = optionalGroupIr();
+    const group = ir.nodes.find((node) => node.id === "group");
+    if (group?.config) group.config.defaultOn = true;
+    const calls: string[] = [];
+    const executor = new WorkflowGraphExecutor({
+      handlers: {
+        prompt: async (node) => {
+          calls.push(node.id);
+          return { outcome: "success" };
+        },
+      },
+    });
+
+    const unsetResult = await executor.run(taskWith(undefined), settingsOn(), ir);
+    const explicitEmptyResult = await executor.run(taskWith([]), settingsOn(), ir);
+
+    expect(calls.filter((id) => id === "optstep")).toHaveLength(1);
+    expect(unsetResult.visitedNodeIds).toContain("group::optstep");
+    expect(explicitEmptyResult.visitedNodeIds).not.toContain("group::optstep");
+  });
+
   it("runs an enabled group's template exactly once (single pass, not per-step/looped)", async () => {
     const runTemplate = vi.fn<WorkflowNodeHandler>(async () => ({ outcome: "success" }));
     const executor = new WorkflowGraphExecutor({
@@ -441,6 +463,64 @@ describe("WorkflowGraphExecutor optional-group", () => {
     expect(result.context["node:plan-review:fixScheduled"]).toBe(true);
     expect(records).toEqual(expect.arrayContaining([
       expect.objectContaining({ workflowStepId: "plan-review", status: "failed" }),
+    ]));
+  });
+
+  it("does not synthesize a Plan Review replan from advisory malformed output", async () => {
+    const requestFix = vi.fn(async () => true);
+    const calls: string[] = [];
+    const records: unknown[] = [];
+    const ir: WorkflowIr = {
+      version: "v2",
+      name: "plan-review-advisory-malformed",
+      columns: [{ id: "work", name: "Work", traits: [] }],
+      nodes: [
+        { id: "start", kind: "start" },
+        {
+          id: "plan-review",
+          kind: "optional-group",
+          config: {
+            name: "Plan Review",
+            defaultOn: true,
+            template: {
+              nodes: [{ id: "plan-review-step", kind: "prompt", config: { prompt: "review plan" } }],
+              edges: [],
+            },
+          },
+        },
+        { id: "execute", kind: "prompt", config: { prompt: "execute" } },
+        { id: "end", kind: "end" },
+      ],
+      edges: [
+        { from: "start", to: "plan-review" },
+        { from: "plan-review", to: "execute", condition: "success" },
+        { from: "execute", to: "end" },
+      ],
+    };
+    const executor = new WorkflowGraphExecutor({
+      handlers: {
+        prompt: async (node) => {
+          calls.push(node.id);
+          return node.id === "plan-review-step"
+            ? { outcome: "success", value: "advisory_failure", contextPatch: { output: "malformed output — no verdict extracted" } }
+            : { outcome: "success" };
+        },
+      },
+      recordWorkflowStepResult: async (_taskId, result) => { records.push(result); },
+      requestPreMergeOptionalStepFix: requestFix,
+    });
+
+    const result = await executor.run(taskWith(["plan-review"]), settingsOn(), ir);
+
+    expect(requestFix).not.toHaveBeenCalled();
+    expect(calls).toContain("execute");
+    expect(result.outcome).toBe("success");
+    expect(records).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        workflowStepId: "plan-review",
+        status: "advisory_failure",
+        output: "malformed output — no verdict extracted",
+      }),
     ]));
   });
 

@@ -557,7 +557,16 @@ export class WorkflowGraphExecutor {
            * the enabled one runs the body, the disabled one runs none and
            * still reaches the same downstream node.
            */
-          const enabled = task.enabledWorkflowSteps?.includes(node.id) ?? false;
+          /*
+           * FNXC:WorkflowOptionalSteps 2026-06-29-02:05:
+           * `enabledWorkflowSteps === undefined` means the task has no explicit
+           * optional-step selection, so default-on workflow nodes must run. An
+           * explicit empty array still means the operator disabled every optional
+           * step from Quick Add or task details.
+           */
+          const enabled = Array.isArray(task.enabledWorkflowSteps)
+            ? task.enabledWorkflowSteps.includes(node.id)
+            : node.config?.defaultOn === true;
           if (!enabled) {
             // FNXC:WorkflowOptionalGroup 2026-06-21-16:30: record the group's own
             // outcome on bypass too (mirrors the enabled path + every other node
@@ -632,6 +641,7 @@ export class WorkflowGraphExecutor {
               : undefined;
           let stepStatus: WorkflowStepResult["status"];
           if (groupResult.outcome === "failure") stepStatus = "failed";
+          else if (groupResult.value === "advisory_failure") stepStatus = "advisory_failure";
           else if (verdict === "REVISE") stepStatus = "advisory_failure";
           else stepStatus = "passed";
           const exitContextPatch = exitResult?.contextPatch;
@@ -676,10 +686,17 @@ export class WorkflowGraphExecutor {
            * seam with a synthesized REVISE verdict so the executor can route it back
            * to triage and then let approved replans continue through todo/execution.
            */
+          /*
+           * FNXC:PlanReview 2026-06-29-02:05:
+           * Plan Review should send a task back to triage only for an actual
+           * REVISE verdict or a hard step failure. A malformed advisory result is
+           * visible as `advisory_failure`, but it must not fabricate a plan-rewrite
+           * request after the reviewer already approved or failed to emit JSON.
+           */
           const shouldRequestPreMergeFix =
             stepPhase === "pre-merge"
             && (stepStatus === "advisory_failure" || stepStatus === "failed")
-            && (verdict === "REVISE" || node.id === PLAN_REVIEW_GROUP_ID);
+            && (verdict === "REVISE" || (node.id === PLAN_REVIEW_GROUP_ID && stepStatus === "failed"));
           if (shouldRequestPreMergeFix) {
             const feedback = stepOutput?.trim()
               || stepNotes?.trim()

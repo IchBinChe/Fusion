@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { getBuiltinWorkflow } from "../builtin-workflows.js";
-import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
+import { BUILTIN_STEPWISE_FINAL_REVIEW_CODING_WORKFLOW_IR } from "../builtin-stepwise-final-review-coding-workflow-ir.js";
 import type { WorkflowIr } from "../workflow-ir-types.js";
 import {
   resolveWorkflowIrForTask,
@@ -73,20 +73,20 @@ describe("resolveWorkflowIrForTask", () => {
       defs: { "wf-gone": undefined },
     });
     const ir = await resolveWorkflowIrForTask(store, "t1");
-    expect(ir).toBe(BUILTIN_CODING_WORKFLOW_IR);
+    expect(ir).toBe(BUILTIN_STEPWISE_FINAL_REVIEW_CODING_WORKFLOW_IR);
   });
 
   it("falls back to the default when there is no selection", async () => {
     const store = makeStore({ selection: undefined });
     const ir = await resolveWorkflowIrForTask(store, "t1");
-    expect(ir).toBe(BUILTIN_CODING_WORKFLOW_IR);
+    expect(ir).toBe(BUILTIN_STEPWISE_FINAL_REVIEW_CODING_WORKFLOW_IR);
     expect(store.getWorkflowDefinition).not.toHaveBeenCalled();
   });
 
   it("degrades to the default when the selection lookup throws", async () => {
     const store = makeStore({ selectionThrows: true });
     const ir = await resolveWorkflowIrForTask(store, "t1");
-    expect(ir).toBe(BUILTIN_CODING_WORKFLOW_IR);
+    expect(ir).toBe(BUILTIN_STEPWISE_FINAL_REVIEW_CODING_WORKFLOW_IR);
   });
 
   it("caches by workflowId so the definition is fetched once across calls", async () => {
@@ -104,11 +104,11 @@ describe("resolveWorkflowIrForTask", () => {
 });
 
 describe("resolveWorkflowIrById", () => {
-  it("resolves builtin:coding to the canonical authored v2 IR with review column traits", async () => {
+  it("resolves builtin:coding to the catalog default stepwise final-review IR", async () => {
     const store = makeStore({});
     const ir = await resolveWorkflowIrById(store, "builtin:coding");
 
-    expect(ir).toBe(BUILTIN_CODING_WORKFLOW_IR);
+    expect(ir).toBe(BUILTIN_STEPWISE_FINAL_REVIEW_CODING_WORKFLOW_IR);
     expect(ir).toBe(getBuiltinWorkflow("builtin:coding")!.ir);
     expect(ir.version).toBe("v2");
     if (ir.version !== "v2") throw new Error("expected v2");
@@ -123,14 +123,14 @@ describe("resolveWorkflowIrById", () => {
   it("resolves an explicit builtin:coding task selection through the canonical IR path", async () => {
     const store = makeStore({ selection: { workflowId: "builtin:coding", stepIds: [] } });
     const ir = await resolveWorkflowIrForTask(store, "t1");
-    expect(ir).toBe(BUILTIN_CODING_WORKFLOW_IR);
+    expect(ir).toBe(BUILTIN_STEPWISE_FINAL_REVIEW_CODING_WORKFLOW_IR);
     expect(store.getWorkflowDefinition).not.toHaveBeenCalled();
   });
 
   it("falls back to the canonical IR for an unknown built-in id", async () => {
     const store = makeStore({});
     const ir = await resolveWorkflowIrById(store, "builtin:missing");
-    expect(ir).toBe(BUILTIN_CODING_WORKFLOW_IR);
+    expect(ir).toBe(BUILTIN_STEPWISE_FINAL_REVIEW_CODING_WORKFLOW_IR);
     expect(store.getWorkflowDefinition).not.toHaveBeenCalled();
   });
 
@@ -142,7 +142,7 @@ describe("resolveWorkflowIrById", () => {
 
     const ir = await resolveWorkflowIrById(store, "builtin:coding");
 
-    expect(ir).toBe(BUILTIN_CODING_WORKFLOW_IR);
+    expect(ir).toBe(BUILTIN_STEPWISE_FINAL_REVIEW_CODING_WORKFLOW_IR);
     expect(store.getWorkflowSettingsProjectId).toHaveBeenCalledTimes(1);
     expect(store.getWorkflowPromptOverrides).not.toHaveBeenCalled();
     expect(store.getWorkflowDefinition).not.toHaveBeenCalled();
@@ -162,7 +162,7 @@ describe("resolveWorkflowIrById", () => {
   it("keeps project-scoped prompt overrides and cache keys when project identity resolves", async () => {
     const store = makeStore({
       projectId: "proj-override",
-      promptOverrides: { planning: "Project-specific plan" },
+      promptOverrides: { plan: "Project-specific plan" },
     });
     const cache = new Map<string, WorkflowIr>();
 
@@ -170,8 +170,8 @@ describe("resolveWorkflowIrById", () => {
     const second = await resolveWorkflowIrById(store, "builtin:coding", cache);
 
     expect(first).toBe(second);
-    expect(first).not.toBe(BUILTIN_CODING_WORKFLOW_IR);
-    expect(first.nodes.find((node) => node.id === "planning")?.config?.prompt).toBe("Project-specific plan");
+    expect(first).not.toBe(BUILTIN_STEPWISE_FINAL_REVIEW_CODING_WORKFLOW_IR);
+    expect(first.nodes.find((node) => node.id === "plan")?.config?.prompt).toBe("Project-specific plan");
     expect(cache.get("builtin:coding\u0000proj-override")).toBe(first);
     expect(store.getWorkflowPromptOverrides).toHaveBeenCalledTimes(1);
   });

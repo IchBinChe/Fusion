@@ -3,7 +3,6 @@ import { join } from "node:path";
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
-import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
 import { BUILTIN_STEPWISE_FINAL_REVIEW_CODING_WORKFLOW_IR } from "../builtin-stepwise-final-review-coding-workflow-ir.js";
 import type { TaskStore } from "../store.js";
 import type { WorkflowRunStepInstance } from "../types.js";
@@ -287,9 +286,9 @@ describe("workflow restart durability for explicit selections", () => {
 
     expect(store().getTaskWorkflowSelection(selectedTask.id)).toEqual(selectionBefore);
     expect(await taskJsonEnabledWorkflowSteps(selectedTask.id)).toEqual(enabledBefore);
-    // Current hot-path resolution degrades a dangling custom definition to the built-in IR instead of throwing.
+    // Current hot-path resolution degrades a dangling custom definition to the default built-in Coding IR instead of throwing.
     // The explicit materialization APIs below must still fail closed when asked to write that missing id again.
-    expect(privateStore().resolveTaskWorkflowIrSync(selectedTask.id)).toEqual(BUILTIN_CODING_WORKFLOW_IR);
+    expect(privateStore().resolveTaskWorkflowIrSync(selectedTask.id)).toEqual(BUILTIN_STEPWISE_FINAL_REVIEW_CODING_WORKFLOW_IR);
 
     await expect(store().selectTaskWorkflow(untouchedTask.id, workflow.id)).rejects.toThrow(
       `Workflow '${workflow.id}' not found`,

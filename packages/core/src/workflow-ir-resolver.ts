@@ -20,6 +20,16 @@ import { parseWorkflowIr } from "./workflow-ir.js";
 import { applyPromptOverridesToIr } from "./workflow-prompt-overrides.js";
 import type { WorkflowIr } from "./workflow-ir-types.js";
 
+function defaultCodingWorkflowIr(): WorkflowIr {
+  /*
+   * FNXC:WorkflowBuiltins 2026-06-29-02:18:
+   * `builtin:coding` is the operator-facing default workflow id, not the legacy monolithic IR export. Resolve the catalog entry first so no-selection tasks follow the new stepwise default; keep the old IR only as a missing-catalog safety fallback.
+   */
+  const builtin = getBuiltinWorkflow("builtin:coding");
+  const ir = builtin?.ir ?? BUILTIN_CODING_WORKFLOW_IR;
+  return typeof ir === "string" ? parseWorkflowIr(ir) : ir;
+}
+
 /** Minimal store surface the resolver needs (public APIs only). */
 export interface WorkflowIrResolverStore {
   getTaskWorkflowSelection(taskId: string): { workflowId: string; stepIds: string[] } | undefined;
@@ -104,7 +114,7 @@ export async function resolveWorkflowIrById(
 
   if (isBuiltinWorkflowId(workflowId)) {
     const builtin = getBuiltinWorkflow(workflowId);
-    const ir = builtin?.ir ?? BUILTIN_CODING_WORKFLOW_IR;
+    const ir = builtin?.ir ?? defaultCodingWorkflowIr();
     const resolved = typeof ir === "string" ? parseWorkflowIr(ir) : ir;
     const overrides = projectId ? store.getWorkflowPromptOverrides?.(workflowId, projectId) : undefined;
     // FNXC:CustomWorkflows 2026-06-21-19:12:
@@ -116,12 +126,12 @@ export async function resolveWorkflowIrById(
 
   try {
     const def = await store.getWorkflowDefinition(workflowId);
-    if (!def) return BUILTIN_CODING_WORKFLOW_IR;
+    if (!def) return defaultCodingWorkflowIr();
     const ir = typeof def.ir === "string" ? parseWorkflowIr(def.ir) : def.ir;
     irCache?.set(cacheKey, ir);
     return ir;
   } catch {
-    return BUILTIN_CODING_WORKFLOW_IR;
+    return defaultCodingWorkflowIr();
   }
 }
 
@@ -138,7 +148,7 @@ export async function resolveWorkflowIrForTask(
   try {
     workflowId = store.getTaskWorkflowSelection(taskId)?.workflowId;
   } catch {
-    return BUILTIN_CODING_WORKFLOW_IR;
+    return defaultCodingWorkflowIr();
   }
   if (!workflowId) return resolveWorkflowIrById(store, "builtin:coding", irCache);
   return resolveWorkflowIrById(store, workflowId, irCache);

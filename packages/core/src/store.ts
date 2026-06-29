@@ -15697,19 +15697,24 @@ ${stepsSection}`;
   private resolveTaskWorkflowIrSync(taskId: string): WorkflowIr {
     const selection = this.getTaskWorkflowSelection(taskId);
     const workflowId = selection?.workflowId;
-    if (!workflowId) return this.applyBuiltInPromptOverridesSync("builtin:coding", BUILTIN_CODING_WORKFLOW_IR);
+    /*
+     * FNXC:WorkflowBuiltins 2026-06-29-02:18:
+     * The built-in id `builtin:coding` now points at the stepwise final-review workflow. No-selection tasks must resolve through the built-in catalog, otherwise dashboard/operator defaults say "Coding" while the engine silently executes legacy coding.
+     */
+    const defaultCodingIr = getBuiltinWorkflow("builtin:coding")?.ir ?? BUILTIN_CODING_WORKFLOW_IR;
+    if (!workflowId) return this.applyBuiltInPromptOverridesSync("builtin:coding", defaultCodingIr);
     if (isBuiltinWorkflowId(workflowId)) {
       const builtin = getBuiltinWorkflow(workflowId);
-      return this.applyBuiltInPromptOverridesSync(workflowId, builtin?.ir ?? BUILTIN_CODING_WORKFLOW_IR);
+      return this.applyBuiltInPromptOverridesSync(workflowId, builtin?.ir ?? defaultCodingIr);
     }
     try {
       const row = this.db
         .prepare("SELECT ir FROM workflows WHERE id = ?")
         .get(workflowId) as { ir: string } | undefined;
-      if (!row) return BUILTIN_CODING_WORKFLOW_IR;
+      if (!row) return defaultCodingIr;
       return parseWorkflowIr(row.ir);
     } catch {
-      return BUILTIN_CODING_WORKFLOW_IR;
+      return defaultCodingIr;
     }
   }
 

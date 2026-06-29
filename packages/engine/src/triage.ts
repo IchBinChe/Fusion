@@ -1867,6 +1867,9 @@ export class TriageProcessor {
     if (parsedSteps.length > 0) {
       taskUpdates.steps = parsedSteps;
     }
+    const shouldClearWorkflowRunStepInstances =
+      parsedSteps.length > 0
+      && (options.isReplan === true || (task.steps?.length ?? 0) > 0);
 
     const duplicateLineage = getTaskDuplicateLineage({
       id: task.id,
@@ -2200,10 +2203,13 @@ export class TriageProcessor {
       return;
     }
 
-    if (options.isReplan) {
+    if (shouldClearWorkflowRunStepInstances) {
       /*
       FNXC:WorkflowReplan 2026-06-29-00:33:
       AI spec revision replaces the task's step-source PROMPT.md, so graph foreach instance pins from the previous plan must be discarded before execution reparses steps. Otherwise rebuilt tasks can fail at parse with a stale pin-mismatch even though the new plan is valid.
+
+      FNXC:WorkflowReplan 2026-06-29-02:24:
+      User-triggered spec rebuilds can race an old paused graph run that writes step-instance rows after the route cleared them. Clear again when triage accepts a fresh parsed plan over an existing step projection, even if the task snapshot no longer has status `needs-replan`.
       */
       const maybeStore = this.store as unknown as {
         clearWorkflowRunStepInstances?: (taskId: string) => void;

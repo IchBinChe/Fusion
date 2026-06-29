@@ -7,6 +7,14 @@ import type { PreparedWorktree, WorkflowRuntimePrimitives } from "../runtime-pri
 
 const task = { id: "FN-9002" } as TaskDetail;
 const flagOff = { experimentalFeatures: {} } as unknown as Pick<Settings, "experimentalFeatures">;
+const promptWithOneStep = "# Task: FN-9002 - Runtime default\n\n## Steps\n\n### Step 1: Implement runtime default\n- Exercise the default workflow.\n";
+
+const parseStepsDeps = {
+  readArtifact: async (_task: TaskDetail, key: string) => key === "PROMPT.md" ? promptWithOneStep : undefined,
+  writeSteps: async (target: TaskDetail, steps: TaskDetail["steps"]) => {
+    target.steps = steps;
+  },
+};
 
 function selectedIr(): WorkflowIr {
   return {
@@ -35,6 +43,7 @@ function recordingPrimitives(
   observed: {
     prepared?: PreparedWorktree;
     executedTasks?: TaskDetail[];
+    stepTasks?: TaskDetail[];
     mergeAttempt?: number;
     mergeRunId?: string;
     mergeWorkflowId?: string;
@@ -55,7 +64,7 @@ function recordingPrimitives(
             : overrides.prepareData ?? prepared,
       };
     },
-    readArtifact: async () => undefined,
+    readArtifact: async (_ctx, _task, key) => key === "PROMPT.md" ? promptWithOneStep : undefined,
     writeArtifact: async (_ctx, _task, key) => ({ outcome: "success", data: { key } }),
     runPlanningSession: async () => {
       calls.push("planning");
@@ -73,7 +82,12 @@ function recordingPrimitives(
         data: { taskDone: override?.outcome !== "failure", modifiedFiles: [] },
       };
     },
-    runTaskStep: async () => ({ outcome: "success" }),
+    runTaskStep: async (_ctx, _task, stepIndex) => {
+      calls.push(`step:${stepIndex}`);
+      observed.stepTasks?.push(_task);
+      observed.executedTasks?.push(_task);
+      return { outcome: "success" };
+    },
     resetTaskStep: async () => ({ ok: true }),
     runReview: async (_ctx, _task, input) => {
       calls.push(input.stepIndex === undefined ? "review" : "step-review");
@@ -94,7 +108,10 @@ function recordingPrimitives(
         data: { allPassed: override?.value !== "remediation-scheduled" },
       };
     },
-    updateSteps: async (_ctx, _task, steps) => ({ outcome: "success", data: { count: steps.length } }),
+    updateSteps: async (_ctx, _task, steps) => {
+      _task.steps = steps;
+      return { outcome: "success", data: { count: steps.length } };
+    },
     transitionTask: async () => {
       calls.push("schedule");
       return { outcome: "success" };
@@ -118,6 +135,7 @@ describe("WorkflowTaskRuntime", () => {
       store: {
         getTaskWorkflowSelection: () => undefined,
         getWorkflowDefinition: async () => undefined,
+        getTaskDocument: async (_taskId, key) => key === "PROMPT.md" ? { key } : null,
       },
       runCustomNode: async () => ({ outcome: "success" }),
     };
@@ -148,6 +166,7 @@ describe("WorkflowTaskRuntime", () => {
         calls.push(`custom:${node.id}`);
         return { outcome: "success" };
       },
+      parseStepsDeps,
     });
 
     const result = await runtime.run(task, flagOff);
@@ -191,6 +210,7 @@ describe("WorkflowTaskRuntime", () => {
         calls.push(`custom:${node.id}`);
         return { outcome: "success" };
       },
+      parseStepsDeps,
     });
 
     const result = await runtime.run(attachmentTask, flagOff);
@@ -218,20 +238,22 @@ describe("WorkflowTaskRuntime", () => {
       store: {
         getTaskWorkflowSelection: () => undefined,
         getWorkflowDefinition: async () => undefined,
+        getTaskDocument: async (_taskId, key) => key === "PROMPT.md" ? { key } : null,
       },
       primitives: recordingPrimitives(calls, undefined, observed),
       runCustomNode: async (node) => {
         calls.push(`custom:${node.id}`);
         return { outcome: "success" };
       },
+      parseStepsDeps,
     });
 
     const result = await runtime.run(attachmentTask, flagOff);
 
     expect(result.disposition).toBe("completed");
-    // U6: the coding built-in no longer runs a `workflow-step` seam; the pre-merge
-    // browser-verification optional-group is default-OFF and bypassed (no call).
-    expect(calls).toEqual(["planning", "prepare-worktree", "execute", "review", "merge"]);
+    // Default Coding is stepwise: planning writes PROMPT.md, parse projects steps,
+    // then foreach runs `runTaskStep` before merge. No legacy execute/review seam.
+    expect(calls).toEqual(["planning", "custom:plan-review-step", "step:0", "custom:code-review-step", "merge"]);
     expect(observed.executedTasks).toHaveLength(1);
     expect(observed.executedTasks[0]?.attachments).toEqual(attachments);
   });
@@ -242,9 +264,11 @@ describe("WorkflowTaskRuntime", () => {
       store: {
         getTaskWorkflowSelection: () => undefined,
         getWorkflowDefinition: async () => undefined,
+        getTaskDocument: async (_taskId, key) => key === "PROMPT.md" ? { key } : null,
       },
       primitives: recordingPrimitives([], undefined, observed),
       runCustomNode: async () => ({ outcome: "success" }),
+      parseStepsDeps,
     });
 
     const result = await runtime.run(task, flagOff);
@@ -284,29 +308,28 @@ describe("WorkflowTaskRuntime", () => {
       store: {
         getTaskWorkflowSelection: () => undefined,
         getWorkflowDefinition: async () => undefined,
+        getTaskDocument: async (_taskId, key) => key === "PROMPT.md" ? { key } : null,
       },
       primitives: recordingPrimitives(calls),
       runCustomNode: async (node) => {
         calls.push(`custom:${node.id}`);
         return { outcome: "success" };
       },
+      parseStepsDeps,
     });
 
-    const result = await runtime.run(task, flagOff);
+    const defaultTask = { ...task, enabledWorkflowSteps: ["plan-review", "code-review"] } as TaskDetail;
+    const result = await runtime.run(defaultTask, flagOff);
 
     expect(result.disposition).toBe("completed");
-    // U6: no `workflow-step` seam; the bypassed browser-verification group node
-    // sits between execute and review in the visited sequence.
-    expect(calls).toEqual(["planning", "prepare-worktree", "execute", "review", "merge"]);
-    expect(result.visitedNodeIds).toEqual([
-      "start",
-      "planning",
-      "execute",
-      "browser-verification",
-      "code-review",
-      "review",
-      "merge",
-    ]);
+    expect(calls).toEqual(["planning", "custom:plan-review-step", "step:0", "custom:code-review-step", "merge"]);
+    expect(result.visitedNodeIds).toContain("plan");
+    expect(result.visitedNodeIds).toContain("plan-review");
+    expect(result.visitedNodeIds).toContain("parse");
+    expect(result.visitedNodeIds).toContain("steps");
+    expect(result.visitedNodeIds).toContain("code-review");
+    expect(result.visitedNodeIds).not.toContain("execute");
+    expect(result.visitedNodeIds).not.toContain("review");
   });
 
   it("runs the pre-merge browser-verification optional-group once when enabled, before review", async () => {
@@ -319,37 +342,33 @@ describe("WorkflowTaskRuntime", () => {
       store: {
         getTaskWorkflowSelection: () => undefined,
         getWorkflowDefinition: async () => undefined,
+        getTaskDocument: async (_taskId, key) => key === "PROMPT.md" ? { key } : null,
       },
       primitives: recordingPrimitives(calls),
       runCustomNode: async (node) => {
         calls.push(`custom:${node.id}`);
         return { outcome: "success" };
       },
+      parseStepsDeps,
     });
 
-    const enabledTask = { ...task, enabledWorkflowSteps: ["browser-verification"] } as TaskDetail;
+    const enabledTask = { ...task, enabledWorkflowSteps: ["plan-review", "browser-verification", "code-review"] } as TaskDetail;
     const result = await runtime.run(enabledTask, flagOff);
 
     expect(result.disposition).toBe("completed");
     expect(calls).toEqual([
       "planning",
-      "prepare-worktree",
-      "execute",
+      "custom:plan-review-step",
+      "step:0",
       "custom:browser-verification-step",
-      "review",
+      "custom:code-review-step",
       "merge",
     ]);
-    expect(result.visitedNodeIds).toEqual([
-      "start",
-      "planning",
-      "execute",
-      // The group container node, then its inner template step (run once).
-      "browser-verification",
-      "browser-verification::browser-verification-step",
-      "code-review",
-      "review",
-      "merge",
-    ]);
+    expect(result.visitedNodeIds).toContain("plan-review::plan-review-step");
+    expect(result.visitedNodeIds).toContain("browser-verification::browser-verification-step");
+    expect(result.visitedNodeIds).toContain("code-review::code-review-step");
+    expect(result.visitedNodeIds).not.toContain("execute");
+    expect(result.visitedNodeIds).not.toContain("review");
   });
 
   it("fails selected workflow lookup misses instead of running the built-in workflow", async () => {
@@ -426,6 +445,7 @@ describe("WorkflowTaskRuntime", () => {
       },
       primitives: recordingPrimitives([]),
       runCustomNode: async () => ({ outcome: "success" }),
+      parseStepsDeps,
       branchPersistence: {
         loadBranchStates: (_taskId, runId) => {
           observedRunIds.push(runId);

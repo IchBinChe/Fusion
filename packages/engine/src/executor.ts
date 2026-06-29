@@ -1128,11 +1128,25 @@ export function parseWorkflowStepVerdict(rawOutput: string): { verdict: "APPROVE
   return null;
 }
 
-export function inferWorkflowStepVerdictFromProse(rawOutput: string): { verdict: "APPROVE" | "REVISE"; notes: string } | null {
+export function inferWorkflowStepVerdictFromProse(rawOutput: string): { verdict: "APPROVE" | "APPROVE_WITH_NOTES" | "REVISE"; notes: string } | null {
   const trimmed = rawOutput.trim();
   const revisionMatch = trimmed.match(/^REQUEST REVISION\s*\n*/i);
   if (revisionMatch) {
     return { verdict: "REVISE", notes: trimmed.slice(revisionMatch[0].length).trim() || "Revision requested" };
+  }
+  /*
+   * FNXC:PlanReview 2026-06-29-02:05:
+   * Plan Review runs through reviewer-style agents that often emit a markdown
+   * section such as `### Verdict: APPROVE` even when the prompt asks for trailing
+   * JSON. Treat that explicit verdict as authoritative so a real approval does
+   * not collapse into a synthetic pre-execution plan failure loop.
+   */
+  const explicitVerdictMatch = trimmed.match(/(?:^|\n)\s*(?:#{1,6}\s*)?(?:verdict|status)\s*:\s*(APPROVE_WITH_NOTES|APPROVE|REVISE)\b/i);
+  if (explicitVerdictMatch) {
+    return {
+      verdict: explicitVerdictMatch[1].toUpperCase() as "APPROVE" | "APPROVE_WITH_NOTES" | "REVISE",
+      notes: "",
+    };
   }
   if (/\b(approve|approved|looks good|no issues|out of scope)\b/i.test(trimmed)) {
     return { verdict: "APPROVE", notes: "" };
@@ -6714,9 +6728,17 @@ export class TaskExecutor {
     const contextPatch: Record<string, unknown> = {};
     if (typeof stepOutput === "string") contextPatch.output = stepOutput;
     if (typeof stepNotes === "string" && stepNotes) contextPatch.notes = stepNotes;
+    /*
+     * FNXC:PlanReview 2026-06-29-02:05:
+     * Advisory graph steps still need a distinct non-pass value when their
+     * review output is malformed. Returning plain `failed` made optional-group
+     * recovery synthesize a Plan Review REVISE even when no reviewer requested
+     * one; `advisory_failure` preserves visibility without inventing feedback.
+     */
+    const advisoryFailureValue = (outcome as { malformed?: boolean }).malformed ? "advisory_failure" : "failed";
     return {
       outcome: outcome.success || !blocking ? "success" : "failure",
-      value: verdict ?? (outcome.success ? "passed" : "failed"),
+      value: verdict ?? (outcome.success ? "passed" : advisoryFailureValue),
       ...(Object.keys(contextPatch).length > 0 ? { contextPatch } : {}),
     };
   }

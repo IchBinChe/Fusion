@@ -1672,6 +1672,33 @@ describe("requirePlanApproval setting", () => {
     expect(store.moveTask).not.toHaveBeenCalled();
   });
 
+  it("clears stale workflow step instances when a fresh accepted plan replaces existing steps", async () => {
+    const task = createTriageTask({
+      id: "FN-7224",
+      title: "Rebuilt plan task",
+      status: "planning",
+      steps: [{ name: "Old step", status: "pending" }],
+    } as Partial<Task>);
+    const clearWorkflowRunStepInstances = vi.fn();
+    const store = createMockStore({
+      getTask: vi.fn().mockResolvedValue(task),
+      parseStepsFromPrompt: vi.fn().mockResolvedValue([{ name: "Fresh step", status: "pending" }]),
+      clearWorkflowRunStepInstances,
+    } as Partial<TaskStore>);
+    const processor = new TriageProcessor(store, rootDir);
+
+    await (processor as unknown as {
+      finalizeApprovedTask(task: Task, writtenInput: string, settings: Settings): Promise<void>;
+    }).finalizeApprovedTask(
+      task,
+      "# Task: FN-7224 - Rebuilt plan task\n\n## Steps\n\n### Step 1: Fresh step\n- Execute the fresh plan.\n",
+      { requirePlanApproval: false } as Settings,
+    );
+
+    expect(clearWorkflowRunStepInstances).toHaveBeenCalledWith("FN-7224");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-7224", "todo");
+  });
+
   it.each([
     { mode: "workflow" as const, requirePlanApproval: true, expectedApproval: true },
     { mode: undefined, requirePlanApproval: false, expectedApproval: false },

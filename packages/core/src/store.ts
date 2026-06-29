@@ -9241,8 +9241,9 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     // (in-progress / done / pending) onto Task.steps[] with EXPLICIT indices. Three
     // behaviors diverge from the legacy (default) write:
     //   (a) the out-of-order-done guard relaxes from strict index order to
-    //       DEPENDENCY order (a done write is legal when every dependsOn step —
-    //       default: the immediately-preceding step — is done/skipped, KTD-11);
+    //       DEPENDENCY order (a done write is legal when every explicitly declared
+    //       dependsOn step is done/skipped; absent dependsOn means the graph has
+    //       already decided the step can run independently);
     //   (b) a guard that DOES suppress a graph write logs an audit warning loudly
     //       (legacy stays silent — a graph suppression is a projection bug);
     //   (c) the auto-reinit-from-PROMPT.md path is bypassed (the graph pinned the
@@ -9292,9 +9293,14 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
 
       if (status === "done") {
         // The set of predecessor steps that must be done/skipped before this step
-        // may go done. Legacy: strict index order (every earlier step). Graph: the
-        // step's dependsOn list (default = the immediately-preceding step when the
-        // annotation is absent — preserving sequential behavior, KTD-11).
+        // may go done. Legacy: strict index order (every earlier step). Graph:
+        // only the step's explicit dependsOn list. When a graph-owned step session
+        // finishes before an earlier independent step, the task card must record
+        // that real completion instead of emitting a false "out-of-order" pause.
+        /*
+        FNXC:WorkflowStepControl 2026-06-29-10:12:
+        Graph-owned execution can complete independent steps out of index order. Do not infer a hidden previous-step dependency in TaskStore projection; the graph scheduler/step-session wave planner is the authority that decided the step was runnable. Legacy fn_task_update keeps strict index order for non-graph sessions.
+        */
         let blockingIndex = -1;
         let blockingStatus: import("./types.js").StepStatus | undefined;
         if (graphSource) {
@@ -9302,8 +9308,6 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
           const depIndices =
             Array.isArray(deps) && deps.length > 0
               ? deps
-              : stepIndex > 0
-              ? [stepIndex - 1]
               : [];
           for (const i of depIndices) {
             const priorStatus = task.steps[i]?.status;

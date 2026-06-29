@@ -75,6 +75,29 @@ describe("runTaskStep", () => {
     ]);
   });
 
+  it("passes graph projection source through in-progress and done writes", async () => {
+    const store = makeStore();
+    const runStep = vi.fn().mockResolvedValue({ success: true });
+
+    await runTaskStep(
+      {
+        store,
+        worktreePath: "/wt",
+        runStep,
+        gitRevParse: async () => "baseSHA",
+        captureCheckpointId: () => "leaf",
+      },
+      makeTask([{ name: "Independent", status: "pending" }]),
+      0,
+      { projectionSource: "graph" },
+    );
+
+    expect(store.updateStep.mock.calls).toEqual([
+      ["FN-001", 0, "in-progress", { source: "graph" }],
+      ["FN-001", 0, "done", { source: "graph" }],
+    ]);
+  });
+
   it("captures the baseline before running the step (order check)", async () => {
     const store = makeStore();
     const order: string[] = [];

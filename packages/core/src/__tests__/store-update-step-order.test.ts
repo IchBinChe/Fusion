@@ -57,38 +57,46 @@ describe("TaskStore.updateStep step-order guard", () => {
 
   // ── U6: graph-source projection discipline (KTD-7/KTD-11) ──────────────────
 
-  it("graph source: done is legal in dependency order even when an earlier step is pending", async () => {
-    // Step 2 depends only on the previous step (1) by default. With step 1 done,
-    // step 2 may go done under graph source even though step 0 is still pending —
-    // the legacy strict-index-order guard relaxes to dependency order.
+  it("graph source: done is legal for independent steps even when an earlier step is in-progress", async () => {
+    // Graph-owned step sessions can complete independent steps out of index order.
+    // Missing dependsOn means the graph/wave planner already decided the step was
+    // runnable; TaskStore must not invent a hidden previous-step dependency.
     const store = harness.store();
     const task = await harness.createTaskWithSteps();
-    // Prime the step list, then give step 2 an explicit dependency on step 0 only
-    // (skipping step 1), so step 2 may go done with step 1 still pending.
-    await store.updateStep(task.id, 0, "in-progress");
-    const primed = await store.getTask(task.id);
-    const steps = primed.steps.map((s, i) => (i === 2 ? { ...s, dependsOn: [0] } : { ...s }));
-    await store.updateTask(task.id, { steps });
 
-    await store.updateStep(task.id, 0, "done", { source: "graph" });
+    await store.updateStep(task.id, 1, "in-progress", { source: "graph" });
     const updated = await store.updateStep(task.id, 2, "done", { source: "graph" });
 
     expect(updated.steps[2].status).toBe("done");
-    // Step 1 was never touched and remains pending — strict index order would have
-    // suppressed the step-2 done write.
-    expect(updated.steps[1].status).toBe("pending");
+    expect(updated.steps[1].status).toBe("in-progress");
+    expect(updated.log.some((e) => e.action.includes("Ignored out-of-order done for step 2"))).toBe(false);
+  });
+
+  it("graph source: explicit dependsOn still suppresses completion until dependencies finish", async () => {
+    const store = harness.store();
+    const task = await harness.createTaskWithSteps();
+    const steps = task.steps.map((s, i) => (i === 2 ? { ...s, dependsOn: [1] } : { ...s }));
+    await store.updateTask(task.id, { steps });
+
+    await store.updateStep(task.id, 1, "in-progress", { source: "graph" });
+    const updated = await store.updateStep(task.id, 2, "done", { source: "graph" });
+
+    expect(updated.steps[2].status).toBe("pending");
+    expect(
+      updated.log.some((e) => e.action.includes("Ignored dependency-order done for step 2")),
+    ).toBe(true);
   });
 
   it("graph source: out-of-order done (unmet dependency) is suppressed AND audited loudly", async () => {
-    // Step 1's default dependency is step 0, which is still pending → suppressed.
     const store = harness.store();
     const task = await harness.createTaskWithSteps();
-    // Prime the step list (graph source bypasses PROMPT.md auto-init).
+    const steps = task.steps.map((s, i) => (i === 1 ? { ...s, dependsOn: [0] } : { ...s }));
+    await store.updateTask(task.id, { steps });
     await store.updateStep(task.id, 1, "in-progress");
 
     const updated = await store.updateStep(task.id, 1, "done", { source: "graph" });
 
-    // Suppressed: step 1's default dependency (step 0) is still pending, so the
+    // Suppressed: step 1's explicit dependency (step 0) is still pending, so the
     // done write is rejected and step 1 keeps its prior (non-done) status.
     expect(updated.steps[1].status).not.toBe("done");
     expect(

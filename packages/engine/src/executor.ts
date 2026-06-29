@@ -5597,7 +5597,7 @@ export class TaskExecutor {
           },
           { id: task.id, steps: live.steps },
           stepIndex,
-          { markDoneOnSuccess: active.deferDoneToReview !== true },
+          { markDoneOnSuccess: active.deferDoneToReview !== true, projectionSource: "graph" },
         );
       },
       resetTaskStep: async (ctx, task, stepIndex, baselineSha, checkpointId) => {
@@ -5886,6 +5886,7 @@ export class TaskExecutor {
             // has a step-review node, leave the step in-progress so the review's
             // APPROVE marks it done (the review is the single done authority).
             markDoneOnSuccess: active.deferDoneToReview !== true,
+            projectionSource: "graph",
           },
         );
         // Capture baseline/checkpoint back into the reserved active context so the
@@ -8498,6 +8499,11 @@ export class TaskExecutor {
 
         let accumulatedStepTokenUsage = detail.tokenUsage;
         const tokenUsageRecordedSteps = new Set<number>();
+        /*
+        FNXC:WorkflowStepControl 2026-06-29-10:15:
+        Graph-pinned step sessions are lifecycle-owned by the workflow graph, not by the legacy executor prompt/tools. Their callback projection must use source:"graph" so independent steps can finish out of index order and so duplicate graph runner writes do not trigger the legacy sequential fn_task_update guard.
+        */
+        const stepProjectionOptions = forceStepSession ? { source: "graph" as const } : undefined;
 
         const stepExecutor = new StepSessionExecutor({
           store: this.store,
@@ -8526,7 +8532,7 @@ export class TaskExecutor {
           onStepStart: (stepIndex) => {
             this.options.stuckTaskDetector?.recordProgress(task.id);
             try {
-              this.store.updateStep(task.id, stepIndex, "in-progress").catch((err) => {
+              this.store.updateStep(task.id, stepIndex, "in-progress", stepProjectionOptions).catch((err) => {
                 executorLog.warn(`${task.id}: failed to update step ${stepIndex} status to in-progress: ${err}`);
               });
             } catch (err) {
@@ -8536,7 +8542,7 @@ export class TaskExecutor {
           onStepComplete: (stepIndex, result) => {
             executorLog.log(`${task.id}: step ${stepIndex} ${result.success ? "succeeded" : "failed"} (${result.retries} retries)`);
             try {
-              this.store.updateStep(task.id, stepIndex, result.success ? "done" : "skipped").catch((err) => {
+              this.store.updateStep(task.id, stepIndex, result.success ? "done" : "skipped", stepProjectionOptions).catch((err) => {
                 executorLog.warn(`${task.id}: failed to update step ${stepIndex} status: ${err}`);
               });
             } catch (err) {

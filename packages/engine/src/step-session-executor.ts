@@ -489,10 +489,14 @@ export function buildStepPrompt(
   }
 
   /*
-   * FNXC:WorkflowStepControl 2026-06-29-01:52:
-   * Graph-owned step execution must not ask the per-step worker to operate board lifecycle tools. Step sessions do not receive fn_task_done; they finish the scoped step and return so the workflow graph can mark the step done or route review/rework.
+   * FNXC:WorkflowStepControl 2026-06-29-10:18:
+   * Graph-owned step execution must not ask the per-step worker to operate board lifecycle tools. Step sessions do not receive fn_task_done/fn_task_update; they finish the scoped step and return so the workflow graph can mark in-progress/done/skipped, order out-of-index completions, and route review/rework.
    */
-  parts.push("After completing this step, commit your changes, then stop. Do NOT call task lifecycle tools and do NOT proceed to subsequent steps; the workflow graph records completion.");
+  parts.push(
+    "After completing this step, commit your changes, then stop.",
+    "Do NOT call task lifecycle tools. Do NOT call `fn_task_update`, `task_update`, `fn_task_done`, or any tool to mark this step in-progress/done/skipped.",
+    "Do NOT proceed to subsequent steps. The workflow graph records step status, ordering, review, and completion.",
+  );
 
   return parts.join("\n");
 }
@@ -620,7 +624,8 @@ export function buildReducedStepPrompt(taskDetail: TaskDetail, stepIndex: number
     "IMPORTANT: Your previous attempt hit the context window limit.",
     "Do NOT repeat work that's already been done.",
     "Check git status and git log to see what's been committed.",
-    "Complete the remaining step work, commit your changes, then stop. The workflow graph records completion.",
+    "Complete the remaining step work, commit your changes, then stop.",
+    "Do NOT call `fn_task_update`, `task_update`, `fn_task_done`, or any tool to mark this step in-progress/done/skipped. The workflow graph records step status and completion.",
   ];
 
   return parts.join("\n").replace(/\n{3,}/g, "\n\n"); // Collapse multiple blank lines

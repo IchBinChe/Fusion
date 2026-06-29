@@ -86,6 +86,12 @@ export interface RunTaskStepOptions {
   /** Session ref used for the default checkpoint capture. */
   sessionRef?: SessionRef;
   /**
+   * Projection source for step-state writes. Graph-owned callers pass `"graph"`
+   * so TaskStore applies dependency-order/out-of-order semantics instead of the
+   * legacy sequential fn_task_update guard.
+   */
+  projectionSource?: "graph";
+  /**
    * Whether a successful step run marks the step `done` through the projection
    * (KTD-7). Default `true` — the step is the terminal authority on its own
    * completion (no review node present). The foreach sub-walk passes `false` when
@@ -130,7 +136,12 @@ export async function runTaskStep(
 
   // 1. Projection: step → in-progress (KTD-7). updateStep's own guards apply.
   try {
-    await store.updateStep(task.id, stepIndex, "in-progress");
+    await store.updateStep(
+      task.id,
+      stepIndex,
+      "in-progress",
+      opts.projectionSource ? { source: opts.projectionSource } : undefined,
+    );
   } catch (err) {
     executorLog.warn(
       `${task.id}: runTaskStep failed to mark step ${stepIndex} in-progress: ${errMsg(err)}`,
@@ -164,7 +175,12 @@ export async function runTaskStep(
   if (result.success) {
     if (markDoneOnSuccess) {
       try {
-        await store.updateStep(task.id, stepIndex, "done");
+        await store.updateStep(
+          task.id,
+          stepIndex,
+          "done",
+          opts.projectionSource ? { source: opts.projectionSource } : undefined,
+        );
       } catch (err) {
         executorLog.warn(
           `${task.id}: runTaskStep failed to mark step ${stepIndex} done: ${errMsg(err)}`,

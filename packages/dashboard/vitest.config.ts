@@ -185,6 +185,7 @@ const qualityAppComponentTests = [
   "TaskCard.footer-wrap",
   "TaskChangesTab",
   "TaskComments",
+  "TaskDetail.swipe-back",
   "TaskDetailModal",
   "TaskDetailModal.allow-resurrection",
   "TaskDetailModal.create-pr-e2e",

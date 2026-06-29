@@ -448,6 +448,73 @@ describe("pause-abort benign requeue-to-todo (FN-6782)", () => {
     expect(graphSpy).not.toHaveBeenCalled();
   });
 
+  it("auto-retries a stale in-review parse pause/resume replay instead of requiring operator action", async () => {
+    const { store, task, executor } = makeHarness({ column: "in-review", graphResumeRetryCount: 0 });
+    (executor as any).addActiveWorktree(task.id, task.worktree);
+    const graphSpy = vi.spyOn(executor as any, "maybeExecuteWorkflowGraph").mockResolvedValue(true);
+
+    await invokeGraphFailure(executor, task, {
+      visitedNodeIds: ["parse"],
+      context: { "node:parse:value": "aborted" },
+    });
+
+    const parkedFailed = store.updateTask.mock.calls.some(
+      (call: unknown[]) => (call[1] as { status?: string } | undefined)?.status === "failed",
+    );
+    expect(parkedFailed).toBe(false);
+    expect(logText(store)).toContain("parse node pause/resume replay surfaced after task was already in-review — auto-retrying workflow graph (1/2)");
+    expect(logText(store)).toContain("Auto-recovered: retrying stale in-review parse pause/resume replay");
+    expect(logText(store)).not.toContain("operator action required");
+    expect(store.updateTask).toHaveBeenCalledWith(task.id, {
+      graphResumeRetryCount: 1,
+      status: null,
+      error: null,
+    }, undefined);
+    expect((executor as any).pausedAborted.has(task.id)).toBe(false);
+    expect((executor as any).activeWorktrees.has(task.id)).toBe(false);
+    expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "task:retry-stale-in-review-parse-pause-abort-replay",
+      metadata: expect.objectContaining({
+        nodeId: "parse",
+        fromColumn: "in-review",
+        attempt: 1,
+        abortProvenance: "hard-cancel",
+        clearedStaleFailure: false,
+        mode: "preserved-in-review-retry-graph",
+      }),
+    }));
+    await flushScheduledRetry();
+    expect(graphSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears a prior stale operator-action failure for an in-review parse replay and retries", async () => {
+    const { store, task, executor } = makeHarness({
+      column: "in-review",
+      status: "failed",
+      error: "Workflow graph failure surfaced after paused engine abort during pause/resume in 'in-review' at node 'parse' — operator action required; retry or explicitly unpause/resume after inspecting the task",
+    });
+    const graphSpy = vi.spyOn(executor as any, "maybeExecuteWorkflowGraph").mockResolvedValue(true);
+
+    await invokeGraphFailure(executor, task, {
+      visitedNodeIds: ["parse"],
+      context: { "node:parse:value": "aborted" },
+    });
+
+    expect(logText(store)).toContain("Auto-recovered: retrying stale in-review parse pause/resume replay");
+    expect(store.updateTask).toHaveBeenCalledWith(task.id, {
+      graphResumeRetryCount: 1,
+      status: null,
+      error: null,
+    }, undefined);
+    expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "task:retry-stale-in-review-parse-pause-abort-replay",
+      metadata: expect.objectContaining({ nodeId: "parse", clearedStaleFailure: true }),
+    }));
+    store.getTask.mockResolvedValue({ ...task, status: null, error: null, graphResumeRetryCount: 1 });
+    await flushScheduledRetry();
+    expect(graphSpy).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps manual retry of a prior plan pause-abort park in review instead of fresh planning", async () => {
     const { store, task, executor } = makeHarness({
       column: "in-review",

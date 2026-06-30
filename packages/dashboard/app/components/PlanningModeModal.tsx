@@ -142,8 +142,13 @@ function normalizePlanningSummary(summary: PlanningSummary): PlanningSummary {
   const title = typeof raw.title === "string" && raw.title.trim().length > 0
     ? raw.title.trim()
     : "Untitled planning task";
-  const description = typeof raw.description === "string" && raw.description.trim().length > 0
-    ? raw.description.trim()
+  /*
+  FNXC:PlanningMode 2026-06-30-12:54:
+  Final summary description is an editable draft. Preserve internal and trailing whitespace during render so mobile text entry can insert a space before the next word; only whitespace-only server payloads fall back to the normalized title.
+  */
+  const rawDescription = typeof raw.description === "string" ? raw.description : "";
+  const description = rawDescription.trim().length > 0
+    ? rawDescription
     : title;
   return {
     ...summary,

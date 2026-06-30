@@ -25,6 +25,7 @@ vi.mock("../../hooks/useNavigationHistory", async (importOriginal) => {
   };
 });
 import { act, render, renderHook, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import * as api from "../../api";
 import { PlanningModeModal } from "../PlanningModeModal";
 import { TaskDetailModal } from "../TaskDetailModal";
@@ -995,6 +996,25 @@ describe("PlanningModeModal", () => {
       await waitFor(() => {
         expect(container.querySelector(".planning-textarea")).not.toBeNull();
       });
+    });
+
+    it.each([
+      { viewport: "mobile" as const, typedDescription: "Mobile summary accepts spaces" },
+      { viewport: "desktop" as const, typedDescription: "Desktop summary accepts spaces" },
+    ])("preserves typed spaces in the $viewport summary description textarea", async ({ viewport, typedDescription }) => {
+      mockViewport(viewport);
+      const user = userEvent.setup();
+      await renderPlanningSummary("Generated summary with existing words");
+
+      const textarea = screen.getByLabelText("Description") as HTMLTextAreaElement;
+      textarea.focus();
+      textarea.setSelectionRange(0, textarea.value.length);
+      await user.type(textarea, typedDescription);
+
+      expect(textarea.value).toContain(typedDescription);
+      expect(textarea.value).not.toContain(typedDescription.replaceAll(" ", ""));
+      expect(screen.getByRole("button", { name: /Create Single Task/i })).toBeDefined();
+      expect(screen.getByRole("button", { name: /Break into Tasks/i })).toBeDefined();
     });
 
     it("expands and collapses the mobile summary description without breaking the adjacent markdown toggle", async () => {

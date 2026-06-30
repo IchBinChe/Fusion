@@ -12,7 +12,7 @@ import { PluginSlot } from "./PluginSlot";
 import { groupByWorktree } from "../utils/worktreeGrouping";
 import type { ToastType } from "../hooks/useToast";
 import type { TaskContextMenuColumnMetadata } from "./TaskContextMenu";
-import { ChevronDown, ChevronUp, Archive, MoreVertical } from "lucide-react";
+import { ChevronDown, ChevronUp, MoreVertical } from "lucide-react";
 import type { ModelInfo, BoardWorkflowColumnFlags } from "../api";
 import type { BlockerFanoutEntry } from "../hooks/useBlockerFanout";
 import type { DoneColumnSortMode } from "./taskSorting";
@@ -565,9 +565,22 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktree
   */
   const isDoneSortColumn = workflowMode ? columnFlags?.complete === true && columnFlags?.archived !== true : column === "done";
   const showDoneSortControl = isDoneSortColumn && doneSortMode !== undefined && !!onDoneSortModeChange;
+  const showDoneArchiveAction = isDoneSortColumn && !!onArchiveAllDone;
+  const hasDoneMenuActions = showDoneSortControl || showDoneArchiveAction;
+  const hasColumnMenu = hasColumnBulkActions || hasDoneMenuActions;
   const doneSortControlLabel = t("column.doneSortControlLabel", "Sort Done tasks");
+  const doneSortOptions: Array<{ mode: DoneColumnSortMode; label: string }> = [
+    { mode: "completion-date-desc", label: t("column.doneSortCompletionDateDesc", "Completion date (newest first)") },
+    { mode: "task-id-desc", label: t("column.doneSortTaskIdDesc", "Task ID (newest first)") },
+  ];
+
+  const handleDoneSortModeSelect = useCallback((mode: DoneColumnSortMode) => {
+    onDoneSortModeChange?.(mode);
+    setIsMenuOpen(false);
+  }, [onDoneSortModeChange]);
 
   const handleArchiveAll = useCallback(async () => {
+    setIsMenuOpen(false);
     if (!onArchiveAllDone) return;
     if (tasks.length === 0) return;
 
@@ -614,35 +627,7 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktree
             + {t("column.newTask", "New Task")}
           </button>
         )}
-        {showDoneSortControl && (
-          <label className="done-sort-control" title={doneSortControlLabel}>
-            {/*
-            FNXC:DoneColumnSorting 2026-06-29-18:09:
-            The Done header needs an accessible, Done-only control that preserves Archive All and other header actions while allowing operators to switch between completion-date-desc and task-id-desc display orders.
-            */}
-            <span className="done-sort-control__label">{t("column.doneSortLabel", "Sort")}</span>
-            <select
-              className="done-sort-control__select"
-              aria-label={doneSortControlLabel}
-              value={doneSortMode}
-              onChange={(event) => onDoneSortModeChange(event.target.value as DoneColumnSortMode)}
-            >
-              <option value="completion-date-desc">{t("column.doneSortCompletionDateDesc", "Completion date (newest first)")}</option>
-              <option value="task-id-desc">{t("column.doneSortTaskIdDesc", "Task ID (newest first)")}</option>
-            </select>
-          </label>
-        )}
-        {column === "done" && onArchiveAllDone && (
-          <button
-            className="btn btn-icon btn-sm"
-            onClick={handleArchiveAll}
-            disabled={tasks.length === 0}
-            title={t("column.archiveAllDoneTitle", "Archive all done tasks")}
-            aria-label={t("column.archiveAllDoneAriaLabel", "Archive all done tasks")}
-          >
-            <Archive />
-          </button>
-        )}
+
         {isArchived && onToggleCollapse && (
           <button
             className="btn btn-icon btn-sm"
@@ -654,15 +639,19 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktree
             {collapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
           </button>
         )}
-        {hasColumnBulkActions && (
+        {hasColumnMenu && (
           <div className="column-menu" ref={menuRef}>
+            {/**
+            FNXC:DoneColumnActions 2026-06-30-00:00:
+            Done and workflow complete-column archive/sort affordances must share this column actions dropdown with existing bulk actions, preventing duplicate header controls on desktop and mobile while preserving the original sort modes and archive confirmation path.
+            */}
             <button
               type="button"
               className="btn btn-icon btn-sm"
               onClick={() => setIsMenuOpen((v) => !v)}
               aria-haspopup="menu"
               aria-expanded={isMenuOpen}
-              aria-label={t("column.actionsAriaLabel", "{{columnLabel}} column actions", { columnLabel: workflowMode ? (columnDisplayName ?? column) : COLUMN_LABELS[column] })}
+              aria-label={t("column.actionsAriaLabel", "{{columnLabel}} column actions", { columnLabel: columnLabelText })}
               title={t("column.actionsTitle", "Column actions")}
               disabled={isMenuBusy}
             >
@@ -670,6 +659,46 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktree
             </button>
             {isMenuOpen && (
               <div className="column-menu-popover" role="menu">
+                {showDoneSortControl && (
+                  <div className="column-menu-group" role="group" aria-label={doneSortControlLabel}>
+                    {doneSortOptions.map((option) => (
+                      <button
+                        key={option.mode}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={doneSortMode === option.mode}
+                        className="column-menu-item column-menu-item-radio"
+                        onClick={() => handleDoneSortModeSelect(option.mode)}
+                      >
+                        <span className="column-menu-item-row">
+                          <span className="column-menu-item-check" aria-hidden="true">{doneSortMode === option.mode ? "✓" : ""}</span>
+                          <span>{option.label}</span>
+                        </span>
+                        <span className="column-menu-item-hint">
+                          {option.mode === "completion-date-desc"
+                            ? t("column.doneSortCompletionDateDescHint", "Show recently completed tasks first")
+                            : t("column.doneSortTaskIdDescHint", "Show highest task IDs first")}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {showDoneArchiveAction && (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="column-menu-item"
+                    onClick={() => void handleArchiveAll()}
+                    disabled={tasks.length === 0}
+                  >
+                    {t("column.archiveAllDoneTitle", "Archive all done tasks")}
+                    <span className="column-menu-item-hint">
+                      {tasks.length === 0
+                        ? t("column.noDoneTasksToArchive", "No done tasks to archive")
+                        : t("column.archiveAllDoneHint", "Archive {{count}} done task{{plural}}", { count: tasks.length, plural: tasks.length === 1 ? "" : "s" })}
+                    </span>
+                  </button>
+                )}
                 {isTodoLikeColumn && (
                   <button
                     type="button"

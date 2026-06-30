@@ -381,21 +381,48 @@ describe("TerminalModal", () => {
     unmount();
 
     const previousInnerWidth = window.innerWidth;
+    const previousInnerHeight = window.innerHeight;
     const previousOntouchstart = window.ontouchstart;
-    Object.defineProperty(window, "innerWidth", { value: 500, configurable: true });
+    Object.defineProperty(window, "innerWidth", { value: 390, configurable: true });
+    Object.defineProperty(window, "innerHeight", { value: 720, configurable: true });
     Object.defineProperty(window, "ontouchstart", { value: null, configurable: true });
     try {
       render(<TerminalModal isOpen={true} onClose={mockOnClose} projectId="mobile-picker" />);
       const mobileModal = await screen.findByTestId("terminal-modal");
       expect(mobileModal).not.toHaveClass("terminal-modal--docked");
       expect(mobileModal).not.toHaveClass("terminal-modal--floating");
-      fireEvent.click(screen.getByLabelText("Select terminal workspace: Project Root"));
-      expect(screen.getByRole("listbox", { name: "Select terminal workspace" })).toBeInTheDocument();
+      const trigger = screen.getByLabelText("Select terminal workspace: Project Root");
+      vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({
+        x: 220,
+        y: 18,
+        top: 18,
+        left: 220,
+        right: 352,
+        bottom: 54,
+        width: 132,
+        height: 36,
+        toJSON: () => ({}),
+      } as DOMRect);
+      fireEvent.click(trigger);
+      const listbox = screen.getByRole("listbox", { name: "Select terminal workspace" });
+      expect(listbox).toBeInTheDocument();
+      expect(listbox.parentElement).toBe(document.body);
+      expect(listbox).toHaveTextContent("Project Root");
+      expect(listbox).toHaveTextContent("FN-7253");
+      await waitFor(() => {
+        expect(listbox).toHaveStyle({ position: "fixed" });
+        expect(Number.parseFloat(listbox.style.left)).toBeGreaterThanOrEqual(0);
+        expect(Number.parseFloat(listbox.style.top)).toBeGreaterThanOrEqual(0);
+        expect(Number.parseFloat(listbox.style.width)).toBeLessThanOrEqual(390);
+        expect(Number.parseFloat(listbox.style.maxHeight)).toBeLessThanOrEqual(720);
+      });
       fireEvent.keyDown(document, { key: "Escape" });
       expect(screen.queryByRole("listbox", { name: "Select terminal workspace" })).toBeNull();
+      expect(trigger).not.toHaveAttribute("aria-controls");
       expect(mockOnClose).not.toHaveBeenCalled();
     } finally {
       Object.defineProperty(window, "innerWidth", { value: previousInnerWidth, configurable: true });
+      Object.defineProperty(window, "innerHeight", { value: previousInnerHeight, configurable: true });
       if (previousOntouchstart === undefined) {
         delete (window as any).ontouchstart;
       } else {
@@ -404,20 +431,57 @@ describe("TerminalModal", () => {
     }
   });
 
+  it("avoids inert workspace picker shells while loading or after workspace fetch errors", async () => {
+    mockUseWorkspaces.mockReturnValue({
+      projectName: "kb",
+      workspaces: [
+        { id: "FN-7253", label: "FN-7253", title: "Loading stays usable", worktree: "/repo/.worktrees/fn-7253", kind: "task" },
+      ],
+      loading: true,
+      error: null,
+    });
+
+    const { rerender } = render(<TerminalModal isOpen={true} onClose={mockOnClose} projectId="loading-picker" />);
+    fireEvent.click(await screen.findByLabelText("Select terminal workspace: Project Root"));
+    expect(screen.getByText("Task worktrees (refreshing…)")).toBeInTheDocument();
+    expect(screen.getByLabelText("Open terminal in selected workspace")).toBeEnabled();
+
+    mockUseWorkspaces.mockReturnValue({
+      projectName: "kb",
+      workspaces: [
+        { id: "FN-7253", label: "FN-7253", title: "Stale entry hidden on error", worktree: "/repo/.worktrees/fn-7253", kind: "task" },
+      ],
+      loading: false,
+      error: "failed",
+    });
+    rerender(<TerminalModal isOpen={true} onClose={mockOnClose} projectId="loading-picker" />);
+
+    expect(screen.queryByTestId("terminal-workspace-picker")).toBeNull();
+    fireEvent.click(screen.getByLabelText("New terminal"));
+    expect(defaultSessionState.createTab).toHaveBeenCalledWith();
+  });
+
   it("bounds terminal worktree picker and tab labels so header actions stay reachable", () => {
     const tabRule = terminalModalCss.match(/\.terminal-tab\s*\{([^}]*)\}/)?.[1] ?? "";
     const tabLabelRule = terminalModalCss.match(/\.terminal-tab-label\s*\{([^}]*)\}/)?.[1] ?? "";
     const triggerRule = terminalModalCss.match(/\.terminal-workspace-picker-trigger\s*\{([^}]*)\}/)?.[1] ?? "";
     const menuRule = terminalModalCss.match(/\.terminal-workspace-picker-menu\s*\{([^}]*)\}/)?.[1] ?? "";
     const actionsRule = terminalModalCss.match(/\.terminal-actions\s*\{([^}]*)\}/)?.[1] ?? "";
+    const mobileHeaderRule = terminalModalCss.match(/@media \(max-width: 768px\) \{[\s\S]*?\.terminal-header\s*\{([^}]*)\}/)?.[1] ?? "";
     const mobileRule = terminalModalCss.match(/@media \(max-width: 768px\) \{[\s\S]*?\.terminal-workspace-picker-menu\s*\{([^}]*)\}/)?.[1] ?? "";
 
     expect(tabRule).toContain("max-width: min(260px, 42vw);");
     expect(tabLabelRule).toContain("text-overflow: ellipsis;");
     expect(triggerRule).toContain("width: clamp(112px, 16vw, 220px);");
-    expect(menuRule).toContain("max-height: min(360px, calc(100dvh - 120px));");
+    expect(menuRule).toContain("position: fixed;");
+    expect(menuRule).toContain("width: min(var(--terminal-workspace-menu-width), calc(100vw - (var(--space-md) * 2)));");
+    expect(menuRule).toContain("max-height: min(var(--terminal-workspace-menu-height), calc(100dvh - (var(--space-md) * 2)));");
+    expect(menuRule).toContain("overflow-y: auto;");
     expect(menuRule).toContain("overscroll-behavior: contain;");
     expect(actionsRule).toContain("flex: 0 0 auto;");
+    expect(mobileHeaderRule).toContain("overflow: hidden;");
+    expect(mobileRule).not.toContain("right:");
+    expect(mobileRule).toContain("width: min(var(--terminal-workspace-menu-width), calc(100vw - (var(--space-sm) * 2)));");
     expect(mobileRule).toContain("-webkit-overflow-scrolling: touch;");
   });
 

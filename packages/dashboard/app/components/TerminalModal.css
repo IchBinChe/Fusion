@@ -357,6 +357,9 @@ Terminal worktree selection mirrors the file-browser workspace model while stayi
 
 FNXC:TerminalWorkspaces 2026-06-29-00:00:
 Terminal headers must survive many tabs, long task titles, floating narrow widths, and mobile touch controls. Bound tab/picker labels and make menus scroll within the viewport so close/reconnect/keyboard controls and the xterm viewport remain reachable.
+
+FNXC:TerminalWorkspaces 2026-06-30-00:00:
+The worktree listbox must escape the mobile terminal header's clipped overflow. It is portaled to the viewport, positioned from the trigger, and constrained with tokenized gutters so narrow phones can reach and scroll every workspace option without hiding the fast + terminal action.
 */
 .terminal-workspace-picker {
   position: relative;
@@ -427,11 +430,14 @@ Terminal headers must survive many tabs, long task titles, floating narrow width
 }
 
 .terminal-workspace-picker-menu {
-  position: absolute;
-  top: calc(100% + var(--space-xs));
-  right: 0;
-  width: min(340px, calc(100vw - var(--space-xl)));
-  max-height: min(360px, calc(100dvh - 120px));
+  --terminal-workspace-menu-width: calc(var(--space-xl) * 14.167);
+  --terminal-workspace-menu-min-width: calc(var(--space-xl) * 9.167);
+  --terminal-workspace-menu-height: calc(var(--space-xl) * 15);
+  position: fixed;
+  top: calc(var(--space-xl) * 2);
+  left: var(--space-md);
+  width: min(var(--terminal-workspace-menu-width), calc(100vw - (var(--space-md) * 2)));
+  max-height: min(var(--terminal-workspace-menu-height), calc(100dvh - (var(--space-md) * 2)));
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: var(--space-xs);
@@ -439,6 +445,7 @@ Terminal headers must survive many tabs, long task titles, floating narrow width
   border-radius: var(--radius-md);
   background: var(--card);
   box-shadow: var(--shadow-lg);
+  z-index: 5000;
 }
 
 .terminal-workspace-picker-option {
@@ -1339,8 +1346,8 @@ Footer reads left-to-right: text-size control, then the relocated Clear/Shortcut
   }
 
   .terminal-workspace-picker-menu {
-    right: calc(var(--space-xs) * -1);
-    max-height: min(300px, calc(100dvh - 96px));
+    width: min(var(--terminal-workspace-menu-width), calc(100vw - (var(--space-sm) * 2)));
+    max-height: min(var(--terminal-workspace-menu-height), calc(100dvh - (var(--space-sm) * 2)));
     -webkit-overflow-scrolling: touch;
   }
 

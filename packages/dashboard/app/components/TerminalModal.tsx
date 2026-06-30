@@ -81,6 +81,13 @@ interface TerminalFloatPosition {
   y: number;
 }
 
+interface TerminalWorkspaceMenuPosition {
+  top: number;
+  left: number;
+  width: number;
+  maxHeight: number;
+}
+
 function readTerminalDisplayMode(projectId?: string): TerminalDisplayMode {
   if (typeof window === "undefined") return "docked";
   const value = window.localStorage.getItem(`fusion:terminal-display-mode-${projectId ?? "default"}`);
@@ -469,6 +476,8 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
   const terminalRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const terminalWorkspacePickerRef = useRef<HTMLDivElement>(null);
+  const terminalWorkspaceTriggerRef = useRef<HTMLButtonElement>(null);
+  const terminalWorkspaceMenuRef = useRef<HTMLDivElement>(null);
   const overlayMouseDownRef = useRef(false);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<ITerminalAddon | null>(null);
@@ -943,6 +952,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
     error: terminalWorkspacesError,
   } = useWorkspaces(projectId);
   const [terminalWorkspaceMenuOpen, setTerminalWorkspaceMenuOpen] = useState(false);
+  const [terminalWorkspaceMenuPosition, setTerminalWorkspaceMenuPosition] = useState<TerminalWorkspaceMenuPosition | null>(null);
   const [selectedTerminalWorkspaceId, setSelectedTerminalWorkspaceId] = useState("project");
 
   const selectedTerminalWorkspace = useMemo(
@@ -974,22 +984,91 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
     }
   }, [selectedTerminalWorkspaceId, terminalWorkspaces]);
 
+  const getEffectiveViewport = useCallback(() => {
+    const visualViewport = window.visualViewport;
+    if (visualViewport && visualViewport.width > 0 && visualViewport.height > 0) {
+      return {
+        width: visualViewport.width,
+        height: visualViewport.height,
+        offsetTop: visualViewport.offsetTop,
+        offsetLeft: visualViewport.offsetLeft,
+      };
+    }
+    return { width: window.innerWidth, height: window.innerHeight, offsetTop: 0, offsetLeft: 0 };
+  }, []);
+
+  const updateTerminalWorkspaceMenuPosition = useCallback(() => {
+    const trigger = terminalWorkspaceTriggerRef.current;
+    if (!trigger) return;
+
+    const rect = trigger.getBoundingClientRect();
+    const menu = terminalWorkspaceMenuRef.current;
+    const { width: viewportWidth, height: viewportHeight, offsetTop, offsetLeft } = getEffectiveViewport();
+    const rootStyle = getComputedStyle(document.documentElement);
+    const horizontalGutter = Number.parseFloat(rootStyle.getPropertyValue("--space-md")) || 16;
+    const verticalGutter = horizontalGutter;
+    const gap = Number.parseFloat(rootStyle.getPropertyValue("--space-xs")) || 6;
+    const minWidth = Number.parseFloat(rootStyle.getPropertyValue("--terminal-workspace-menu-min-width")) || 220;
+    const preferredWidth = Number.parseFloat(rootStyle.getPropertyValue("--terminal-workspace-menu-width")) || 340;
+    const preferredHeight = Number.parseFloat(rootStyle.getPropertyValue("--terminal-workspace-menu-height")) || 360;
+
+    const measuredWidth = menu?.offsetWidth || Math.max(rect.width, preferredWidth);
+    const maxWidth = Math.max(viewportWidth - horizontalGutter * 2, minWidth);
+    const width = Math.min(Math.max(measuredWidth, minWidth), maxWidth);
+    const measuredHeight = menu?.offsetHeight || preferredHeight;
+    const maxHeight = Math.max(viewportHeight - verticalGutter * 2, minWidth);
+    const constrainedHeight = Math.min(measuredHeight, maxHeight);
+    const triggerTop = rect.top - offsetTop;
+    const triggerBottom = rect.bottom - offsetTop;
+    const triggerRight = rect.right - offsetLeft;
+    const spaceBelow = viewportHeight - triggerBottom;
+    const spaceAbove = triggerTop;
+    const openUpward = spaceBelow < constrainedHeight && spaceAbove > spaceBelow;
+    const left = Math.min(
+      Math.max(triggerRight - width, horizontalGutter),
+      viewportWidth - horizontalGutter - width,
+    ) + offsetLeft;
+    const top = openUpward
+      ? Math.max(verticalGutter + offsetTop, triggerTop - constrainedHeight - gap + offsetTop)
+      : Math.min(triggerBottom + gap + offsetTop, viewportHeight + offsetTop - verticalGutter - constrainedHeight);
+
+    setTerminalWorkspaceMenuPosition({ top, left, width, maxHeight: constrainedHeight });
+  }, [getEffectiveViewport]);
+
   useEffect(() => {
     if (!terminalWorkspaceMenuOpen) {
+      setTerminalWorkspaceMenuPosition(null);
       return;
     }
 
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target;
-      if (target instanceof Node && terminalWorkspacePickerRef.current?.contains(target)) {
+      if (
+        target instanceof Node &&
+        (terminalWorkspacePickerRef.current?.contains(target) || terminalWorkspaceMenuRef.current?.contains(target))
+      ) {
         return;
       }
       setTerminalWorkspaceMenuOpen(false);
     };
 
+    const handleReposition = () => updateTerminalWorkspaceMenuPosition();
+    const frame = requestAnimationFrame(handleReposition);
     document.addEventListener("pointerdown", handlePointerDown);
-    return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [terminalWorkspaceMenuOpen]);
+    window.addEventListener("resize", handleReposition);
+    window.addEventListener("scroll", handleReposition, true);
+    const visualViewport = window.visualViewport;
+    visualViewport?.addEventListener("resize", handleReposition);
+    visualViewport?.addEventListener("scroll", handleReposition);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("resize", handleReposition);
+      window.removeEventListener("scroll", handleReposition, true);
+      visualViewport?.removeEventListener("resize", handleReposition);
+      visualViewport?.removeEventListener("scroll", handleReposition);
+    };
+  }, [terminalWorkspaceMenuOpen, terminalWorkspaces.length, updateTerminalWorkspaceMenuPosition]);
 
   const handleOpenSelectedTerminalWorkspace = useCallback(() => {
     setTerminalWorkspaceMenuOpen(false);
@@ -2048,6 +2127,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
             >
               <button
                 type="button"
+                ref={terminalWorkspaceTriggerRef}
                 className="terminal-workspace-picker-trigger"
                 onClick={() => setTerminalWorkspaceMenuOpen((open) => !open)}
                 aria-haspopup="listbox"
@@ -2074,12 +2154,22 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
               >
                 <Plus size={14} />
               </button>
-              {terminalWorkspaceMenuOpen && (
+              {terminalWorkspaceMenuOpen && createPortal(
                 <div
+                  ref={terminalWorkspaceMenuRef}
                   id="terminal-workspace-picker-menu"
                   className="terminal-workspace-picker-menu"
                   role="listbox"
                   aria-label={t("terminal.selectWorkspace", "Select terminal workspace")}
+                  style={terminalWorkspaceMenuPosition
+                    ? {
+                        top: terminalWorkspaceMenuPosition.top,
+                        left: terminalWorkspaceMenuPosition.left,
+                        width: terminalWorkspaceMenuPosition.width,
+                        maxHeight: terminalWorkspaceMenuPosition.maxHeight,
+                      }
+                    : undefined}
+                  onPointerDown={(event) => event.stopPropagation()}
                 >
                   <button
                     type="button"
@@ -2132,7 +2222,8 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
                       </button>
                     );
                   })}
-                </div>
+                </div>,
+                document.body,
               )}
             </div>
           )}

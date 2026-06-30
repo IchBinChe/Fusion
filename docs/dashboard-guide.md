@@ -511,7 +511,7 @@ Use the terminal on mobile:
 Open a terminal in a specific workspace:
 
 1. Open the terminal and use the workspace picker in the terminal header.
-   Expected outcome: **Project Root** is always available and opens a new tab in the repository root.
+   Expected outcome: **Project Root** is always available and opens a new tab in the repository root. On narrow mobile screens, the picker menu remains visible, viewport-safe, and scrollable instead of being clipped by the terminal header.
 2. Select a task worktree from the **Task Worktrees** list, then choose **Open terminal in selected workspace**.
    Expected outcome: Fusion opens a new terminal tab with the selected task label and starts the shell in that task worktree.
 3. If a task is listed without a live worktree, the task remains visible but disabled and marked **No worktree**.

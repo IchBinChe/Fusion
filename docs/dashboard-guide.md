@@ -232,6 +232,9 @@ Behavior:
 
 Workflows define how a task moves through planning, execution, review, workflow steps, merge, and any custom graph policy. Most coding tasks can stay on the default Coding workflow, but task and board workflow controls can select a different built-in or custom workflow per task. For the built-in catalog and runtime semantics, see [Workflow Steps → Workflow overview](./workflow-steps.md#workflow-overview).
 
+<!-- FNXC:NewTaskWorkflowDropdown 2026-06-30-18:52: The full New Task dialog workflow picker now matches the icon-rich workflow identity used in Board/List selectors while preserving create-time workflowId semantics. -->
+When creating a task from the full **New Task** dialog, the **Workflow** advanced control opens a styled dropdown instead of a native select. Built-in workflows show the Fusion mark, custom workflows show their configured compact icon when present, **No workflow** remains the explicit opt-out, and leaving the picker untouched still inherits the project/default workflow.
+
 The workflow editor opens as a full-screen modal editor for inspecting built-ins and authoring custom workflows.
 
 Navigation:

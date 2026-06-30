@@ -407,9 +407,14 @@ export {
   resolveEffectiveSettings,
   resolveEffectiveSettingsDetailed,
   resolveEffectiveSettingsById,
+  resolveOptionalReviewRevisionBudget,
+  PLAN_REVIEW_MAX_REVISIONS_SETTING_ID,
+  CODE_REVIEW_MAX_REVISIONS_SETTING_ID,
   type WorkflowSettingsResolverStore,
   type EffectiveSettingsResult,
   type EffectiveSettingsTaskRef,
+  type OptionalReviewRevisionBudget,
+  type ResolveOptionalReviewRevisionBudgetInput,
 } from "./workflow-settings-resolver.js";
 export {
   applyWorkflowSettingsOverlay,

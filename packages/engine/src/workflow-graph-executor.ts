@@ -199,7 +199,10 @@ export interface WorkflowGraphExecutorDeps {
   recordWorkflowStepResult?: (taskId: string, result: WorkflowStepResult) => void | Promise<void>;
   /*
    * FNXC:WorkflowOptionalStepFix 2026-06-26-16:20:
-   * Enabled PRE-merge optional workflow steps that return REVISE must offer the executor one remediation path before normal advisory/gate fall-through. The graph forwards the optional-group node id and per-step `maxRevisions` override so the executor can resolve the budget against `maxPostReviewFixes` or honor `"unbounded"`; absent or false preserves prior byte-inert behavior for in-memory tests and exhausted budgets.
+   * Enabled PRE-merge optional workflow steps that return REVISE must offer the executor one remediation path before normal advisory/gate fall-through. The graph forwards the optional-group node id and per-step `maxRevisions` override so the executor can resolve the budget against workflow-value caps, `maxPostReviewFixes`, or `"unbounded"`; absent or false preserves prior byte-inert behavior for in-memory tests and exhausted budgets.
+   *
+   * FNXC:WorkflowRevisionBudget 2026-06-30-20:46:
+   * Forward the optional-group id for every failure context because Plan Review/spec and Code Review budget resolution is keyed by that id. The graph does not read workflow setting values directly; live execution and self-healing share the core resolver at the remediation boundary.
    */
   requestPreMergeOptionalStepFix?: (taskId: string, info: {
     stepName: string;

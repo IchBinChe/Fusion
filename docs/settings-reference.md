@@ -269,7 +269,11 @@ Actions. It has two tabs:
   (Plan/Triage, Executor, Reviewer, and fallbacks declared by the workflow) use the
   same model dropdown picker as Project Models so clearing or selecting a model
   updates both keys together. Advanced/custom non-model settings still use typed
-  controls. Edits batch and commit through a single **Save** in the Values tab.
+  controls. Built-in Plan Review/spec and Code Review revision caps also live here:
+  leave `planReviewMaxRevisions` or `codeReviewMaxRevisions` empty for unbounded
+  automatic revisions, enter a non-negative integer to cap attempts, or enter `0`
+  to disable automatic revision for that path. Edits batch and commit through a
+  single **Save** in the Values tab.
 
 **How values resolve.** The engine resolves *effective settings* per task as
 `stored value ?? declaration default`. The task-detail Workflow, Chat, and Agent
@@ -307,7 +311,7 @@ These groups moved out of project settings and into workflow settings (built-in
 | Group | Keys (examples) |
 |---|---|
 | **Step execution** | `workflowStepTimeoutMs`, `runStepsInNewSessions`, `maxParallelSteps`, `workflowStepScopeEnforcement`, `strictScopeEnforcement`, `verificationFixRetries`, `maxPostReviewFixes`, `buildRetryCount` |
-| **Review / approval** | Workflow values: `requirePrApproval`, `requirePlanApproval`, `reviewHandoffPolicy`, `maxReviewerContextRetries`, `maxReviewerFallbackRetries`; project override: `planApprovalMode` |
+| **Review / approval** | Workflow values: `requirePrApproval`, `requirePlanApproval`, `reviewHandoffPolicy`, `maxReviewerContextRetries`, `maxReviewerFallbackRetries`, `planReviewMaxRevisions`, `codeReviewMaxRevisions`; project override: `planApprovalMode` |
 | **Per-phase model lanes** | `executionProvider`/`executionModelId`, `planningProvider`/`planningModelId` (+ fallbacks), `validatorProvider`/`validatorModelId` (+ fallbacks) |
 
 ### Workflow-native triage policy settings
@@ -335,6 +339,8 @@ The built-in workflows also declare triage/spec policy settings that were **not*
 | `triageDefaultWorkflowId` | `builtin:coding` | Default workflow for standard coding tasks and for existing tasks without an explicit user-requested or creator-owned workflow selection. |
 | `leanPlanning` | `false` | Workflow-native fast-mode policy: select the lean `planning-fast` prompt variant instead of the full triage spec prompt. |
 | `autoApproveSpec` | `false` | Legacy compatibility setting. Workflow Plan Review now owns optional pre-execution AI plan approval. |
+| `planReviewMaxRevisions` | unset | Workflow-native Plan Review/spec revision cap. Unset/empty means unbounded automatic replans; a non-negative integer caps attempts; `0` disables automatic Plan Review revision. |
+| `codeReviewMaxRevisions` | unset | Workflow-native Code Review remediation cap. Unset/empty means unbounded automatic code-fix passes; a non-negative integer caps attempts; `0` disables automatic Code Review remediation. |
 
 In the dashboard Settings modal, Project Models exposes Plan/Triage, Executor,
 Reviewer, and declared fallback dropdown controls for the default workflow. The
@@ -562,7 +568,7 @@ Default notes:
 | `maxReviewerContextRetries` | `number` | `2` | Max reviewer context-compaction retries (FN-4082) per task. |
 | `maxReviewerFallbackRetries` | `number` | `2` | Max reviewer fallback-model retries (FN-4092) per task. |
 | `maxTotalRetriesBeforeFail` | `number` | `25` | Master retry budget across all tracked retry counters; exceeding this fails the task with `RetryStormError`. |
-| `maxPostReviewFixes` | `number` | `3` | Default max automatic fix passes for review/pre-merge optional-step feedback, including self-healing auto-revival of in-review tasks failing pre-merge workflow steps. Individual `optional-group` workflow nodes can override this with `config.maxRevisions` (non-negative integer or `"unbounded"`). |
+| `maxPostReviewFixes` | `number` | `3` | Default max automatic fix passes for generic review/pre-merge optional-step feedback, including self-healing auto-revival of in-review tasks failing pre-merge workflow steps. Individual `optional-group` workflow nodes can override this with `config.maxRevisions` (non-negative integer or `"unbounded"`). Built-in Plan Review/spec and Code Review use workflow values `planReviewMaxRevisions` / `codeReviewMaxRevisions` first, and are unbounded when those values are unset. |
 | `maxSpawnedAgentsPerParent` | `number` | `5` | Max child agents per parent task. |
 | `maxSpawnedAgentsGlobal` | `number` | `20` | Max spawned agents across one executor instance. |
 | `maintenanceIntervalMs` | `number` | `300000` | Periodic maintenance interval in ms (5 min). |

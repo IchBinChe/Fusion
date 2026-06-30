@@ -11,7 +11,7 @@ import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode, WorkflowIrNodeKind, WorkflowStepResult as CoreWorkflowStepResult } from "@fusion/core";
 import { getUnmetSchedulingDependencies } from "./scheduler.js";
-import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker, allowsAutoMergeProcessing, isSharedBranchGroupMemberIntegration, resolveMaxAutoMergeRetries, resolveOptionalStepRevisionBudget } from "@fusion/core";
+import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker, allowsAutoMergeProcessing, isSharedBranchGroupMemberIntegration, resolveMaxAutoMergeRetries, resolveOptionalStepRevisionBudget, resolveOptionalReviewRevisionBudget } from "@fusion/core";
 import { finalizeProvenAutoMergeTask } from "./auto-merge-finalization.js";
 import { mergeEffectiveSettings } from "./effective-settings.js";
 import type { TaskStep, WorkflowIr, WorkflowFieldDefinition, WorkflowColumnAgent, EffectiveAgentInput, WorkflowWorkEngineDispatchResult } from "@fusion/core";
@@ -427,6 +427,37 @@ function getResumeOrphanDelayMs(): number {
 }
 
 const tokenCacheMetricsLog = createLogger("token-cache-metrics");
+
+const OPTIONAL_STEP_REVISION_KEY_MARKER = "Workflow revision key:";
+
+function normalizeOptionalStepRevisionKey(value: string | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function optionalStepRevisionKey(nodeId: string | undefined, stepName: string | undefined): string {
+  return normalizeOptionalStepRevisionKey(nodeId) || normalizeOptionalStepRevisionKey(stepName) || "pre-merge-optional-step";
+}
+
+function countOptionalStepRevisionAttempts(task: Pick<Task, "log">, key: string, stepName: string | undefined): number {
+  const normalizedKey = normalizeOptionalStepRevisionKey(key);
+  const normalizedStepName = normalizeOptionalStepRevisionKey(stepName);
+  return (task.log ?? []).filter((entry) => {
+    const action = entry.action ?? "";
+    const outcome = entry.outcome ?? "";
+    if (!/attempt \d+\//.test(action)) return false;
+    const markerIndex = outcome.indexOf(OPTIONAL_STEP_REVISION_KEY_MARKER);
+    if (markerIndex >= 0) {
+      const markerValue = outcome.slice(markerIndex + OPTIONAL_STEP_REVISION_KEY_MARKER.length).split(/\r?\n/, 1)[0]?.trim();
+      return normalizeOptionalStepRevisionKey(markerValue) === normalizedKey;
+    }
+    if (!normalizedStepName) return false;
+    return normalizeOptionalStepRevisionKey(outcome).includes(`step: ${normalizedStepName}`);
+  }).length;
+}
+
+function optionalStepRevisionLogOutcome(details: string, key: string): string {
+  return `${details}\n${OPTIONAL_STEP_REVISION_KEY_MARKER} ${key}`;
+}
 
 const STEP_STATUSES: StepStatus[] = ["pending", "in-progress", "done", "skipped"];
 
@@ -3968,7 +3999,13 @@ export class TaskExecutor {
 
   /*
    * FNXC:WorkflowOptionalStepFix 2026-06-26-16:35:
-   * Inline graph optional-step remediation consumes `postReviewFixCount` BEFORE calling `sendTaskBackForFix`, matching self-healing's budget-first ordering. Persistent Code Review / Browser Verification REVISE loops are bounded by the optional-group `maxRevisions` override when present, otherwise by `maxPostReviewFixes`; `"unbounded"` intentionally skips the ceiling check so the step cycles until it returns APPROVE/APPROVE_WITH_NOTES or a human intervenes.
+   * Inline graph optional-step remediation consumes `postReviewFixCount` BEFORE calling `sendTaskBackForFix`, matching self-healing's budget-first ordering. Persistent optional-step REVISE loops are bounded by the resolved optional-group budget; `"unbounded"` intentionally skips the ceiling check so the step cycles until it returns APPROVE/APPROVE_WITH_NOTES or a human intervenes.
+   *
+   * FNXC:WorkflowRevisionBudget 2026-06-30-20:48:
+   * Live Plan Review/spec and Code Review remediation must honor explicit workflow setting values before node `maxRevisions`, and must treat unset values as unbounded for those two built-in review paths. Browser Verification keeps the existing `maxPostReviewFixes` fallback unless its node config explicitly changes it.
+   *
+   * FNXC:WorkflowRevisionBudget 2026-06-30-22:04:
+   * Plan Review and Code Review caps are independent policy budgets, so attempts are counted by workflow step key instead of the legacy aggregate `postReviewFixCount`. The aggregate still increments for existing dashboard summaries, but it must not let a Plan Review replan consume a Code Review remediation slot.
    */
   private async requestPreMergeOptionalStepFix(
     taskId: string,
@@ -3999,6 +4036,22 @@ export class TaskExecutor {
        */
       const feedback = info.feedback?.trim()
         || "Plan Review failed before execution. Revise the task plan, then continue execution.";
+      const settings = await mergeEffectiveSettings(this.store, liveTask, await this.store.getSettings());
+      const maxRevisions = resolveOptionalReviewRevisionBudget({
+        optionalGroupId: info.nodeId ?? "plan-review",
+        workflowSettings: settings as Record<string, unknown>,
+        nodeMaxRevisions: info.maxRevisions,
+        fallbackMaxRevisions: settings.maxPostReviewFixes ?? 3,
+      });
+      const budget = resolveOptionalStepRevisionBudget(maxRevisions, settings.maxPostReviewFixes ?? 3);
+      if (!budget.unbounded && (!Number.isFinite(budget.max) || budget.max <= 0)) return false;
+      const revisionKey = optionalStepRevisionKey(info.nodeId ?? "plan-review", info.stepName);
+      const currentCount = countOptionalStepRevisionAttempts(liveTask, revisionKey, info.stepName);
+      if (!budget.unbounded && currentCount >= budget.max) return false;
+      const nextCount = currentCount + 1;
+      const totalFixCount = (liveTask.postReviewFixCount ?? 0) + 1;
+      const budgetLabel = budget.unbounded ? "unbounded" : String(budget.max);
+      await this.store.updateTask(taskId, { postReviewFixCount: totalFixCount }, this.getRunContextFor(taskId));
       this.clearPausedAborted(taskId);
       await this.store.logEntry(
         taskId,
@@ -4008,8 +4061,8 @@ export class TaskExecutor {
       );
       await this.store.logEntry(
         taskId,
-        "Plan Review failed — moved to triage for automatic replan",
-        feedback,
+        `Plan Review failed — moved to triage for automatic replan (attempt ${nextCount}/${budgetLabel})`,
+        optionalStepRevisionLogOutcome(feedback, revisionKey),
         this.getRunContextFor(taskId),
       );
       if (liveTask.column !== "triage") {
@@ -4027,19 +4080,27 @@ export class TaskExecutor {
 
     if (info.verdict !== "REVISE") return false;
     const settings = await mergeEffectiveSettings(this.store, liveTask, await this.store.getSettings());
-    const budget = resolveOptionalStepRevisionBudget(info.maxRevisions, settings.maxPostReviewFixes ?? 3);
+    const maxRevisions = resolveOptionalReviewRevisionBudget({
+      optionalGroupId: info.nodeId ?? "",
+      workflowSettings: settings as Record<string, unknown>,
+      nodeMaxRevisions: info.maxRevisions,
+      fallbackMaxRevisions: settings.maxPostReviewFixes ?? 3,
+    });
+    const budget = resolveOptionalStepRevisionBudget(maxRevisions, settings.maxPostReviewFixes ?? 3);
     if (!budget.unbounded && (!Number.isFinite(budget.max) || budget.max <= 0)) return false;
 
-    const currentCount = liveTask.postReviewFixCount ?? 0;
+    const revisionKey = optionalStepRevisionKey(info.nodeId, info.stepName);
+    const currentCount = countOptionalStepRevisionAttempts(liveTask, revisionKey, info.stepName);
     if (!budget.unbounded && currentCount >= budget.max) return false;
 
     const nextCount = currentCount + 1;
+    const totalFixCount = (liveTask.postReviewFixCount ?? 0) + 1;
     const budgetLabel = budget.unbounded ? "unbounded" : String(budget.max);
-    await this.store.updateTask(taskId, { postReviewFixCount: nextCount }, this.getRunContextFor(taskId));
+    await this.store.updateTask(taskId, { postReviewFixCount: totalFixCount }, this.getRunContextFor(taskId));
     await this.store.logEntry(
       taskId,
       `Pre-merge optional workflow step requested executor fixes (attempt ${nextCount}/${budgetLabel})`,
-      `Step: ${info.stepName}\nStatus: ${info.status}\nFeedback:\n${info.feedback}`,
+      optionalStepRevisionLogOutcome(`Step: ${info.stepName}\nStatus: ${info.status}\nFeedback:\n${info.feedback}`, revisionKey),
       this.getRunContextFor(taskId),
     );
     await this.sendTaskBackForFix(

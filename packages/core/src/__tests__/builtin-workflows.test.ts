@@ -74,6 +74,24 @@ describe("built-in workflows", () => {
     }
   });
 
+  it("all built-ins expose workflow-native review revision cap settings", () => {
+    for (const workflow of BUILTIN_WORKFLOWS) {
+      if (workflow.kind === "fragment") continue;
+      const ir = parseWorkflowIr(workflow.ir);
+      expect(ir.version, workflow.id).toBe("v2");
+      if (ir.version !== "v2") throw new Error(`expected ${workflow.id} v2`);
+      expect(ir.settings?.map((setting) => setting.id), workflow.id).toEqual(
+        expect.arrayContaining(["planReviewMaxRevisions", "codeReviewMaxRevisions"]),
+      );
+      expect(ir.settings?.find((setting) => setting.id === "planReviewMaxRevisions"), workflow.id).not.toHaveProperty(
+        "default",
+      );
+      expect(ir.settings?.find((setting) => setting.id === "codeReviewMaxRevisions"), workflow.id).not.toHaveProperty(
+        "default",
+      );
+    }
+  });
+
   it("engineering built-ins expose plan, code, and browser optional groups with expected defaults", () => {
     const expectedDefaults: Record<string, Record<string, boolean>> = {
       "builtin:coding": { "plan-review": true, "code-review": true, "browser-verification": false },
@@ -152,7 +170,7 @@ describe("built-in workflows", () => {
         expect(workflow.ir.nodes.find((node) => node.id === gate)?.config, `${workflow.id}:${gate}:reworkRegion`).toMatchObject({
           reworkRegion: true,
           maxReworkCycles: 3,
-          maxRevisions: gate === "code-review" ? "unbounded" : 3,
+          maxRevisions: gate === "browser-verification" ? 3 : "unbounded",
         });
       }
     }
@@ -511,6 +529,7 @@ describe("built-in workflows", () => {
     expect(byId.get("plan")?.column).toBe("in-progress");
     expect(byId.get("plan-review")?.kind).toBe("optional-group");
     expect(byId.get("plan-review")?.column).toBe("in-progress");
+    expect(byId.get("plan-review")?.config?.maxRevisions).toBe("unbounded");
     expect(planReviewInnerConfig(ir)).toMatchObject({
       toolMode: "readonly",
       gateMode: "gate",
@@ -538,6 +557,14 @@ describe("built-in workflows", () => {
     expect(byId.get("merge-attempt")?.column).toBe("in-review");
     expect(byId.get("recovery-router")?.column).toBe("in-review");
     expect(ir.settings).toEqual(BUILTIN_WORKFLOW_SETTINGS);
+    expect(ir.settings?.find((setting) => setting.id === "planReviewMaxRevisions")).toMatchObject({
+      type: "number",
+      description: expect.stringMatching(/unbounded/i),
+    });
+    expect(ir.settings?.find((setting) => setting.id === "codeReviewMaxRevisions")).toMatchObject({
+      type: "number",
+      description: expect.stringMatching(/unbounded/i),
+    });
   });
 
   it("includes the marketing built-in with custom columns, prompts, and lifecycle traits", () => {

@@ -72,10 +72,10 @@ export function planReviewOptionalGroupNode(
       reworkRegion: true,
       maxReworkCycles: 3,
       /*
-       * FNXC:WorkflowRemediationBudget 2026-06-29-13:56:
-       * Built-in Plan Review owns the pre-execution replan budget. Default to three graph-mediated revise→replan→review attempts while allowing workflow authors to override `maxRevisions`.
+       * FNXC:WorkflowRevisionBudget 2026-06-30-19:49:
+       * Built-in Plan Review/spec remediation is unbounded by default; workflow setting value `planReviewMaxRevisions` is the operator cap for read-only built-ins, while authored `maxRevisions` still lets custom/duplicated workflows encode their own budget.
        */
-      maxRevisions: options.maxRevisions ?? 3,
+      maxRevisions: options.maxRevisions ?? "unbounded",
       template: {
         nodes: [
           {

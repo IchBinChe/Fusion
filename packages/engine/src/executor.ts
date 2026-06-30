@@ -3169,6 +3169,8 @@ export class TaskExecutor {
     await this.store.updateTask(task.id, {
       mergeDetails: null,
       mergeRetries: 0,
+      status: null,
+      error: null,
       verificationFailureCount: options?.preserveVerificationFailureCount ? task.verificationFailureCount ?? 0 : 0,
       workflowStepResults: preservedWorkflowStepResults,
     });
@@ -5806,6 +5808,23 @@ export class TaskExecutor {
           workflowId: ctx.run.workflowId,
           runId: ctx.run.runId,
         });
+        /*
+        FNXC:WorkflowMerge 2026-06-29-23:18:
+        FN-7261 reached the merge node in fast mode with every legacy implementation step still pending, producing a no-op merge proof for work that never ran. A graph-native workflow may project its checklist at the merge boundary only when node workflow results prove implementation completed; otherwise incomplete legacy steps are authoritative and merge must fail before the merger can create stale no-op proof.
+        */
+        if (hasNonTerminalWorkflowSteps(mergeTask)) {
+          await this.store.logEntry(
+            mergeTask.id,
+            "Workflow merge blocked before requester: implementation steps are incomplete",
+            undefined,
+            this.getRunContextFor(mergeTask.id),
+          );
+          return {
+            outcome: "failure",
+            value: "implementation-incomplete",
+            data: { status: "failed", reason: "implementation-incomplete" },
+          };
+        }
         const GRAPH_MERGE_TIMEOUT_MS = 30 * 60 * 1000;
         const controller = new AbortController();
         let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
@@ -6783,6 +6802,13 @@ export class TaskExecutor {
         undefined,
         this.getRunContextFor(taskId),
       );
+      if (finalization.reason === "task has incomplete steps" && live.mergeDetails?.noOpMerge === true && !live.mergeDetails?.commitSha) {
+        /*
+        FNXC:WorkflowMerge 2026-06-29-23:12:
+        FN-7261 exposed stale no-op proof as a re-execution blocker: a reopened task with incomplete implementation steps and only no-op merge proof must fall through to merge-state cleanup/reverification, not consume execute() by repeatedly trying blocked finalization.
+        */
+        return false;
+      }
       return true;
     }
     executorLog.log(`${taskId}: workflow graph merge-confirmed task finalized (${finalization.outcome})`);
@@ -8069,6 +8095,9 @@ export class TaskExecutor {
         await this.persistTokenUsage(task.id);
         return;
       }
+      if (mergeGraphFailure && failureValue === "implementation-incomplete" && await this.routeGraphFailureToExecutionResume(live, failedNode ?? "unknown", failureValue)) {
+        return;
+      }
       if (mergeGraphFailure && !this.isTerminalMergeGraphFailureValue(failureValue) && await this.routeGraphMergeFailureToRetry(live, result, abortProvenance)) {
         return;
       }
@@ -8167,7 +8196,8 @@ export class TaskExecutor {
     if (live.paused || live.userPaused === true) return false;
     if (live.column === "done" || live.column === "archived") return false;
     const incompleteSteps = hasNonTerminalWorkflowSteps(live);
-    if (live.column !== "in-review" && !(incompleteSteps && live.column === "todo")) return false;
+    const prematureMergeWithIncompleteSteps = failedNode === "merge" && failureValue === "implementation-incomplete" && incompleteSteps;
+    if (live.column !== "in-review" && !(incompleteSteps && live.column === "todo") && !(prematureMergeWithIncompleteSteps && live.column === "in-progress")) return false;
 
     const message = incompleteSteps
       ? `Workflow graph failed at node '${failedNode}'${failureValue ? ` (${failureValue})` : ""} with incomplete steps — moved back to todo for execution resume`

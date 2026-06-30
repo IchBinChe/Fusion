@@ -1857,6 +1857,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
               triggerTestId="quick-entry-optional-steps-trigger"
             />
 
+            {/* FNXC:QuickEntry 2026-06-30-00:00: Quick Add Plan stays a normal text action without a Lightbulb icon so the action row preserves behavior while removing the extra visual affordance and icon spacing shell. */}
             <button
               type="button"
               className="btn btn-sm"
@@ -1866,7 +1867,6 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
               data-testid="plan-button"
               title={t("tasks.planButtonTitle", "Open planning mode with current description")}
             >
-              <Lightbulb size={12} style={{ verticalAlign: "middle", marginRight: 4 }} />
               {t("tasks.plan", "Plan")}
             </button>
             {/* FNXC:QuickAddSubtaskFlag 2026-06-21-00:00: Render no Subtask button or click target unless App wires the default-off `subtaskBreakdown` experiment callback. */}

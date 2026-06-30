@@ -2795,14 +2795,18 @@ describe("QuickEntryBox", () => {
       });
     });
 
-    it("calls onPlanningMode and preserves input draft when Plan clicked", async () => {
+    it("renders Plan as text-only and preserves planning handoff", async () => {
       const onPlanningMode = vi.fn();
       renderQuickEntryBox({ onPlanningMode });
       expandQuickEntry();
       const textarea = screen.getByTestId("quick-entry-input") as HTMLTextAreaElement;
+      const planButton = screen.getByTestId("plan-button");
+
+      expect(planButton).toHaveTextContent("Plan");
+      expect(planButton.querySelector("svg")).toBeNull();
 
       fireEvent.change(textarea, { target: { value: "  Plan this task  " } });
-      fireEvent.click(screen.getByTestId("plan-button"));
+      fireEvent.click(planButton);
 
       await waitFor(() => {
         expect(onPlanningMode).toHaveBeenCalledWith("Plan this task");

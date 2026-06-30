@@ -5811,7 +5811,24 @@ export class TaskExecutor {
         /*
         FNXC:WorkflowMerge 2026-06-29-23:18:
         FN-7261 reached the merge node in fast mode with every legacy implementation step still pending, producing a no-op merge proof for work that never ran. A graph-native workflow may project its checklist at the merge boundary only when node workflow results prove implementation completed; otherwise incomplete legacy steps are authoritative and merge must fail before the merger can create stale no-op proof.
+
+        FNXC:WorkflowMerge 2026-06-30-00:38:
+        Fast default Coding tasks must still execute implementation work. FN-7260/FN-7271 reached merge with no parsed task steps, no foreach instances, and no implementation proof, then finalized through no-op merge. The workflow merge boundary must fail before requesting merge when a coding workflow has not produced implementation evidence; fast mode only bypasses review/verification gates.
         */
+        const missingImplementationProof = await this.getWorkflowMergeImplementationProofFailure(mergeTask);
+        if (missingImplementationProof) {
+          await this.store.logEntry(
+            mergeTask.id,
+            `Workflow merge blocked before requester: ${missingImplementationProof}`,
+            undefined,
+            this.getRunContextFor(mergeTask.id),
+          );
+          return {
+            outcome: "failure",
+            value: "implementation-incomplete",
+            data: { status: "failed", reason: "implementation-incomplete" },
+          };
+        }
         if (hasNonTerminalWorkflowSteps(mergeTask)) {
           await this.store.logEntry(
             mergeTask.id,
@@ -5962,6 +5979,50 @@ export class TaskExecutor {
     return { ...live, column: "in-review" };
   }
 
+  private async getWorkflowMergeImplementationProofFailure(task: TaskDetail): Promise<string | undefined> {
+    if (task.noCommitsExpected === true) return undefined;
+
+    let ir: WorkflowIr | undefined;
+    try {
+      ir = await resolveWorkflowIrForTask(this.store, task.id);
+    } catch {
+      ir = undefined;
+    }
+    if (!ir) return undefined;
+
+    const usesParsedSteps = ir.nodes.some((node) => node.kind === "parse-steps");
+    const usesExecuteSeam = ir.nodes.some((node) => node.kind === "prompt" && node.config?.seam === "execute");
+    if (!usesParsedSteps && !usesExecuteSeam) return undefined;
+
+    const steps = Array.isArray(task.steps) ? task.steps : [];
+    const hasTerminalParsedSteps =
+      steps.length > 0 && steps.every((step) => step.status === "done" || step.status === "skipped");
+    const hasModifiedFiles = (task.modifiedFiles?.length ?? 0) > 0;
+    const hasGraphNativeImplementationProof = (task.workflowStepResults ?? []).some((result) =>
+      result.source === "node"
+      && (result.phase ?? "pre-merge") === "pre-merge"
+      && (result.status === "passed" || result.status === "skipped")
+    );
+
+    /*
+    FNXC:WorkflowMerge 2026-06-30-00:38:
+    Stepwise Coding proves implementation through parsed task steps/foreach projection. Legacy monolithic Coding may prove through modified files or explicit no-op completion. Do not accept an empty step list as success for parse-step workflows; a valid PROMPT.md with unparsed steps must resume execution, not no-op merge.
+    */
+    if (usesParsedSteps) {
+      return hasTerminalParsedSteps || hasGraphNativeImplementationProof
+        ? undefined
+        : "implementation did not run: parsed coding steps are missing or incomplete";
+    }
+
+    if (usesExecuteSeam) {
+      return hasTerminalParsedSteps || hasModifiedFiles || hasGraphNativeImplementationProof
+        ? undefined
+        : "implementation did not run: execute seam has no completion proof";
+    }
+
+    return undefined;
+  }
+
   private shouldCompleteChecklistAtWorkflowMerge(task: TaskDetail): boolean {
     if (!Array.isArray(task.steps) || task.steps.length === 0) return false;
     if (task.steps.every((step) => step.status === "done" || step.status === "skipped")) return false;
@@ -6051,6 +6112,16 @@ export class TaskExecutor {
           workflowId: "legacy-seams",
           runId: this.getRunContextFor(seamTask.id)?.runId ?? "legacy-seam",
         });
+        const missingImplementationProof = await this.getWorkflowMergeImplementationProofFailure(mergeTask);
+        if (missingImplementationProof) {
+          await this.store.logEntry(
+            mergeTask.id,
+            `Workflow merge blocked before requester: ${missingImplementationProof}`,
+            undefined,
+            this.getRunContextFor(mergeTask.id),
+          );
+          return { outcome: "failure", value: "implementation-incomplete" };
+        }
         // Bound the wait: a wedged merge queue must not strand the graph walk
         // holding the routing claim. On timeout the run fails cleanly and the
         // task is parked for human review; the queue can still finish later.

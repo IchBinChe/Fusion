@@ -101,6 +101,49 @@ describe("step-parsers registry (U12, KTD-12)", () => {
         { name: "Preflight", status: "pending" },
       ]);
     });
+
+    it("parses plain third-level headings inside the Steps section when legacy step headings are absent", () => {
+      const content = `# Task
+
+## Mission
+
+### Not a task step
+
+## Steps
+
+### Preflight
+
+- [ ] inspect
+
+### Implementation
+
+### Testing & Verification
+
+## Do NOT
+
+### Also not a task step
+`;
+      expect(headings().parse(content).steps).toEqual([
+        { name: "Preflight" },
+        { name: "Implementation" },
+        { name: "Testing & Verification" },
+      ]);
+      expect(parseStepHeadings(content)).toEqual([
+        { name: "Preflight", status: "pending" },
+        { name: "Implementation", status: "pending" },
+        { name: "Testing & Verification", status: "pending" },
+      ]);
+    });
+
+    it("keeps legacy Step N headings authoritative when both styles appear", () => {
+      const content = `## Steps
+
+### Preflight
+
+### Step 1: Implementation
+`;
+      expect(headings().parse(content).steps).toEqual([{ name: "Implementation" }]);
+    });
   });
 
   describe("json-steps built-in", () => {

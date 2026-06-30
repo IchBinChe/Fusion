@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { Board } from "../Board";
 import { COLUMNS } from "@fusion/core";
-import { BOARD_WORKFLOW_SELECTION_STORAGE_KEY } from "../../utils/boardWorkflowSelection";
+import { ALL_WORKFLOWS_BOARD_VIEW_ID, BOARD_WORKFLOW_SELECTION_STORAGE_KEY } from "../../utils/boardWorkflowSelection";
 import { scopedKey } from "../../utils/projectStorage";
 
 import type { Task } from "@fusion/core";
@@ -1381,7 +1381,7 @@ describe("Board", () => {
       expect(onOpenWorkflowEditor).toHaveBeenCalledWith("wf-custom");
     });
 
-    it("selects the all-workflows aggregate view without persisting the sentinel", async () => {
+    it("selects and persists the all-workflows aggregate view", async () => {
       const projectId = "project-board-all-workflows";
       enableFlag(
         { "FN-1": "builtin:coding", "FN-2": "wf-custom" },
@@ -1394,7 +1394,7 @@ describe("Board", () => {
         onSubtaskBreakdown: vi.fn(),
       });
 
-      await selectWorkflow("__all_workflows__");
+      await selectWorkflow(ALL_WORKFLOWS_BOARD_VIEW_ID);
 
       expect(screen.getByTestId("workflow-switcher")).toHaveTextContent("All workflows");
       expect(screen.getByTestId("column-todo")).toHaveAttribute("data-tasks", expect.stringContaining("FN-1"));
@@ -1409,12 +1409,11 @@ describe("Board", () => {
       expect(screen.getByTestId("column-triage")).toHaveAttribute("data-has-can-drop", "no");
       expect(screen.getByTestId("column-triage")).toHaveAttribute("data-has-planning", "yes");
       expect(screen.getByTestId("column-triage")).toHaveAttribute("data-has-subtask", "yes");
-      expect(window.localStorage.getItem(scopedKey(BOARD_WORKFLOW_SELECTION_STORAGE_KEY, projectId))).toBeNull();
+      expect(window.localStorage.getItem(scopedKey(BOARD_WORKFLOW_SELECTION_STORAGE_KEY, projectId))).toBe(ALL_WORKFLOWS_BOARD_VIEW_ID);
 
       fireEvent.click(screen.getByTestId("workflow-switcher"));
       expect(screen.queryByTestId("workflow-switcher-edit-__all_workflows__")).toBeNull();
     });
-
 
     it("passes workflow options and the selected workflow default to per-workflow quick-add", async () => {
       enableFlag({ "FN-1": CUSTOM_WORKFLOW.id }, [DEFAULT_WORKFLOW, CUSTOM_WORKFLOW]);
@@ -1444,6 +1443,55 @@ describe("Board", () => {
         column: "intake",
       })));
       expect(onQuickCreate).not.toHaveBeenCalledWith(expect.objectContaining({ workflowId: "__all_workflows__" }));
+    });
+
+    it("restores all-workflows after remount and then persists a real workflow selection", async () => {
+      const projectId = "project-board-all-workflows-remount";
+      enableFlag(
+        { "FN-1": "builtin:coding", "FN-2": "wf-custom" },
+        [DEFAULT_WORKFLOW, CUSTOM_WORKFLOW],
+      );
+      const tasks = [mkTask({ id: "FN-1", column: "todo" }), mkTask({ id: "FN-2", column: "intake" })];
+      const first = renderBoard({ projectId, tasks });
+
+      await selectWorkflow(ALL_WORKFLOWS_BOARD_VIEW_ID);
+      expect(screen.getByTestId("workflow-switcher")).toHaveTextContent("All workflows");
+      expect(screen.getByTestId("column-intake")).toHaveAttribute("data-tasks", expect.stringContaining("FN-2"));
+      first.unmount();
+
+      renderBoard({ projectId, tasks });
+
+      await waitFor(() => expect(screen.getByTestId("workflow-switcher")).toHaveTextContent("All workflows"));
+      expect(screen.getByTestId("column-todo")).toHaveAttribute("data-tasks", expect.stringContaining("FN-1"));
+      expect(screen.getByTestId("column-intake")).toHaveAttribute("data-tasks", expect.stringContaining("FN-2"));
+
+      await selectWorkflow("wf-custom");
+      await waitFor(() => expect(screen.getByTestId("workflow-switcher")).toHaveTextContent("Custom Flow"));
+      expect(window.localStorage.getItem(scopedKey(BOARD_WORKFLOW_SELECTION_STORAGE_KEY, projectId))).toBe("wf-custom");
+      expect(screen.getByTestId("column-intake")).toHaveAttribute("data-tasks", expect.stringContaining("FN-2"));
+      expect(screen.queryByTestId("column-todo")).toBeNull();
+    });
+
+    it("scopes persisted all-workflows preferences per project", async () => {
+      const allWorkflowsProjectId = "project-board-all-workflows-alpha";
+      const realWorkflowProjectId = "project-board-all-workflows-beta";
+      window.localStorage.setItem(scopedKey(BOARD_WORKFLOW_SELECTION_STORAGE_KEY, allWorkflowsProjectId), ALL_WORKFLOWS_BOARD_VIEW_ID);
+      window.localStorage.setItem(scopedKey(BOARD_WORKFLOW_SELECTION_STORAGE_KEY, realWorkflowProjectId), "wf-custom");
+      enableFlag(
+        { "FN-1": "builtin:coding", "FN-2": "wf-custom" },
+        [DEFAULT_WORKFLOW, CUSTOM_WORKFLOW],
+      );
+      const tasks = [mkTask({ id: "FN-1", column: "todo" }), mkTask({ id: "FN-2", column: "intake" })];
+      const { rerender } = renderBoard({ projectId: allWorkflowsProjectId, tasks });
+
+      await waitFor(() => expect(screen.getByTestId("workflow-switcher")).toHaveTextContent("All workflows"));
+      expect(screen.getByTestId("column-intake")).toHaveAttribute("data-tasks", expect.stringContaining("FN-2"));
+
+      rerender(<Board {...createBoardProps({ projectId: realWorkflowProjectId, tasks })} />);
+
+      await waitFor(() => expect(screen.getByTestId("workflow-switcher")).toHaveTextContent("Custom Flow"));
+      expect(screen.queryByTestId("column-todo")).toBeNull();
+      expect(screen.getByTestId("column-intake")).toHaveAttribute("data-tasks", expect.stringContaining("FN-2"));
     });
 
     it("falls stale and missing task workflow ids back to the default workflow", async () => {

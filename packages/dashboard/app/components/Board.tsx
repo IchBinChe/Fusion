@@ -16,6 +16,12 @@ import { WorkflowSwitcher } from "./WorkflowSwitcher";
 import { computeWorkflowStatusCounts, type WorkflowStatusCounts } from "./workflowStatusCounts";
 import { writeBoardWorkflowsCache } from "../utils/boardWorkflowsCache";
 import { useBoardWorkflows } from "../hooks/useBoardWorkflows";
+import {
+  ALL_WORKFLOWS_BOARD_VIEW_ID,
+  readBoardWorkflowViewSelection,
+  removeBoardWorkflowSelection,
+  writeBoardWorkflowSelection,
+} from "../utils/boardWorkflowSelection";
 import type { TaskContextMenuColumnMetadata } from "./TaskContextMenu";
 
 interface BoardProps {
@@ -130,7 +136,7 @@ function scheduleDocumentHorizontalScrollReset() {
   setTimeout(run, 0);
 }
 
-export const ALL_WORKFLOWS_BOARD_VIEW_ID = "__all_workflows__";
+export { ALL_WORKFLOWS_BOARD_VIEW_ID } from "../utils/boardWorkflowSelection";
 
 type AggregateBoardColumn = BoardWorkflowColumn & { sourceWorkflowIds: string[] };
 type AggregateQuickCreateTarget = { columnId: string; workflowId: string };
@@ -156,7 +162,9 @@ export function Board({ tasks, projectId, maxConcurrent, showWorktreeGrouping, o
   Board owns one Done sort mode so legacy and built-in workflow Done surfaces stay in sync; the default remains completion-date descending to preserve existing first-load ordering.
   */
   const [doneSortMode, setDoneSortMode] = useState<DoneColumnSortMode>("completion-date-desc");
-  const [isAllWorkflowsViewSelected, setIsAllWorkflowsViewSelected] = useState(false);
+  const [isAllWorkflowsViewSelected, setIsAllWorkflowsViewSelected] = useState(
+    () => readBoardWorkflowViewSelection(projectId) === ALL_WORKFLOWS_BOARD_VIEW_ID,
+  );
   const archivedLoadedRef = useRef(false);
   const boardRef = useRef<HTMLElement | null>(null);
   const [headerWorkflowSlot, setHeaderWorkflowSlot] = useState<HTMLElement | null>(() => {
@@ -398,25 +406,32 @@ export function Board({ tasks, projectId, maxConcurrent, showWorktreeGrouping, o
     return counts;
   }, [boardWorkflows, tasks]);
 
+  useEffect(() => {
+    setIsAllWorkflowsViewSelected(readBoardWorkflowViewSelection(projectId) === ALL_WORKFLOWS_BOARD_VIEW_ID);
+  }, [projectId]);
+
   const handleWorkflowSwitcherChange = useCallback((workflowId: string) => {
     /*
-    FNXC:WorkflowBoard 2026-06-29-16:00:
-    "All workflows" is a Board-only aggregate filter sentinel. Selecting it must not write to the durable workflow-selection store or flow into task creation, workflow editing, or workflow settings APIs that expect a real workflow id.
-    Real workflow selections still use useBoardWorkflows so FN-7234 project-scoped persistence remains the only durable path.
+    FNXC:WorkflowBoard 2026-06-30-00:00:
+    "All workflows" is a Board-only aggregate filter sentinel. It is now persisted in the same project-scoped Board view preference as real workflow ids so refresh/remount restores whichever Board view the operator last selected, while `useBoardWorkflows` filters the sentinel away from shared real-workflow consumers and backend-bound APIs.
     */
     if (workflowId === ALL_WORKFLOWS_BOARD_VIEW_ID) {
       setIsAllWorkflowsViewSelected(true);
+      writeBoardWorkflowSelection(projectId, ALL_WORKFLOWS_BOARD_VIEW_ID);
       return;
     }
     setIsAllWorkflowsViewSelected(false);
     setSelectedWorkflowId(workflowId);
-  }, [setSelectedWorkflowId]);
+  }, [projectId, setSelectedWorkflowId]);
 
   useEffect(() => {
-    if (!workflowMode) {
+    if (boardWorkflows && !workflowMode) {
       setIsAllWorkflowsViewSelected(false);
+      if (readBoardWorkflowViewSelection(projectId) === ALL_WORKFLOWS_BOARD_VIEW_ID) {
+        removeBoardWorkflowSelection(projectId);
+      }
     }
-  }, [workflowMode]);
+  }, [boardWorkflows, projectId, workflowMode]);
 
   const knownWorkflowIds = useMemo(() => new Set(boardWorkflows?.workflows.map((workflow) => workflow.id) ?? []), [boardWorkflows]);
 

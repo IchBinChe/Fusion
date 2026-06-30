@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act, createEvent } from "@testing-library/react";
 import { QuickEntryBox } from "../QuickEntryBox";
 import type { Task } from "@fusion/core";
 import { checkDuplicateTasks, fetchSettings, fetchAgents, uploadAttachment, fetchWorkflowOptionalSteps } from "../../api";
@@ -3112,14 +3112,20 @@ describe("QuickEntryBox", () => {
   });
 
   describe("image attachments", () => {
-    it("shows Attach as an inline control when expanded", () => {
+    it("shows an icon-only Attach control when expanded", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
 
-      expect(screen.getByTestId("quick-entry-attach")).toBeInTheDocument();
+      const attachButton = screen.getByTestId("quick-entry-attach");
+      expect(attachButton).toBeInTheDocument();
+      expect(attachButton).toHaveAccessibleName("Attach images");
+      expect(attachButton).toHaveAttribute("title", "Attach images");
+      expect(attachButton.textContent).not.toContain("Attach");
+      expect(attachButton.querySelector("svg")).toBeTruthy();
+      expect(attachButton.classList.contains("btn-icon")).toBe(true);
     });
 
-    it("clicking Attach triggers the hidden file input", () => {
+    it("clicking the icon-only Attach control triggers the hidden file input", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
 
@@ -3197,7 +3203,7 @@ describe("QuickEntryBox", () => {
       expect(uploadAttachment).not.toHaveBeenCalled();
     });
 
-    it("shows pending image count in the inline Attach label", () => {
+    it("preserves pending image count in accessible labels without visible Attach text", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
 
@@ -3205,7 +3211,117 @@ describe("QuickEntryBox", () => {
       const file = new File(["badge"], "badge.png", { type: "image/png" });
       fireEvent.change(fileInput, { target: { files: [file] } });
 
-      expect(screen.getByTestId("quick-entry-attach").textContent).toContain("Attach (1)");
+      const attachButton = screen.getByTestId("quick-entry-attach");
+      expect(attachButton).toHaveAccessibleName("Attach images (1 pending)");
+      expect(attachButton).toHaveAttribute("title", "Attach images (1 pending)");
+      expect(attachButton.textContent).toBe("1");
+      expect(attachButton.textContent).not.toContain("Attach");
+    });
+
+    it("keeps the icon-only Attach control in the mobile touch target action row", () => {
+      mockMobileViewport();
+      renderQuickEntryBox({});
+      expandQuickEntry();
+
+      const attachButton = screen.getByTestId("quick-entry-attach");
+      expect(attachButton.closest(".quick-entry-actions")).toBeTruthy();
+      expect(attachButton.classList.contains("btn-icon")).toBe(true);
+      const touchRule = cssRuleBody(
+        QUICK_ENTRY_BOX_CSS,
+        ".quick-entry-actions .btn,\n  .quick-entry-actions .wf-optional-steps-dropdown-trigger",
+      );
+      expect(touchRule).toContain("min-height: calc(var(--space-2xl) + var(--space-xs))");
+    });
+
+    it("shows and clears a Quick Add drop target only for file drags", () => {
+      renderQuickEntryBox({});
+      const box = screen.getByTestId("quick-entry-box");
+
+      fireEvent.dragEnter(box, { dataTransfer: { types: ["text/plain"], files: [] } });
+      expect(screen.queryByTestId("quick-entry-drop-target")).toBeNull();
+
+      fireEvent.dragEnter(box, { dataTransfer: { types: ["Files"], files: [] } });
+      expect(screen.getByTestId("quick-entry-drop-target")).toHaveTextContent("Drop images to attach");
+      expect(box.classList.contains("quick-entry-box--drag-over")).toBe(true);
+
+      fireEvent.dragLeave(box, { dataTransfer: { types: ["Files"], files: [] } });
+      expect(screen.queryByTestId("quick-entry-drop-target")).toBeNull();
+      expect(box.classList.contains("quick-entry-box--drag-over")).toBe(false);
+    });
+
+    it("prevents browser navigation while dragging files over nested Quick Add controls", () => {
+      renderQuickEntryBox({});
+      expandQuickEntry();
+      const attachButton = screen.getByTestId("quick-entry-attach");
+      const dragOverEvent = createEvent.dragOver(attachButton);
+      Object.defineProperty(dragOverEvent, "dataTransfer", {
+        value: { types: ["Files"], files: [], dropEffect: "none" },
+      });
+      const preventDefault = vi.spyOn(dragOverEvent, "preventDefault");
+
+      fireEvent(attachButton, dragOverEvent);
+
+      expect(preventDefault).toHaveBeenCalled();
+      expect(screen.getByTestId("quick-entry-drop-target")).toBeInTheDocument();
+    });
+
+    it("adds previews for supported dropped images and rejects unsupported dropped files", () => {
+      renderQuickEntryBox({});
+      const box = screen.getByTestId("quick-entry-box");
+      const image = new File(["image"], "dropped.png", { type: "image/png" });
+      const text = new File(["text"], "notes.txt", { type: "text/plain" });
+
+      fireEvent.dragEnter(box, { dataTransfer: { types: ["Files"], files: [image, text] } });
+      fireEvent.drop(box, { dataTransfer: { types: ["Files"], files: [image, text] } });
+
+      expect(screen.queryByTestId("quick-entry-drop-target")).toBeNull();
+      expect(screen.getByAltText("dropped.png")).toBeInTheDocument();
+      expect(screen.queryByAltText("notes.txt")).toBeNull();
+    });
+
+    it("uploads images added by dropping files after task creation", async () => {
+      const onCreate = vi.fn().mockResolvedValue(CREATED_TASK);
+      renderQuickEntryBox({ onCreate });
+      const box = screen.getByTestId("quick-entry-box");
+      const textarea = screen.getByTestId("quick-entry-input");
+      const image = new File(["dropped"], "create-dropped.webp", { type: "image/webp" });
+
+      fireEvent.drop(box, { dataTransfer: { types: ["Files"], files: [image] } });
+      fireEvent.change(textarea, { target: { value: "Create with dropped image" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(onCreate).toHaveBeenCalled();
+        expect(uploadAttachment).toHaveBeenCalledWith(CREATED_TASK.id, image, TEST_PROJECT_ID);
+      });
+    });
+
+    it("clears the drag target after dragend without expanding collapsed List quick add controls", () => {
+      renderQuickEntryBox({ singleLine: true, defaultExpanded: false });
+      const box = screen.getByTestId("quick-entry-box");
+      const controls = document.getElementById("quick-entry-controls");
+
+      expect(controls?.hasAttribute("hidden")).toBe(true);
+      fireEvent.dragEnter(box, { dataTransfer: { types: ["Files"], files: [] } });
+      expect(screen.getByTestId("quick-entry-drop-target")).toBeInTheDocument();
+
+      fireEvent.dragEnd(box);
+      expect(screen.queryByTestId("quick-entry-drop-target")).toBeNull();
+      expect(controls?.hasAttribute("hidden")).toBe(true);
+    });
+
+    it("keeps tokenized drag/drop and icon-only attachment CSS contracts", () => {
+      const dragRule = cssRuleBody(QUICK_ENTRY_BOX_CSS, ".quick-entry-box--drag-over");
+      const dropRule = cssRuleBody(QUICK_ENTRY_BOX_CSS, ".quick-entry-drop-target");
+      const attachRule = cssRuleBody(QUICK_ENTRY_BOX_CSS, ".quick-entry-attach-button");
+      expect(dragRule).not.toBeNull();
+      expect(dropRule).not.toBeNull();
+      expect(attachRule).not.toBeNull();
+      expect(dragRule).toContain("var(--triage)");
+      expect(dropRule).toContain("var(--triage)");
+      expect(dropRule).toContain("pointer-events: none");
+      expect(attachRule).toContain("min-width: calc(var(--space-xl) + var(--space-xs))");
+      expect(QUICK_ENTRY_BOX_CSS).toMatch(/@media \(max-width: 768px\) \{[\s\S]*\.quick-entry-drop-target/);
     });
 
     it("resetForm clears pending images and revokes object URLs", async () => {

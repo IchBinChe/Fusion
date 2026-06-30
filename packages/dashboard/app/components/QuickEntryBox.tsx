@@ -155,6 +155,8 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
   const previousProjectIdRef = useRef(projectId);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const pendingImagesRef = useRef<PendingImage[]>([]);
+  const [isFileDragOver, setIsFileDragOver] = useState(false);
+  const dragDepthRef = useRef(0);
 
   // Rich creation state (mirrors InlineCreateCard)
   const [dependencies, setDependencies] = useState<string[]>([]);
@@ -609,6 +611,8 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
   const resetForm = useCallback(() => {
     pendingImages.forEach((img) => URL.revokeObjectURL(img.previewUrl));
     setPendingImages([]);
+    dragDepthRef.current = 0;
+    setIsFileDragOver(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -650,7 +654,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     }
   }, [pendingImages, projectId, optionalSteps]);
 
-  const handleImageFiles = useCallback((files: FileList | null | undefined) => {
+  const handleImageFiles = useCallback((files: FileList | File[] | null | undefined) => {
     if (!files || files.length === 0) return;
 
     const newImages: PendingImage[] = [];
@@ -665,6 +669,55 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
       setPendingImages((prev) => [...prev, ...newImages]);
     }
   }, []);
+
+  const isFileDrag = useCallback((dataTransfer: DataTransfer | null) => {
+    if (!dataTransfer) return false;
+    return Array.from(dataTransfer.types ?? []).includes("Files");
+  }, []);
+
+  /*
+  FNXC:QuickAddAttachments 2026-06-30-00:00:
+  Quick Add uses an icon-only paperclip to keep the action row compact, so the accessible name and title carry the Attach action plus pending-image count. The same image intake path handles file input, paste, and file drag/drop so previews and post-create uploads stay consistent.
+  */
+  const attachLabel = pendingImages.length > 0
+    ? t("tasks.attachImagesCount", "Attach images ({{count}} pending)", { count: pendingImages.length })
+    : t("tasks.attachImages", "Attach images");
+
+  const handleDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!isFileDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    dragDepthRef.current += 1;
+    setIsFileDragOver(true);
+  }, [isFileDrag]);
+
+  const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!isFileDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    setIsFileDragOver(true);
+  }, [isFileDrag]);
+
+  const clearFileDragState = useCallback(() => {
+    dragDepthRef.current = 0;
+    setIsFileDragOver(false);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!isFileDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) {
+      setIsFileDragOver(false);
+    }
+  }, [isFileDrag]);
+
+  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!isFileDrag(e.dataTransfer)) return;
+    e.preventDefault();
+    clearFileDragState();
+    if (isSubmitting) return;
+    handleImageFiles(e.dataTransfer.files);
+  }, [clearFileDragState, handleImageFiles, isFileDrag, isSubmitting]);
 
   const handlePaste = useCallback((e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     if (isSubmitting) return;
@@ -1703,7 +1756,21 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
 
   return (
     <>
-      <div className={`quick-entry-box ${isDisclosureExpanded ? "quick-entry-box--expanded" : "quick-entry-box--collapsed"}${singleLine ? " quick-entry--single-line" : ""}`} data-testid="quick-entry-box">
+      <div
+        className={`quick-entry-box ${isDisclosureExpanded ? "quick-entry-box--expanded" : "quick-entry-box--collapsed"}${singleLine ? " quick-entry--single-line" : ""}${isFileDragOver ? " quick-entry-box--drag-over" : ""}`}
+        data-testid="quick-entry-box"
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDragEnd={clearFileDragState}
+        onDrop={handleDrop}
+      >
+      {isFileDragOver && (
+        <div className="quick-entry-drop-target" data-testid="quick-entry-drop-target" aria-hidden="true">
+          <Paperclip size={16} aria-hidden="true" />
+          <span>{t("tasks.dropImagesToAttach", "Drop images to attach")}</span>
+        </div>
+      )}
       <div className="description-with-refine">
         <div className="quick-entry-main-row">
           <div className="quick-entry-textarea-wrap">
@@ -2164,12 +2231,16 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
             <button
               type="button"
               onMouseDown={(e) => e.preventDefault()}
-              className="btn btn-sm"
+              className="btn btn-icon btn-sm quick-entry-attach-button"
               data-testid="quick-entry-attach"
               onClick={() => fileInputRef.current?.click()}
+              aria-label={attachLabel}
+              title={attachLabel}
             >
-              <Paperclip size={12} style={{ verticalAlign: "middle" }} />
-              {pendingImages.length > 0 ? t("tasks.attachCount", "Attach ({{count}})", { count: pendingImages.length }) : t("tasks.attach", "Attach")}
+              <Paperclip size={12} aria-hidden="true" />
+              {pendingImages.length > 0 && (
+                <span className="quick-entry-attach-count" aria-hidden="true">{pendingImages.length}</span>
+              )}
             </button>
 
             <button

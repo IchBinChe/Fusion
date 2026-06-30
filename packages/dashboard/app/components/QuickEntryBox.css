@@ -1,5 +1,6 @@
 /* === Quick Entry Box === */
 .quick-entry-box {
+  position: relative;
   padding: 8px 10px;
   background: var(--card);
   border: 1px solid var(--border);
@@ -9,6 +10,54 @@
 
 .quick-entry-box:focus-within {
   border-color: var(--todo);
+}
+
+.quick-entry-box--drag-over {
+  border-color: var(--triage);
+  box-shadow: 0 0 0 var(--space-2xs) color-mix(in srgb, var(--triage) 35%, transparent);
+}
+
+.quick-entry-drop-target {
+  position: absolute;
+  inset: var(--space-xs);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  border: var(--space-2xs) dashed var(--triage);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--card) 86%, var(--triage));
+  color: var(--text);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.quick-entry-attach-button {
+  position: relative;
+  min-width: calc(var(--space-xl) + var(--space-xs));
+  gap: var(--space-2xs);
+}
+
+.quick-entry-attach-count {
+  min-width: var(--space-md);
+  padding: 0 var(--space-2xs);
+  border-radius: calc(var(--radius) * 4);
+  background: var(--triage);
+  color: var(--provider-icon-contrast);
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  font-weight: 700;
+}
+
+@media (max-width: 768px) {
+  .quick-entry-drop-target {
+    inset: var(--space-2xs);
+    padding: var(--space-xs);
+    text-align: center;
+  }
 }
 
 .quick-entry-input {

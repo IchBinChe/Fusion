@@ -355,6 +355,9 @@ The **New Task** dialog's workflow selector also defaults to the current or last
 
 Optional workflow steps declared by the active workflow are available from the quick-add action row and the **New Task** dialog's inline quick buttons. For example, the coding workflow's browser verification option appears as a quick drop-down when that workflow is active; each option is seeded from the workflow step's `defaultOn` setting and is sent with the task's `enabledWorkflowSteps` payload at creation time.
 
+<!-- FNXC:QuickAddAttachments 2026-06-30-00:00: Quick Add attachments use a compact icon-only paperclip while keeping the Attach action and pending image count in accessible labels. The same pending preview/upload path accepts image selection, paste, and direct drag/drop onto the Quick Add box. -->
+Quick Add image attachments use the paperclip icon button in the action row. Supported image files (`png`, `jpeg`, `gif`, `webp`) can be selected from that control, pasted into the Quick Add input, or dragged onto the Quick Add box; all three paths show pending previews before task creation and upload the images to the created task afterward.
+
 Quick entry, inline quick-create, and the full **New Task** dialog all check for similar active tasks before creating. When possible duplicates exist, the warning lists each match by task description (falling back to title, then “No description”) and lets you open an existing task, cancel, or create anyway with the duplicates acknowledged.
 
 Completed single-task planning sessions remain in the Planning Mode history after you create the task, and selecting one restores the completed summary instead of restarting the composer. History rows are deduplicated by session id even if the initial load and live session updates arrive out of order, and deleting a history entry now waits for the server delete to persist (failures keep the row visible and surface an error instead of silently disappearing until refresh).

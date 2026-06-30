@@ -227,6 +227,11 @@ When the dashboard footer reports that a newer `@runfusion/fusion` version is av
 
 ## Workflow Settings
 
+<!--
+FNXC:WorkflowSettings 2026-06-30-09:15:
+Settings docs should keep workflow value resolution and prompt ownership separate: settings values are typed per-workflow/project data, while built-in prompt overrides are node text overlays edited through the workflow editor.
+-->
+
 Some knobs that used to live in this Settings reference as project settings are now
 **workflow settings**: they are declared by a workflow and their values are stored
 **per `(workflow, project)`**, not as ambient project settings. A workflow models

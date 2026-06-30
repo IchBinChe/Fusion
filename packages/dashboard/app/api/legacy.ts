@@ -2239,6 +2239,17 @@ export function deleteCustomProvider(id: string): Promise<{ success: boolean }> 
   });
 }
 
+export interface RefreshProviderModelsResponse {
+  provider: CustomProvider;
+  modelsRefreshed: number;
+}
+
+export function refreshProviderModels(id: string): Promise<RefreshProviderModelsResponse> {
+  return api<RefreshProviderModelsResponse>(`/custom-providers/${encodeURIComponent(id)}/refresh-models`, {
+    method: "POST",
+  });
+}
+
 // Backward-compatibility exports for existing UI callers; will be removed when
 // custom-provider UI migrates to the new core CustomProvider contract.
 export interface CustomProviderModelInput {

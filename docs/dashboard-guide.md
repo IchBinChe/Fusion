@@ -269,7 +269,7 @@ The custom-provider form uses these fields:
 - **API key** — optional credential for providers that require authentication.
 - **Available models** — comma-separated model IDs, for example `gpt-4, gpt-3.5-turbo`.
 
-Use **Detect Models** to auto-fill **Available models** from the provider's `/models` endpoint. Detection requires a **Base URL** and may require an **API key**, depending on the provider.
+Use **Detect Models** to auto-fill **Available models** while adding or editing a provider from the provider's `/models` endpoint. Detection requires a **Base URL** and may require an **API key**, depending on the provider. Saved providers also have a row-level **Refresh Models** action that uses the stored endpoint and credential to replace the persisted model list without exposing the raw key in the browser.
 
 ### Add a custom provider
 
@@ -292,10 +292,10 @@ Expected outcome: the provider appears in the Custom Providers list with its API
 1. Open **Settings → Authentication → Custom Providers** and expand **Advanced: Custom Providers**.
 2. Find the provider in the list and select its pencil **Edit** action.
 3. Update **Provider name**, **API type**, **Base URL**, **API key**, or **Available models** as needed.
-4. Select **Detect Models** again if you want to refresh or add model IDs from the provider's `/models` endpoint.
+4. Select **Detect Models** again if you want to refresh or add model IDs from the provider's `/models` endpoint before saving.
 5. Select **Save Changes**.
 
-Expected outcome: the provider list refreshes, and model dropdowns use the updated model list. If you rename the provider or change model IDs, update any **Project Models** or workflow model lane selections that should use the new `{provider}/{modelId}` value.
+Expected outcome: the provider list refreshes, and model dropdowns use the updated model list. If you only need to refresh a saved provider's models after credentials, endpoints, or upstream availability changed, select the row-level **Refresh Models** action instead; failures keep the previous model list intact. If you rename the provider or change model IDs, update any **Project Models** or workflow model lane selections that should use the new `{provider}/{modelId}` value.
 
 ### Delete a custom provider
 

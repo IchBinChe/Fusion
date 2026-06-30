@@ -1274,6 +1274,52 @@ describe("StepSessionExecutor", () => {
       expect(onStepStart).toHaveBeenNthCalledWith(3, 2);
     });
 
+    it("skips live-terminal steps before starting resumed sessions", async () => {
+      const prompt = makeStepPrompt("FN-7248", 2);
+      const task = makeTaskDetail({
+        id: "FN-7248",
+        prompt,
+        steps: [
+          { name: "Preflight", status: "pending" },
+          { name: "Implement", status: "pending" },
+        ],
+      });
+      const settings = makeSettings({ maxParallelSteps: 1 });
+      const session = makeMockSession();
+      mockedCreateFnAgent.mockResolvedValue({ session } as any);
+      const onStepStart = vi.fn();
+      const store = {
+        getTask: vi.fn().mockResolvedValue({
+          ...task,
+          steps: [
+            { name: "Preflight", status: "done" },
+            { name: "Implement", status: "in-progress" },
+          ],
+        }),
+        appendAgentLog: vi.fn().mockResolvedValue(undefined),
+      };
+
+      const executor = new StepSessionExecutor({
+        store: store as any,
+        taskDetail: task,
+        worktreePath: "/project/.worktrees/main",
+        rootDir: "/project",
+        settings,
+        onStepStart,
+      });
+
+      const results = await executor.executeAll();
+
+      /*
+       * FNXC:WorkflowResume 2026-06-29-18:26:
+       * Resume must use TaskStore as the authoritative projection before scheduling per-step sessions. A stale snapshot may still list Step 0 as pending, but if the live task says Step 0 is done then no Step 0 session or onStepStart callback may run.
+       */
+      expect(results.map((result) => result.stepIndex)).toEqual([1]);
+      expect(onStepStart).toHaveBeenCalledTimes(1);
+      expect(onStepStart).toHaveBeenCalledWith(1);
+      expect(mockedCreateFnAgent).toHaveBeenCalledTimes(1);
+    });
+
     it("includes token usage from session stats on successful step completion", async () => {
       const prompt = makeStepPrompt("FN-001", 1);
       const task = makeTaskDetail({

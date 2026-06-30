@@ -791,20 +791,59 @@ export class StepSessionExecutor {
     for (const wave of waves) {
       if (this.aborted) break;
 
-      if (wave.indices.length === 1) {
+      /*
+       * FNXC:WorkflowResume 2026-06-29-18:26:
+       * Engine restart/resume may construct StepSessionExecutor with a stale taskDetail snapshot while TaskStore already shows earlier steps as done/skipped. Re-read live step status before scheduling each wave so resumed graph-owned execution does not fire onStepStart for completed steps and produce noisy done→in-progress regressions like FN-7248.
+       */
+      const runnableIndices = await this.filterLiveRunnableStepIndices(wave.indices);
+      if (runnableIndices.length === 0) {
+        continue;
+      }
+
+      if (runnableIndices.length === 1) {
         // Single step — use primary worktree
-        const stepIdx = wave.indices[0]!;
+        const stepIdx = runnableIndices[0]!;
         const result = await this.executeStep(stepIdx, this.options.worktreePath);
         this.stepResults.push(result);
       } else {
         // Multiple steps — parallel wave
-        const waveResults = await this.executeParallelWave(wave);
+        const waveResults = await this.executeParallelWave({ ...wave, indices: runnableIndices });
         this.stepResults.push(...waveResults);
       }
     }
 
     // Sort results by step index for deterministic output
     return this.stepResults.sort((a, b) => a.stepIndex - b.stepIndex);
+  }
+
+  private async filterLiveRunnableStepIndices(stepIndices: number[]): Promise<number[]> {
+    if (!this.options.store || stepIndices.length === 0) {
+      return stepIndices;
+    }
+
+    try {
+      const liveTask = await this.options.store.getTask(this.options.taskDetail.id);
+      if (!liveTask || liveTask.id !== this.options.taskDetail.id) {
+        return stepIndices;
+      }
+      return stepIndices.filter((stepIndex) => {
+        const liveStatus = liveTask.steps?.[stepIndex]?.status;
+        if (liveStatus === "done" || liveStatus === "skipped") {
+          stepExecLog.log(
+            `Skipping step ${stepIndex} for task ${this.options.taskDetail.id}: live status is ${liveStatus}`,
+          );
+          return false;
+        }
+        return true;
+      });
+    } catch (err) {
+      stepExecLog.warn(
+        `Failed to inspect live step status for task ${this.options.taskDetail.id}; continuing from snapshot: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return stepIndices;
+    }
   }
 
   /**

@@ -29,7 +29,7 @@ The gray top header band (task id + column badge) was over-padded. Trim its vert
 .detail-title-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-sm);
 }
 
 .detail-id {
@@ -39,27 +39,32 @@ The gray top header band (task id + column badge) was over-padded. Trim its vert
   color: var(--text-muted);
 }
 
-.detail-column-badge,
-.detail-workflow-badge {
-  font-size: 11px;
-  padding: 2px 8px;
+.detail-column-badge {
+  font-size: 0.6875rem;
+  padding: calc(var(--space-xs) / 2) var(--space-sm);
   border-radius: var(--radius-pill);
   font-weight: 600;
-  letter-spacing: 0.5px;
-}
-
-.detail-column-badge {
+  letter-spacing: 0.03125rem;
   text-transform: uppercase;
 }
 
 .detail-workflow-badge {
+  font-size: 0.6875rem;
+  padding: calc(var(--space-xs) / 2) var(--space-sm);
+  border-radius: var(--radius-pill);
+  font-weight: 600;
+  letter-spacing: 0.03125rem;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text-muted);
   background: var(--surface-raised);
   border: 1px solid var(--border);
-}
-
-.detail-workflow-badge--mobile {
-  display: none;
 }
 .badge-triage {
   background: var(--status-triage-bg);
@@ -314,22 +319,12 @@ The task-detail modal metadata must keep priority, execution mode, provenance, P
 
   /*
   FNXC:TaskDetailWorkflow 2026-06-30-07:37:
-  Mobile task details need the workflow-name badge to read with the Updated timestamp instead of the compact header band. Keep desktop's header badge placement while showing exactly one mobile badge inside the timestamp group.
+  Task details show workflow identity in the Updated timestamp section across desktop and mobile. Keep the canonical badge inline with Created/Updated metadata so header rows, embedded detail hosts, and mobile back-header details do not render duplicate workflow badges or empty mobile-only shells.
   */
-  .detail-workflow-badge--desktop {
-    display: none;
-  }
-
   .detail-timestamps {
     display: flex;
     align-items: center;
     flex-wrap: nowrap;
-  }
-
-  .detail-timestamps .detail-workflow-badge--mobile {
-    display: inline-flex;
-    align-items: center;
-    flex: 0 0 auto;
   }
 
   .detail-provenance-context {

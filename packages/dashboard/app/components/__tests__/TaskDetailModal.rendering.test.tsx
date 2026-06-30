@@ -35,7 +35,7 @@ import { FileBrowserProvider } from "../../context/FileBrowserContext";
 setupTaskDetailModalHooks();
 
 describe("TaskDetailModal", () => {
-  describe("workflow header badge", () => {
+  describe("workflow timestamp badge", () => {
     const workflowPayload = {
       flagEnabled: true,
       defaultWorkflowId: "builtin:coding",
@@ -71,14 +71,17 @@ describe("TaskDetailModal", () => {
       );
     }
 
-    it("renders the resolved workflow name beside the task id and column badge", async () => {
+    it("renders the resolved workflow name in the timestamp section instead of the title row", async () => {
       vi.mocked(dashboardApi.fetchBoardWorkflows).mockResolvedValueOnce(workflowPayload);
 
-      renderDetail();
+      const { container } = renderDetail();
 
       const badge = await screen.findByTestId("task-detail-workflow-badge");
       expect(badge).toHaveTextContent("Docs");
-      expect(badge.parentElement).toHaveClass("detail-title-row");
+      expect(badge.closest(".detail-timestamps")).toBeTruthy();
+      expect(badge.closest(".detail-title-row")).toBeNull();
+      expect(container.querySelector(".detail-title-row .detail-workflow-badge")).toBeNull();
+      expect(screen.getAllByTestId("task-detail-workflow-badge")).toHaveLength(1);
       expect(screen.getByText("FN-101")).toBeInTheDocument();
       expect(screen.getByText("Todo")).toBeInTheDocument();
       expect(dashboardApi.fetchBoardWorkflows).toHaveBeenCalledTimes(1);
@@ -170,7 +173,7 @@ describe("TaskDetailModal", () => {
       expect(container.querySelector(".detail-workflow-badge")).toBeNull();
     });
 
-    it("renders beside the Updated timestamp in the mobile back-header variant", async () => {
+    it("renders the canonical badge beside the Updated timestamp in the mobile back-header variant", async () => {
       vi.mocked(dashboardApi.fetchBoardWorkflows).mockResolvedValueOnce(workflowPayload);
 
       const { container } = render(
@@ -187,13 +190,15 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      expect(await screen.findByTestId("task-detail-workflow-badge")).toHaveTextContent("Docs");
-      const mobileBadge = screen.getByTestId("task-detail-workflow-badge-mobile");
+      const badge = await screen.findByTestId("task-detail-workflow-badge");
       const timestamps = container.querySelector(".detail-timestamps");
       const updatedLabel = screen.getByText("Updated").closest(".detail-timestamp-item");
-      expect(mobileBadge).toHaveTextContent("Docs");
-      expect(mobileBadge.parentElement).toBe(timestamps);
-      expect(updatedLabel?.nextElementSibling).toBe(mobileBadge);
+      expect(badge).toHaveTextContent("Docs");
+      expect(badge.parentElement).toBe(timestamps);
+      expect(updatedLabel?.nextElementSibling).toBe(badge);
+      expect(screen.getAllByTestId("task-detail-workflow-badge")).toHaveLength(1);
+      expect(screen.queryByTestId("task-detail-workflow-badge-mobile")).toBeNull();
+      expect(container.querySelector(".detail-title-row .detail-workflow-badge")).toBeNull();
       expect(screen.getByRole("button", { name: "Back to task list" })).toBeInTheDocument();
     });
   });

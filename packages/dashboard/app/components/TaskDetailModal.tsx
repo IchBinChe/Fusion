@@ -2716,11 +2716,6 @@ export function TaskDetailContent({
             <span className={`detail-column-badge badge-${task.column}`}>
               {columnLabel(task.column)}
             </span>
-            {taskWorkflowName && (
-              <span className="detail-workflow-badge detail-workflow-badge--desktop" data-testid="task-detail-workflow-badge">
-                {taskWorkflowName}
-              </span>
-            )}
           </div>
           <div className="modal-header-actions">
             {!isEditing && canEdit && (
@@ -3094,7 +3089,7 @@ export function TaskDetailContent({
                     </time>
                   </span>
                   {taskWorkflowName && (
-                    <span className="detail-workflow-badge detail-workflow-badge--mobile" data-testid="task-detail-workflow-badge-mobile">
+                    <span className="detail-workflow-badge" data-testid="task-detail-workflow-badge">
                       {taskWorkflowName}
                     </span>
                   )}

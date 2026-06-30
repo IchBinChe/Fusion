@@ -121,18 +121,23 @@ describe("TaskDetailModal", () => {
       expect(css).not.toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.detail-timestamp-separator\s*\{[^}]*display:\s*none;/);
     });
 
-    it("places only the mobile workflow badge inside the timestamp group at the mobile breakpoint", () => {
+    it("keeps the canonical workflow badge owned by the timestamp group across breakpoints", () => {
       const css = readDashboardStylesSource();
-      const mobileBlock = getCssAtRuleBlockContaining(css, "@media (max-width: 768px)", ".detail-timestamps .detail-workflow-badge--mobile");
-      const mobileTimestampBadgeBlock = getCssRuleBlock(mobileBlock, ".detail-timestamps .detail-workflow-badge--mobile");
-      const mobileDesktopBadgeBlock = getCssRuleBlock(mobileBlock, ".detail-workflow-badge--desktop");
+      const workflowBadgeBlock = css.match(/^\.detail-workflow-badge\s*\{([^}]*)\}/m)?.[1] ?? "";
+      const mobileBlock = getCssAtRuleBlockContaining(css, "@media (max-width: 768px)", ".detail-timestamps");
+      const mobileTimestampsBlock = getCssRuleBlock(mobileBlock, ".detail-timestamps");
 
-      expectBaseRule(css, ".detail-workflow-badge--mobile", "display: none;");
-      expect(mobileDesktopBadgeBlock).toContain("display: none;");
-      expect(mobileTimestampBadgeBlock).toContain("display: inline-flex;");
-      expect(mobileTimestampBadgeBlock).toContain("align-items: center;");
-      expect(mobileTimestampBadgeBlock).toContain("flex: 0 0 auto;");
-      expect(css).not.toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.detail-title-row\s+\.detail-workflow-badge--mobile\s*\{/);
+      expect(workflowBadgeBlock).toContain("display: inline-flex;");
+      expect(workflowBadgeBlock).toContain("align-items: center;");
+      expect(workflowBadgeBlock).toContain("flex: 0 1 auto;");
+      expect(workflowBadgeBlock).toContain("text-overflow: ellipsis;");
+      expect(mobileTimestampsBlock).toContain("display: flex;");
+      expect(mobileTimestampsBlock).toContain("align-items: center;");
+      expect(mobileTimestampsBlock).toContain("flex-wrap: nowrap;");
+      expect(css).not.toMatch(/detail-workflow-badge--desktop/);
+      expect(css).not.toMatch(/detail-workflow-badge--mobile/);
+      expect(css).not.toMatch(/task-detail-workflow-badge-mobile/);
+      expect(css).not.toMatch(/\.detail-title-row\s+\.detail-workflow-badge\s*\{/);
     });
     it("keeps desktop and mobile modal sizing guards unchanged", () => {
       const css = readDashboardStylesSource();

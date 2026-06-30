@@ -3691,6 +3691,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     task: Task,
     operation: string,
     reservationCommit?: { reservationId: string; nodeId: string },
+    workflowSelection?: { workflowId: string; stepIds: string[] },
   ): Promise<void> {
     const id = this.getTaskIdFromDir(dir);
     let deletedAt: string | undefined;
@@ -3698,6 +3699,9 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       deletedAt = this.getSoftDeletedWriteConflict(id, task);
       if (deletedAt) return;
       this.insertTaskWithFtsRecovery(task, operation);
+      if (workflowSelection) {
+        this.writeTaskWorkflowSelection(id, workflowSelection.workflowId, workflowSelection.stepIds);
+      }
       if (reservationCommit) {
         /*
         FNXC:TaskIdReservation 2026-06-26-00:00:
@@ -5198,7 +5202,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
 
   /**
    * Create a refinement task from a completed or in-review task.
-   * The new task is created in triage with a dependency on the original task.
+   * The new task is created in the inherited workflow's entry column with a dependency on the original task.
    * Validates the original is in 'done' or 'in-review' column.
    */
   async refineTask(id: string, feedback: string): Promise<Task> {
@@ -5224,6 +5228,34 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
      */
     const refinementTitle = `${id}: ${normalizedFeedback}`.slice(0, MAX_TITLE_LENGTH).trim();
 
+    const sourceWorkflowSelection = this.getTaskWorkflowSelection(id);
+    let inheritedWorkflowSelection: { workflowId: string; stepIds: string[]; entryColumnId?: string } | undefined;
+    if (sourceWorkflowSelection) {
+      try {
+        inheritedWorkflowSelection = await this.materializeExplicitWorkflowSteps(sourceWorkflowSelection.workflowId);
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        if (!/not found/i.test(errorMessage)) throw err;
+        storeLog.warn("Source workflow selection was stale during refinement; falling back to default workflow", {
+          phase: "refineTask:source-workflow",
+          taskId: id,
+          workflowId: sourceWorkflowSelection.workflowId,
+          error: errorMessage,
+        });
+      }
+    }
+    if (!inheritedWorkflowSelection) {
+      try {
+        inheritedWorkflowSelection = await this.materializeDefaultWorkflowSteps();
+      } catch (err) {
+        storeLog.warn("Failed to apply default workflow during refinement creation; continuing without workflow selection", {
+          phase: "refineTask:default-workflow",
+          taskId: id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     return this.createTaskWithDistributedReservation({ description: feedback.trim() }, {
       createTaskWithId: async (newId, reservationCommit) => {
         const sourceGithubLinked = sourceTask.githubTracking?.enabled === true || Boolean(sourceTask.githubTracking?.issue);
@@ -5243,13 +5275,18 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
           title: refinementTitle,
           description: `${feedback.trim()}\n\nRefines: ${id}`,
           priority: normalizeTaskPriority(sourceTask.priority),
-          column: "triage",
+          /*
+          FNXC:TaskRefinementWorkflow 2026-06-29-22:36:
+          Refinements must enter the inherited workflow's intake/default column, not hard-coded triage, because custom workflows can omit triage and would otherwise hide the new card from the workflow the operator returns to.
+          */
+          column: inheritedWorkflowSelection?.entryColumnId ?? "triage",
           dependencies: [id],
           sourceType: "task_refine",
           sourceParentTaskId: id,
           githubTracking: refinementGithubTracking,
           steps: [],
           currentStep: 0,
+          enabledWorkflowSteps: inheritedWorkflowSelection?.stepIds,
           log: [{ timestamp: now, action: `Created as refinement of ${id}` }],
           columnMovedAt: now,
           createdAt: now,
@@ -5261,7 +5298,11 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         this.assertTaskIdAvailable(newId);
 
         const newDir = this.taskDir(newId);
-        await this.atomicCreateTaskJson(newDir, newTask, "refineTask", reservationCommit);
+        /*
+        FNXC:TaskRefinementWorkflow 2026-06-29-21:25:
+        Refinements keep the source task's explicit workflow selection, reseeded from the current workflow definition, so returning from a non-default workflow does not hide the new refinement on the default board. The task row and workflow-selection row are written in one SQLite transaction so creation cannot strand a refinement without its intended board lane.
+        */
+        await this.atomicCreateTaskJson(newDir, newTask, "refineTask", reservationCommit, inheritedWorkflowSelection);
         const prompt = `# ${newTask.title}\n\n${newTask.description}\n`;
         const sanitizedPrompt = sanitizeFileScopeInPromptContent(prompt);
         await mkdir(newDir, { recursive: true });
@@ -15938,7 +15979,7 @@ ${stepsSection}`;
   /** Resolve the project-default workflow into the selection seed (workflow id +
    *  default-on optional-group node ids), or undefined when no default is set /
    *  it is missing / it is a fragment. */
-  private async materializeDefaultWorkflowSteps(): Promise<{ workflowId: string; stepIds: string[] } | undefined> {
+  private async materializeDefaultWorkflowSteps(): Promise<{ workflowId: string; stepIds: string[]; entryColumnId?: string } | undefined> {
     const workflowId = await this.getDefaultWorkflowId();
     if (!workflowId) return undefined;
     const def = await this.getWorkflowDefinition(workflowId);
@@ -15952,7 +15993,7 @@ ${stepsSection}`;
     // FNXC:WorkflowOptionalGroup 2026-06-21-14:20: seed `enabledWorkflowSteps`
     // with the ids of `optional-group` nodes whose `defaultOn` is true. These group
     // ids are the toggle keys the executor reads at the optional-group seam.
-    return { workflowId, stepIds: resolveDefaultOnOptionalGroupIds(def.ir) };
+    return { workflowId, stepIds: resolveDefaultOnOptionalGroupIds(def.ir), entryColumnId: resolveEntryColumnId(def.ir) };
   }
 
   /** Resolve an EXPLICITLY requested workflow id (U6/R3/KTD-4) into the selection
@@ -15962,14 +16003,14 @@ ${stepsSection}`;
    *  workflow. Validation happens up front so a non-compilable workflow aborts. */
   private async materializeExplicitWorkflowSteps(
     workflowId: string,
-  ): Promise<{ workflowId: string; stepIds: string[] }> {
+  ): Promise<{ workflowId: string; stepIds: string[]; entryColumnId?: string }> {
     const def = await this.getWorkflowDefinition(workflowId);
     if (!def) throw new Error(`Workflow '${workflowId}' not found`);
     if (def.kind === "fragment") {
       throw new Error(`Workflow '${workflowId}' is a fragment and cannot be selected for a task`);
     }
     this.validateWorkflowCompilable(workflowId, def);
-    return { workflowId, stepIds: resolveDefaultOnOptionalGroupIds(def.ir) };
+    return { workflowId, stepIds: resolveDefaultOnOptionalGroupIds(def.ir), entryColumnId: resolveEntryColumnId(def.ir) };
   }
 
   /**

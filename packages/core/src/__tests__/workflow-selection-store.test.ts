@@ -75,36 +75,47 @@ invariant `selection.stepIds === task.enabledWorkflowSteps` still holds.
 */
 /** v2 workflow whose success path threads through two optional-group nodes
  *  (og-on defaultOn:true, og-off defaultOn:false). */
-function optionalGroupIr(): WorkflowIr {
+function optionalGroupIr(options: { onId?: string; offId?: string; name?: string } = {}): WorkflowIr {
+  const onId = options.onId ?? "og-on";
+  const offId = options.offId ?? "og-off";
   const groupTemplate = (id: string) => ({
     nodes: [{ id: `${id}-inner`, kind: "prompt" as const, config: { prompt: "x" } }],
     edges: [],
   });
   return {
     version: "v2",
-    name: "og-wf",
+    name: options.name ?? "og-wf",
     columns: [{ id: "todo", name: "Todo", traits: [] }],
     nodes: [
       { id: "start", kind: "start", column: "todo" },
       {
-        id: "og-on",
+        id: onId,
         kind: "optional-group",
         column: "todo",
-        config: { name: "On Group", defaultOn: true, template: groupTemplate("og-on") },
+        config: { name: "On Group", defaultOn: true, template: groupTemplate(onId) },
       },
       {
-        id: "og-off",
+        id: offId,
         kind: "optional-group",
         column: "todo",
-        config: { name: "Off Group", defaultOn: false, template: groupTemplate("og-off") },
+        config: { name: "Off Group", defaultOn: false, template: groupTemplate(offId) },
       },
       { id: "end", kind: "end", column: "todo" },
     ],
     edges: [
-      { from: "start", to: "og-on", condition: "success" },
-      { from: "og-on", to: "og-off", condition: "success" },
-      { from: "og-off", to: "end", condition: "success" },
+      { from: "start", to: onId, condition: "success" },
+      { from: onId, to: offId, condition: "success" },
+      { from: offId, to: "end", condition: "success" },
     ],
+  };
+}
+
+function nonTriageIntakeIr(): WorkflowIr {
+  const ir = optionalGroupIr({ name: "non-triage-intake" }) as Extract<WorkflowIr, { version: "v2" }>;
+  return {
+    ...ir,
+    columns: [{ id: "intake", name: "Intake", traits: [{ trait: "intake" }] }],
+    nodes: ir.nodes.map((node) => ({ ...node, column: "intake" })),
   };
 }
 
@@ -332,6 +343,136 @@ describe("TaskStore workflow selection (U3)", () => {
     expect(await store.getDefaultWorkflowId()).toBe(wf.id);
     await store.setDefaultWorkflowId(null);
     expect(await store.getDefaultWorkflowId()).toBeUndefined();
+  });
+
+  async function moveToDone(taskId: string): Promise<void> {
+    await store.moveTask(taskId, "todo");
+    await store.moveTask(taskId, "in-progress");
+    await store.moveTask(taskId, "in-review");
+    await store.moveTask(taskId, "done");
+  }
+
+  describe("refinement workflow inheritance (FN-7265)", () => {
+    it("preserves a custom workflow selection by reseeding its default-on optional groups", async () => {
+      const wf = await store.createWorkflowDefinition({ name: "QA", ir: optionalGroupIr() });
+      const otherWorkflow = await store.createWorkflowDefinition({
+        name: "Other QA",
+        ir: optionalGroupIr({ onId: "other-on", offId: "other-off", name: "other-og-wf" }),
+      });
+      const source = await store.createTask({ description: "source", enabledWorkflowSteps: [] });
+      await store.selectTaskWorkflow(source.id, otherWorkflow.id);
+      await store.selectTaskWorkflow(source.id, wf.id);
+      await store.updateTask(source.id, { enabledWorkflowSteps: ["other-on", "stale-manual-toggle"] });
+      await moveToDone(source.id);
+
+      const refined = await store.refineTask(source.id, "follow up");
+      const detail = await store.getTask(refined.id);
+      const refinedSelection = store.getTaskWorkflowSelection(refined.id);
+
+      expect(refinedSelection?.workflowId).toBe(wf.id);
+      expect(refinedSelection?.stepIds).toEqual(["og-on"]);
+      expect(detail.enabledWorkflowSteps).toEqual(["og-on"]);
+      expect(detail.enabledWorkflowSteps).not.toEqual(["other-on", "stale-manual-toggle"]);
+      expect(detail.enabledWorkflowSteps).not.toContain("other-on");
+    });
+
+    it("places a custom-workflow refinement in its non-triage entry column", async () => {
+      const wf = await store.createWorkflowDefinition({ name: "Non-triage QA", ir: nonTriageIntakeIr() });
+      const source = await store.createTask({ description: "source", enabledWorkflowSteps: [] });
+      await store.selectTaskWorkflow(source.id, wf.id);
+      await moveToDone(source.id);
+
+      const refined = await store.refineTask(source.id, "follow up");
+      const detail = await store.getTask(refined.id);
+
+      expect(store.getTaskWorkflowSelection(refined.id)).toEqual({ workflowId: wf.id, stepIds: ["og-on"] });
+      expect(detail.column).toBe("intake");
+      expect(detail.column).not.toBe("triage");
+    });
+
+    it("preserves a custom workflow selection with an empty optional-group seed set", async () => {
+      const wf = await store.createWorkflowDefinition({ name: "Linear", ir: linearIr() });
+      const source = await store.createTask({ description: "source", enabledWorkflowSteps: [] });
+      await store.selectTaskWorkflow(source.id, wf.id);
+      await moveToDone(source.id);
+
+      const refined = await store.refineTask(source.id, "follow up");
+
+      expect(store.getTaskWorkflowSelection(refined.id)).toEqual({ workflowId: wf.id, stepIds: [] });
+      expect((await store.getTask(refined.id)).enabledWorkflowSteps ?? []).toEqual([]);
+    });
+
+    it("preserves a non-default built-in workflow selection", async () => {
+      const source = await store.createTask({ description: "source", enabledWorkflowSteps: [] });
+      await store.selectTaskWorkflow(source.id, "builtin:quick-fix");
+      await moveToDone(source.id);
+
+      const refined = await store.refineTask(source.id, "follow up");
+
+      expect(store.getTaskWorkflowSelection(refined.id)?.workflowId).toBe("builtin:quick-fix");
+    });
+
+    it("uses normal default-workflow inheritance when the source has no explicit selection", async () => {
+      const defaultWorkflow = await store.createWorkflowDefinition({ name: "Default", ir: optionalGroupIr() });
+      await store.setDefaultWorkflowId(defaultWorkflow.id);
+      const source = await store.createTask({ description: "source", enabledWorkflowSteps: [] });
+      expect(store.getTaskWorkflowSelection(source.id)).toBeUndefined();
+      await moveToDone(source.id);
+
+      const refined = await store.refineTask(source.id, "follow up");
+
+      const detail = await store.getTask(refined.id);
+      expect(store.getTaskWorkflowSelection(refined.id)).toEqual({ workflowId: defaultWorkflow.id, stepIds: ["og-on"] });
+      expect(detail.enabledWorkflowSteps).toEqual(["og-on"]);
+      expect(detail.column).toBe("todo");
+    });
+
+    it("does not create an explicit selection row for no-selection sources without a default workflow", async () => {
+      const source = await store.createTask({ description: "source", enabledWorkflowSteps: [] });
+      expect(store.getTaskWorkflowSelection(source.id)).toBeUndefined();
+      await moveToDone(source.id);
+
+      const refined = await store.refineTask(source.id, "follow up");
+
+      expect(store.getTaskWorkflowSelection(refined.id)).toBeUndefined();
+      expect((await store.getTask(refined.id)).enabledWorkflowSteps ?? []).toEqual([]);
+    });
+
+    it("falls back to the default workflow when the source selection row is stale", async () => {
+      const defaultWorkflow = await store.createWorkflowDefinition({ name: "Default", ir: optionalGroupIr() });
+      await store.setDefaultWorkflowId(defaultWorkflow.id);
+      const source = await store.createTask({ description: "source", enabledWorkflowSteps: [] });
+      store.getDatabase().prepare(
+        `INSERT INTO task_workflow_selection (taskId, workflowId, stepIds, updatedAt)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(taskId) DO UPDATE SET workflowId = excluded.workflowId, stepIds = excluded.stepIds, updatedAt = excluded.updatedAt`,
+      ).run(source.id, "WF-MISSING", JSON.stringify(["stale-group"]), new Date().toISOString());
+      await moveToDone(source.id);
+      const before = (await store.listTasks({ includeArchived: true })).length;
+
+      const refined = await store.refineTask(source.id, "follow up");
+
+      const detail = await store.getTask(refined.id);
+      expect((await store.listTasks({ includeArchived: true })).length).toBe(before + 1);
+      expect(store.getTaskWorkflowSelection(refined.id)).toEqual({ workflowId: defaultWorkflow.id, stepIds: ["og-on"] });
+      expect(detail.column).toBe("todo");
+    });
+
+    it("fails before creating a refinement when the explicit source workflow cannot materialize", async () => {
+      const invalidWorkflow = await store.createWorkflowDefinition({ name: "Branchy", ir: branchingIr() });
+      const source = await store.createTask({ description: "source", enabledWorkflowSteps: [] });
+      store.getDatabase().prepare(
+        `INSERT INTO task_workflow_selection (taskId, workflowId, stepIds, updatedAt)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(taskId) DO UPDATE SET workflowId = excluded.workflowId, stepIds = excluded.stepIds, updatedAt = excluded.updatedAt`,
+      ).run(source.id, invalidWorkflow.id, JSON.stringify([]), new Date().toISOString());
+      await moveToDone(source.id);
+      const before = (await store.listTasks({ includeArchived: true })).length;
+
+      await expect(store.refineTask(source.id, "follow up")).rejects.toBeInstanceOf(WorkflowCompileError);
+
+      expect((await store.listTasks({ includeArchived: true })).length).toBe(before);
+    });
   });
 
   // U6/R3/KTD-4: create-time `workflowId` materializes the selection atomically.

@@ -610,11 +610,11 @@ importers:
         specifier: 0.24.0
         version: 0.24.0(zod@4.3.6)
       '@earendil-works/pi-ai':
-        specifier: '*'
-        version: 0.77.0(@modelcontextprotocol/sdk@1.28.0(zod@4.3.6))(ws@8.20.0)(zod@4.3.6)
+        specifier: ^0.80.3
+        version: 0.80.3(@modelcontextprotocol/sdk@1.28.0(zod@4.3.6))(ws@8.20.0)(zod@4.3.6)
       '@earendil-works/pi-coding-agent':
-        specifier: '*'
-        version: 0.77.0(@modelcontextprotocol/sdk@1.28.0(zod@4.3.6))(ws@8.20.0)(zod@4.3.6)
+        specifier: ^0.80.3
+        version: 0.80.3(@modelcontextprotocol/sdk@1.28.0(zod@4.3.6))(ws@8.20.0)(zod@4.3.6)
     devDependencies:
       '@types/node':
         specifier: ^25.5.2

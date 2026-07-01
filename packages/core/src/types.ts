@@ -3730,10 +3730,10 @@ export interface ProjectSettings {
    */
   openTasksInRightSidebar?: boolean;
   /**
-   * When true, mobile board task-card clicks open task detail in the existing popped-out FloatingWindow task surface instead of the full main-panel task detail. Default: false.
+   * When true, ordinary board task-card clicks open task detail in the existing popped-out FloatingWindow task surface instead of the full main-panel task detail. Default: false.
    *
-   * FNXC:MobileTaskPopups 2026-06-29-00:00:
-   * This project-scoped setting is default-off so mobile board navigation is unchanged until operators opt in. When enabled, it applies only to mobile viewport board-card clicks with no deep initial tab and reuses the existing task pop-out/FloatingWindow path; desktop/tablet right-dock routing and all non-board task-open paths remain governed by their existing settings and handlers.
+   * FNXC:MobileTaskPopups 2026-07-01-12:00:
+   * This project-scoped setting is default-off so board navigation is unchanged until operators opt in. When enabled, it applies to board-card clicks on every viewport with no deep initial tab and reuses the existing task pop-out/FloatingWindow path; the popup route takes precedence over right-dock routing for those ordinary clicks while all non-board task-open paths remain governed by their existing settings and handlers.
    */
   openMobileTasksInPopup?: boolean;
   /**

@@ -63,11 +63,13 @@ describe("AppearanceSection", () => {
     expect(screen.getByLabelText("Open tasks in the right sidebar")).toBeChecked();
   });
 
-  it("renders and updates the mobile task popup checkbox", () => {
+  it("renders and updates the task popup checkbox", () => {
     const { setForm, getForm } = renderAppearanceSection();
 
-    const checkbox = screen.getByLabelText("Open mobile tasks as popups");
+    const checkbox = screen.getByLabelText("Open tasks as popups");
     expect(checkbox).not.toBeChecked();
+    expect(screen.getByText(/ordinary board task-card clicks open the existing task popup/)).toBeInTheDocument();
+    expect(screen.getByText(/Deep-tab and non-board task opens keep their current behavior/)).toBeInTheDocument();
 
     fireEvent.click(checkbox);
 
@@ -75,10 +77,10 @@ describe("AppearanceSection", () => {
     expect(getForm().openMobileTasksInPopup).toBe(true);
   });
 
-  it("reflects a persisted enabled mobile task popup value", () => {
+  it("reflects a persisted enabled task popup value", () => {
     renderAppearanceSection({ openMobileTasksInPopup: true });
 
-    expect(screen.getByLabelText("Open mobile tasks as popups")).toBeChecked();
+    expect(screen.getByLabelText("Open tasks as popups")).toBeChecked();
   });
 
   it("renders task detail Chat-first as unchecked by default and updates it", () => {

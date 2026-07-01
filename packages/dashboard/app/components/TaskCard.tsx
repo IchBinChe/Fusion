@@ -2,6 +2,7 @@ import "./TaskCard.css";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { memo, useCallback, useState, useRef, useEffect, useLayoutEffect, useMemo, type CSSProperties, type ReactElement } from "react";
+import { createPortal } from "react-dom";
 import { Link, Clock, Layers, Pencil, ChevronDown, Folder, Target, Bot, Trash2, RotateCw, Zap, GitBranch, GitPullRequest, AlertTriangle, ArrowUpRight } from "lucide-react";
 import type { Task, TaskDetail, Column, ColumnId, PrInfo, IssueInfo, TaskPriority, GithubIssueAction, MergeResult } from "@fusion/core";
 import {
@@ -1972,6 +1973,10 @@ function TaskCardComponent({
     setContextMenuPosition(null);
   }, []);
 
+  useEffect(() => {
+    closeContextMenu();
+  }, [closeContextMenu, task.column, task.id]);
+
   const clearLongPressTimer = useCallback(() => {
     if (longPressTimerRef.current) {
       clearTimeout(longPressTimerRef.current);
@@ -1982,12 +1987,10 @@ function TaskCardComponent({
 
   const openContextMenuAt = useCallback((clientX: number, clientY: number) => {
     if (!hasContextMenuActions || isEditing) return;
-    const rect = cardRef.current?.getBoundingClientRect();
-    if (!rect) return;
     setShowSendBackMenu(false);
     setContextMenuPosition({
-      x: Math.max(CONTEXT_MENU_VIEWPORT_MARGIN, Math.min(clientX - rect.left, rect.width - CONTEXT_MENU_VIEWPORT_MARGIN)),
-      y: Math.max(CONTEXT_MENU_VIEWPORT_MARGIN, Math.min(clientY - rect.top, rect.height - CONTEXT_MENU_VIEWPORT_MARGIN)),
+      x: Math.max(CONTEXT_MENU_VIEWPORT_MARGIN, Math.min(clientX, window.innerWidth - CONTEXT_MENU_VIEWPORT_MARGIN)),
+      y: Math.max(CONTEXT_MENU_VIEWPORT_MARGIN, Math.min(clientY, window.innerHeight - CONTEXT_MENU_VIEWPORT_MARGIN)),
     });
   }, [hasContextMenuActions, isEditing]);
 
@@ -2039,27 +2042,17 @@ function TaskCardComponent({
   }, [clearLongPressTimer]);
 
   /*
-  FNXC:TaskContextMenu 2026-06-30-00:15:
-  Board card context menus open from pointer and keyboard coordinates, so clamp after render using the measured menu size. This keeps long action lists inside the viewport without changing normal card click or drag behavior.
+  FNXC:TaskContextMenu 2026-07-01-00:00:
+  Board columns intentionally clip and scroll their bodies, so card context menus must be portaled to document.body and positioned in viewport coordinates. Clamp after render using the measured menu size so right-click, keyboard, and long-press menus escape column borders without weakening board overflow containment.
   */
   useLayoutEffect(() => {
     if (!contextMenuPosition) return;
     const menu = contextMenuRef.current;
-    const card = cardRef.current;
-    if (!menu || !card) return;
+    if (!menu) return;
     const menuRect = menu.getBoundingClientRect();
-    const cardRect = card.getBoundingClientRect();
-    const maxX = Math.max(
-      CONTEXT_MENU_VIEWPORT_MARGIN,
-      Math.min(cardRect.width - CONTEXT_MENU_VIEWPORT_MARGIN, window.innerWidth - cardRect.left - menuRect.width - CONTEXT_MENU_VIEWPORT_MARGIN),
-    );
-    const maxY = Math.max(
-      CONTEXT_MENU_VIEWPORT_MARGIN,
-      Math.min(cardRect.height - CONTEXT_MENU_VIEWPORT_MARGIN, window.innerHeight - cardRect.top - menuRect.height - CONTEXT_MENU_VIEWPORT_MARGIN),
-    );
     const nextPosition = {
-      x: Math.max(CONTEXT_MENU_VIEWPORT_MARGIN, Math.min(contextMenuPosition.x, maxX)),
-      y: Math.max(CONTEXT_MENU_VIEWPORT_MARGIN, Math.min(contextMenuPosition.y, maxY)),
+      x: Math.max(CONTEXT_MENU_VIEWPORT_MARGIN, Math.min(contextMenuPosition.x, window.innerWidth - menuRect.width - CONTEXT_MENU_VIEWPORT_MARGIN)),
+      y: Math.max(CONTEXT_MENU_VIEWPORT_MARGIN, Math.min(contextMenuPosition.y, window.innerHeight - menuRect.height - CONTEXT_MENU_VIEWPORT_MARGIN)),
     };
     if (nextPosition.x !== contextMenuPosition.x || nextPosition.y !== contextMenuPosition.y) {
       setContextMenuPosition(nextPosition);
@@ -2352,11 +2345,11 @@ function TaskCardComponent({
       tabIndex={hasContextMenuActions ? 0 : undefined}
       aria-haspopup={hasContextMenuActions ? "menu" : undefined}
     >
-      {contextMenuPosition && hasContextMenuActions && (
+      {contextMenuPosition && hasContextMenuActions && createPortal(
         <div
           ref={contextMenuRef}
           className="task-card-context-menu-popover"
-          style={{ "--task-card-context-menu-x": `${contextMenuPosition.x}px`, "--task-card-context-menu-y": `${contextMenuPosition.y}px` } as CSSProperties}
+          style={{ left: contextMenuPosition.x, top: contextMenuPosition.y } as CSSProperties}
           onClick={(event) => event.stopPropagation()}
           onContextMenu={(event) => event.preventDefault()}
         >
@@ -2364,7 +2357,8 @@ function TaskCardComponent({
             actions={contextMenuActions}
             onActionSelect={closeContextMenu}
           />
-        </div>
+        </div>,
+        document.body,
       )}
       <div className="card-header">
         <span className="card-id">{task.id}</span>

@@ -38,10 +38,8 @@
 }
 
 .task-card-context-menu-popover {
-  position: absolute;
-  left: var(--task-card-context-menu-x);
-  top: var(--task-card-context-menu-y);
-  z-index: 30;
+  position: fixed;
+  z-index: 1000;
 }
 
 .task-card-context-menu-popover .task-context-menu {

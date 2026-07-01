@@ -4,14 +4,16 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { TaskPlannerChatTab } from "../TaskPlannerChatTab";
 
-const { mockEnsureTaskPlannerChatSession, mockFetchTaskPlannerChatSession, mockFetchChatMessages, mockFetchTaskDetail, mockStreamChatResponse, mockTranslations, mockT } = vi.hoisted(() => {
+const { mockEnsureTaskPlannerChatSession, mockFetchTaskPlannerChatSession, mockFetchChatSession, mockFetchChatMessages, mockFetchTaskDetail, mockStreamChatResponse, mockAttachChatStream, mockTranslations, mockT } = vi.hoisted(() => {
   const translations = new Map<string, string>();
   return {
     mockEnsureTaskPlannerChatSession: vi.fn(),
     mockFetchTaskPlannerChatSession: vi.fn(),
+    mockFetchChatSession: vi.fn(),
     mockFetchChatMessages: vi.fn(),
     mockFetchTaskDetail: vi.fn(),
     mockStreamChatResponse: vi.fn(),
+    mockAttachChatStream: vi.fn(),
     mockTranslations: translations,
     mockT: (key: string, fallback: string) => translations.get(key) ?? fallback,
   };
@@ -29,9 +31,11 @@ vi.mock("../../api", async (importOriginal) => {
     ...actual,
     ensureTaskPlannerChatSession: mockEnsureTaskPlannerChatSession,
     fetchTaskPlannerChatSession: mockFetchTaskPlannerChatSession,
+    fetchChatSession: mockFetchChatSession,
     fetchChatMessages: mockFetchChatMessages,
     fetchTaskDetail: mockFetchTaskDetail,
     streamChatResponse: mockStreamChatResponse,
+    attachChatStream: mockAttachChatStream,
   };
 });
 
@@ -44,6 +48,24 @@ vi.mock("lucide-react", () => ({
 
 function makeTask(id: string) {
   return { id, description: "Test task", column: "todo", dependencies: [], steps: [], currentStep: 0, createdAt: "2026-06-30T00:00:00.000Z", updatedAt: "2026-06-30T00:00:00.000Z", planningModelProvider: "anthropic", planningModelId: "claude-plan" } as any;
+}
+
+function makePlannerSession(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "chat-planner",
+    agentId: "task-planner:FN-7310",
+    title: "FN-7310 planner chat",
+    status: "active",
+    projectId: null,
+    modelProvider: "anthropic",
+    modelId: "claude-plan",
+    createdAt: "2026-06-30T00:00:00.000Z",
+    updatedAt: "2026-06-30T00:00:00.000Z",
+    cliSessionFile: null,
+    cliExecutorAdapterId: null,
+    inFlightGeneration: null,
+    ...overrides,
+  };
 }
 
 function createDeferred<T>() {
@@ -92,25 +114,14 @@ describe("TaskPlannerChatTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockTranslations.clear();
-    const plannerSession = {
-      id: "chat-planner",
-      agentId: "task-planner:FN-7310",
-      title: "FN-7310 planner chat",
-      status: "active",
-      projectId: null,
-      modelProvider: "anthropic",
-      modelId: "claude-plan",
-      createdAt: "2026-06-30T00:00:00.000Z",
-      updatedAt: "2026-06-30T00:00:00.000Z",
-      cliSessionFile: null,
-      cliExecutorAdapterId: null,
-      inFlightGeneration: null,
-    };
+    const plannerSession = makePlannerSession();
     mockFetchTaskPlannerChatSession.mockResolvedValue({ session: plannerSession });
+    mockFetchChatSession.mockResolvedValue({ session: plannerSession });
     mockEnsureTaskPlannerChatSession.mockResolvedValue({ session: plannerSession });
     mockFetchChatMessages.mockResolvedValue({ messages: [] });
     mockFetchTaskDetail.mockResolvedValue(makeTask("FN-7310"));
     mockStreamChatResponse.mockReturnValue({ close: vi.fn(), isConnected: () => true });
+    mockAttachChatStream.mockReturnValue({ close: vi.fn(), isConnected: () => true });
   });
 
   it("looks up an existing task-scoped planner session and renders the starter-prompt empty state", async () => {
@@ -355,6 +366,127 @@ describe("TaskPlannerChatTab", () => {
     expect(screen.queryByText("Committed stale answer")).not.toBeInTheDocument();
     expect(screen.queryByText("Stale stream error")).not.toBeInTheDocument();
     expect(screen.getByTestId("task-planner-chat-empty")).toBeInTheDocument();
+  });
+
+  it("reattaches an in-flight planner generation after modal remount and keeps stop visible", async () => {
+    const firstClose = vi.fn();
+    const inFlightGeneration = {
+      status: "generating",
+      streamingText: "Partial planner answer",
+      streamingThinking: "Reviewing task context",
+      toolCalls: [{ toolName: "fn_task_planner_add_steering", args: { text: "Add this steering" }, isError: false, status: "running" }],
+      replayFromEventId: 7,
+      updatedAt: "2026-07-01T14:00:00.000Z",
+    };
+    mockFetchTaskPlannerChatSession.mockResolvedValue({ session: makePlannerSession({ isGenerating: true, inFlightGeneration }) });
+    mockFetchChatSession.mockResolvedValue({ session: makePlannerSession({ isGenerating: true, inFlightGeneration }) });
+    mockFetchChatMessages.mockResolvedValue({
+      messages: [{ id: "user-1", sessionId: "chat-planner", role: "user", content: "Help plan this", thinkingOutput: null, metadata: null, createdAt: "2026-07-01T13:59:00.000Z" }],
+    });
+    mockAttachChatStream.mockReturnValueOnce({ close: firstClose, isConnected: () => true }).mockReturnValue({ close: vi.fn(), isConnected: () => true });
+
+    const { unmount } = renderPlannerChat();
+
+    expect(await screen.findByText("Partial planner answer")).toBeInTheDocument();
+    expect(screen.getByText("Reviewing task context")).toBeInTheDocument();
+    expect(screen.getByTestId("task-planner-chat-steering-pending")).toHaveTextContent("Adding steering comment…");
+    expect(screen.getByRole("button", { name: "Stop generation" })).toBeInTheDocument();
+    expect(mockAttachChatStream).toHaveBeenCalledWith("chat-planner", expect.any(Object), undefined, { lastEventId: 7 });
+
+    unmount();
+    expect(firstClose).toHaveBeenCalled();
+
+    renderPlannerChat();
+    expect(await screen.findByText("Partial planner answer")).toBeInTheDocument();
+    expect(mockAttachChatStream).toHaveBeenCalledTimes(2);
+  });
+
+  it("refreshes to completed planner history after returning to a remounted modal", async () => {
+    mockFetchTaskPlannerChatSession.mockResolvedValue({ session: makePlannerSession({ isGenerating: false, inFlightGeneration: null }) });
+    mockFetchChatSession.mockResolvedValue({ session: makePlannerSession({ isGenerating: false, inFlightGeneration: null }) });
+    mockFetchChatMessages.mockResolvedValue({
+      messages: [
+        { id: "user-1", sessionId: "chat-planner", role: "user", content: "Summarize blockers", thinkingOutput: null, metadata: null, createdAt: "2026-07-01T13:59:00.000Z" },
+        { id: "assistant-1", sessionId: "chat-planner", role: "assistant", content: "The planner finished while you were away.", thinkingOutput: null, metadata: null, createdAt: "2026-07-01T14:00:00.000Z" },
+      ],
+    });
+
+    const { unmount } = renderPlannerChat();
+    expect(await screen.findByText("The planner finished while you were away.")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop generation" })).not.toBeInTheDocument();
+    unmount();
+
+    renderPlannerChat();
+    expect(await screen.findByText("The planner finished while you were away.")).toBeInTheDocument();
+    expect(mockAttachChatStream).not.toHaveBeenCalled();
+  });
+
+  it("refreshes attached planner completion without leaving a stale streaming bubble", async () => {
+    let attachedHandlers: any;
+    const inFlightGeneration = {
+      status: "generating",
+      streamingText: "Partial draft",
+      streamingThinking: "Synthesizing",
+      toolCalls: [],
+      replayFromEventId: 11,
+      updatedAt: "2026-07-01T14:00:00.000Z",
+    };
+    mockFetchTaskPlannerChatSession.mockResolvedValue({ session: makePlannerSession({ isGenerating: true, inFlightGeneration }) });
+    mockFetchChatSession.mockResolvedValue({ session: makePlannerSession({ isGenerating: true, inFlightGeneration }) });
+    mockFetchChatMessages
+      .mockResolvedValueOnce({ messages: [] })
+      .mockResolvedValueOnce({
+        messages: [{ id: "assistant-complete", sessionId: "chat-planner", role: "assistant", content: "Final planner response", thinkingOutput: null, metadata: null, createdAt: "2026-07-01T14:01:00.000Z" }],
+      });
+    mockAttachChatStream.mockImplementation((_sessionId, handlers) => {
+      attachedHandlers = handlers;
+      return { close: vi.fn(), isConnected: () => true };
+    });
+
+    renderPlannerChat();
+    expect(await screen.findByText("Partial draft")).toBeInTheDocument();
+    act(() => {
+      attachedHandlers.onDone({ messageId: "assistant-complete" });
+    });
+
+    expect(await screen.findByText("Final planner response")).toBeInTheDocument();
+    expect(screen.queryByText("Partial draft")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stop generation" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+  });
+
+  it("surfaces a failed reattached planner stream as recoverable error and refreshed history", async () => {
+    let attachedHandlers: any;
+    const inFlightGeneration = {
+      status: "generating",
+      streamingText: "",
+      streamingThinking: "Still thinking",
+      toolCalls: [],
+      replayFromEventId: 9,
+      updatedAt: "2026-07-01T14:00:00.000Z",
+    };
+    mockFetchTaskPlannerChatSession.mockResolvedValue({ session: makePlannerSession({ isGenerating: true, inFlightGeneration }) });
+    mockFetchChatSession.mockResolvedValue({ session: makePlannerSession({ isGenerating: true, inFlightGeneration }) });
+    mockFetchChatMessages
+      .mockResolvedValueOnce({ messages: [] })
+      .mockResolvedValueOnce({
+        messages: [{ id: "assistant-failed", sessionId: "chat-planner", role: "assistant", content: "Planner failed while you were away.", thinkingOutput: null, metadata: { failureInfo: { summary: "Planner failed while you were away." } }, createdAt: "2026-07-01T14:01:00.000Z" }],
+      });
+    mockAttachChatStream.mockImplementation((_sessionId, handlers) => {
+      attachedHandlers = handlers;
+      return { close: vi.fn(), isConnected: () => true };
+    });
+
+    renderPlannerChat();
+    expect(await screen.findByText("Still thinking")).toBeInTheDocument();
+    act(() => {
+      attachedHandlers.onError({ summary: "Planner failed while you were away." });
+    });
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Planner failed while you were away.");
+    expect(await screen.findAllByText("Planner failed while you were away.")).toHaveLength(2);
+    expect(screen.queryByRole("button", { name: "Stop generation" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
   });
 
   it("does not show starter prompts while planner-chat history is loading", async () => {
@@ -740,6 +872,33 @@ describe("TaskPlannerChatTab", () => {
     expect(screen.getByTestId("task-planner-chat-steering-confirmation")).toHaveTextContent("Keep Activity and Chat separate");
     await waitFor(() => expect(mockFetchTaskDetail).toHaveBeenCalledWith("FN-7310", "project-1"));
     expect(onTaskUpdated).toHaveBeenCalledWith(updatedTask);
+  });
+
+  it("renders reattached planner questions and pending/completed/error steering tool states", async () => {
+    const inFlightGeneration = {
+      status: "generating",
+      streamingText: "I need clarification and may add steering.",
+      streamingThinking: "Checking planner tools",
+      toolCalls: [
+        { toolName: "fn_ask_question", args: { question: "Pick a path", options: ["Conservative", "Aggressive"] }, isError: false, status: "completed" },
+        { toolName: "fn_task_planner_add_steering", args: { text: "Persist this later" }, isError: false, status: "running" },
+        { toolName: "fn_task_planner_add_steering", args: { text: "Persisted steering" }, isError: false, result: { details: { text: "Persisted steering" } }, status: "completed" },
+        { toolName: "fn_task_planner_add_steering", args: { text: "Bad steering" }, isError: true, result: { error: "Invalid steering" }, status: "completed" },
+      ],
+      replayFromEventId: 12,
+      updatedAt: "2026-07-01T14:00:00.000Z",
+    };
+    mockFetchTaskPlannerChatSession.mockResolvedValue({ session: makePlannerSession({ isGenerating: true, inFlightGeneration }) });
+    mockFetchChatSession.mockResolvedValue({ session: makePlannerSession({ isGenerating: true, inFlightGeneration }) });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+
+    renderPlannerChat();
+
+    expect(await screen.findByTestId("chat-question-response")).toHaveTextContent("Pick a path");
+    expect(screen.getByTestId("task-planner-chat-steering-pending")).toHaveTextContent("Adding steering comment…");
+    expect(screen.getByTestId("task-planner-chat-steering-confirmation")).toHaveTextContent("Persisted steering");
+    expect(screen.getByTestId("task-planner-chat-steering-error")).toHaveTextContent("Steering comment was not added");
+    expect(screen.getAllByTestId("chat-question-response-submit")).toHaveLength(1);
   });
 
   it("renders clarification questions without refreshing task steering", async () => {

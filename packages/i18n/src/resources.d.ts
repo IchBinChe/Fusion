@@ -4164,6 +4164,7 @@ export default interface Resources {
         "local": "Local Docker",
         "remote": "Remote: {{host}}"
       },
+      "dockerHostLabel": "Host",
       "dockerHostConfig": "Host Config",
       "dockerHostPath": "Host path",
       "dockerHostUrl": "Docker host URL",
@@ -5217,6 +5218,7 @@ export default interface Resources {
         "override": "Per-task override",
         "projectDefault": "Project default"
       },
+      "sourceLabel": "Routing source",
       "summarySection": "Routing Summary",
       "title": "Task Routing",
       "unavailablePolicy": "Unavailable-node policy",
@@ -7351,6 +7353,7 @@ export default interface Resources {
         "standard": "Standard",
         "updated": "Execution mode updated to {{mode}}"
       },
+      "executionModeLabel": "Execution mode",
       "executionModeFast": "Fast",
       "executionModeStandard": "Standard",
       "executionStatsAria": "Task execution statistics",

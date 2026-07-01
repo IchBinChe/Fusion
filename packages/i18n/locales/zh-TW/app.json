@@ -4153,6 +4153,7 @@
       "local": "本地 Docker",
       "remote": "遠端: {{host}}"
     },
+    "dockerHostLabel": "主機",
     "dockerHostConfig": "主機設定",
     "dockerHostPath": "主機路徑",
     "dockerHostUrl": "Docker 主機網址",
@@ -5224,6 +5225,7 @@
       "override": "每個工作的覆寫",
       "projectDefault": "專案預設值"
     },
+    "sourceLabel": "路由來源",
     "summarySection": "路由摘要",
     "title": "任務路由",
     "unavailablePolicy": "不可用節點政策",
@@ -7315,6 +7317,7 @@
       "replanTitle": "變更執行模式並重新規劃？",
       "replanning": "執行模式已更新為 {{mode}} — {{id}} 已返回規劃以重新規劃"
     },
+    "executionModeLabel": "執行模式",
     "executionModeFast": "快速",
     "executionModeStandard": "標準",
     "executionStatsAria": "任務執行統計",

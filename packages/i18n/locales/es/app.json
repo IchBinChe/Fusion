@@ -4153,6 +4153,7 @@
       "local": "Docker local",
       "remote": "Remoto: {{host}}"
     },
+    "dockerHostLabel": "Host",
     "dockerHostConfig": "Configuración del host",
     "dockerHostPath": "Ruta del host",
     "dockerHostUrl": "URL del host de Docker",
@@ -5224,6 +5225,7 @@
       "override": "Anulación por tarea",
       "projectDefault": "Predeterminado del proyecto"
     },
+    "sourceLabel": "Origen de enrutamiento",
     "summarySection": "Resumen de enrutamiento",
     "title": "Enrutamiento de tareas",
     "unavailablePolicy": "Política de nodo no disponible",
@@ -7315,6 +7317,7 @@
       "replanTitle": "¿Cambiar el modo de ejecución y replanificar?",
       "replanning": "Modo de ejecución actualizado a {{mode}} — {{id}} volvió a Planificación para replanificación"
     },
+    "executionModeLabel": "Modo de ejecución",
     "executionModeFast": "Rápido",
     "executionModeStandard": "Estándar",
     "executionStatsAria": "Estadísticas de ejecución de la tarea",

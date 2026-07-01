@@ -397,6 +397,11 @@ export {
   isBuiltinWorkflowPluginGated,
 } from "./builtin-workflows.js";
 export {
+  COMPLETION_SUMMARY_NODE_ID,
+  completionSummaryNode,
+  isCompletionSummaryNode,
+} from "./builtin-completion-summary-node.js";
+export {
   resolveWorkflowIrForTask,
   resolveWorkflowIrById,
   resolveSeamPromptFromIr,

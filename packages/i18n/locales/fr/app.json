@@ -4153,6 +4153,7 @@
       "local": "Docker local",
       "remote": "Distant : {{host}}"
     },
+    "dockerHostLabel": "Hôte",
     "dockerHostConfig": "Config hôte",
     "dockerHostPath": "Chemin hôte",
     "dockerHostUrl": "URL de l'hôte Docker",
@@ -5224,6 +5225,7 @@
       "override": "Substitution par tâche",
       "projectDefault": "Défaut du projet"
     },
+    "sourceLabel": "Source de routage",
     "summarySection": "Résumé du routage",
     "title": "Routage des tâches",
     "unavailablePolicy": "Politique en cas de nœud indisponible",
@@ -7315,6 +7317,7 @@
       "replanTitle": "Changer le mode d'exécution et replanifier ?",
       "replanning": "Mode d'exécution mis à jour vers {{mode}} — {{id}} est revenue en planification pour replanification"
     },
+    "executionModeLabel": "Mode d'exécution",
     "executionModeFast": "Rapide",
     "executionModeStandard": "Standard",
     "executionStatsAria": "Statistiques d'exécution de la tâche",

@@ -9,7 +9,7 @@ import type {
   WorkflowNodeExtensionResult,
   WorkflowStepResult,
 } from "@fusion/core";
-import { BUILTIN_CODING_WORKFLOW_IR, PLAN_REVIEW_GROUP_ID, WorkflowIrError, getWorkflowExtensionRegistry, resolveMaxReworkCycles, isExperimentalFeatureEnabled, GRAPH_NATIVE_POST_MERGE_FLAG } from "@fusion/core";
+import { BUILTIN_CODING_WORKFLOW_IR, PLAN_REVIEW_GROUP_ID, WorkflowIrError, getWorkflowExtensionRegistry, resolveMaxReworkCycles, isExperimentalFeatureEnabled, GRAPH_NATIVE_POST_MERGE_FLAG, isCompletionSummaryNode } from "@fusion/core";
 
 import {
   createDefaultNodeHandlers,
@@ -1207,6 +1207,30 @@ export class WorkflowGraphExecutor {
       return this.withEnginePauseAbortContext(node, { outcome: "failure", value: "aborted" });
     }
 
+    /*
+     * FNXC:WorkflowCompletion 2026-07-01-16:24:
+     * A thrown handler exception (missing/pruned worktree, model/provider error,
+     * etc.) bypasses `runGraphCustomNode`'s advisory `!blocking → success`
+     * coercion and lands here as a hard `exception` failure. For the best-effort
+     * completion-summary node that failure has nowhere to go (success-only edge),
+     * so it terminates the graph and loops the in-review task back to todo forever
+     * (issue #1863). Degrade the summary node's exhausted-retry failure to success
+     * — the deterministic `ensureWorkflowCompletionSummary` fallback still fills
+     * `task.summary` — so the graph always advances past it.
+     */
+    if (isCompletionSummaryNode(node)) {
+      const degraded: WorkflowNodeResult = {
+        outcome: "success",
+        value: "summary-unavailable",
+        contextPatch: {
+          [`node:${node.id}:error`]: lastError instanceof Error ? lastError.message : String(lastError),
+        },
+      };
+      if (recordProgress && this.shouldRecordNodeProgress(node)) {
+        await this.recordNodeProgressFinish(task.id, node, null, degraded);
+      }
+      return degraded;
+    }
     const failureResult: WorkflowNodeResult = {
       outcome: "failure",
       value: "exception",
@@ -1327,6 +1351,25 @@ export class WorkflowGraphExecutor {
     try {
       await this.deps.publishTaskProjection?.(taskId, patch, source);
     } catch (error) {
+      /*
+       * FNXC:WorkflowCompletion 2026-07-01-16:24:
+       * The advisory completion-summary node persists its text via a `summary`
+       * projection patch. A failed projection write here must NOT become a
+       * `projection-error` graph failure: that node has no failure edge, so it
+       * would terminate the graph and `routeGraphFailureToExecutionResume` would
+       * bounce the in-review task back to todo forever (issue #1863 v0.52.0
+       * triage loop). Keep the node's success outcome — `ensureWorkflowCompletionSummary`
+       * still backfills `task.summary` deterministically at the review/done boundary.
+       */
+      if (isCompletionSummaryNode(node)) {
+        return {
+          ...result,
+          contextPatch: {
+            ...(result.contextPatch ?? {}),
+            [`node:${node.id}:projectionError`]: error instanceof Error ? error.message : String(error),
+          },
+        };
+      }
       return {
         outcome: "failure",
         value: "projection-error",

@@ -1,5 +1,6 @@
 import type { WorkflowDefinitionKind } from "./workflow-definition-types.js";
 import type { WorkflowIr, WorkflowIrEdge, WorkflowIrNode } from "./workflow-ir-types.js";
+import { isCompletionSummaryNode } from "./builtin-completion-summary-node.js";
 
 /**
  * FNXC:WorkflowLifecycle 2026-07-01-00:00:
@@ -36,7 +37,7 @@ export interface AnalyzeWorkflowLifecycleOptions {
 }
 
 function isSummaryNode(node: WorkflowIrNode): boolean {
-  return node.config?.summaryTarget === "task" || node.id === "completion-summary";
+  return isCompletionSummaryNode(node);
 }
 
 function isMergeNode(node: WorkflowIrNode): boolean {

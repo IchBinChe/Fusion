@@ -11,7 +11,7 @@ import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode, WorkflowIrNodeKind, WorkflowStepResult as CoreWorkflowStepResult } from "@fusion/core";
 import { getUnmetSchedulingDependencies } from "./scheduler.js";
-import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker, allowsAutoMergeProcessing, isSharedBranchGroupMemberIntegration, resolveMaxAutoMergeRetries, resolveOptionalStepRevisionBudget, resolveOptionalReviewRevisionBudget } from "@fusion/core";
+import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker, allowsAutoMergeProcessing, isSharedBranchGroupMemberIntegration, resolveMaxAutoMergeRetries, resolveOptionalStepRevisionBudget, resolveOptionalReviewRevisionBudget, COMPLETION_SUMMARY_NODE_ID } from "@fusion/core";
 import { finalizeProvenAutoMergeTask } from "./auto-merge-finalization.js";
 import { mergeEffectiveSettings } from "./effective-settings.js";
 import type { TaskStep, WorkflowIr, WorkflowFieldDefinition, WorkflowColumnAgent, EffectiveAgentInput, WorkflowWorkEngineDispatchResult } from "@fusion/core";
@@ -8463,6 +8463,17 @@ export class TaskExecutor {
     if (live.deletedAt) return false;
     if (live.paused || live.userPaused === true) return false;
     if (live.column === "done" || live.column === "archived") return false;
+    /*
+     * FNXC:WorkflowCompletion 2026-07-01-16:26:
+     * Backstop for issue #1863. The advisory completion-summary node must never
+     * drive the in-review→todo resume loop: it has no failure edge, so a failure
+     * here would bounce the task back to execution every run and never stick.
+     * The graph executor now degrades summary-node failures to success, so this
+     * should be unreachable — but if a summary failure ever reaches this router,
+     * let the caller park the task `failed` (a visible terminal state) instead of
+     * looping it forever.
+     */
+    if (failedNode === COMPLETION_SUMMARY_NODE_ID) return false;
     const incompleteSteps = hasNonTerminalWorkflowSteps(live);
     const prematureMergeWithIncompleteSteps = failedNode === "merge" && failureValue === "implementation-incomplete" && incompleteSteps;
     if (live.column !== "in-review" && !(incompleteSteps && live.column === "todo") && !(prematureMergeWithIncompleteSteps && live.column === "in-progress")) return false;

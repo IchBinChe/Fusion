@@ -4153,6 +4153,7 @@
       "local": "로컬 Docker",
       "remote": "원격: {{host}}"
     },
+    "dockerHostLabel": "호스트",
     "dockerHostConfig": "호스트 구성",
     "dockerHostPath": "호스트 경로",
     "dockerHostUrl": "Docker 호스트 URL",
@@ -5224,6 +5225,7 @@
       "override": "작업별 재정의",
       "projectDefault": "프로젝트 기본값"
     },
+    "sourceLabel": "라우팅 소스",
     "summarySection": "라우팅 요약",
     "title": "작업 라우팅",
     "unavailablePolicy": "사용 불가 노드 정책",
@@ -7315,6 +7317,7 @@
       "replanTitle": "실행 모드를 변경하고 다시 계획할까요?",
       "replanning": "실행 모드가 {{mode}}로 업데이트되었습니다 — {{id}}가 재계획을 위해 계획으로 돌아갔습니다"
     },
+    "executionModeLabel": "실행 모드",
     "executionModeFast": "빠름",
     "executionModeStandard": "표준",
     "executionStatsAria": "작업 실행 통계",

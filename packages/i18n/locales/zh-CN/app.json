@@ -4153,6 +4153,7 @@
       "local": "本地 Docker",
       "remote": "远程: {{host}}"
     },
+    "dockerHostLabel": "主机",
     "dockerHostConfig": "主机配置",
     "dockerHostPath": "主机路径",
     "dockerHostUrl": "Docker 主机地址",
@@ -5224,6 +5225,7 @@
       "override": "每个任务的覆盖",
       "projectDefault": "项目默认值"
     },
+    "sourceLabel": "路由来源",
     "summarySection": "路由摘要",
     "title": "任务路由",
     "unavailablePolicy": "不可用节点策略",
@@ -7315,6 +7317,7 @@
       "replanTitle": "更改执行模式并重新规划？",
       "replanning": "执行模式已更新为 {{mode}} — {{id}} 已返回规划以重新规划"
     },
+    "executionModeLabel": "执行模式",
     "executionModeFast": "快速",
     "executionModeStandard": "标准",
     "executionStatsAria": "任务执行统计",

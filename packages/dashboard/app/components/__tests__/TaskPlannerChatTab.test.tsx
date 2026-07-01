@@ -199,6 +199,7 @@ describe("TaskPlannerChatTab", () => {
       expect.any(Object),
       undefined,
       undefined,
+      { taskId: "FN-7312" },
     );
   });
 
@@ -326,6 +327,7 @@ describe("TaskPlannerChatTab", () => {
       expect.any(Object),
       undefined,
       undefined,
+      { taskId: "FN-7310" },
     );
     expect(screen.getByText("Help plan this")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Hello")).toBeInTheDocument());
@@ -353,6 +355,24 @@ describe("TaskPlannerChatTab", () => {
     expect(screen.getByLabelText("Message planner chat")).toBeEnabled();
   });
 
+  it("sends manual status/progress questions with the current task identity", async () => {
+    const user = userEvent.setup();
+    renderPlannerChat({ task: makeTask("FN-STATUS") });
+    await screen.findByTestId("task-planner-chat-empty");
+
+    await user.type(screen.getByLabelText("Message planner chat"), "What is the current status and progress?");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(mockStreamChatResponse).toHaveBeenCalledWith(
+      "chat-planner",
+      "What is the current status and progress?",
+      expect.any(Object),
+      undefined,
+      undefined,
+      { taskId: "FN-STATUS" },
+    );
+  });
+
   it("sends starter prompts through the planner chat stream", async () => {
     const user = userEvent.setup();
     renderPlannerChat();
@@ -366,6 +386,7 @@ describe("TaskPlannerChatTab", () => {
       expect.any(Object),
       undefined,
       undefined,
+      { taskId: "FN-7310" },
     );
     expect(screen.queryByTestId("task-planner-chat-empty")).not.toBeInTheDocument();
   });
@@ -399,6 +420,7 @@ describe("TaskPlannerChatTab", () => {
       expect.any(Object),
       undefined,
       undefined,
+      { taskId: "FN-7310" },
     );
   });
 

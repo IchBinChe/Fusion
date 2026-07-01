@@ -302,6 +302,7 @@ export function TaskPlannerChatTab({ task, projectId, active, planningModel, add
         },
         undefined,
         projectId,
+        { taskId: task.id },
       );
     } catch (err) {
       if (!isCurrentStreamRequest()) return;
@@ -345,7 +346,7 @@ export function TaskPlannerChatTab({ task, projectId, active, planningModel, add
   Planner Chat is a separate task-detail surface from Activity steering. It can answer from task context, offer starter prompts, ask structured follow-up questions, and convert explicit operator intent into steering through the server-side planner-chat tool instead of posting every chat message as steering by default.
 
   FNXC:TaskDetailPlannerChat 2026-06-30-23:59:
-  The empty Chat tab starts with guided task-state prompts that submit ordinary user messages through the same planner-chat stream as the composer. Context enrichment, steering conversion, and structured question rendering remain owned by later planner-chat subtasks, so starter prompts are only message text plus accessible affordances here.
+  The empty Chat tab starts with guided task-state prompts that submit ordinary user messages through the same task-context-aware planner-chat stream as the composer. Steering conversion and structured question-modal rendering remain owned by later planner-chat subtasks, so starter prompts are only message text plus accessible affordances here.
 
   FNXC:TaskDetailPlannerChat 2026-06-30-23:59:
   Session loads are scoped to the current task/project/model and stale responses are ignored so a delayed previous task load cannot attach starter-prompt sends to the wrong planner-chat session.
@@ -358,7 +359,7 @@ export function TaskPlannerChatTab({ task, projectId, active, planningModel, add
       <div className="task-planner-chat-header">
         <div>
           <h4>{t("taskDetail.plannerChat.heading", "Planner Chat")}</h4>
-          <p>{t("taskDetail.plannerChat.description", "Ask planning questions about this task, clarify next steps, or request steering for the executor.")}</p>
+          <p>{t("taskDetail.plannerChat.description", "Ask planning questions about this task's current status, recent activity, blockers, next steps, or definition.")}</p>
         </div>
         {isUsableModel(planningModel) && (
           <span className="task-planner-chat-model" data-testid="task-planner-chat-model">

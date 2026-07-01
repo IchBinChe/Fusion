@@ -1285,6 +1285,7 @@ describe("ChatManager.sendMessage", () => {
         prompt: "# PROMPT.md\n\nImplement the planner-model Chat tab from the detailed task plan.",
         column: "todo",
         status: "planning",
+        currentStep: 0,
         dependencies: ["FN-7309"],
         steps: [{ title: "Polish", status: "in-progress" }],
         comments: [{ text: "User wants planner chat", author: "user" }],
@@ -1313,13 +1314,23 @@ describe("ChatManager.sendMessage", () => {
     expect(createOptions.systemPrompt).toContain("Title: Add planner chat");
     expect(createOptions.systemPrompt).toContain("Prompt:\n# PROMPT.md");
     expect(createOptions.systemPrompt).toContain("Implement the planner-model Chat tab from the detailed task plan.");
-    expect(createOptions.systemPrompt).toContain("Dependencies: FN-7309");
+    expect(createOptions.systemPrompt).toContain("Dependencies:\n- FN-7309:");
+    expect(createOptions.systemPrompt).toContain("Progress: step 1 of 1");
+    expect(createOptions.systemPrompt).toContain("Current step: Polish: in-progress");
     expect(createOptions.systemPrompt).toContain("Polish: in-progress");
     expect(createOptions.systemPrompt).toContain("Activity transcript loaded");
-    expect(createOptions.systemPrompt).toContain("fn_task_planner_add_steering");
     expect(createOptions.systemPrompt).toContain("fn_ask_question");
     expect(createOptions.customTools.map((tool: { name: string }) => tool.name)).toContain("fn_task_planner_add_steering");
-    expect(taskStore.getTask).toHaveBeenCalledWith("FN-7310", { activityLogLimit: 20 });
+    expect(mockChatStore.addMessage).toHaveBeenCalledWith("chat-001", expect.objectContaining({
+      role: "user",
+      content: "How should I plan this?",
+    }));
+    expect(mockChatStore.addMessage).not.toHaveBeenCalledWith("chat-001", expect.objectContaining({
+      role: "user",
+      content: expect.stringContaining("Task Planner Chat Context"),
+    }));
+    expect(taskStore.getTask).toHaveBeenNthCalledWith(1, "FN-7310", { activityLogLimit: 20 });
+    expect(taskStore.getTask).toHaveBeenCalledWith("FN-7309");
   });
 
   it("guides chat agents to use ask-question cards for option sets", () => {

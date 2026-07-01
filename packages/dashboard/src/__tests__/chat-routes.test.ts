@@ -482,6 +482,38 @@ describe("Chat API Routes", () => {
       expect(mockCreateSession).not.toHaveBeenCalled();
     });
 
+    it("does not resume another task's planner chat session", async () => {
+      const created = {
+        ...sampleSession,
+        id: "chat-planner-7312",
+        agentId: "task-planner:FN-7312",
+        title: "FN-7312 planner chat",
+      };
+      mockFindLatestActiveSessionForTarget.mockImplementation((input: { agentId: string }) => {
+        return input.agentId === "task-planner:FN-7311"
+          ? { ...sampleSession, id: "chat-planner-7311", agentId: "task-planner:FN-7311" }
+          : null;
+      });
+      mockCreateSession.mockReturnValue(created);
+
+      const response = await request(
+        app,
+        "POST",
+        "/api/chat/task-planner/FN-7312/session",
+        JSON.stringify({}),
+        { "content-type": "application/json" },
+      );
+
+      expect(response.status).toBe(201);
+      expect((response.body as any).session).toEqual(created);
+      expect(mockFindLatestActiveSessionForTarget).toHaveBeenCalledWith({ agentId: "task-planner:FN-7312" });
+      expect(mockCreateSession).toHaveBeenCalledWith(expect.objectContaining({
+        agentId: "task-planner:FN-7312",
+        title: "FN-7312 planner chat",
+      }));
+      expect(mockUpdateSession).not.toHaveBeenCalled();
+    });
+
     it("rejects incomplete model override pairs", async () => {
       const response = await request(
         app,
@@ -1250,6 +1282,50 @@ describe("Chat API Routes", () => {
 
       expect(response.status).toBe(400);
       expect((response.body as any).error).toContain("content is required");
+    });
+
+    it("rejects a taskId that does not match a task-planner chat session", async () => {
+      mockGetSession.mockReturnValue({ ...sampleSession, agentId: "task-planner:FN-7312" });
+
+      const response = await request(
+        app,
+        "POST",
+        "/api/chat/sessions/chat-abc123/messages",
+        JSON.stringify({ content: "What is the status?", taskId: "FN-OTHER" }),
+        { "content-type": "application/json" },
+      );
+
+      expect(response.status).toBe(400);
+      expect((response.body as any).error).toContain("taskId does not match");
+      expect(mockSendMessage).not.toHaveBeenCalled();
+    });
+
+    it("accepts matching taskId metadata while preserving the clean user content sent to ChatManager", async () => {
+      mockGetSession.mockReturnValue({ ...sampleSession, agentId: "task-planner:FN-7312" });
+      mockSendMessage.mockImplementation(async (sessionId: string) => {
+        mockChatStreamManager.broadcast(sessionId, {
+          type: "done",
+          data: { messageId: "msg-task-planner" },
+        });
+      });
+
+      const response = await request(
+        app,
+        "POST",
+        "/api/chat/sessions/chat-abc123/messages",
+        JSON.stringify({ content: "What is the status?", taskId: "FN-7312" }),
+        { "content-type": "application/json" },
+      );
+
+      expect(response.status).toBe(200);
+      expect(mockSendMessage).toHaveBeenCalledWith(
+        "chat-abc123",
+        "What is the status?",
+        undefined,
+        undefined,
+        undefined,
+        { generationId: expect.any(Number) },
+      );
     });
 
     it("accepts multipart content with attachments without crashing", async () => {

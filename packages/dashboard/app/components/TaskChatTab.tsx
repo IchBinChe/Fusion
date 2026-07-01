@@ -569,6 +569,7 @@ export function TaskChatTab({ task, projectId, active, addToast, onTaskUpdated, 
   const { entries, loading, loadMore, hasMore, loadingMore } = useAgentLogs(task.id, active, projectId);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
   const [optimisticMessages, setOptimisticMessages] = useState<UserChatMessage[]>([]);
   const [isTranscriptAtBottom, setIsTranscriptAtBottom] = useState(true);
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -782,7 +783,8 @@ export function TaskChatTab({ task, projectId, active, addToast, onTaskUpdated, 
   const handleSubmit = useCallback(async (event?: React.FormEvent) => {
     event?.preventDefault();
     const text = draft.trim();
-    if (!text || sending) return;
+    if (!text || sendingRef.current) return;
+    sendingRef.current = true;
 
     const latestTimestampMs = getLatestTranscriptTimestampMs(entries, userMessages);
     const optimisticCreatedAtMs = Math.max(Date.now(), latestTimestampMs + 1);
@@ -826,9 +828,10 @@ export function TaskChatTab({ task, projectId, active, addToast, onTaskUpdated, 
       setOptimisticMessages((current) => current.filter((message) => message.id !== optimisticMessage.id));
       addToast(`Unable to send message: ${getErrorMessage(error)}`, "error");
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
-  }, [addToast, draft, entries, isDoneTask, onTaskUpdated, projectId, sending, task.id, userMessages]);
+  }, [addToast, draft, entries, isDoneTask, onTaskUpdated, projectId, task.id, userMessages]);
 
   /**
    * FNXC:TaskDetailChat 2026-06-13-19:05:
@@ -842,6 +845,22 @@ export function TaskChatTab({ task, projectId, active, addToast, onTaskUpdated, 
     event.preventDefault();
     void handleSubmit();
   }, [handleSubmit]);
+
+  /*
+  FNXC:TaskDetailChat 2026-07-01-00:00:
+  Mobile soft keyboards can blur the focused composer textarea before the Send button receives a click, consuming the first tap. Touch/pen pointer-down submits immediately while the synchronous sendingRef guard preserves empty/disabled and duplicate-send behavior; mouse down only preserves focus so desktop click and keyboard submit semantics remain unchanged.
+  */
+  const handleSendPointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === "mouse") return;
+    if (!canSend) return;
+    event.preventDefault();
+    void handleSubmit();
+  }, [canSend, handleSubmit]);
+
+  const handleSendMouseDown = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    if (!canSend) return;
+    event.preventDefault();
+  }, [canSend]);
 
   return (
     <div className="task-chat-tab" data-testid="task-chat-tab">
@@ -956,6 +975,8 @@ export function TaskChatTab({ task, projectId, active, addToast, onTaskUpdated, 
             disabled={!canSend}
             aria-label={sending ? t("taskChat.sending", "Sending") : t("common:actions.send", "Send")}
             title={sending ? t("taskChat.sending", "Sending") : t("common:actions.send", "Send")}
+            onPointerDown={handleSendPointerDown}
+            onMouseDown={handleSendMouseDown}
           >
             {sending ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Send aria-hidden="true" />}
           </button>

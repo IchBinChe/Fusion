@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import React from "react";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TaskPlannerChatTab } from "../TaskPlannerChatTab";
 
@@ -54,6 +54,14 @@ function createDeferred<T>() {
     reject = promiseReject;
   });
   return { promise, resolve, reject };
+}
+
+function firstTapSendFromFocusedPlannerTextarea(input: HTMLElement, sendButton: HTMLElement) {
+  input.focus();
+  expect(input).toHaveFocus();
+  fireEvent.pointerDown(sendButton, { pointerType: "touch" });
+  fireEvent.blur(input);
+  fireEvent.click(sendButton);
 }
 
 function renderPlannerChat(overrides: Partial<React.ComponentProps<typeof TaskPlannerChatTab>> = {}) {
@@ -423,6 +431,63 @@ describe("TaskPlannerChatTab", () => {
     );
     expect(screen.getByText("Help plan this")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText("Hello")).toBeInTheDocument());
+  });
+
+  it("sends planner Chat exactly once on the first mobile tap while the textarea is focused", async () => {
+    mockFetchTaskPlannerChatSession.mockResolvedValueOnce({ session: null });
+    renderPlannerChat({ projectId: "project-1" });
+    await screen.findByTestId("task-planner-chat-empty");
+
+    const input = screen.getByLabelText("Message planner chat");
+    fireEvent.change(input, { target: { value: "First mobile tap planner message" } });
+    firstTapSendFromFocusedPlannerTextarea(input, screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(mockEnsureTaskPlannerChatSession).toHaveBeenCalledWith(
+        "FN-7310",
+        { modelProvider: "anthropic", modelId: "claude-plan" },
+        "project-1",
+      );
+    });
+    expect(mockEnsureTaskPlannerChatSession).toHaveBeenCalledTimes(1);
+    expect(mockStreamChatResponse).toHaveBeenCalledWith(
+      "chat-planner",
+      "First mobile tap planner message",
+      expect.any(Object),
+      undefined,
+      "project-1",
+      { taskId: "FN-7310" },
+    );
+    expect(mockStreamChatResponse).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps planner mobile first-tap guards for blank drafts and in-flight sends", async () => {
+    renderPlannerChat();
+    await screen.findByTestId("task-planner-chat-empty");
+
+    const input = screen.getByLabelText("Message planner chat");
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(sendButton).toBeDisabled();
+    fireEvent.change(input, { target: { value: "   \n  " } });
+    expect(sendButton).toBeDisabled();
+    firstTapSendFromFocusedPlannerTextarea(input, sendButton);
+    expect(mockStreamChatResponse).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: "Do not duplicate planner tap" } });
+    expect(sendButton).not.toBeDisabled();
+    firstTapSendFromFocusedPlannerTextarea(input, sendButton);
+    fireEvent.pointerDown(sendButton, { pointerType: "touch" });
+    fireEvent.click(sendButton);
+
+    await waitFor(() => expect(mockStreamChatResponse).toHaveBeenCalledTimes(1));
+    expect(mockStreamChatResponse).toHaveBeenCalledWith(
+      "chat-planner",
+      "Do not duplicate planner tap",
+      expect.any(Object),
+      undefined,
+      undefined,
+      { taskId: "FN-7310" },
+    );
   });
 
   it("shows a recoverable error when the post-stream refresh fails", async () => {

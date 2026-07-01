@@ -218,6 +218,14 @@ function expectDonePlaceholderWithoutGuidance() {
   expect(screen.getByPlaceholderText("Start a refinement task for this completed task")).toBeInTheDocument();
 }
 
+function firstTapSendFromFocusedTextarea(input: HTMLElement, sendButton: HTMLElement) {
+  input.focus();
+  expect(input).toHaveFocus();
+  fireEvent.pointerDown(sendButton, { pointerType: "touch" });
+  fireEvent.blur(input);
+  fireEvent.click(sendButton);
+}
+
 function restoreMetricDescriptor(name: "scrollTop" | "scrollHeight" | "clientHeight", descriptor: PropertyDescriptor | undefined) {
   if (descriptor) {
     Object.defineProperty(HTMLElement.prototype, name, descriptor);
@@ -1454,6 +1462,63 @@ describe("TaskChatTab", () => {
     expect(mockedRefineTask).not.toHaveBeenCalled();
     expect(onTaskUpdated).toHaveBeenCalledWith(updatedTask);
     expect(input).toHaveValue("");
+  });
+
+  it("sends Activity steering exactly once on the first mobile tap while the textarea is focused", async () => {
+    const updatedTask = makeTask();
+    mockedAddSteeringComment.mockResolvedValue(updatedTask);
+    render(<TaskChatTab task={makeTask()} projectId="project-1" active addToast={vi.fn()} />);
+
+    const input = screen.getByLabelText("Message active agent session");
+    fireEvent.change(input, { target: { value: "First mobile tap steering" } });
+    firstTapSendFromFocusedTextarea(input, screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(mockedAddSteeringComment).toHaveBeenCalledWith("FN-001", "First mobile tap steering", "project-1");
+    });
+    expect(mockedAddSteeringComment).toHaveBeenCalledTimes(1);
+    expect(mockedRefineTask).not.toHaveBeenCalled();
+  });
+
+  it("sends done-task refinement exactly once on the first mobile tap while the textarea is focused", async () => {
+    mockedRefineTask.mockResolvedValue(makeTask({ id: "FN-222", column: "todo" }));
+    render(<TaskChatTab task={makeTask({ column: "done", status: undefined })} projectId="project-1" active addToast={vi.fn()} />);
+
+    const input = screen.getByLabelText("Message active agent session");
+    fireEvent.change(input, { target: { value: "First mobile tap refinement" } });
+    firstTapSendFromFocusedTextarea(input, screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(mockedRefineTask).toHaveBeenCalledWith("FN-001", "First mobile tap refinement", "project-1");
+    });
+    expect(mockedRefineTask).toHaveBeenCalledTimes(1);
+    expect(mockedAddSteeringComment).not.toHaveBeenCalled();
+  });
+
+  it("keeps mobile first-tap guards for blank drafts and in-flight sends", async () => {
+    const send = deferred<Task>();
+    mockedAddSteeringComment.mockReturnValue(send.promise);
+    render(<TaskChatTab task={makeTask()} projectId="project-1" active addToast={vi.fn()} />);
+
+    const input = screen.getByLabelText("Message active agent session");
+    const sendButton = screen.getByRole("button", { name: "Send" });
+    expect(sendButton).toBeDisabled();
+    fireEvent.change(input, { target: { value: "   \n  " } });
+    expect(sendButton).toBeDisabled();
+    firstTapSendFromFocusedTextarea(input, sendButton);
+    expect(mockedAddSteeringComment).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: "Do not duplicate mobile tap" } });
+    expect(sendButton).not.toBeDisabled();
+    firstTapSendFromFocusedTextarea(input, sendButton);
+    fireEvent.pointerDown(sendButton, { pointerType: "touch" });
+    fireEvent.click(sendButton);
+
+    await waitFor(() => expect(mockedAddSteeringComment).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      send.resolve(makeTask());
+      await send.promise;
+    });
   });
 
   it("routes done-task composer sends to refineTask without replacing the current task", async () => {

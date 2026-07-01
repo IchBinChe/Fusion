@@ -237,6 +237,7 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [draft, setDraft] = useState("");
   const [composerState, setComposerState] = useState<ComposerState>("idle");
+  const composerStateRef = useRef<ComposerState>("idle");
   const [loading, setLoading] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -295,6 +296,7 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
     setSessionId(null);
     setMessages([]);
     setDraft("");
+    composerStateRef.current = "idle";
     setComposerState("idle");
     setLoading(false);
     setHistoryLoaded(false);
@@ -340,7 +342,8 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
 
   const sendMessageContent = useCallback(async (messageContent: string) => {
     const content = messageContent.trim();
-    if (!content || composerState === "sending") return;
+    if (!content || composerStateRef.current === "sending") return;
+    composerStateRef.current = "sending";
 
     const streamRequestId = streamRequestRef.current + 1;
     streamRequestRef.current = streamRequestId;
@@ -406,6 +409,7 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
           },
           onDone: (data) => {
             if (!isCurrentStreamRequest()) return;
+            composerStateRef.current = "idle";
             setComposerState("idle");
             streamRef.current = null;
             if (data.message) {
@@ -431,6 +435,7 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
             if (!isCurrentStreamRequest()) return;
             const message = typeof streamError === "string" ? streamError : streamError.summary;
             setError(message || t("taskDetail.plannerChat.sendFailed", "Planner chat failed to respond"));
+            composerStateRef.current = "idle";
             setComposerState("idle");
             streamRef.current = null;
           },
@@ -444,9 +449,10 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
       const message = getErrorMessage(err) || t("taskDetail.plannerChat.sendFailed", "Planner chat failed to respond");
       setError(message);
       addToast(message, "error");
+      composerStateRef.current = "idle";
       setComposerState("idle");
     }
-  }, [addToast, composerState, modelPayload, projectId, refreshTaskAfterSteering, sessionId, task.id, t]);
+  }, [addToast, modelPayload, projectId, refreshTaskAfterSteering, sessionId, task.id, t]);
 
   const sendMessage = useCallback(() => sendMessageContent(draft), [draft, sendMessageContent]);
 
@@ -457,6 +463,23 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
   }, [sendMessage]);
 
   const canSend = draft.trim().length > 0 && composerState !== "sending";
+
+  /*
+  FNXC:TaskDetailPlannerChat 2026-07-01-00:00:
+  Mobile soft keyboards can blur the focused planner-chat textarea before the Send button's click fires. Touch/pen pointer-down submits through the same planner Chat stream path with a synchronous composerStateRef duplicate guard; mouse down only preserves focus so desktop click and Enter behavior stay unchanged.
+  */
+  const handleSendPointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === "mouse") return;
+    if (!canSend) return;
+    event.preventDefault();
+    void sendMessage();
+  }, [canSend, sendMessage]);
+
+  const handleSendMouseDown = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    if (!canSend) return;
+    event.preventDefault();
+  }, [canSend]);
+
   const showEmptyState = historyLoaded && !loading && !error && messages.length === 0;
   const questionRenderStates = useMemo(() => buildPlannerQuestionRenderStates(messages), [messages]);
   const starterPrompts = useMemo(() => {
@@ -627,7 +650,14 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
           disabled={composerState === "sending"}
           rows={1}
         />
-        <button type="button" className="btn btn-primary task-planner-chat-send" onClick={() => void sendMessage()} disabled={!canSend}>
+        <button
+          type="button"
+          className="btn btn-primary task-planner-chat-send"
+          onClick={() => void sendMessage()}
+          onPointerDown={handleSendPointerDown}
+          onMouseDown={handleSendMouseDown}
+          disabled={!canSend}
+        >
           {composerState === "sending" ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Send aria-hidden="true" />}
           <span>{composerState === "sending" ? t("taskDetail.plannerChat.sending", "Sending") : t("taskDetail.plannerChat.send", "Send")}</span>
         </button>

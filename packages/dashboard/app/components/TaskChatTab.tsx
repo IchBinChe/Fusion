@@ -594,7 +594,7 @@ export function TaskChatTab({ task, projectId, active, addToast, onTaskUpdated, 
   const isDoneTask = task.column === "done";
   /*
    * FNXC:TaskDetailActivity 2026-06-30-21:51:
-   * Activity → Current is the operational steering surface for task execution. Show an explicit steering-comment affordance here while keeping the future top-level planner-model Chat tab out of scope; Feed and Raw Logs remain read-only Activity segments without this composer.
+   * Activity → Live (legacy `current`) is the operational steering surface for task execution. Show an explicit steering-comment affordance here while keeping the top-level planner-model Chat tab separate; Feed and Raw Logs remain read-only Activity segments without this composer.
    */
   const composerLabel = isDoneTask
     ? t("taskChat.refinementComposerLabel", "Refinement request")
@@ -851,11 +851,11 @@ export function TaskChatTab({ task, projectId, active, addToast, onTaskUpdated, 
           type="button"
           className="btn btn-icon btn-sm task-chat-expand-toggle task-chat-expand-toggle--overlay"
           onClick={onToggleExpanded}
-          aria-label={expanded ? t("taskChat.collapseChat", "Collapse chat") : t("taskChat.expandChat", "Expand chat to full modal")}
+          aria-label={expanded ? t("taskChat.collapseActivity", "Collapse activity") : t("taskChat.expandActivity", "Expand activity to full modal")}
           aria-pressed={expanded}
           data-testid="task-chat-expand-toggle"
         >
-          {/* FNXC:TaskChat 2026-06-13-00:00: FN-6425 refines FN-6405 by keeping the task-chat expand affordance icon-only and pinned to the chat view corner so transcript scrolling never removes access to expansion controls. */}
+          {/* FNXC:TaskDetailActivity 2026-06-30-23:55: The legacy TaskChatTab expand affordance now uses Activity-wide copy when a caller still renders it; TaskDetailModal owns the visible Activity-level toggle across Live, Feed, and Raw Logs. */}
           {expanded ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
         </button>
       ) : null}

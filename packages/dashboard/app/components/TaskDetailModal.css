@@ -128,8 +128,8 @@ Task detail workflow badges share the board badge's slight token-based icon-to-l
   overflow-y: hidden;
 }
 
-/* Activity → Current mirrors the Raw Logs fill-height layout: the modal body does not scroll;
-   the transcript owns internal scrolling while the composer stays visible. */
+/* Activity → Live and expanded Activity mirror the Raw Logs fill-height layout: the modal body does not scroll;
+   each segment owns internal scrolling while composers and controls stay visible. */
 .detail-body--chat {
   display: flex;
   flex-direction: column;
@@ -818,6 +818,9 @@ Expanded chat should take over the modal except for the task title row, so users
 
 FNXC:TaskDetailChat 2026-06-22-13:27:
 Expanded chat must also cover the task metadata row — priority, execution mode, provenance/Created by, and Created/Updated timestamps — so the chat grows all the way up to the title row instead of stopping below secondary metadata controls.
+
+FNXC:TaskDetailActivity 2026-06-30-23:55:
+The same expanded-mode chrome collapse now applies to all Activity segments: Live, Feed, and Raw Logs. Keep the legacy `--chat-expanded` class for test and styling compatibility while treating it as Activity-expanded behavior.
 */
 .task-detail-content--chat-expanded .detail-meta {
   display: none;
@@ -847,6 +850,19 @@ Expanded chat must also cover the task metadata row — priority, execution mode
   flex: 1;
   min-height: 0;
   margin-top: 0;
+}
+
+.task-detail-content--chat-expanded .detail-activity {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.task-detail-content--chat-expanded .detail-activity-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 
@@ -2355,9 +2371,17 @@ FNXC:TaskDetailTabs 2026-06-26-00:35:
 
 /* === Activity Segmented Control === */
 /*
-FNXC:TaskDetailActivity 2026-06-30-22:15:
-The Activity top-level tab owns Current, Feed, and Raw Logs as an in-content segmented control. Keep this selector visually quieter than the top-level tab strip and horizontally reachable on narrow modal and embedded task-detail surfaces.
+FNXC:TaskDetailActivity 2026-06-30-23:55:
+The Activity top-level tab owns Live (internal `current`), Feed, and Raw Logs as an in-content segmented control. Keep this selector visually quieter than the top-level tab strip and horizontally reachable on narrow modal and embedded task-detail surfaces; the Activity-wide expand control must sit beside it on every segment.
 */
+.activity-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-md);
+}
+
 .activity-segmented-control {
   display: inline-flex;
   max-inline-size: 100%;
@@ -2366,7 +2390,6 @@ The Activity top-level tab owns Current, Feed, and Raw Logs as an in-content seg
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius-md);
   padding: calc(var(--space-xs) / 4);
-  margin-bottom: var(--space-md);
   overflow-x: auto;
   overflow-y: hidden;
   overscroll-behavior-inline: contain;
@@ -2406,6 +2429,13 @@ The Activity top-level tab owns Current, Feed, and Raw Logs as an in-content seg
   box-shadow: var(--shadow-sm);
 }
 
+.activity-expand-toggle {
+  flex: 0 0 auto;
+  min-inline-size: var(--space-2xl);
+  min-block-size: var(--space-2xl);
+  padding: 0;
+}
+
 .detail-log-loading {
   display: flex;
   align-items: center;
@@ -2419,6 +2449,19 @@ The Activity top-level tab owns Current, Feed, and Raw Logs as an in-content seg
 }
 
 @media (max-width: 768px) {
+  .activity-toolbar {
+    align-items: stretch;
+  }
+
+  .activity-segmented-control {
+    flex: 1 1 auto;
+  }
+
+  .activity-expand-toggle {
+    min-inline-size: calc(var(--space-2xl) + var(--space-sm));
+    min-block-size: calc(var(--space-2xl) + var(--space-sm));
+  }
+
   .detail-log-loading {
     min-height: calc(var(--space-2xl) + var(--space-lg));
   }

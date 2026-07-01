@@ -122,7 +122,7 @@ describe("TaskDetailModal planner Chat tab", () => {
     renderTask("in-progress", "chat");
 
     expect(screen.getByRole("button", { name: "Activity" })).toHaveClass("detail-tab-active");
-    expect(screen.getByRole("tab", { name: "Current" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Live" })).toHaveAttribute("aria-selected", "true");
   });
 
   it("routes explicit planner-chat requests to the new Chat tab", () => {
@@ -442,7 +442,7 @@ describe("TaskDetailModal Activity feed loading", () => {
 });
 
 describe("TaskDetailModal Chat task merge", () => {
-  it("exposes the steering composer only in Activity Current and posts through task updates", async () => {
+  it("exposes the steering composer only in Activity Live and posts through task updates", async () => {
     const user = userEvent.setup();
     const { addSteeringComment } = await import("../../api");
     const onTaskUpdated = vi.fn();
@@ -469,7 +469,7 @@ describe("TaskDetailModal Chat task merge", () => {
       />,
     );
 
-    expect(screen.getByRole("tab", { name: "Current" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Live" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getAllByRole("form", { name: "Steering comment" })).toHaveLength(1);
     expect(screen.getByText("Send operational guidance to the active task through steering comments.")).toBeInTheDocument();
 
@@ -481,7 +481,7 @@ describe("TaskDetailModal Chat task merge", () => {
     expect(screen.queryByRole("form", { name: "Steering comment" })).not.toBeInTheDocument();
     expect(screen.getByTestId("agent-log-viewer")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Current" }));
+    await user.click(screen.getByRole("tab", { name: "Live" }));
     const input = screen.getByLabelText("Message active agent session");
     await user.type(input, "Please keep the current approach");
     await user.click(screen.getByRole("button", { name: "Send" }));

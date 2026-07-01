@@ -2056,7 +2056,7 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      await userEvent.click(screen.getByRole("button", { name: "Expand chat to full modal" }));
+      await userEvent.click(screen.getByRole("button", { name: "Expand activity to full modal" }));
 
       expect(container.querySelector(".task-detail-content--chat-expanded")).toBeInTheDocument();
       expect(container.querySelector("h2.detail-title")).toHaveClass("detail-title--collapsed");

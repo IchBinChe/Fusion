@@ -466,8 +466,9 @@ describe("TaskDetailModal", () => {
       expect(container.querySelector(".activity-segmented-control")).toBeTruthy();
       expect(screen.queryByText("Agent Log")).toBeNull();
       const segments = screen.getAllByRole("tab");
-      expect(segments.map((segment) => segment.textContent)).toEqual(["Current", "Feed", "Raw Logs"]);
-      expect(screen.getByRole("tab", { name: "Current" })).toHaveAttribute("aria-selected", "true");
+      expect(segments.map((segment) => segment.textContent)).toEqual(["Live", "Feed", "Raw Logs"]);
+      expect(screen.queryByRole("tab", { name: "Current" })).toBeNull();
+      expect(screen.getByRole("tab", { name: "Live" })).toHaveAttribute("aria-selected", "true");
       expect(container.querySelector(".detail-section--chat")).toBeTruthy();
       expect(container.querySelector("[data-testid='task-chat-tab']")).toBeTruthy();
       expect(container.querySelector(".detail-activity")).toBeNull();
@@ -869,7 +870,7 @@ describe("TaskDetailModal", () => {
       expect(mobileActionsRule).toContain("display: none");
     });
 
-    it("FN-6370/FN-6517 expands and collapses chat without leaving chrome hidden", () => {
+    it("FN-6370/FN-6517 expands and collapses Activity Live without leaving chrome hidden", () => {
       const { container } = render(
         <TaskDetailModal
           task={makeTask({ prompt: "# Hello\n\nContent" })}
@@ -896,7 +897,7 @@ describe("TaskDetailModal", () => {
       expect(titleRow).toHaveTextContent("In Progress");
       expect(container.querySelector(".detail-tabs")).toBeTruthy();
       expect(container.querySelector(".modal-actions")).toBeTruthy();
-      expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-label", "Collapse chat");
+      expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-label", "Collapse activity");
       expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-pressed", "true");
 
       fireEvent.click(screen.getByTestId("task-chat-expand-toggle"));
@@ -904,11 +905,80 @@ describe("TaskDetailModal", () => {
       expect(titleRow).toHaveTextContent("FN-099");
       expect(container.querySelector(".detail-tabs")).toBeTruthy();
       expect(container.querySelector(".modal-actions")).toBeTruthy();
-      expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-label", "Expand chat to full modal");
+      expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-label", "Expand activity to full modal");
       expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-pressed", "false");
     });
 
-    it("FN-7320 removes branch group chrome only while Activity chat is expanded", () => {
+    it("FN-7325 keeps Activity expansion available and sticky across Live, Feed, and Raw Logs", () => {
+      const { container } = render(
+        <TaskDetailModal
+          task={makeTask({
+            prompt: "# Hello\n\nContent",
+            log: [{ timestamp: "2026-01-01T00:00:00Z", action: "Expanded feed entry", outcome: "visible" }],
+          })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      const content = container.querySelector(".task-detail-content");
+      expect(screen.getByRole("tab", { name: "Live" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-label", "Expand activity to full modal");
+
+      fireEvent.click(screen.getByTestId("task-chat-expand-toggle"));
+      expect(content).toHaveClass("task-detail-content--chat-expanded");
+      expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-label", "Collapse activity");
+
+      fireEvent.click(screen.getByRole("tab", { name: "Feed" }));
+      expect(content).toHaveClass("task-detail-content--chat-expanded");
+      expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByText("Expanded feed entry")).toBeInTheDocument();
+      expect(container.querySelector(".detail-activity-list")).toBeTruthy();
+
+      fireEvent.click(screen.getByRole("tab", { name: "Raw Logs" }));
+      expect(content).toHaveClass("task-detail-content--chat-expanded");
+      expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-pressed", "true");
+      expect(container.querySelector("[data-testid='agent-log-viewer']")).toBeTruthy();
+    });
+
+    it("FN-7325 resets Activity expansion on task changes but preserves legacy logs routing", () => {
+      const { container, rerender } = render(
+        <TaskDetailContent
+          task={makeTask({ id: "FN-099", prompt: "# Hello\n\nContent" })}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+          initialTab="chat"
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("task-chat-expand-toggle"));
+      expect(container.querySelector(".task-detail-content")).toHaveClass("task-detail-content--chat-expanded");
+
+      rerender(
+        <TaskDetailContent
+          task={makeTask({ id: "FN-100", prompt: "# Next\n\nContent" })}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+          initialTab="logs"
+        />,
+      );
+
+      expect(container.querySelector(".task-detail-content")).not.toHaveClass("task-detail-content--chat-expanded");
+      expect(screen.getByRole("tab", { name: "Feed" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByTestId("task-chat-expand-toggle")).toHaveAttribute("aria-label", "Expand activity to full modal");
+    });
+
+    it("FN-7320 removes branch group chrome only while Activity is expanded", () => {
       const branchContext = { groupId: "BG-7320", source: "planning", assignmentMode: "shared" } as const;
       const { container } = render(
         <TaskDetailModal
@@ -938,7 +1008,7 @@ describe("TaskDetailModal", () => {
       expect(screen.getByRole("button", { name: "Mock branch group toggle BG-7320" })).toBeInTheDocument();
     });
 
-    it("FN-7320 expands Activity chat for tasks without branch groups without rendering branch shells", () => {
+    it("FN-7320 expands Activity for tasks without branch groups without rendering branch shells", () => {
       const { container } = render(
         <TaskDetailModal
           task={makeTask({ prompt: "# Hello\n\nContent", branchContext: undefined })}
@@ -987,7 +1057,7 @@ describe("TaskDetailModal", () => {
       expect(container.querySelector(".modal-actions")).toBeTruthy();
     });
 
-    it("FN-6370 resets expanded chat when the active tab changes", () => {
+    it("FN-6370 resets expanded Activity when the active tab changes", () => {
       const { container, rerender } = render(
         <TaskDetailContent
           task={makeTask({ prompt: "# Hello\n\nContent" })}
@@ -1012,7 +1082,7 @@ describe("TaskDetailModal", () => {
           onMergeTask={noopMerge}
           onOpenDetail={noopOpenDetail}
           addToast={noop}
-          initialTab="logs"
+          initialTab="definition"
         />,
       );
 
@@ -1020,7 +1090,7 @@ describe("TaskDetailModal", () => {
       expect(screen.queryByTestId("task-chat-expand-toggle")).toBeNull();
     });
 
-    it("FN-6370 resets expanded chat when entering edit mode", () => {
+    it("FN-6370 resets expanded Activity when entering edit mode", () => {
       const { container } = render(
         <TaskDetailModal
           task={makeTask({ column: "triage", prompt: "# Hello\n\nContent" })}

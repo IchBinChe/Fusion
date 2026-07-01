@@ -394,7 +394,7 @@ describe("TaskChatTab", () => {
     expect(document.querySelector(".task-chat-toolbar")).toBeNull();
     expect(toggle).toHaveClass("btn-icon");
     expect(toggle).toHaveClass("task-chat-expand-toggle--overlay");
-    expect(toggle).toHaveAttribute("aria-label", "Expand chat to full modal");
+    expect(toggle).toHaveAttribute("aria-label", "Expand activity to full modal");
     expect(toggle).toHaveAttribute("aria-pressed", "false");
     expect(toggle).not.toHaveTextContent("Expand");
     expect(toggle).not.toHaveTextContent("Collapse");
@@ -407,7 +407,7 @@ describe("TaskChatTab", () => {
     render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} expanded onToggleExpanded={vi.fn()} />);
 
     const toggle = screen.getByTestId("task-chat-expand-toggle");
-    expect(toggle).toHaveAttribute("aria-label", "Collapse chat");
+    expect(toggle).toHaveAttribute("aria-label", "Collapse activity");
     expect(toggle).toHaveAttribute("aria-pressed", "true");
     expect(toggle).not.toHaveTextContent("Collapse");
     expect(toggle).not.toHaveTextContent("Expand");
@@ -1383,7 +1383,7 @@ describe("TaskChatTab", () => {
     const toggle = screen.getByTestId("task-chat-expand-toggle");
     expect(toggle).toBeInTheDocument();
     expect(toggle).toBeVisible();
-    expect(toggle).toHaveAccessibleName("Expand chat to full modal");
+    expect(toggle).toHaveAccessibleName("Expand activity to full modal");
     expect(toggle).not.toHaveTextContent("Expand");
     expect(transcript).not.toContainElement(toggle);
   });
@@ -2566,15 +2566,15 @@ describe("TaskChatTab", () => {
     expect(mobileInputRule).toContain("min-height: calc(var(--space-2xl) + var(--space-lg))");
   });
 
-  it("keeps TaskDetailModal inline and expanded chat on the canonical TaskChatTab renderer", () => {
+  it("keeps TaskDetailModal inline and expanded Activity on the canonical TaskChatTab renderer", () => {
     const source = readFileSync(resolve(__dirname, "../TaskDetailModal.tsx"), "utf8");
     const taskChatMounts = source.match(/<TaskChatTab\b/g) ?? [];
 
     expect(source).toContain('import { TaskChatTab } from "./TaskChatTab"');
     expect(taskChatMounts).toHaveLength(1);
-    expect(source).toContain("const isChatExpanded = chatExpanded && activeTab === \"chat\" && !isEditing");
+    expect(source).toContain("const isActivityExpanded = activityExpanded && activeTab === \"chat\" && !isEditing");
     expect(source).toContain("task-detail-content--chat-expanded");
-    expect(source).toContain("expanded={chatExpanded}");
+    expect(source).toContain("setActivityExpanded((value) => !value)");
   });
 
   it("widens task chat messages in narrow host containers without changing desktop layout", () => {

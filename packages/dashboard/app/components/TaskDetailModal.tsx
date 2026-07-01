@@ -1,7 +1,7 @@
 import "./TaskDetailModal.css";
 import React, { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Pencil, Bot, X, ChevronDown, ChevronRight, GitBranch, ArrowLeft, Zap, Loader2, AlertTriangle, Sparkles, Maximize2 } from "lucide-react";
+import { Pencil, Bot, X, ChevronDown, ChevronRight, GitBranch, ArrowLeft, Zap, Loader2, AlertTriangle, Sparkles, Maximize2, Minimize2 } from "lucide-react";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
@@ -200,13 +200,16 @@ FNXC:TaskDetailActivityTab 2026-06-30-00:00:
 The existing task activity/steering surface keeps the stable internal `chat` tab id for deep-link/plugin compatibility, but its top-level user-facing label is Activity. Activity is the implicit default for active task columns; done tasks keep Summary as their omitted-initial-tab landing surface so completed work still opens on the completion report while Activity remains first in tab order.
 
 FNXC:TaskDetailPlannerChat 2026-06-30-22:30:
-Task detail now separates Activity from planner-model Chat. `chat` remains the legacy Activity id for old links and Activity → Current/Feed/Raw Logs/steering, while `planner-chat` is the new top-level Chat tab for task-aware planning conversation and must render immediately after Activity.
+Task detail now separates Activity from planner-model Chat. `chat` remains the legacy Activity id for old links and Activity → Live (internal `current`)/Feed/Raw Logs/steering, while `planner-chat` is the new top-level Chat tab for task-aware planning conversation and must render immediately after Activity.
 
 FNXC:TaskDetailActivity 2026-06-30-15:50:
-Only an omitted initial tab is the implicit default. Preserve explicit `initialTab="chat"` requests from plugins and task-detail entrypoints so existing links continue to open Activity → Current. Legacy `initialTab="logs"` now routes to Activity → Feed, and Raw Logs remains an Activity segment.
+Only an omitted initial tab is the implicit default. Preserve explicit `initialTab="chat"` requests from plugins and task-detail entrypoints so existing links continue to open Activity → Live (internal `current`). Legacy `initialTab="logs"` now routes to Activity → Feed, and Raw Logs remains an Activity segment.
 
 FNXC:TaskDetailActivity 2026-06-30-21:55:
-The first Activity segment keeps the stable Current label for legacy segment tests and links, but its embedded composer labels the operational steering-comment affordance explicitly. Do not reuse this segment as planner-model Chat conversation; that belongs to the `planner-chat` top-level tab.
+The first Activity segment keeps the stable internal `current` id for legacy segment tests and links, but its embedded composer labels the operational steering-comment affordance explicitly. Do not reuse this segment as planner-model Chat conversation; that belongs to the `planner-chat` top-level tab.
+
+FNXC:TaskDetailActivity 2026-06-30-23:55:
+The first Activity segment is user-facing Live while legacy internals remain `current` and explicit `initialTab="chat"` continues landing there for compatibility.
 */
 function resolveDefaultTab(initialTab: TabId | undefined, column: ColumnId): TabId {
   if (initialTab === "retries") {
@@ -532,7 +535,7 @@ export function TaskDetailContent({
   const fileBrowser = useFileBrowser();
   const [activeTab, setActiveTab] = useState<TabId>(() => resolveDefaultTab(initialTab, task.column));
   const [activitySegment, setActivitySegment] = useState<ActivitySegment>(() => resolveDefaultActivitySegment(initialTab));
-  const [chatExpanded, setChatExpanded] = useState(false);
+  const [activityExpanded, setActivityExpanded] = useState(false);
 
   // ── CLI agent session (U11) ────────────────────────────────────────────────
   const [cliSession, setCliSession] = useState<CliSessionSummaryRecord | null>(null);
@@ -844,10 +847,14 @@ export function TaskDetailContent({
   const [isEditing, setIsEditing] = useState(false);
 
   useEffect(() => {
-    if (activeTab !== "chat" || activitySegment !== "current" || isEditing) {
-      setChatExpanded(false);
+    if (activeTab !== "chat" || isEditing) {
+      setActivityExpanded(false);
     }
-  }, [activeTab, activitySegment, isEditing]);
+  }, [activeTab, isEditing]);
+
+  useEffect(() => {
+    setActivityExpanded(false);
+  }, [task.id]);
 
   const [editTitle, setEditTitle] = useState(task.title || "");
   const [editDescription, setEditDescription] = useState(task.description || "");
@@ -2610,12 +2617,12 @@ export function TaskDetailContent({
   const autoMergeEnabled = autoMergeEnabledProp ?? (settings?.autoMerge ?? false);
   const effectiveAutoMerge = resolveEffectiveAutoMerge({ autoMerge: task.autoMerge }, { autoMerge: autoMergeEnabled });
   const isManualPrFlow = mergeStrategy === "pull-request" && !effectiveAutoMerge;
-  const isChatExpanded = chatExpanded && activeTab === "chat" && !isEditing;
+  const isActivityExpanded = activityExpanded && activeTab === "chat" && !isEditing;
   /*
-  FNXC:TaskDetailChat 2026-06-30-23:30:
-  Maximized Activity chat should reserve the detail surface for the header context and chat only. Do not mount branch-group chrome in this mode so its expand/promote controls are not hidden-but-focusable, while normal and embedded task details keep the BranchGroupCard behavior.
+  FNXC:TaskDetailActivity 2026-06-30-23:55:
+  Maximized Activity applies to Live, Feed, and Raw Logs, not only the legacy `current` chat segment. Reserve the detail surface for header context and Activity content, and do not mount branch-group chrome in this mode so expand/promote controls are not hidden-but-focusable.
   */
-  const shouldShowBranchGroupCard = Boolean(task.branchContext?.groupId && !isChatExpanded);
+  const shouldShowBranchGroupCard = Boolean(task.branchContext?.groupId && !isActivityExpanded);
 
   const taskActionMenuModel = useMemo(() => buildTaskActionMenuModel({
     task,
@@ -2733,7 +2740,7 @@ export function TaskDetailContent({
 
   return (
     <div
-      className={`task-detail-content${embedded ? " task-detail-content--embedded" : ""}${isChatExpanded ? " task-detail-content--chat-expanded" : ""}`}
+      className={`task-detail-content${embedded ? " task-detail-content--embedded" : ""}${isActivityExpanded ? " task-detail-content--chat-expanded" : ""}`}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
@@ -2813,7 +2820,7 @@ export function TaskDetailContent({
             )}
           </div>
         </div>
-        <div className={`detail-body${activeTab === "chat" && activitySegment === "raw-logs" && !isEditing ? " detail-body--agent-log" : ""}${activeTab === "chat" && activitySegment === "current" && !isEditing ? " detail-body--chat" : ""}`}>
+        <div className={`detail-body${activeTab === "chat" && activitySegment === "raw-logs" && !isEditing ? " detail-body--agent-log" : ""}${activeTab === "chat" && (activitySegment === "current" || isActivityExpanded) && !isEditing ? " detail-body--chat" : ""}`}>
           {isEditing ? (
             <div className="modal-edit-form">
               <TaskForm
@@ -3315,41 +3322,53 @@ export function TaskDetailContent({
               />
             </div>
           ) : activeTab === "chat" ? (
-            <div className={`detail-section detail-section--activity${activitySegment === "current" ? " detail-section--chat" : ""}${activitySegment === "raw-logs" ? " detail-section--agent-log" : ""}`}>
+            <div className={`detail-section detail-section--activity${activitySegment === "current" || isActivityExpanded ? " detail-section--chat" : ""}${activitySegment === "raw-logs" ? " detail-section--agent-log" : ""}`}>
               {/*
                 FNXC:TaskDetailPlannerChat 2026-06-30-22:30:
                 Activity owns the existing steering/current view, Feed, and Raw Logs inside one segmented control. The stable Activity tab id remains `chat`, legacy `logs` callers land on Feed, and Raw Logs is the only segment that enables raw agent-log fetching. Planner-model conversation belongs to the separate `planner-chat` tab and must not route into steering comments.
 
-                FNXC:TaskDetailActivity 2026-06-30-21:55:
-                The first Activity segment keeps the stable Current label for legacy segment tests and links, but its embedded composer labels the operational steering-comment affordance explicitly. Do not reuse this segment as planner-model Chat conversation.
+                FNXC:TaskDetailActivity 2026-06-30-23:55:
+                The first Activity segment is user-facing Live but keeps the legacy `current` segment id. Activity expansion is segment-wide, so the same reachable toggle must remain present on Live, Feed, and Raw Logs without fetching Raw Logs outside the Raw Logs segment.
               */}
-              <div className="activity-segmented-control" role="tablist" aria-label={t("taskDetail.activity.segmentsLabel", "Activity views")}>
+              <div className="activity-toolbar">
+                <div className="activity-segmented-control" role="tablist" aria-label={t("taskDetail.activity.segmentsLabel", "Activity views")}>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activitySegment === "current"}
+                    className={`activity-segment${activitySegment === "current" ? " activity-segment-active" : ""}`}
+                    onClick={() => setActivitySegment("current")}
+                  >
+                    {t("taskDetail.activity.current", "Live")}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activitySegment === "feed"}
+                    className={`activity-segment${activitySegment === "feed" ? " activity-segment-active" : ""}`}
+                    onClick={() => setActivitySegment("feed")}
+                  >
+                    {t("taskDetail.activity.feed", "Feed")}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activitySegment === "raw-logs"}
+                    className={`activity-segment${activitySegment === "raw-logs" ? " activity-segment-active" : ""}`}
+                    onClick={() => setActivitySegment("raw-logs")}
+                  >
+                    {t("taskDetail.activity.rawLogs", "Raw Logs")}
+                  </button>
+                </div>
                 <button
                   type="button"
-                  role="tab"
-                  aria-selected={activitySegment === "current"}
-                  className={`activity-segment${activitySegment === "current" ? " activity-segment-active" : ""}`}
-                  onClick={() => setActivitySegment("current")}
+                  className="btn btn-icon btn-sm activity-expand-toggle"
+                  onClick={() => setActivityExpanded((value) => !value)}
+                  aria-label={isActivityExpanded ? t("taskDetail.activity.collapse", "Collapse activity") : t("taskDetail.activity.expand", "Expand activity to full modal")}
+                  aria-pressed={isActivityExpanded}
+                  data-testid="task-chat-expand-toggle"
                 >
-                  {t("taskDetail.activity.current", "Current")}
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={activitySegment === "feed"}
-                  className={`activity-segment${activitySegment === "feed" ? " activity-segment-active" : ""}`}
-                  onClick={() => setActivitySegment("feed")}
-                >
-                  {t("taskDetail.activity.feed", "Feed")}
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={activitySegment === "raw-logs"}
-                  className={`activity-segment${activitySegment === "raw-logs" ? " activity-segment-active" : ""}`}
-                  onClick={() => setActivitySegment("raw-logs")}
-                >
-                  {t("taskDetail.activity.rawLogs", "Raw Logs")}
+                  {isActivityExpanded ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
                 </button>
               </div>
               {activitySegment === "current" ? (
@@ -3360,8 +3379,6 @@ export function TaskDetailContent({
                   addToast={addToast}
                   sessionLive={isCliSessionLive(cliSession)}
                   onTaskUpdated={handleChatTaskUpdated}
-                  expanded={chatExpanded}
-                  onToggleExpanded={() => setChatExpanded((value) => !value)}
                   effectiveModels={{
                     triage: toTaskChatModelInfo(resolveEffectivePlanning(workingTask, agentLogEntries, settings)),
                     executor: toTaskChatModelInfo(resolveEffectiveExecutor(workingTask, agentLogEntries, assignedAgent, settings)),

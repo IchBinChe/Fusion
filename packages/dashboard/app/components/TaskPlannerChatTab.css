@@ -180,6 +180,11 @@
   color: var(--text-muted);
 }
 
+.task-planner-chat-message .chat-question-response {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 .task-planner-chat-composer {
   display: flex;
   align-items: flex-end;
@@ -218,5 +223,9 @@
 
   .task-planner-chat-message {
     max-width: 100%;
+  }
+
+  .task-planner-chat-message .chat-question-response {
+    margin-inline: 0;
   }
 }

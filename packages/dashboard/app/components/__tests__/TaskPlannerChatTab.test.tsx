@@ -64,6 +64,18 @@ function renderPlannerChat(overrides: Partial<React.ComponentProps<typeof TaskPl
   );
 }
 
+function plannerQuestionMessage(id: string, args: Record<string, unknown>, createdAt = "2026-06-30T00:02:00.000Z") {
+  return {
+    id,
+    sessionId: "chat-planner",
+    role: "assistant",
+    content: "Planner needs clarification.",
+    thinkingOutput: null,
+    metadata: { toolCalls: [{ toolName: "fn_ask_question", args, isError: false }] },
+    createdAt,
+  };
+}
+
 describe("TaskPlannerChatTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -397,19 +409,7 @@ describe("TaskPlannerChatTab", () => {
   it("renders planner question tool calls with the shared answer UI", async () => {
     const user = userEvent.setup();
     mockFetchChatMessages.mockResolvedValue({
-      messages: [
-        {
-          id: "assistant-question",
-          sessionId: "chat-planner",
-          role: "assistant",
-          content: "Which path should we use?",
-          thinkingOutput: null,
-          metadata: {
-            toolCalls: [{ toolName: "fn_ask_question", args: { question: "Pick a path", options: ["Conservative", "Aggressive"] }, isError: false }],
-          },
-          createdAt: "2026-06-30T00:02:00.000Z",
-        },
-      ],
+      messages: [plannerQuestionMessage("assistant-question", { question: "Pick a path", options: ["Conservative", "Aggressive"] })],
     });
     renderPlannerChat();
 
@@ -492,6 +492,69 @@ describe("TaskPlannerChatTab", () => {
     expect(await screen.findByTestId("chat-question-response")).toBeInTheDocument();
     expect(screen.queryByTestId("task-planner-chat-steering-confirmation")).not.toBeInTheDocument();
     expect(mockFetchTaskDetail).not.toHaveBeenCalled();
+  });
+
+  it("renders text, single-select, multi-select, confirm, and missing-option planner questions", async () => {
+    const user = userEvent.setup();
+    mockFetchChatMessages.mockResolvedValue({
+      messages: [plannerQuestionMessage("assistant-question", {
+        questions: [
+          { id: "text", question: "Describe the risk", type: "text" },
+          { id: "single", question: "Pick one", type: "single_select", options: [{ id: "safe", label: "Safe" }] },
+          { id: "multi", question: "Pick many", type: "multi_select", options: [{ id: "a", label: "A" }, { id: "b", label: "B" }] },
+          { id: "confirm", question: "Proceed?", type: "confirm" },
+          { id: "missing", question: "Missing choices", type: "single_select" },
+        ],
+      })],
+    });
+    renderPlannerChat();
+
+    expect(await screen.findByTestId("chat-question-response")).toBeInTheDocument();
+    expect(screen.getByTestId("chat-question-response-submit")).toBeDisabled();
+    await user.type(screen.getByTestId("chat-question-response-text-text"), "Low risk");
+    await user.click(screen.getByTestId("chat-question-response-option-single-safe"));
+    await user.click(screen.getByTestId("chat-question-response-option-multi-a"));
+    await user.click(screen.getByTestId("chat-question-response-option-confirm-no"));
+    await user.type(screen.getByTestId("chat-question-response-text-missing"), "Use the default");
+    await user.click(screen.getByTestId("chat-question-response-submit"));
+
+    expect(mockStreamChatResponse).toHaveBeenCalledWith(
+      "chat-planner",
+      "> Q: Describe the risk\nLow risk\n\n> Q: Pick one\nSafe\n\n> Q: Pick many\nA\n\n> Q: Proceed?\nNo\n\n> Q: Missing choices\nUse the default",
+      expect.any(Object),
+      undefined,
+      undefined,
+      { taskId: "FN-7310" },
+    );
+  });
+
+  it("renders answered planner questions read-only with the submitted answer", async () => {
+    mockFetchChatMessages.mockResolvedValue({
+      messages: [
+        plannerQuestionMessage("assistant-question", { question: "Pick a path", options: ["Conservative", "Aggressive"] }),
+        { id: "user-answer", sessionId: "chat-planner", role: "user", content: "> Q: Pick a path\nAggressive", thinkingOutput: null, metadata: null, createdAt: "2026-06-30T00:03:00.000Z" },
+      ],
+    });
+    renderPlannerChat();
+
+    expect(await screen.findByTestId("chat-question-response-submitted-answer")).toHaveTextContent("Aggressive");
+    expect(screen.getByText("Answered")).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-question-response-submit")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("chat-question-response-option-q-0-opt-1")).not.toBeInTheDocument();
+  });
+
+  it("hides older duplicate pending planner questions after a refetch", async () => {
+    mockFetchChatMessages.mockResolvedValue({
+      messages: [
+        plannerQuestionMessage("assistant-question-old", { question: "Pick a path", options: ["Conservative", "Aggressive"] }, "2026-06-30T00:02:00.000Z"),
+        plannerQuestionMessage("assistant-question-new", { question: "Pick a path", options: ["Conservative", "Aggressive"] }, "2026-06-30T00:03:00.000Z"),
+      ],
+    });
+    renderPlannerChat();
+
+    expect(await screen.findByTestId("chat-question-response")).toBeInTheDocument();
+    expect(screen.getAllByTestId("chat-question-response")).toHaveLength(1);
+    expect(screen.getAllByTestId("chat-question-response-submit")).toHaveLength(1);
   });
 
   it("shows API errors and re-enables the composer", async () => {

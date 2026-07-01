@@ -100,8 +100,11 @@ describe("TaskDetailModal", () => {
       expect(mobileBlock).toContain("flex-direction: column;");
       expect(mobileBlock).toContain("align-items: stretch;");
       expectBaseRule(css, ".task-planner-chat-starters", "grid-template-columns: repeat(2, minmax(0, 1fr));");
+      expectBaseRule(css, ".task-planner-chat-message .chat-question-response", "overflow-wrap: anywhere;");
       expect(mobileBlock).toContain(".task-planner-chat-starters");
       expect(mobileBlock).toContain("grid-template-columns: 1fr;");
+      expect(mobileBlock).toContain(".task-planner-chat-message .chat-question-response");
+      expect(mobileBlock).toContain("margin-inline: 0;");
     });
 
     it("keeps detail metadata as a single wrapping flex row without mobile column fallbacks", () => {

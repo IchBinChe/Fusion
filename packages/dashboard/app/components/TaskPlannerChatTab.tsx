@@ -8,7 +8,7 @@ import { useTranslation } from "react-i18next";
 import type { ToastType } from "../hooks/useToast";
 import type { ToolCallInfo } from "../hooks/chatTypes";
 import { ensureTaskPlannerChatSession, fetchChatMessages, fetchTaskDetail, streamChatResponse } from "../api";
-import { parseQuestionToolCall } from "../utils/parseQuestionToolCall";
+import { parseQuestionToolCall, type ParsedQuestionToolCall } from "../utils/parseQuestionToolCall";
 import { markdownComponents } from "./AgentLogViewer";
 import { ChatQuestionResponse } from "./ChatQuestionResponse";
 import "./TaskPlannerChatTab.css";
@@ -23,6 +23,13 @@ interface TaskPlannerChatTabProps {
 }
 
 type ComposerState = "idle" | "sending";
+
+type PlannerQuestionRenderState = {
+  parsed: ParsedQuestionToolCall;
+  answered: boolean;
+  submittedAnswer?: string;
+  hiddenDuplicate: boolean;
+};
 
 interface StarterPromptDefinition {
   id: string;
@@ -168,6 +175,57 @@ function extractToolCalls(message: ChatMessage): ToolCallInfo[] {
       };
     })
     .filter((toolCall): toolCall is ToolCallInfo => toolCall !== null);
+}
+
+function getPlannerQuestionKey(parsed: ParsedQuestionToolCall): string {
+  return JSON.stringify(parsed.questions.map((question) => ({
+    id: question.id,
+    type: question.type,
+    question: question.question,
+    options: question.options?.map((option) => [option.id, option.label]),
+  })));
+}
+
+function isQuestionAnswerFor(message: ChatMessage, parsed: ParsedQuestionToolCall): boolean {
+  if (message.role !== "user") return false;
+  const trimmed = message.content.trim();
+  if (!trimmed) return false;
+  return parsed.questions.some((question) => trimmed.includes(`> Q: ${question.question}`));
+}
+
+function buildPlannerQuestionRenderStates(messages: readonly ChatMessage[]): Map<string, PlannerQuestionRenderState> {
+  const states = new Map<string, PlannerQuestionRenderState>();
+  const latestUnansweredByQuestion = new Map<string, string>();
+
+  messages.forEach((message, messageIndex) => {
+    if (message.role !== "assistant") return;
+    extractToolCalls(message).forEach((toolCall, toolCallIndex) => {
+      const parsed = parseQuestionToolCall(toolCall);
+      if (!parsed) return;
+      const stateKey = `${message.id}:${toolCallIndex}`;
+      const questionKey = getPlannerQuestionKey(parsed);
+      const nextUserAnswer = messages.slice(messageIndex + 1).find((candidate) => isQuestionAnswerFor(candidate, parsed));
+      const answered = Boolean(nextUserAnswer);
+      if (!answered) {
+        const previousPendingKey = latestUnansweredByQuestion.get(questionKey);
+        if (previousPendingKey) {
+          const previous = states.get(previousPendingKey);
+          if (previous) {
+            states.set(previousPendingKey, { ...previous, hiddenDuplicate: true });
+          }
+        }
+        latestUnansweredByQuestion.set(questionKey, stateKey);
+      }
+      states.set(stateKey, {
+        parsed,
+        answered,
+        submittedAnswer: nextUserAnswer?.content,
+        hiddenDuplicate: false,
+      });
+    });
+  });
+
+  return states;
 }
 
 export function TaskPlannerChatTab({ task, projectId, active, planningModel, addToast, onTaskUpdated }: TaskPlannerChatTabProps) {
@@ -386,6 +444,7 @@ export function TaskPlannerChatTab({ task, projectId, active, planningModel, add
 
   const canSend = draft.trim().length > 0 && composerState !== "sending";
   const showEmptyState = historyLoaded && !loading && !error && messages.length === 0;
+  const questionRenderStates = useMemo(() => buildPlannerQuestionRenderStates(messages), [messages]);
   const starterPrompts = useMemo(() => {
     const seenLabels = new Set<string>();
     return TASK_PLANNER_CHAT_STARTER_PROMPTS.flatMap((prompt) => {
@@ -419,6 +478,9 @@ export function TaskPlannerChatTab({ task, projectId, active, planningModel, add
 
   FNXC:TaskDetailPlannerChat 2026-06-30-23:59:
   Stream callbacks are guarded by a per-send token because closing an EventSource/stream is not enough to prevent queued text, tool, done, error, or fallback refresh callbacks from mutating the newly selected task's Chat tab.
+
+  FNXC:TaskDetailPlannerChat 2026-06-30-23:59:
+  Planner-generated clarification questions in the task-detail Chat transcript must reuse ChatQuestionResponse instead of bespoke chat text. Submitted answers stay in the planner-chat lane as ordinary follow-up user messages, render the prior question read-only, and duplicate refetched pending tool calls hide older live forms so users never see competing submit affordances.
   */
   return (
     <section className="task-planner-chat" aria-label={t("taskDetail.plannerChat.label", "Planner chat")} data-testid="task-planner-chat-panel">
@@ -504,15 +566,15 @@ export function TaskPlannerChatTab({ task, projectId, active, planningModel, add
                       </div>
                     );
                   }
-                  const parsedQuestion = parseQuestionToolCall(toolCall);
-                  if (!parsedQuestion) return null;
-                  const answered = message.id !== "streaming-assistant" && message !== messages[messages.length - 1];
+                  const questionState = questionRenderStates.get(`${message.id}:${index}`);
+                  if (!questionState || questionState.hiddenDuplicate) return null;
                   return (
                     <ChatQuestionResponse
                       key={`${toolCall.toolName}-${index}`}
-                      parsed={parsedQuestion}
-                      answered={answered}
-                      disabled={composerState === "sending" || answered}
+                      parsed={questionState.parsed}
+                      answered={questionState.answered}
+                      submittedAnswer={questionState.submittedAnswer}
+                      disabled={composerState === "sending" || questionState.answered}
                       compact
                       onSubmit={(answerText) => void sendMessageContent(answerText)}
                     />

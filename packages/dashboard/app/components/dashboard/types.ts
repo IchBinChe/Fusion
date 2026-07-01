@@ -112,6 +112,7 @@ export interface MainContentProps {
   prAuthAvailable: boolean;
   autoMerge: boolean;
   mergeStrategy: string;
+  planAutoApproveEnabled: boolean;
   settingsLoaded: boolean;
   taskDetailChatFirst: boolean;
   skillsEnabled: boolean;
@@ -167,6 +168,7 @@ export interface MainContentProps {
   subtaskBreakdownEnabled: boolean;
   openSubtaskBreakdownWithNav: (description: string, workflowId?: string | null) => void;
   toggleAutoMerge: () => Promise<void>;
+  togglePlanAutoApprove: () => Promise<void>;
   globalPaused: boolean;
   updateTask: (
     id: string,

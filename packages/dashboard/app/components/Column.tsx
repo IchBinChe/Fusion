@@ -110,6 +110,8 @@ interface ColumnProps {
   /** Project merge strategy for Task Detail-equivalent card context actions. */
   mergeStrategy?: string;
   onToggleAutoMerge?: () => void;
+  planAutoApproveEnabled?: boolean;
+  onTogglePlanAutoApprove?: () => void;
   globalPaused?: boolean;
   onUpdateTask?: (
     id: string,
@@ -195,7 +197,7 @@ interface ColumnProps {
   getDraggingTaskId?: () => string | null;
 }
 
-function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktreeGrouping, onMoveTask, onPauseTask, onUnpauseTask, onResetTask, onDuplicateTask, onMergeTask, onOpenDetail, onOpenRefine, onOpenGroupModal, addToast, onQuickCreate, onNewTask, autoMerge, mergeStrategy = "direct", onToggleAutoMerge, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, doneSortMode, onDoneSortModeChange, collapsed, onToggleCollapse, allTasks, availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, isSearchActive, taskStuckTimeoutMs, onOpenMission, lastFetchTimeMs, taskCardFieldDefs, taskWorkflowBadges, blockerFanoutMap, prAuthAvailable, workflowMode, workflowId, workflowOptions, defaultWorkflowId, columnDisplayName, columnFlags, workflowContextMenuColumns, taskContextMenuColumnsByTaskId, onPromote, canDropTask, getDraggingTaskId }: ColumnProps) {
+function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktreeGrouping, onMoveTask, onPauseTask, onUnpauseTask, onResetTask, onDuplicateTask, onMergeTask, onOpenDetail, onOpenRefine, onOpenGroupModal, addToast, onQuickCreate, onNewTask, autoMerge, mergeStrategy = "direct", onToggleAutoMerge, planAutoApproveEnabled, onTogglePlanAutoApprove, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, doneSortMode, onDoneSortModeChange, collapsed, onToggleCollapse, allTasks, availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, isSearchActive, taskStuckTimeoutMs, onOpenMission, lastFetchTimeMs, taskCardFieldDefs, taskWorkflowBadges, blockerFanoutMap, prAuthAvailable, workflowMode, workflowId, workflowOptions, defaultWorkflowId, columnDisplayName, columnFlags, workflowContextMenuColumns, taskContextMenuColumnsByTaskId, onPromote, canDropTask, getDraggingTaskId }: ColumnProps) {
   const { t } = useTranslation("app");
   // Anchor the board.rejection.* catalog keys for the i18next extractor (it
   // scopes `t` to the useTranslation binding, so the shared translateRejection
@@ -571,8 +573,13 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktree
   const isDoneSortColumn = workflowMode ? columnFlags?.complete === true && columnFlags?.archived !== true : column === "done";
   const showDoneSortControl = isDoneSortColumn && doneSortMode !== undefined && !!onDoneSortModeChange;
   const showDoneArchiveAction = isDoneSortColumn && !!onArchiveAllDone;
+  /*
+  FNXC:PlanApproval 2026-07-01-08:44:
+  Triage and workflow intake/hold column actions need a Board shortcut that mirrors the project auto-approve plan override without replacing Settings modal's full workflow/auto-approve/require-all editor.
+  */
+  const hasPlanAutoApproveAction = !!onTogglePlanAutoApprove;
   const hasDoneMenuActions = showDoneSortControl || showDoneArchiveAction;
-  const hasColumnMenu = hasColumnBulkActions || hasDoneMenuActions;
+  const hasColumnMenu = hasColumnBulkActions || hasDoneMenuActions || hasPlanAutoApproveAction;
   const doneSortControlLabel = t("column.doneSortControlLabel", "Sort Done tasks");
   const doneSortOptions: Array<{ mode: DoneColumnSortMode; label: string }> = [
     { mode: "completion-date-desc", label: t("column.doneSortCompletionDateDesc", "Completion date (newest first)") },
@@ -583,6 +590,11 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktree
     onDoneSortModeChange?.(mode);
     setIsMenuOpen(false);
   }, [onDoneSortModeChange]);
+
+  const handlePlanAutoApproveToggle = useCallback(() => {
+    onTogglePlanAutoApprove?.();
+    setIsMenuOpen(false);
+  }, [onTogglePlanAutoApprove]);
 
   const handleArchiveAll = useCallback(async () => {
     setIsMenuOpen(false);
@@ -664,6 +676,25 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktree
             </button>
             {isMenuOpen && (
               <div className="column-menu-popover" role="menu">
+                {hasPlanAutoApproveAction && (
+                  <label className="column-menu-item auto-merge-toggle" role="menuitemcheckbox" aria-checked={!!planAutoApproveEnabled}>
+                    <span className="column-menu-item-row">
+                      <input
+                        type="checkbox"
+                        checked={!!planAutoApproveEnabled}
+                        onChange={handlePlanAutoApproveToggle}
+                        aria-label={t("column.planAutoApproveLabel", "Auto-approve plan")}
+                      />
+                      <span className="toggle-slider" aria-hidden="true" />
+                      <span>{t("column.planAutoApproveLabel", "Auto-approve plan")}</span>
+                    </span>
+                    <span className="column-menu-item-hint">
+                      {planAutoApproveEnabled
+                        ? t("column.planAutoApproveOnHint", "On bypasses manual plan approval for this project")
+                        : t("column.planAutoApproveOffHint", "Off uses the workflow/default plan approval setting")}
+                    </span>
+                  </label>
+                )}
                 {showDoneSortControl && (
                   <div className="column-menu-group" role="group" aria-label={doneSortControlLabel}>
                     {doneSortOptions.map((option) => (

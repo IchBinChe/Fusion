@@ -45,6 +45,8 @@ interface BoardProps {
   /** Project merge strategy passed to Board-owned card context menus. */
   mergeStrategy?: string;
   onToggleAutoMerge: () => void;
+  planAutoApproveEnabled: boolean;
+  onTogglePlanAutoApprove: () => void;
   globalPaused?: boolean;
   onUpdateTask?: (
     id: string,
@@ -156,7 +158,7 @@ function BoardWorkflowSkeleton({ empty = false }: { empty?: boolean }) {
   );
 }
 
-export function Board({ tasks, projectId, maxConcurrent, showWorktreeGrouping, onMoveTask, onPauseTask, onUnpauseTask, onResetTask, onDuplicateTask, onMergeTask, onOpenDetail, onOpenRefine, onOpenGroupModal, addToast, onQuickCreate, onNewTask, autoMerge, mergeStrategy = "direct", onToggleAutoMerge, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, onLoadArchivedTasks, searchQuery = "", availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, taskStuckTimeoutMs, onOpenMission, staleHighFanoutBlockerAgeThresholdMs, lastFetchTimeMs, prAuthAvailable, onOpenWorkflowEditor, onCreateWorkflow, workflowColumnsEnabled, settingsLoaded, workflowControlsInHeader = false }: BoardProps) {
+export function Board({ tasks, projectId, maxConcurrent, showWorktreeGrouping, onMoveTask, onPauseTask, onUnpauseTask, onResetTask, onDuplicateTask, onMergeTask, onOpenDetail, onOpenRefine, onOpenGroupModal, addToast, onQuickCreate, onNewTask, autoMerge, mergeStrategy = "direct", onToggleAutoMerge, planAutoApproveEnabled, onTogglePlanAutoApprove, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, onLoadArchivedTasks, searchQuery = "", availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, taskStuckTimeoutMs, onOpenMission, staleHighFanoutBlockerAgeThresholdMs, lastFetchTimeMs, prAuthAvailable, onOpenWorkflowEditor, onCreateWorkflow, workflowColumnsEnabled, settingsLoaded, workflowControlsInHeader = false }: BoardProps) {
   const [archivedCollapsed, setArchivedCollapsed] = useState(true);
   /*
   FNXC:DoneColumnSorting 2026-06-29-16:57:
@@ -859,6 +861,7 @@ export function Board({ tasks, projectId, maxConcurrent, showWorktreeGrouping, o
                   prAuthAvailable={prAuthAvailable}
                   autoMerge={autoMerge}
                   mergeStrategy={mergeStrategy}
+                  {...(((columnDef.flags.intake || columnDef.flags.hold) && !columnDef.flags.archived && !columnDef.flags.complete && !columnDef.flags.countsTowardWip && !columnDef.flags.mergeBlocker && !columnDef.flags.humanReview) ? { planAutoApproveEnabled, onTogglePlanAutoApprove } : {})}
                   {...(isCreateColumn && aggregateQuickCreateTarget ? { workflowId: aggregateQuickCreateTarget.workflowId, workflowOptions, defaultWorkflowId: boardWorkflows?.defaultWorkflowId ?? null, onQuickCreate: handleAggregateWorkflowQuickCreate, onNewTask, onPlanningMode, onSubtaskBreakdown } : {})}
                   {...(columnDef.flags.mergeBlocker || columnDef.flags.humanReview ? { onToggleAutoMerge: handleToggleAutoMerge } : {})}
                   {...(columnDef.id === "done" ? { onArchiveAllDone } : {})}
@@ -938,6 +941,7 @@ export function Board({ tasks, projectId, maxConcurrent, showWorktreeGrouping, o
                 prAuthAvailable={prAuthAvailable}
                 autoMerge={autoMerge}
                 mergeStrategy={mergeStrategy}
+                {...(((columnDef.flags.intake || columnDef.flags.hold) && !columnDef.flags.archived && !columnDef.flags.complete && !columnDef.flags.countsTowardWip && !columnDef.flags.mergeBlocker && !columnDef.flags.humanReview) ? { planAutoApproveEnabled, onTogglePlanAutoApprove } : {})}
                 {...(isCreateColumn ? { workflowOptions, defaultWorkflowId: selectedWorkflow.id, onQuickCreate: handleWorkflowQuickCreate, onNewTask, onPlanningMode, onSubtaskBreakdown } : {})}
                 {...(columnDef.flags.mergeBlocker || columnDef.flags.humanReview ? { onToggleAutoMerge: handleToggleAutoMerge } : {})}
                 {...(columnDef.id === "done" ? { onArchiveAllDone } : {})}
@@ -1045,6 +1049,7 @@ export function Board({ tasks, projectId, maxConcurrent, showWorktreeGrouping, o
             prAuthAvailable={prAuthAvailable}
             autoMerge={autoMerge}
             mergeStrategy={mergeStrategy}
+            {...(col === "triage" ? { planAutoApproveEnabled, onTogglePlanAutoApprove } : {})}
             {...(col === "triage" ? { onQuickCreate, onNewTask, onPlanningMode, onSubtaskBreakdown } : {})}
             {...(col === "in-review" ? { onToggleAutoMerge: handleToggleAutoMerge } : {})}
             {...(col === "done" ? { onArchiveAllDone, doneSortMode, onDoneSortModeChange: setDoneSortMode } : {})}

@@ -72,6 +72,7 @@ export function MainContent({
   prAuthAvailable,
   autoMerge,
   mergeStrategy,
+  planAutoApproveEnabled,
   settingsLoaded,
   taskDetailChatFirst,
   skillsEnabled,
@@ -123,6 +124,7 @@ export function MainContent({
   subtaskBreakdownEnabled,
   openSubtaskBreakdownWithNav,
   toggleAutoMerge,
+  togglePlanAutoApprove,
   globalPaused,
   updateTask,
   retryTask,
@@ -710,6 +712,8 @@ export function MainContent({
             autoMerge={autoMerge}
             mergeStrategy={mergeStrategy}
             onToggleAutoMerge={toggleAutoMerge}
+            planAutoApproveEnabled={planAutoApproveEnabled}
+            onTogglePlanAutoApprove={togglePlanAutoApprove}
             globalPaused={globalPaused}
             onUpdateTask={updateTask}
             onRetryTask={retryTask}
@@ -813,6 +817,8 @@ export function MainContent({
           autoMerge={autoMerge}
           mergeStrategy={mergeStrategy}
           onToggleAutoMerge={toggleAutoMerge}
+          planAutoApproveEnabled={planAutoApproveEnabled}
+          onTogglePlanAutoApprove={togglePlanAutoApprove}
           globalPaused={globalPaused}
           onUpdateTask={updateTask}
           onRetryTask={retryTask}

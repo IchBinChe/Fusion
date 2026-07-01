@@ -551,6 +551,7 @@ function AppInner() {
     maxConcurrent,
     autoMerge,
     mergeStrategy,
+    planAutoApproveEnabled,
     showWorktreeGrouping,
     globalPaused,
     isTestMode,
@@ -575,6 +576,7 @@ function AppInner() {
     goalsEnabled,
     setQuickChatButtonModeImmediate,
     toggleAutoMerge,
+    togglePlanAutoApprove,
     refresh: refreshAppSettings,
   } = useAppSettings(currentProject?.id);
 
@@ -1219,6 +1221,7 @@ function AppInner() {
     prAuthAvailable,
     autoMerge,
     mergeStrategy,
+    planAutoApproveEnabled,
     settingsLoaded,
     taskDetailChatFirst,
     skillsEnabled,
@@ -1270,6 +1273,7 @@ function AppInner() {
     subtaskBreakdownEnabled,
     openSubtaskBreakdownWithNav,
     toggleAutoMerge,
+    togglePlanAutoApprove,
     globalPaused,
     updateTask,
     retryTask,

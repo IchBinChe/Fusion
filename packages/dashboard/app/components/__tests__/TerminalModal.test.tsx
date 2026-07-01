@@ -4999,6 +4999,79 @@ describe("TerminalModal — FN-872 real-device keyboard overlap refinement", () 
     }
   });
 
+  it("treats Android folded visualViewport width as mobile before initial terminal fit", async () => {
+    (window as any).ontouchstart = null;
+    window.localStorage.setItem(TERMINAL_FONT_SIZE_KEY, "10");
+    const listeners: Record<string, Array<() => void>> = { resize: [], scroll: [] };
+    const mockVV = {
+      width: 390,
+      height: 320,
+      offsetTop: 0,
+      offsetLeft: 0,
+      addEventListener: vi.fn((event: string, cb: () => void) => {
+        if (listeners[event]) listeners[event].push(cb);
+      }),
+      removeEventListener: vi.fn(),
+    };
+    Object.defineProperty(window, "visualViewport", {
+      value: mockVV,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "innerWidth", {
+      value: 900,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      value: 700,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      value: 700,
+      configurable: true,
+    });
+    const onDataListeners: Array<(data: string) => void> = [];
+    const resizeForFoldedAndroid = vi.fn();
+    mockUseTerminal.mockReturnValue(createMockTerminalState({
+      connectionStatus: "connected",
+      resize: resizeForFoldedAndroid,
+      onData: vi.fn((cb: (data: string) => void) => {
+        onDataListeners.push(cb);
+        return vi.fn();
+      }),
+      onScrollback: vi.fn((cb: (data: string) => void) => {
+        onDataListeners.push(cb);
+        return vi.fn();
+      }),
+    }));
+
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+    await waitFor(() => expect(screen.getByTestId("terminal-font-size-value")).toHaveTextContent("10px"));
+    await waitFor(() => {
+      const modal = screen.getByTestId("terminal-modal");
+      expect(modal).not.toHaveClass("terminal-modal--docked");
+      expect(modal).not.toHaveClass("terminal-modal--floating");
+      expect(modal.style.getPropertyValue("--keyboard-overlap")).toBe("380px");
+      expect(modal.style.getPropertyValue("--vv-height")).toBe("320px");
+    });
+
+    await waitFor(() => expect(onDataListeners.length).toBeGreaterThan(0));
+    act(() => {
+      for (const cb of onDataListeners) {
+        cb("❯ pnpm build\r\n@fusion/dashboard build complete  main\r\n");
+      }
+      for (const cb of listeners.resize) cb();
+    });
+
+    await waitFor(() => expect(mockTerminalInstance.write).toHaveBeenCalledWith(expect.stringContaining("pnpm build")));
+    await waitFor(() => expect(resizeForFoldedAndroid).toHaveBeenCalledWith(80, 24));
+    expectMeasurementSafeFontStack(mockTerminalInstance.options.fontFamily as string);
+    expect(mockTerminalInstance.options.fontSize).toBe(10);
+  });
+
   it("detects keyboard on iOS Safari where innerHeight shrinks with visualViewport", async () => {
     // On iOS Safari, both window.innerHeight and visualViewport.height shrink.
     // The primary formula (innerHeight - vv.offsetTop - vv.height) returns 0

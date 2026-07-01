@@ -292,19 +292,44 @@ export async function retryDynamicImport<T>(
   throw originalError ?? new Error("Dynamic import failed");
 }
 
+/** Effective viewport width for terminal mobile decisions. */
+function getTerminalViewportWidth(hasTouchScreen = false): number {
+  if (typeof window === "undefined") return Number.POSITIVE_INFINITY;
+  const layoutWidth = window.innerWidth;
+  const visualWidth = window.visualViewport?.width;
+  if (hasTouchScreen && typeof visualWidth === "number" && visualWidth > 0) {
+    return Math.min(layoutWidth, visualWidth);
+  }
+  return layoutWidth;
+}
+
+function getTerminalViewportHeight(hasTouchScreen = false): number {
+  if (typeof window === "undefined") return Number.POSITIVE_INFINITY;
+  const layoutHeight = window.innerHeight;
+  const visualHeight = window.visualViewport?.height;
+  if (hasTouchScreen && typeof visualHeight === "number" && visualHeight > 0) {
+    return Math.min(layoutHeight, visualHeight);
+  }
+  return layoutHeight;
+}
+
 /** Whether the current device is likely mobile (touch-primary, small viewport). */
 function isMobileDevice(): boolean {
   if (typeof window === "undefined") return false;
   const hasTouchScreen =
     "ontouchstart" in window || navigator.maxTouchPoints > 0;
-  const isNarrow = window.innerWidth <= 768;
+  const isNarrow = getTerminalViewportWidth(hasTouchScreen) <= 768;
   return hasTouchScreen && isNarrow;
 }
 
 function isTerminalMobileViewport(): boolean {
   if (typeof window === "undefined") return false;
   const hasTouchScreen = "ontouchstart" in window || navigator.maxTouchPoints > 0;
-  return window.innerWidth <= 768 || (hasTouchScreen && window.innerHeight <= 480);
+  /*
+  FNXC:Terminal 2026-07-01-11:46:
+  Android foldables can expose a tablet-sized layout viewport while the current visualViewport is the folded phone pane. Treat touch-primary visualViewport width as the terminal mobile breakpoint so the first xterm fit uses the fullscreen/mobile shell and keyboard vars before any unfold/orientation event can repair stale desktop geometry.
+  */
+  return window.innerWidth <= 768 || (hasTouchScreen && (getTerminalViewportWidth(true) <= 768 || getTerminalViewportHeight(true) <= 480));
 }
 
 function isMacPlatform(): boolean {
@@ -2051,7 +2076,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
   const isLoading = !isReady || (!activeTab && !bootstrapError);
   // FNXC:Terminal 2026-06-23-04:30: Always carry the base `terminal-modal-overlay` class so the no-dim/no-blur rule applies in EVERY mode (docked, floating, AND the mobile/default sheet that is neither) — the terminal must never dim the page behind it.
   const overlayClassName = `modal-overlay open terminal-modal-overlay${isDockedMode ? " terminal-modal-overlay--docked" : ""}${isFloatingMode ? " terminal-modal-overlay--floating" : ""}`;
-  const modalClassName = `modal terminal-modal${isDockedMode ? " terminal-modal--docked" : ""}${isFloatingMode ? " terminal-modal--floating" : ""}`;
+  const modalClassName = `modal terminal-modal${isMobileTerminal ? " terminal-modal--mobile" : ""}${isDockedMode ? " terminal-modal--docked" : ""}${isFloatingMode ? " terminal-modal--floating" : ""}`;
   const modalStyle = {
     ...(keyboardOverlap > 0
       ? {

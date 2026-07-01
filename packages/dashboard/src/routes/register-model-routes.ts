@@ -163,6 +163,18 @@ export const registerModelRoutes: ApiRouteRegistrar = (ctx) => {
         contextWindow: m.contextWindow,
       }));
 
+      /*
+       * FNXC:ModelCatalog 2026-07-01-12:02:
+       * Model visibility is provider-surface-specific: Claude CLI can advertise its own `pi-claude-cli/claude-sonnet-5` row while direct Anthropic must only show Sonnet 5 when the upstream registry returns it. Dedupe after refresh/supplemental merges so overlapping live and supplemental catalogs expose one selectable row without reintroducing static direct-Anthropic advertisement.
+       */
+      const seenModelKeys = new Set<string>();
+      models = models.filter((model) => {
+        const key = `${model.provider}/${model.id}`;
+        if (seenModelKeys.has(key)) return false;
+        seenModelKeys.add(key);
+        return true;
+      });
+
       // The vendored pi-claude-cli extension registers its provider as
       // "pi-claude-cli" (distinct from "anthropic") whenever it loads.
       // When the toggle is OFF, hide those entries from pickers so users

@@ -132,6 +132,39 @@ describe("CustomModelDropdown", () => {
     expect(onChange).toHaveBeenCalledWith("");
   });
 
+  it("renders eligible Claude CLI Sonnet 5 without stale direct-Anthropic favorite shells", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+
+    render(
+      <CustomModelDropdown
+        label="Executor Model"
+        value="anthropic/claude-sonnet-5"
+        onChange={onChange}
+        models={[
+          ...MOCK_MODELS,
+          { provider: "pi-claude-cli", id: "claude-sonnet-5", name: "Claude Sonnet 5 (CLI)", reasoning: true, contextWindow: 1_000_000 },
+        ]}
+        favoriteModels={["anthropic/claude-sonnet-5", "pi-claude-cli/claude-sonnet-5"]}
+        onToggleModelFavorite={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Executor Model" })).toHaveTextContent("anthropic/claude-sonnet-5");
+
+    await user.click(screen.getByRole("button", { name: "Executor Model" }));
+    const portal = await screen.findByTestId("model-combobox-portal");
+    const options = within(portal).getAllByRole("option");
+    const cliSonnetOptions = options.filter((option) => option.textContent?.includes("Claude Sonnet 5 (CLI)"));
+
+    expect(cliSonnetOptions).toHaveLength(1);
+    expect(within(portal).queryByLabelText("Remove Claude Sonnet 5 from favorites")).toBeNull();
+    expect(within(portal).getByLabelText("Remove Claude Sonnet 5 (CLI) from favorites")).toBeTruthy();
+
+    await user.click(cliSonnetOptions[0]!);
+    expect(onChange).toHaveBeenCalledWith("pi-claude-cli/claude-sonnet-5");
+  });
+
   it("closes the portaled dropdown when clicking outside the trigger and menu", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();

@@ -473,15 +473,20 @@ describe("GET /models", () => {
           { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5", provider: "anthropic", reasoning: true, contextWindow: 200000 },
           { id: "gpt-4o", name: "GPT-4o", provider: "openai", reasoning: false, contextWindow: 128000 },
           { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5 (CLI)", provider: "pi-claude-cli", reasoning: true, contextWindow: 200000 },
+          { id: "claude-sonnet-5", name: "Claude Sonnet 5 (CLI)", provider: "pi-claude-cli", reasoning: true, contextWindow: 1_000_000 },
+          { id: "claude-sonnet-5", name: "Claude Sonnet 5 Duplicate (CLI)", provider: "pi-claude-cli", reasoning: true, contextWindow: 1_000_000 },
         ]),
       });
     }
 
-    it("hides pi-claude-cli entries when useClaudeCli is false", async () => {
+    it("hides pi-claude-cli entries, including Claude Sonnet 5, when useClaudeCli is false", async () => {
       const res = await GET(buildAppWithSetting(false, registryWithCli()), "/api/models");
       expect(res.status).toBe(200);
       const providers = res.body.models.map((m: { provider: string }) => m.provider);
       expect(providers).not.toContain("pi-claude-cli");
+      expect(res.body.models).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ provider: "pi-claude-cli", id: "claude-sonnet-5" }),
+      ]));
       expect(providers).toEqual(expect.arrayContaining(["anthropic", "openai"]));
     });
 
@@ -492,11 +497,17 @@ describe("GET /models", () => {
       expect(providers).not.toContain("pi-claude-cli");
     });
 
-    it("includes pi-claude-cli entries alongside other providers when useClaudeCli is true", async () => {
+    it("includes pi-claude-cli Claude Sonnet 5 exactly once alongside other providers when useClaudeCli is true", async () => {
       const res = await GET(buildAppWithSetting(true, registryWithCli()), "/api/models");
       expect(res.status).toBe(200);
       const providers = res.body.models.map((m: { provider: string }) => m.provider);
       expect(providers).toEqual(expect.arrayContaining(["anthropic", "openai", "pi-claude-cli"]));
+      const cliSonnetFiveRows = res.body.models.filter((m: { provider: string; id: string }) => m.provider === "pi-claude-cli" && m.id === "claude-sonnet-5");
+      expect(cliSonnetFiveRows).toHaveLength(1);
+      expect(cliSonnetFiveRows[0]).toEqual(expect.objectContaining({
+        name: "Claude Sonnet 5 (CLI)",
+        contextWindow: 1_000_000,
+      }));
     });
 
     it("hides direct Anthropic rows for OAuth-only subscription auth while showing distinct Claude CLI rows", async () => {

@@ -66,7 +66,7 @@ function mockRawLogs(entries: AgentLogEntry[]) {
 }
 
 describe("TaskDetailModal Activity and planner Chat tab integration", () => {
-  it("keeps Activity first and segments Live, Feed, and Raw Logs without duplicate panels on desktop", async () => {
+  it("keeps Chat first while Activity segments Live, Feed, and Raw Logs without duplicate panels on desktop", async () => {
     const user = userEvent.setup();
     mockRawLogs([
       { timestamp: "2026-06-30T20:03:00.000Z", taskId: "FN-7315", type: "text", agent: "executor", text: "raw executor line" },
@@ -74,8 +74,14 @@ describe("TaskDetailModal Activity and planner Chat tab integration", () => {
 
     renderModal();
 
-    expect(topLevelTabLabels().slice(0, 2)).toEqual(["Activity", "Chat"]);
+    expect(topLevelTabLabels().slice(0, 2)).toEqual(["Chat", "Activity"]);
     expect(screen.getAllByRole("button", { name: "Chat" })).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Chat" })).toHaveClass("detail-tab-active");
+    expect(screen.getByTestId("task-planner-chat-panel")).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Live" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Activity" }));
+
     expect(screen.getByRole("button", { name: "Activity" })).toHaveClass("detail-tab-active");
     expect(activitySegmentButtons().map((button) => button.textContent?.trim())).toEqual(["Live", "Feed", "Raw Logs"]);
     expect(activitySegmentButtons().every((button) => (button.textContent ?? "").trim().length > 0)).toBe(true);
@@ -124,7 +130,7 @@ describe("TaskDetailModal Activity and planner Chat tab integration", () => {
         />,
       );
 
-      expect(topLevelTabLabels().slice(0, 3)).toEqual(["Activity", "Chat", "Summary"]);
+      expect(topLevelTabLabels().slice(0, 3)).toEqual(["Chat", "Activity", "Summary"]);
       expect(screen.getByRole("button", { name: "Summary" })).toHaveClass("detail-tab-active");
       expect(screen.queryByRole("tab", { name: "Live" })).not.toBeInTheDocument();
 

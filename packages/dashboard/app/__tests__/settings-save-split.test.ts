@@ -239,6 +239,62 @@ describe("splitSettingsSave", () => {
     expect(projectResult.projectPatch).toEqual({ mcpServers: projectMcp });
   });
 
+  it("maps flattened remote access fields to the canonical global remoteAccess patch", () => {
+    const { globalPatch, projectPatch } = splitSettingsSave({
+      payload: {
+        remoteActiveProvider: "tailscale",
+        remoteTailscaleEnabled: false,
+        remoteTailscaleHostname: "tail.example.ts.net",
+        remoteTailscaleTargetPort: 4040,
+        remoteTailscaleAcceptRoutes: true,
+        remoteCloudflareEnabled: true,
+        remoteCloudflareQuickTunnel: false,
+        remoteCloudflareTunnelName: "demo-tunnel",
+        remoteCloudflareTunnelToken: "cf-secret-token",
+        remoteCloudflareIngressUrl: "https://remote.example.com",
+        remoteShortLivedEnabled: true,
+        remoteShortLivedTtlMs: 120000,
+        remoteShortLivedMaxTtlMs: 86400000,
+        remoteRememberLastRunning: true,
+        remoteWasRunningOnShutdown: true,
+        remoteLastStartedProvider: "cloudflare",
+      },
+      initialValues: null,
+      initialScopedValues: { global: {}, project: {} } as never,
+      activeSection: "remote",
+    });
+
+    expect(projectPatch).toEqual({});
+    expect(globalPatch).toEqual({
+      remoteAccess: expect.objectContaining({
+        activeProvider: "tailscale",
+        providers: expect.objectContaining({
+          tailscale: expect.objectContaining({
+            enabled: true,
+            hostname: "tail.example.ts.net",
+            targetPort: 4040,
+            acceptRoutes: true,
+          }),
+          cloudflare: expect.objectContaining({
+            enabled: true,
+            quickTunnel: false,
+            tunnelName: "demo-tunnel",
+            tunnelToken: "cf-secret-token",
+            ingressUrl: "https://remote.example.com",
+          }),
+        }),
+        tokenStrategy: expect.objectContaining({
+          shortLived: expect.objectContaining({ enabled: true, ttlMs: 120000, maxTtlMs: 86400000 }),
+        }),
+        lifecycle: expect.objectContaining({
+          rememberLastRunning: true,
+          wasRunningOnShutdown: true,
+          lastRunningProvider: "cloudflare",
+        }),
+      }),
+    });
+  });
+
   it("routes enabled built-in workflow ids as a changed project setting", () => {
     const { projectPatch } = splitSettingsSave({
       payload: { enabledBuiltinWorkflowIds: ["builtin:coding"] },

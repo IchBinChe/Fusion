@@ -1237,6 +1237,7 @@ Dashboard remote controls live in **Settings → Remote Access**.
 From this section, operators can:
 
 - Configure Tailscale and Cloudflare provider fields
+- Save provider options such as Tailscale **Accept routes** and **Remember last running state** with the main Settings **Save** button; starting a tunnel is not required for these settings to persist.
 - Activate the current provider
 - Start/stop tunnel lifecycle manually
 - Generate login URLs / QR payloads using persistent or short-lived token mode

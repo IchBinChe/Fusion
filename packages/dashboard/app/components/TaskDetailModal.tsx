@@ -1957,8 +1957,8 @@ export function TaskDetailContent({
         return;
       }
       /*
-      FNXC:TaskDetailDelete 2026-06-23-10:55:
-      Task detail hosts must close optimistically after the operator completes every required delete prompt and before the server delete request settles. Keep async success/error toasts attached to the delete promise so conflict handling and failure reporting continue after the modal, embedded panel, or floating host is gone.
+      FNXC:TaskDetailDelete 2026-07-01-09:40:
+      Task detail hosts must close optimistically after the operator completes every required delete prompt and before each server delete request starts. Keep this helper idempotent so dependency/lineage retries preserve async prompts and toasts without reopening or repeatedly closing the modal, main panel, list split, or right-dock host.
       */
       requestClose();
       deleteCloseRequested = true;

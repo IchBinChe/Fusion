@@ -1846,6 +1846,20 @@ export function ListView({
     };
   }, []);
 
+  const closeEmbeddedTaskDetail = useCallback(() => {
+    /*
+    FNXC:TaskDetailDelete 2026-07-01-09:46:
+    List split-detail is an embedded TaskDetailContent host, so optimistic delete close must clear the selected task synchronously and remove the persisted selection before the delete request settles. Clear any pending detail fetch so a delayed response cannot resurrect the closed split panel.
+    */
+    detailFetchTargetRef.current = null;
+    if (detailFetchTimerRef.current) {
+      clearTimeout(detailFetchTimerRef.current);
+      detailFetchTimerRef.current = null;
+    }
+    setSelectedTaskId(null);
+    setSelectedTaskSnapshot(null);
+  }, []);
+
   const handleEmbeddedOpenDetail = useCallback((nextTask: Task | TaskDetail) => {
     setSelectedTaskId(nextTask.id);
     setSelectedTaskSnapshot(nextTask);
@@ -2855,6 +2869,7 @@ export function ListView({
                       projectId={projectId}
                       tasks={tasks}
                       embedded
+                      onRequestClose={closeEmbeddedTaskDetail}
                       onOpenDetail={handleEmbeddedOpenDetail}
                       onMoveTask={onMoveTask}
                       onDeleteTask={onDeleteTask}

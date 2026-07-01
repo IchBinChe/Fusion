@@ -161,12 +161,15 @@ vi.mock("../TaskDetailModal", () => ({
   TaskDetailContent: ({
     task,
     onOpenDetail,
+    onRequestClose,
   }: {
     task: Task | TaskDetail;
     onOpenDetail?: (task: Task | TaskDetail) => void;
+    onRequestClose?: () => void;
   }) => (
     <div data-testid="task-detail-content">
       <span>{task.id}</span>
+      <button type="button" onClick={() => onRequestClose?.()}>Close detail</button>
       {(task.dependencies ?? []).map((dependencyId) => (
         <button
           key={dependencyId}
@@ -1451,6 +1454,25 @@ describe("ListView", () => {
     expect(screen.getByTestId("list-split-resize-handle")).toBeInTheDocument();
     expect(screen.getByTestId("list-split-detail")).toBeInTheDocument();
     expect(screen.getByText("Select a task to view details")).toBeInTheDocument();
+    viewportSpy.mockRestore();
+  });
+
+  it("clears the desktop split-detail shell when embedded detail requests close", async () => {
+    const viewportSpy = mockDesktopViewport();
+    const tasks = [createMockTask({ id: "FN-001", title: "Task" })];
+
+    renderListView({ tasks });
+
+    fireEvent.click(screen.getByText("FN-001").closest("tr")!);
+    expect(await screen.findByTestId("task-detail-content")).toHaveTextContent("FN-001");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close detail" }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("task-detail-content")).toBeNull();
+      expect(screen.getByText("Select a task to view details")).toBeInTheDocument();
+      expect(localStorage.getItem(scopedStorageKey("kb-dashboard-list-selected-task"))).toBeNull();
+    });
     viewportSpy.mockRestore();
   });
 

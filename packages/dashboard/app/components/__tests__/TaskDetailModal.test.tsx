@@ -1019,6 +1019,55 @@ describe("TaskDetailModal delete affordance", () => {
     pendingRetry.resolve(makeTask());
   });
 
+  it("reports a delete failure after optimistic close without reopening or reclosing", async () => {
+    const user = userEvent.setup();
+    const pendingDelete = createDeferred<ReturnType<typeof makeTask>>();
+    const onDeleteTask = vi.fn(() => pendingDelete.promise);
+    const addToast = vi.fn();
+    const { onClose } = renderClosingTaskDetailModal({ onDeleteTask, addToast });
+
+    await user.click(screen.getByRole("button", { name: "Delete task" }));
+
+    await waitFor(() => expect(onDeleteTask).toHaveBeenCalledWith("FN-099", { allowResurrection: false }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    pendingDelete.reject(new Error("delete failed"));
+
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith("delete failed", "error"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("does not reclose or retry when the force-delete prompt is cancelled after a conflict", async () => {
+    const user = userEvent.setup();
+    const onDeleteTask = vi.fn().mockRejectedValueOnce(dependencyConflictError(["FN-200"]));
+    const onRequestClose = vi.fn();
+    mockConfirm.mockResolvedValueOnce(false);
+
+    render(
+      <TaskDetailContent
+        initialTab="definition"
+        embedded
+        task={makeTask({ column: "triage" })}
+        onRequestClose={onRequestClose}
+        onMoveTask={noopMove}
+        onDeleteTask={onDeleteTask}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Delete task" }));
+
+    await waitFor(() => expect(mockConfirm).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Force Delete Task",
+    })));
+    expect(onDeleteTask).toHaveBeenCalledTimes(1);
+    expect(onRequestClose).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the dialog open when the delete confirmation is cancelled", async () => {
     const user = userEvent.setup();
     const onDeleteTask = vi.fn(async () => makeTask());

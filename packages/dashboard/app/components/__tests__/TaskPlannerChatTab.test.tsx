@@ -35,6 +35,8 @@ vi.mock("../../api", async (importOriginal) => {
 
 vi.mock("lucide-react", () => ({
   Loader2: (props: any) => React.createElement("svg", { "data-testid": "loader2-icon", ...props }),
+  Maximize2: (props: any) => React.createElement("svg", { "data-testid": "maximize2-icon", ...props }),
+  Minimize2: (props: any) => React.createElement("svg", { "data-testid": "minimize2-icon", ...props }),
   Send: (props: any) => React.createElement("svg", { "data-testid": "send-icon", ...props }),
 }));
 
@@ -119,6 +121,22 @@ describe("TaskPlannerChatTab", () => {
     expect(screen.getByRole("button", { name: /Identify the next best action/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Review the plan or definition/ })).toBeInTheDocument();
     expect(screen.getAllByTestId(/task-planner-chat-starter-/)).toHaveLength(4);
+  });
+
+  it("renders accessible expand controls without moving the composer out of the panel", async () => {
+    const onExpandedChange = vi.fn();
+    renderPlannerChat({ expanded: true, onExpandedChange });
+
+    expect(await screen.findByTestId("task-planner-chat-empty")).toBeInTheDocument();
+    const toggle = screen.getByTestId("task-planner-chat-expand-toggle");
+    expect(toggle).toHaveAccessibleName("Collapse planner chat");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByTestId("task-planner-chat-panel")).toContainElement(screen.getByLabelText("Message planner chat"));
+    expect(screen.getByTestId("task-planner-chat-panel")).toContainElement(screen.getByRole("button", { name: "Send" }));
+
+    await userEvent.click(toggle);
+
+    expect(onExpandedChange).toHaveBeenCalledWith(false);
   });
 
   it("omits model override when the effective planning model is undefined", async () => {

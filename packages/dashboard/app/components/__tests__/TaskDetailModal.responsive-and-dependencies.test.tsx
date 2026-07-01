@@ -99,10 +99,13 @@ describe("TaskDetailModal", () => {
       const mobileSendBlock = getCssRuleBlock(mobileBlock, ".task-planner-chat-send");
 
       expectBaseRule(css, ".task-planner-chat", "display: flex;");
+      expectBaseRule(css, ".task-planner-chat", "min-height: 0;");
       expectBaseRule(css, ".task-planner-chat-transcript", "overflow: auto;");
+      expectBaseRule(css, ".task-planner-chat-transcript", "min-height: 0;");
       expect(composerBlock).toContain("display: flex;");
       expect(composerBlock).toContain("flex-wrap: wrap;");
       expect(composerBlock).toContain("align-items: stretch;");
+      expect(composerBlock).toContain("flex: 0 0 auto;");
       expect(composerBlock).not.toContain("flex-direction: column;");
       expect(inputBlock).toContain("height: calc(var(--space-lg) + (var(--space-sm) * 2) + (var(--btn-border-width) * 2));");
       expect(inputBlock).toContain("min-height: calc(var(--space-lg) + (var(--space-sm) * 2) + (var(--btn-border-width) * 2));");
@@ -117,6 +120,15 @@ describe("TaskDetailModal", () => {
       expect(mobileBlock).toContain("grid-template-columns: 1fr;");
       expect(mobileBlock).toContain(".task-planner-chat-message .chat-question-response");
       expect(mobileBlock).toContain("margin-inline: 0;");
+
+      const detailCss = readDashboardStylesSource();
+      const plannerMobileBlock = getCssAtRuleBlockContaining(detailCss, "@media (max-width: 768px)", ".task-detail-content--planner-chat-expanded .detail-tabs");
+      expectBaseRule(detailCss, ".detail-body--planner-chat", "overflow-y: hidden;");
+      expectBaseRule(detailCss, ".detail-section--planner-chat", "min-height: 0;");
+      expect(plannerMobileBlock).toContain(".task-detail-content--planner-chat-expanded .detail-heading-row");
+      expect(plannerMobileBlock).toContain(".task-detail-content--planner-chat-expanded .detail-tabs");
+      expect(plannerMobileBlock).toContain(".task-detail-content--planner-chat-expanded .modal-actions");
+      expect(plannerMobileBlock).toContain("display: none;");
     });
 
     it("keeps detail metadata as a single wrapping flex row without mobile column fallbacks", () => {
@@ -254,8 +266,8 @@ describe("TaskDetailModal", () => {
       expect(container.querySelectorAll(".detail-timestamp-item").length).toBe(2);
       const tabs = container.querySelectorAll(".detail-tab");
       expect(Array.from(tabs).map((tab) => tab.textContent?.trim())).toEqual([
-        "Activity",
         "Chat",
+        "Activity",
         "Plan",
         "Changes",
         "Review",

@@ -3,7 +3,7 @@ import { getErrorMessage } from "@fusion/core";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Loader2, Send } from "lucide-react";
+import { Loader2, Maximize2, Minimize2, Send } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ToastType } from "../hooks/useToast";
 import type { ToolCallInfo } from "../hooks/chatTypes";
@@ -17,6 +17,8 @@ interface TaskPlannerChatTabProps {
   task: Task | TaskDetail;
   projectId?: string;
   active: boolean;
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
   planningModel: ResolvedModelSelection;
   addToast: (msg: string, type?: ToastType) => void;
   onTaskUpdated?: (task: Task) => void;
@@ -228,7 +230,7 @@ function buildPlannerQuestionRenderStates(messages: readonly ChatMessage[]): Map
   return states;
 }
 
-export function TaskPlannerChatTab({ task, projectId, active, planningModel, addToast, onTaskUpdated }: TaskPlannerChatTabProps) {
+export function TaskPlannerChatTab({ task, projectId, active, expanded = false, onExpandedChange, planningModel, addToast, onTaskUpdated }: TaskPlannerChatTabProps) {
   const { t } = useTranslation("app");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -481,6 +483,9 @@ export function TaskPlannerChatTab({ task, projectId, active, planningModel, add
 
   FNXC:TaskDetailPlannerChat 2026-06-30-23:59:
   Planner-generated clarification questions in the task-detail Chat transcript must reuse ChatQuestionResponse instead of bespoke chat text. Submitted answers stay in the planner-chat lane as ordinary follow-up user messages, render the prior question read-only, and duplicate refetched pending tool calls hide older live forms so users never see competing submit affordances.
+
+  FNXC:TaskDetailPlannerChat 2026-06-30-23:58:
+  The planner Chat tab owns an in-view expand/collapse button so mobile users can reclaim vertical room while keeping close/back/task identity controls reachable. This state is independent from Activity Live expansion because Activity still represents operational steering/history, not planner-model conversation.
   */
   return (
     <section className="task-planner-chat" aria-label={t("taskDetail.plannerChat.label", "Planner chat")} data-testid="task-planner-chat-panel">
@@ -489,16 +494,30 @@ export function TaskPlannerChatTab({ task, projectId, active, planningModel, add
           <h4>{t("taskDetail.plannerChat.heading", "Planner Chat")}</h4>
           <p>{t("taskDetail.plannerChat.description", "Ask planning questions about this task's current status, recent activity, blockers, next steps, or definition.")}</p>
         </div>
-        {isUsableModel(planningModel) && (
-          <span className="task-planner-chat-model" data-testid="task-planner-chat-model">
-            {planningModel.provider}/{planningModel.modelId}
-          </span>
-        )}
+        <div className="task-planner-chat-header-actions">
+          {onExpandedChange && (
+            <button
+              type="button"
+              className="btn btn-icon btn-sm task-planner-chat-expand-toggle"
+              onClick={() => onExpandedChange(!expanded)}
+              aria-label={expanded ? t("taskDetail.plannerChat.collapse", "Collapse planner chat") : t("taskDetail.plannerChat.expand", "Expand planner chat")}
+              aria-pressed={expanded}
+              aria-expanded={expanded}
+              data-testid="task-planner-chat-expand-toggle"
+            >
+              {expanded ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
+            </button>
+          )}
+          {isUsableModel(planningModel) && (
+            <span className="task-planner-chat-model" data-testid="task-planner-chat-model">
+              {planningModel.provider}/{planningModel.modelId}
+            </span>
+          )}
+        </div>
       </div>
 
-      {error && <div className="task-planner-chat-error" role="alert">{error}</div>}
-
       <div className="task-planner-chat-transcript" ref={transcriptRef} data-testid="task-planner-chat-transcript">
+        {error && <div className="task-planner-chat-error" role="alert">{error}</div>}
         {loading ? (
           <div className="task-planner-chat-state" role="status" aria-live="polite">
             <Loader2 className="animate-spin" aria-hidden="true" />

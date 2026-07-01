@@ -130,7 +130,8 @@ Task detail workflow badges share the board badge's slight token-based icon-to-l
 
 /* Activity → Live and expanded Activity mirror the Raw Logs fill-height layout: the modal body does not scroll;
    each segment owns internal scrolling while composers and controls stay visible. */
-.detail-body--chat {
+.detail-body--chat,
+.detail-body--planner-chat {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -865,6 +866,29 @@ The same expanded-mode chrome collapse now applies to all Activity segments: Liv
   overflow-y: auto;
 }
 
+/*
+FNXC:TaskDetailPlannerChat 2026-06-30-23:58:
+Planner Chat defaults to a focused state, but operator steering says large screens should keep the full task-detail context visible. Desktop therefore uses the same internal-scroll chat body without hiding rows; narrow/mobile layouts collapse nonessential title/meta/tabs/actions so the composer remains reachable while header identity and close/back controls stay available.
+*/
+.detail-section--planner-chat {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  margin-top: 0;
+}
+
+.task-detail-content--planner-chat-expanded .detail-body--planner-chat {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-md);
+}
+
+.task-detail-content--planner-chat-expanded .detail-section--planner-chat {
+  flex: 1;
+  min-height: 0;
+}
+
 
 .detail-spec-edit-trigger {
   display: flex;
@@ -1140,6 +1164,27 @@ FN-6500 fixes a tablet regression from FN-5599: the task-detail overlay offset a
 
   .task-detail-content--chat-expanded .modal-actions {
     display: none;
+  }
+
+  .task-detail-content--planner-chat-expanded .detail-heading-row,
+  .task-detail-content--planner-chat-expanded .detail-description-toggle,
+  .task-detail-content--planner-chat-expanded .detail-meta,
+  .task-detail-content--planner-chat-expanded .detail-near-duplicate-banner,
+  .task-detail-content--planner-chat-expanded .detail-tabs,
+  .task-detail-content--planner-chat-expanded .branch-group-card,
+  .task-detail-content--planner-chat-expanded .workspace-worktrees-summary,
+  .task-detail-content--planner-chat-expanded .modal-actions {
+    display: none;
+  }
+
+  .task-detail-content--planner-chat-expanded .modal-header {
+    flex: 0 0 auto;
+    justify-content: space-between;
+    padding-block: var(--space-sm);
+  }
+
+  .task-detail-content--planner-chat-expanded .detail-body--planner-chat {
+    padding: var(--space-sm);
   }
 }
 

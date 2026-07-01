@@ -197,10 +197,13 @@ type ActivitySegment = "current" | "feed" | "raw-logs";
 
 /*
 FNXC:TaskDetailActivityTab 2026-06-30-00:00:
-The existing task activity/steering surface keeps the stable internal `chat` tab id for deep-link/plugin compatibility, but its top-level user-facing label is Activity. Activity is the implicit default for active task columns; done tasks keep Summary as their omitted-initial-tab landing surface so completed work still opens on the completion report while Activity remains first in tab order.
+The existing task activity/steering surface keeps the stable internal `chat` tab id for deep-link/plugin compatibility, but its top-level user-facing label is Activity. Done tasks keep Summary as their omitted-initial-tab landing surface so completed work still opens on the completion report.
 
 FNXC:TaskDetailPlannerChat 2026-06-30-22:30:
-Task detail now separates Activity from planner-model Chat. `chat` remains the legacy Activity id for old links and Activity → Live (internal `current`)/Feed/Raw Logs/steering, while `planner-chat` is the new top-level Chat tab for task-aware planning conversation and must render immediately after Activity.
+Task detail separates Activity from planner-model Chat. `chat` remains the legacy Activity id for old links and Activity → Live (internal `current`)/Feed/Raw Logs/steering, while `planner-chat` is the top-level Chat tab for task-aware planning conversation.
+
+FNXC:TaskDetailPlannerChat 2026-06-30-23:58:
+Task details should prioritize task-aware Chat: render Chat before Activity, default omitted non-done task opens to `planner-chat`, and reserve expanded/focused layout behavior for the planner Chat surface rather than the legacy Activity `chat` id.
 
 FNXC:TaskDetailActivity 2026-06-30-15:50:
 Only an omitted initial tab is the implicit default. Preserve explicit `initialTab="chat"` requests from plugins and task-detail entrypoints so existing links continue to open Activity → Live (internal `current`). Legacy `initialTab="logs"` now routes to Activity → Feed, and Raw Logs remains an Activity segment.
@@ -221,7 +224,7 @@ function resolveDefaultTab(initialTab: TabId | undefined, column: ColumnId): Tab
   if (initialTab) {
     return initialTab;
   }
-  return column === "done" ? "summary" : "chat";
+  return column === "done" ? "summary" : "planner-chat";
 }
 
 function resolveDefaultActivitySegment(initialTab: TabId | undefined): ActivitySegment {
@@ -536,6 +539,7 @@ export function TaskDetailContent({
   const [activeTab, setActiveTab] = useState<TabId>(() => resolveDefaultTab(initialTab, task.column));
   const [activitySegment, setActivitySegment] = useState<ActivitySegment>(() => resolveDefaultActivitySegment(initialTab));
   const [activityExpanded, setActivityExpanded] = useState(false);
+  const [plannerChatExpanded, setPlannerChatExpanded] = useState(true);
 
   // ── CLI agent session (U11) ────────────────────────────────────────────────
   const [cliSession, setCliSession] = useState<CliSessionSummaryRecord | null>(null);
@@ -683,9 +687,10 @@ export function TaskDetailContent({
     }
   }, [activeTab, task.column]);
 
-  // Reset description expanded state when task changes
+  // Reset description and planner-chat focus state when task changes
   useEffect(() => {
     setDescriptionExpanded(false);
+    setPlannerChatExpanded(true);
   }, [task.column, task.id]);
 
   const [highlightStallCode, setHighlightStallCode] = useState<string | null>(null);
@@ -2618,6 +2623,7 @@ export function TaskDetailContent({
   const effectiveAutoMerge = resolveEffectiveAutoMerge({ autoMerge: task.autoMerge }, { autoMerge: autoMergeEnabled });
   const isManualPrFlow = mergeStrategy === "pull-request" && !effectiveAutoMerge;
   const isActivityExpanded = activityExpanded && activeTab === "chat" && !isEditing;
+  const isPlannerChatExpanded = plannerChatExpanded && activeTab === "planner-chat" && !isEditing;
   /*
   FNXC:TaskDetailActivity 2026-06-30-23:55:
   Maximized Activity applies to Live, Feed, and Raw Logs, not only the legacy `current` chat segment. Reserve the detail surface for header context and Activity content, and do not mount branch-group chrome in this mode so expand/promote controls are not hidden-but-focusable.
@@ -2740,7 +2746,7 @@ export function TaskDetailContent({
 
   return (
     <div
-      className={`task-detail-content${embedded ? " task-detail-content--embedded" : ""}${isActivityExpanded ? " task-detail-content--chat-expanded" : ""}`}
+      className={`task-detail-content${embedded ? " task-detail-content--embedded" : ""}${isActivityExpanded ? " task-detail-content--chat-expanded" : ""}${isPlannerChatExpanded ? " task-detail-content--planner-chat-expanded" : ""}`}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
@@ -2820,7 +2826,7 @@ export function TaskDetailContent({
             )}
           </div>
         </div>
-        <div className={`detail-body${activeTab === "chat" && activitySegment === "raw-logs" && !isEditing ? " detail-body--agent-log" : ""}${activeTab === "chat" && (activitySegment === "current" || isActivityExpanded) && !isEditing ? " detail-body--chat" : ""}`}>
+        <div className={`detail-body${activeTab === "chat" && activitySegment === "raw-logs" && !isEditing ? " detail-body--agent-log" : ""}${activeTab === "chat" && (activitySegment === "current" || isActivityExpanded) && !isEditing ? " detail-body--chat" : ""}${activeTab === "planner-chat" && !isEditing ? " detail-body--planner-chat" : ""}`}>
           {isEditing ? (
             <div className="modal-edit-form">
               <TaskForm
@@ -3165,20 +3171,20 @@ export function TaskDetailContent({
             <>
           <div className="detail-tabs">
             {/*
-              FNXC:TaskDetailPlannerChat 2026-06-30-22:30:
-              The existing task activity/steering surface is labelled Activity and always renders first with the legacy `chat` tab id. The adjacent `planner-chat` tab is the separate planner-model Chat destination, so `initialTab="chat"` remains Activity while visible Chat opens task-aware planning conversation.
+              FNXC:TaskDetailPlannerChat 2026-06-30-23:58:
+              Chat is the first visible task-detail tab and maps to `planner-chat` so omitted non-done task opens prioritize task-aware planning conversation. Activity stays immediately after Chat with the legacy `chat` id for explicit `initialTab="chat"` callers and operational steering/feed/raw-log history.
             */}
-            <button
-              className={`detail-tab${activeTab === "chat" ? " detail-tab-active" : ""}`}
-              onClick={() => setActiveTab("chat")}
-            >
-              {t("taskDetail.tabs.activity", "Activity")}
-            </button>
             <button
               className={`detail-tab${activeTab === "planner-chat" ? " detail-tab-active" : ""}`}
               onClick={() => setActiveTab("planner-chat")}
             >
               {t("taskDetail.tabs.chat", "Chat")}
+            </button>
+            <button
+              className={`detail-tab${activeTab === "chat" ? " detail-tab-active" : ""}`}
+              onClick={() => setActiveTab("chat")}
+            >
+              {t("taskDetail.tabs.activity", "Activity")}
             </button>
             {task.column === "done" && (
               <button
@@ -3316,6 +3322,8 @@ export function TaskDetailContent({
                 task={workingTask}
                 projectId={projectId}
                 active={activeTab === "planner-chat"}
+                expanded={isPlannerChatExpanded}
+                onExpandedChange={setPlannerChatExpanded}
                 planningModel={resolveEffectivePlanning(workingTask, agentLogEntries, settings)}
                 addToast={addToast}
                 onTaskUpdated={onTaskUpdated}

@@ -1,9 +1,9 @@
 /*
 FNXC:TaskDetailTabs 2026-06-17-08:20:
-FN-7306 labels the stable internal `chat` tab as Activity and keeps it as the default TaskDetailModal tab. Tests that assert Definition-only sections must opt into `initialTab="definition"` so they verify the intended surface instead of the Activity landing state.
+FN-7324 keeps the stable internal `chat` tab as Activity for explicit legacy links, but the omitted non-done default is now planner Chat. Tests that assert Definition-only sections must opt into `initialTab="definition"` so they verify the intended surface instead of the Chat landing state.
 */
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import React, { type ComponentProps } from "react";
 import userEvent from "@testing-library/user-event";
 import {
@@ -96,25 +96,25 @@ describe("TaskDetailModal planner Chat tab", () => {
       .map((button) => button.textContent?.trim() ?? "");
   }
 
-  it("renders Activity then Chat as the first task-detail conversation tabs for active tasks", async () => {
+  it("renders Chat then Activity as the first task-detail conversation tabs and defaults active tasks to Chat", async () => {
     const user = userEvent.setup();
     renderTask("in-progress");
 
-    expect(tabLabels().slice(0, 2)).toEqual(["Activity", "Chat"]);
+    expect(tabLabels().slice(0, 2)).toEqual(["Chat", "Activity"]);
     expect(screen.getAllByRole("button", { name: "Chat" })).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "Activity" })).toHaveClass("detail-tab-active");
-
-    await user.click(screen.getByRole("button", { name: "Chat" }));
-
-    expect(screen.getByTestId("task-planner-chat-panel")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Chat" })).toHaveClass("detail-tab-active");
-    expect(screen.getByRole("button", { name: "Activity" })).not.toHaveClass("detail-tab-active");
+    expect(screen.getByTestId("task-planner-chat-panel")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Activity" }));
+
+    expect(screen.getByRole("button", { name: "Activity" })).toHaveClass("detail-tab-active");
+    expect(screen.queryByTestId("task-planner-chat-panel")).not.toBeInTheDocument();
   });
 
-  it("preserves Summary as the default for done tasks while keeping Activity then Chat order", () => {
+  it("preserves Summary as the default for done tasks while keeping Chat then Activity order", () => {
     renderTask("done");
 
-    expect(tabLabels().slice(0, 3)).toEqual(["Activity", "Chat", "Summary"]);
+    expect(tabLabels().slice(0, 3)).toEqual(["Chat", "Activity", "Summary"]);
     expect(screen.getByRole("button", { name: "Summary" })).toHaveClass("detail-tab-active");
   });
 
@@ -130,6 +130,76 @@ describe("TaskDetailModal planner Chat tab", () => {
 
     expect(screen.getByRole("button", { name: "Chat" })).toHaveClass("detail-tab-active");
     expect(screen.getByTestId("task-planner-chat-panel")).toBeInTheDocument();
+  });
+
+  it("defaults planner Chat to focused mode and lets the in-view control collapse it", async () => {
+    const user = userEvent.setup();
+    const { container } = renderTask("todo");
+    const detail = container.querySelector(".task-detail-content");
+
+    expect(detail).toHaveClass("task-detail-content--planner-chat-expanded");
+    const toggle = screen.getByTestId("task-planner-chat-expand-toggle");
+    expect(toggle).toHaveAccessibleName("Collapse planner chat");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+    await user.click(toggle);
+
+    expect(detail).not.toHaveClass("task-detail-content--planner-chat-expanded");
+    expect(screen.getByRole("button", { name: "Chat" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Activity" })).toBeInTheDocument();
+    expect(screen.getByTestId("task-planner-chat-expand-toggle")).toHaveAccessibleName("Expand planner chat");
+  });
+
+  it("resets planner Chat focused mode when switching tasks", async () => {
+    const user = userEvent.setup();
+    const { container, rerender } = render(
+      <TaskDetailModal
+        task={makeTask({ id: "FN-7324-A", column: "todo" as any })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+    const detail = container.querySelector(".task-detail-content");
+
+    await user.click(screen.getByTestId("task-planner-chat-expand-toggle"));
+    expect(detail).not.toHaveClass("task-detail-content--planner-chat-expanded");
+
+    rerender(
+      <TaskDetailModal
+        task={makeTask({ id: "FN-7324-B", column: "todo" as any })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    expect(detail).toHaveClass("task-detail-content--planner-chat-expanded");
+  });
+
+  it("keeps Activity expansion independent from planner Chat expansion", async () => {
+    const user = userEvent.setup();
+    const { container } = renderTask("todo", "chat");
+    const detail = container.querySelector(".task-detail-content");
+
+    await user.click(screen.getByTestId("task-chat-expand-toggle"));
+    expect(detail).toHaveClass("task-detail-content--chat-expanded");
+
+    const chatTab = container.querySelectorAll<HTMLButtonElement>(".detail-tabs .detail-tab")[0];
+    expect(chatTab?.textContent?.trim()).toBe("Chat");
+    fireEvent.click(chatTab!);
+    expect(detail).toHaveClass("task-detail-content--planner-chat-expanded");
+    expect(detail).not.toHaveClass("task-detail-content--chat-expanded");
+
+    await user.click(screen.getByTestId("task-planner-chat-expand-toggle"));
+    expect(detail).not.toHaveClass("task-detail-content--planner-chat-expanded");
+    expect(detail).not.toHaveClass("task-detail-content--chat-expanded");
   });
 });
 
@@ -499,6 +569,7 @@ describe("TaskDetailModal Chat task merge", () => {
         task={makeTask({ id: "FN-7310", column: "todo" as any, steeringComments: undefined, log: [] })}
         projectId="project-7309"
         embedded
+        initialTab="chat"
         onRequestClose={noop}
         onMoveTask={noopMove}
         onDeleteTask={noopDelete}

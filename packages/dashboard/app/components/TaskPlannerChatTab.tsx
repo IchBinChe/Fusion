@@ -11,6 +11,7 @@ import { ensureTaskPlannerChatSession, fetchChatMessages, fetchTaskDetail, fetch
 import { parseQuestionToolCall, type ParsedQuestionToolCall } from "../utils/parseQuestionToolCall";
 import { markdownComponents } from "./AgentLogViewer";
 import { ChatQuestionResponse } from "./ChatQuestionResponse";
+import { ProviderIcon } from "./ProviderIcon";
 import "./TaskPlannerChatTab.css";
 
 interface TaskPlannerChatTabProps {
@@ -246,6 +247,7 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
 
   const planningModelProvider = isUsableModel(planningModel) ? planningModel.provider : undefined;
   const planningModelId = isUsableModel(planningModel) ? planningModel.modelId : undefined;
+  const planningModelLabel = planningModelProvider && planningModelId ? `${planningModelProvider}/${planningModelId}` : "";
   const modelPayload = useMemo(() => {
     return planningModelProvider && planningModelId
       ? { modelProvider: planningModelProvider, modelId: planningModelId }
@@ -505,8 +507,13 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
         </div>
         <div className="task-planner-chat-header-actions">
           {isUsableModel(planningModel) && (
-            <span className="task-planner-chat-model" data-testid="task-planner-chat-model">
-              {planningModel.provider}/{planningModel.modelId}
+            <span
+              className="task-planner-chat-model"
+              data-testid="task-planner-chat-model"
+              title={planningModelLabel}
+              aria-label={planningModelLabel}
+            >
+              <ProviderIcon provider={planningModel.provider} size="md" />
             </span>
           )}
           {onExpandedChange && (
@@ -623,6 +630,7 @@ export function TaskPlannerChatTab({ task, projectId, active, expanded = false, 
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={handleKeyDown}
           disabled={composerState === "sending"}
+          rows={1}
         />
         <button type="button" className="btn btn-primary task-planner-chat-send" onClick={() => void sendMessage()} disabled={!canSend}>
           {composerState === "sending" ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Send aria-hidden="true" />}

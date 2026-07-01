@@ -118,7 +118,11 @@ describe("TaskPlannerChatTab", () => {
     );
     expect(mockEnsureTaskPlannerChatSession).not.toHaveBeenCalled();
     expect(mockFetchChatMessages).toHaveBeenCalledWith("chat-planner", { order: "asc" }, undefined);
-    expect(screen.getByTestId("task-planner-chat-model")).toHaveTextContent("anthropic/claude-plan");
+    const modelBadge = screen.getByTestId("task-planner-chat-model");
+    expect(modelBadge).toHaveAccessibleName("anthropic/claude-plan");
+    expect(modelBadge).toHaveAttribute("title", "anthropic/claude-plan");
+    expect(modelBadge).toHaveTextContent("");
+    expect(modelBadge.querySelector(".provider-icon[data-provider='anthropic']")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Summarize recent activity/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Explain status and blockers/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Identify the next best action/ })).toBeInTheDocument();

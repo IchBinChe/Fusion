@@ -531,7 +531,7 @@ export function MainContent({
     return (
       <PageErrorBoundary>
         <Suspense fallback={null}>
-          <GoalsView anchorGoalId={goalAnchorId} onNavigateToMission={handleOpenMission} />
+          <GoalsView anchorGoalId={goalAnchorId} projectId={currentProject?.id} onNavigateToMission={handleOpenMission} />
         </Suspense>
       </PageErrorBoundary>
     );

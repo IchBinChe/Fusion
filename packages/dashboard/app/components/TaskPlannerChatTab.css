@@ -65,22 +65,58 @@
 
 .task-planner-chat-empty {
   flex-direction: column;
-  max-width: 36rem;
+  width: 100%;
+  max-width: 42rem;
+  gap: var(--space-lg);
 }
 
-.task-planner-chat-empty p {
+.task-planner-chat-empty-copy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.task-planner-chat-empty-copy h5,
+.task-planner-chat-empty-copy p {
   margin: 0;
 }
 
+.task-planner-chat-empty-copy h5 {
+  color: var(--text);
+  font-size: var(--font-size-lg);
+}
+
 .task-planner-chat-starters {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-sm);
+  width: 100%;
 }
 
 .task-planner-chat-starter {
+  align-items: flex-start;
+  justify-content: flex-start;
+  min-width: 0;
+  height: auto;
   white-space: normal;
+  text-align: left;
+}
+
+.task-planner-chat-starter-label,
+.task-planner-chat-starter-description {
+  display: block;
+}
+
+.task-planner-chat-starter-label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.task-planner-chat-starter-description {
+  margin-top: var(--space-xs);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  line-height: var(--line-height-tight);
 }
 
 .task-planner-chat-message {
@@ -141,6 +177,15 @@
   .task-planner-chat-composer {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .task-planner-chat-starters {
+    grid-template-columns: 1fr;
+  }
+
+  .task-planner-chat-send {
+    justify-content: center;
+    width: 100%;
   }
 
   .task-planner-chat-message {

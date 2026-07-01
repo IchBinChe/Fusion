@@ -15845,7 +15845,7 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
    * Handle "already used by worktree" conflict.
    * Either generates a new worktree name (if conflicting worktree is in use by active task)
    * or cleans up the conflicting worktree and retries.
-   * 
+   *
    * @returns The worktree path if recovery succeeded, null if recovery failed
    */
   private async handleWorktreeConflict(
@@ -15858,6 +15858,15 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
     allowSiblingBranchRename = false,
     settings: Partial<Settings> = {},
   ): Promise<{ path: string; branch: string } | null> {
+    const tryFreshFallback = () => this.tryFreshWorktreeAfterLiveConflict({
+      conflictPath,
+      branch,
+      taskId,
+      startPoint,
+      attemptNumber,
+      allowSiblingBranchRename,
+      settings,
+    });
     const shouldGenerateNewName = await this.shouldGenerateNewWorktreeName(
       conflictPath,
       taskId,
@@ -15922,28 +15931,7 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
         throw new Error(`Branch ${branch} conflict could not be auto-resolved`);
       }
 
-      const conflictStartPoint = branch;
-      const newPath = resolveTaskWorktreePath(this.rootDir, settings, generateWorktreeName(this.rootDir, settings));
-      for (let suffix = 2; suffix <= 6; suffix++) {
-        const suffixedBranch = `${branch}-${suffix}`;
-        try {
-          await this.store.logEntry(
-            taskId,
-            `Conflicting worktree in use by active task, trying new path with branch ${suffixedBranch}`,
-            newPath,
-          );
-          return await this.tryCreateWorktree(suffixedBranch, newPath, taskId, conflictStartPoint, attemptNumber, 0, true, settings);
-        } catch (suffixErr: unknown) {
-          const info = this.extractWorktreeConflictInfo(suffixErr);
-          if (info.type === "already-used") {
-            continue;
-          }
-          throw suffixErr;
-        }
-      }
-      throw new Error(
-        `Cannot create branch for task: "${branch}" and suffixes -2 through -6 are all in use by other worktrees`,
-      );
+      return tryFreshFallback();
     }
 
     const cleanupSuccess = await this.cleanupConflictingWorktree(conflictPath, branch, taskId);
@@ -15952,7 +15940,63 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
       return this.tryCreateWorktree(branch, path, taskId, startPoint, attemptNumber, 0, allowSiblingBranchRename, settings);
     }
 
+    if (await this.isLiveCleanupRefusal(conflictPath, taskId)) {
+      return tryFreshFallback();
+    }
+
     return null;
+  }
+
+  private async tryFreshWorktreeAfterLiveConflict(input: {
+    conflictPath: string;
+    branch: string;
+    taskId: string;
+    startPoint?: string;
+    attemptNumber?: number;
+    allowSiblingBranchRename: boolean;
+    settings: Partial<Settings>;
+  }): Promise<{ path: string; branch: string }> {
+    const { conflictPath, branch, taskId, attemptNumber, allowSiblingBranchRename, settings } = input;
+    if (!allowSiblingBranchRename) {
+      throw new Error(`Branch ${branch} conflict could not be auto-resolved`);
+    }
+
+    const conflictStartPoint = branch;
+    for (let suffix = 2; suffix <= 6; suffix++) {
+      const suffixedBranch = `${branch}-${suffix}`;
+      const newPath = resolveTaskWorktreePath(this.rootDir, settings, generateWorktreeName(this.rootDir, settings));
+      try {
+        await this.store.logEntry(
+          taskId,
+          `Preserved active conflicting worktree and retrying with fresh worktree branch ${suffixedBranch}`,
+          `${conflictPath} -> ${newPath}`,
+        );
+        /*
+         * FNXC:ExecutorWorktree 2026-07-01-00:00:
+         * Active-session cleanup refusal must allocate a fresh worktree/branch instead of bubbling automatic cleanup failure. Removing the live conflicting path violates the FN-4811 invariant, so bounded sibling branches preserve the owner while letting the requesting task continue.
+         */
+        return await this.tryCreateWorktree(suffixedBranch, newPath, taskId, conflictStartPoint, attemptNumber, 0, true, settings);
+      } catch (suffixErr: unknown) {
+        const info = this.extractWorktreeConflictInfo(suffixErr);
+        if (info.type === "already-used") {
+          continue;
+        }
+        throw suffixErr;
+      }
+    }
+    throw new Error(
+      `Cannot create branch for task: "${branch}"; live conflicting worktree ${conflictPath} was preserved and suffixes -2 through -6 are all in use by other worktrees`,
+    );
+  }
+
+  private async isLiveCleanupRefusal(worktreePath: string, taskId: string): Promise<boolean> {
+    const activeOwner = await this.findActiveWorktreeOwner(worktreePath, taskId);
+    if (activeOwner !== null) return true;
+
+    const activeRecord = activeSessionRegistry.lookupByPath(worktreePath);
+    if (!activeRecord) return false;
+    if (activeRecord.taskId !== taskId) return true;
+    return executingTaskLock.has(taskId) || this.hasActiveWorktreeBinding(taskId, worktreePath);
   }
 
   /**

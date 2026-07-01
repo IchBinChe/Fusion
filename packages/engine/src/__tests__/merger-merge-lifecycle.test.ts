@@ -315,6 +315,73 @@ describe("auto-merge proven finalization helper", () => {
     );
   });
 
+  it("uses the task base commit for branch proof so inherited foreign commits do not block finalization", async () => {
+    const strandedTask = {
+      id: "FN-7360",
+      title: "Contaminated branch but landed task files",
+      description: "Test",
+      column: "in-review",
+      status: "landing",
+      error: null,
+      blockedBy: null,
+      overlapBlockedBy: null,
+      dependencies: [],
+      steps: [{ status: "done" }],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      branch: "fusion/fn-7360",
+      baseCommitSha: "foreign-base",
+      mergeDetails: {
+        mergeConfirmed: true,
+        commitSha: "landed",
+        mergedAt: "2026-07-01T15:06:13.748Z",
+        landedFiles: ["packages/desktop/scripts/build.ts"],
+      },
+    } as Task;
+    const doneTask = { ...strandedTask, column: "done", status: null } as Task;
+    const store = createMockStore(strandedTask) as unknown as TaskStore & {
+      getTask: ReturnType<typeof vi.fn>;
+      updateTask: ReturnType<typeof vi.fn>;
+      moveTask: ReturnType<typeof vi.fn>;
+      recordRunAuditEvent: ReturnType<typeof vi.fn>;
+    };
+    store.getTask.mockResolvedValue(strandedTask);
+    store.moveTask.mockResolvedValue(doneTask);
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const command = String(cmd);
+      if (command.includes("rev-parse --verify")) return "ok\n" as any;
+      if (command.includes("git diff --name-only 'foreign-base..fusion/fn-7360'")) {
+        return "packages/desktop/scripts/build.ts\n" as any;
+      }
+      if (command.includes("git diff --name-only 'main...fusion/fn-7360'")) {
+        throw new Error("should not read ambient main branch diff for task proof");
+      }
+      return "" as any;
+    });
+
+    const result = await finalizeProvenAutoMergeTask({
+      store,
+      taskId: "FN-7360",
+      result: { task: strandedTask, ok: true, merged: true, commitSha: "landed", mergeConfirmed: true } as MergeResult,
+      rootDir: "/tmp/repo",
+      source: "workflow-graph-merge-finalize",
+      auditAgentId: "executor",
+      auditPhase: "workflow-graph-merge-finalize",
+    });
+
+    expect(result.outcome).toBe("done");
+    expect(store.moveTask).toHaveBeenCalledWith(
+      "FN-7360",
+      "done",
+      expect.objectContaining({ moveSource: "engine", preserveProgress: true }),
+    );
+    expect(store.recordRunAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "task:auto-merge-finalize-column-mismatch-no-action",
+    }));
+  });
+
   it("blocks loose merged results that lack durable merge confirmation", async () => {
     const strandedTask = {
       id: "FN-MERGED-PROOF",

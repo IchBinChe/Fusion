@@ -137,11 +137,16 @@ function branchDiffFilesMissingFromMergeProof(task: Task, branchFiles: string[],
 async function readBranchDiffFiles(rootDir: string, task: Task): Promise<string[] | null> {
   const branch = task.branch;
   if (!branch) return null;
-  const baseBranch = task.mergeDetails?.mergeTargetBranch ?? task.baseBranch ?? "main";
+  /*
+   * FNXC:AutoMergeFinalization 2026-07-01-08:35:
+   * Branch-proof validation must measure the task's own diff, not every commit reachable from the task branch but absent from current main. Fresh-worktree bugs and historical recovery paths can leave a branch with foreign ancestor commits; when the merger has already landed the recorded task files, `baseCommitSha..branch` is the authoritative task-owned range and prevents unrelated ancestor files from stranding a mergeConfirmed task in `landing`.
+   */
+  const diffBase = task.baseCommitSha ?? task.mergeDetails?.mergeTargetBranch ?? task.baseBranch ?? "main";
   try {
     await execAsync(`git rev-parse --verify ${shellQuote(`refs/heads/${branch}`)}`, { cwd: rootDir, maxBuffer: 1024 * 1024 });
-    await execAsync(`git rev-parse --verify ${shellQuote(baseBranch)}`, { cwd: rootDir, maxBuffer: 1024 * 1024 });
-    const { stdout } = await execAsync(`git diff --name-only ${shellQuote(`${baseBranch}...${branch}`)}`, {
+    await execAsync(`git rev-parse --verify ${shellQuote(diffBase)}`, { cwd: rootDir, maxBuffer: 1024 * 1024 });
+    const range = task.baseCommitSha ? `${diffBase}..${branch}` : `${diffBase}...${branch}`;
+    const { stdout } = await execAsync(`git diff --name-only ${shellQuote(range)}`, {
       cwd: rootDir,
       maxBuffer: 1024 * 1024,
     });

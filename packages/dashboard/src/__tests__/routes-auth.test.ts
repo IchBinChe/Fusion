@@ -944,6 +944,35 @@ describe("GET /auth/status", () => {
     expect(anthropic).toMatchObject({ authenticated: true, expired: false });
   });
 
+  it("reports legacy Anthropic OAuth expiry under the subscription status id without using CLI state", async () => {
+    const now = Date.now();
+    (authStorage.getOAuthProviders as ReturnType<typeof vi.fn>).mockReturnValue([
+      { id: "anthropic", name: "Anthropic" },
+    ]);
+    (authStorage.hasAuth as ReturnType<typeof vi.fn>).mockImplementation((provider: string) => provider === "anthropic-subscription");
+    (authStorage.get as ReturnType<typeof vi.fn>).mockImplementation((provider: string) => {
+      if (provider === "anthropic") {
+        return {
+          type: "oauth",
+          access: "expired-legacy-token",
+          refresh: "refresh",
+          expires: now - 1_000,
+        };
+      }
+      return undefined;
+    });
+    (authStorage.getApiKey as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("refresh failed"));
+
+    const res = await GET(app, "/api/auth/status");
+
+    expect(res.status).toBe(200);
+    const anthropic = res.body.providers.find((p: any) => p.id === "anthropic-subscription");
+    const claudeCli = res.body.providers.find((p: any) => p.id === "claude-cli");
+    expect(authStorage.getApiKey).toHaveBeenCalledWith("anthropic-subscription");
+    expect(anthropic).toMatchObject({ authenticated: false, expired: true });
+    expect(claudeCli).toMatchObject({ type: "cli" });
+  });
+
   it("keeps expired oauth status when async refresh fails", async () => {
     const now = Date.now();
     (authStorage.getOAuthProviders as ReturnType<typeof vi.fn>).mockReturnValue([

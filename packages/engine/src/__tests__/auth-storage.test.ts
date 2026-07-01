@@ -234,6 +234,71 @@ describe("createFusionAuthStorage", () => {
       expect(authStorage.list()).toEqual(expect.arrayContaining(["anthropic", "anthropic-subscription"]));
     });
 
+    it("exposes legacy Anthropic OAuth through the subscription provider without raw direct auth", async () => {
+      writeFusionAuth(homeDir, {
+        anthropic: {
+          type: "oauth",
+          access: "legacy-subscription-access-token",
+          refresh: "legacy-subscription-refresh-token",
+          expires: Date.now() + 3_600_000,
+        },
+      });
+
+      const authStorage = createFusionAuthStorage();
+
+      expect(await authStorage.getApiKey("anthropic")).toBeUndefined();
+      expect(authStorage.get("anthropic-subscription")).toEqual({
+        type: "oauth",
+        access: "legacy-subscription-access-token",
+        refresh: "legacy-subscription-refresh-token",
+        expires: expect.any(Number),
+      });
+      expect(authStorage.hasAuth("anthropic-subscription")).toBe(true);
+      expect(authStorage.list()).toEqual(expect.arrayContaining(["anthropic", "anthropic-subscription"]));
+      expect(await authStorage.getApiKey("anthropic-subscription")).toBe("legacy-subscription-access-token");
+    });
+
+    it("refreshes legacy Anthropic OAuth into the subscription provider id", async () => {
+      writeFusionAuth(homeDir, {
+        anthropic: {
+          type: "oauth",
+          access: "expired-legacy-subscription-access-token",
+          refresh: "legacy-subscription-refresh-token",
+          expires: Date.now() - 60_000,
+          scopes: ["user:profile"],
+        },
+      });
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          access_token: "refreshed-legacy-as-subscription-access-token",
+          refresh_token: "rotated-legacy-subscription-refresh-token",
+          expires_in: 3600,
+          scope: "user:profile",
+        }),
+      } as Response);
+      globalThis.fetch = fetchMock as typeof fetch;
+
+      const authStorage = createFusionAuthStorage();
+
+      expect(await authStorage.getApiKey("anthropic")).toBeUndefined();
+      expect(await authStorage.getApiKey("anthropic-subscription")).toBe("refreshed-legacy-as-subscription-access-token");
+      expect(authStorage.get("anthropic-subscription")).toEqual({
+        type: "oauth",
+        access: "refreshed-legacy-as-subscription-access-token",
+        refresh: "rotated-legacy-subscription-refresh-token",
+        expires: expect.any(Number),
+        scopes: ["user:profile"],
+      });
+      expect(authStorage.get("anthropic")).toEqual({
+        type: "oauth",
+        access: "expired-legacy-subscription-access-token",
+        refresh: "legacy-subscription-refresh-token",
+        expires: expect.any(Number),
+        scopes: ["user:profile"],
+      });
+    });
+
     it("keeps raw Anthropic API-key precedence when subscription OAuth also exists", async () => {
       writeFusionAuth(homeDir, {
         anthropic: { type: "api_key", key: "sk-ant-api03-runtime-key" },

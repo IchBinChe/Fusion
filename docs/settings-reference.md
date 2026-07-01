@@ -53,7 +53,7 @@ Defaults from `DEFAULT_GLOBAL_SETTINGS`; key scope from `GLOBAL_SETTINGS_KEYS`.
 | `language` | `"en" \| "zh-CN" \| "zh-TW" \| "fr" \| "es" \| "ko"` | `undefined` | UI language for the dashboard and TUI. When unset, the dashboard detects from localStorage → browser language and the CLI from `--lang` flag → environment locale, falling back to `en`. Validated at the store write boundary (`validateLocale`); invalid values are dropped. Reset to auto-detect via the dashboard's "Auto" language option or `fn settings set language auto` (clears the persisted key). |
 | `dashboardFontScalePct` | `number` | `100` | Dashboard font scale percentage used by Appearance settings. Valid range: `85` to `125`; applied pre-hydration via document root font-size so board typography (column headers/counts, task cards, and quick-entry text) scales with the setting from first paint. |
 | `dismissModalsOnOutsideClick` | `boolean` | `false` | Global dashboard preference for closing fixed modal overlays by clicking/tapping the backdrop. Off by default to prevent accidental modal dismissal; explicit close, cancel, and Escape paths remain available. |
-| `defaultProvider` | `string` | `undefined` | Default AI provider. Anthropic has three distinct surfaces: direct `anthropic` uses raw API-key material only (`ANTHROPIC_API_KEY`, a `models.json` `apiKey`, or an `api_key` auth credential); subscription OAuth remains the `anthropic-subscription` auth/usage credential; Claude CLI execution uses the `pi-claude-cli` model provider. OAuth-only Anthropic selections are never sent to `api.anthropic.com/v1`; Fusion routes them to the CLI provider when available or fails with a configuration error. |
+| `defaultProvider` | `string` | `undefined` | Default AI provider. Anthropic has three distinct surfaces: direct `anthropic` uses raw API-key material only (`ANTHROPIC_API_KEY`, a `models.json` `apiKey`, or an `api_key` auth credential); subscription OAuth uses the dedicated `anthropic-subscription` auth/status/usage/banner and direct execution path; Claude CLI execution uses the explicit `pi-claude-cli` model provider. OAuth-backed execution never stores or resolves subscription tokens as raw `ANTHROPIC_API_KEY` material. |
 | `defaultModelId` | `string` | `undefined` | Default AI model ID. |
 | `modelPricingOverrides` | `Record<string, ModelPricing>` | `undefined` | Optional global Command Center pricing overrides keyed by lowercased `provider:model` or bare `:model`. Values store USD per 1M input, output, cache-read, and cache-write tokens plus optional `source`; they override the built-in pricing table for cost estimates only and are editable from Settings → Global Models → View pricing table. |
 | `modelPricingFetchedAt` | `string` | `undefined` | ISO timestamp for the last successful one-click pricing refresh from the Settings → Global Models pricing summary. |
@@ -722,13 +722,19 @@ Recovery entrypoints in the dashboard:
 
 ### OAuth credential refresh
 
-Fusion automatically refreshes Claude/Anthropic OAuth credentials before reporting auth status when the stored OAuth credential includes a refresh token and the access token is expired or within the refresh buffer. A successful refresh updates auth storage and prevents `oauth-token-expired` notifications or startup warnings for that provider, so users usually do not need manual re-login after the initial Claude OAuth login.
+Fusion automatically refreshes Claude/Anthropic OAuth credentials before reporting auth status when the stored OAuth credential includes a refresh token and the access token is expired or within the refresh buffer. For Anthropic, this status path is the `anthropic-subscription` surface (including legacy `anthropic` OAuth rows), not Claude CLI state. A successful refresh updates auth storage and prevents `oauth-token-expired` notifications or startup warnings for that provider, so users usually do not need manual re-login after the initial Claude OAuth login.
 
 Manual re-login is still required when no refresh token is stored, the refresh request fails, or the expired OAuth credential belongs to a non-Anthropic provider. In those cases the credential remains expired, `oauth-token-expired` notifications/startup warnings may fire subject to their 12-hour provider throttle, and users should re-authenticate from **Settings → Authentication** or Model Onboarding.
 
 ### Anthropic API-key authentication
 
-Anthropic can be connected with a raw API key from both Model Onboarding and **Settings → Authentication**. Anthropic API-key auth appears as a separate **Anthropic API Key** card for `ANTHROPIC_API_KEY`, while Claude subscription OAuth appears as **Anthropic Subscription** with Login/Logout controls. `/api/auth/status` returns only masked key hints for the API-key card.
+Anthropic has three independent authentication/routing paths:
+
+- **Anthropic Subscription** (`anthropic-subscription`) is Claude subscription OAuth. It powers login/logout, `/api/auth/status`, usage/subscription checks through `https://api.anthropic.com/api/oauth/usage`, and the OAuth re-login banner. Legacy `anthropic` OAuth rows are treated as this subscription surface.
+- **Claude CLI** (`pi-claude-cli`) is the CLI-backed execution provider. Use it when you want sessions to run through the local `claude` CLI; CLI availability does not prove the subscription OAuth status is valid.
+- **Anthropic API Key** (`anthropic` direct `/v1`) is raw API-key auth only. It accepts `ANTHROPIC_API_KEY`, a `models.json` `apiKey`, or an `api_key` auth credential and is the only path used for `https://api.anthropic.com/v1` requests.
+
+Anthropic can be connected with a raw API key from both Model Onboarding and **Settings → Authentication**. Anthropic API-key auth appears as a separate **Anthropic API Key** card, while Claude subscription OAuth appears as **Anthropic Subscription** with Login/Logout controls. `/api/auth/status` returns only masked key hints for the API-key card.
 
 ### Authentication troubleshooting (mobile OAuth fallback)
 

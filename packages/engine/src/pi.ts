@@ -84,7 +84,7 @@ const RTK_EXPECTED_PASSTHROUGH_EXIT_CODES = new Set([1, 2]);
 const RTK_EXPECTED_FAIL_OPEN_ERROR_CODES = new Set(["ABORT_ERR", "ENOENT", "ETIMEDOUT"]);
 const RTK_REWRITE_MAX_BUFFER_BYTES = 64 * 1024;
 const ANTHROPIC_PROVIDER_ID = "anthropic";
-const CLAUDE_CLI_PROVIDER_ID = "pi-claude-cli";
+const ANTHROPIC_SUBSCRIPTION_PROVIDER_ID = "anthropic-subscription";
 
 export type RtkRewriteMode = "off" | "rewrite";
 
@@ -1174,27 +1174,51 @@ function readJsonObject(path: string): Record<string, any> {
   }
 }
 
-function resolveClaudeCliModelForAnthropicSelection(
+function resolveAnthropicSubscriptionModelForAnthropicSelection(
   modelRegistry: ModelRegistry,
   kind: "primary" | "fallback",
-  modelId: string,
+  model: ReturnType<typeof resolveConfiguredModel>,
 ) {
-  const cliModel = modelRegistry.find(CLAUDE_CLI_PROVIDER_ID, modelId);
-  if (cliModel) {
-    return cliModel;
+  if (!model) return model;
+  const subscriptionModel = modelRegistry.find(ANTHROPIC_SUBSCRIPTION_PROVIDER_ID, model.id);
+  if (subscriptionModel) {
+    return subscriptionModel;
   }
 
-  const providerModels = modelRegistry.getAll().filter((model) => model.provider === CLAUDE_CLI_PROVIDER_ID);
-  if (providerModels.length > 0) {
-    const baseModel = providerModels[0]!;
-    piLog.warn(`${kind} model ${CLAUDE_CLI_PROVIDER_ID}/${modelId} not in registry; using Claude CLI provider base model as template`);
-    return { ...baseModel, id: modelId, name: modelId };
+  piLog.warn(`${kind} model ${ANTHROPIC_SUBSCRIPTION_PROVIDER_ID}/${model.id} not in registry; using the resolved Anthropic model as a subscription provider template`);
+  return { ...model, provider: ANTHROPIC_SUBSCRIPTION_PROVIDER_ID };
+}
+
+function registerAnthropicSubscriptionProvider(modelRegistry: ModelRegistry): void {
+  const models = modelRegistry.getAll()
+    .filter((model) => model.provider === ANTHROPIC_PROVIDER_ID)
+    .map((model) => ({
+      id: model.id,
+      name: model.name ?? model.id,
+      reasoning: model.reasoning ?? false,
+      input: Array.isArray(model.input) ? model.input : ["text" as const],
+      cost: model.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: model.contextWindow ?? 0,
+      maxTokens: model.maxTokens ?? 0,
+      ...(model.compat ? { compat: model.compat } : {}),
+    }));
+
+  if (models.length === 0) {
+    return;
   }
 
-  throw new Error(
-    `Anthropic subscription/OAuth model ${ANTHROPIC_PROVIDER_ID}/${modelId} requires the Claude CLI provider, but ${CLAUDE_CLI_PROVIDER_ID} is not available. `
-    + "Enable Settings → Model Providers → Claude CLI and ensure the Claude Code CLI is installed, or configure a raw ANTHROPIC_API_KEY for the direct Anthropic API provider.",
-  );
+  /*
+  FNXC:ProviderAuth 2026-07-01-13:06:
+  Claude subscription OAuth is an execution-capable Anthropic surface, but it must not be saved or resolved as raw `ANTHROPIC_API_KEY` material for the public `anthropic` provider. Register a separate hidden `anthropic-subscription` runtime provider so persisted Anthropic selections can execute with OAuth through their own provider id while explicit `pi-claude-cli` selections remain CLI-only.
+  */
+  modelRegistry.registerProvider(ANTHROPIC_SUBSCRIPTION_PROVIDER_ID, {
+    name: "Anthropic Subscription",
+    baseUrl: "https://api.anthropic.com/v1",
+    apiKey: "$ANTHROPIC_SUBSCRIPTION_API_KEY",
+    api: "anthropic-messages",
+    models,
+  });
+  modelRegistry.refresh();
 }
 
 async function routeAnthropicSelectionForAvailableAuth(
@@ -1212,11 +1236,16 @@ async function routeAnthropicSelectionForAvailableAuth(
     return model;
   }
 
+  const hasSubscriptionOAuth = authStorage.hasAuth?.(ANTHROPIC_SUBSCRIPTION_PROVIDER_ID) === true;
+  if (!hasSubscriptionOAuth) {
+    return model;
+  }
+
   /*
-  FNXC:ProviderAuth 2026-07-01-12:00:
-  Persisted `anthropic/<model>` selections from subscription users must be re-routed at runtime, not merely hidden from the picker. With no raw Anthropic API key, `pi-claude-cli` is the compliant OAuth surface; direct `/v1` remains raw-key-only. Preserve the pre-0.52 working behavior by using the vendored CLI provider whenever it is registered, even if `useClaudeCli` was not explicitly toggled on for picker visibility; if the CLI provider is unavailable, fail before any OAuth token can reach `api.anthropic.com/v1`.
+  FNXC:ProviderAuth 2026-07-01-13:08:
+  OAuth subscription credentials are execution credentials for the dedicated `anthropic-subscription` path, not status-only credentials and not raw `anthropic` `/v1` API keys. Route persisted `anthropic/<model>` selections without a raw key to the subscription provider; explicit `pi-claude-cli` selections remain the only CLI path.
   */
-  return resolveClaudeCliModelForAnthropicSelection(modelRegistry, kind, model.id);
+  return resolveAnthropicSubscriptionModelForAnthropicSelection(modelRegistry, kind, model);
 }
 
 function normalizeSessionHistoryEntries(sessionManager: SessionManagerLike): void {
@@ -2115,6 +2144,7 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
   }
   modelRegistry.refresh();
   mergeSupplementalAnthropicModels(modelRegistry, (message) => extensionsLog.warn(message));
+  registerAnthropicSubscriptionProvider(modelRegistry);
 
   // Build the pi built-in tool set. We deliberately do NOT use the bundled
   // `createCodingTools` / `createReadOnlyTools` presets — they're missing

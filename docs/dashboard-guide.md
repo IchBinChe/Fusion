@@ -623,11 +623,11 @@ Branch names are dynamic from merge/audit payloads; the banner is not hardcoded 
 
 The global OAuth re-login banner clears a provider row immediately after that provider successfully re-authenticates (from Settings → Authentication or Model Onboarding), instead of waiting for the next `GET /auth/status` poll interval.
 
-For Claude/Anthropic OAuth credentials, the same `/auth/status` poll also attempts an automatic refresh when the stored OAuth credential has a refresh token and the access token is expired or within the refresh buffer. When that refresh succeeds, the banner clears for Claude without manual re-login and without waiting for a separate model request.
+For Claude/Anthropic OAuth credentials, the same `/auth/status` poll also attempts an automatic refresh when the stored OAuth credential has a refresh token and the access token is expired or within the refresh buffer. Anthropic banner state is keyed to `anthropic-subscription` (including legacy Anthropic OAuth rows), not Claude CLI state. When that refresh succeeds, the banner clears for the subscription provider without manual re-login and without waiting for a separate model request.
 
 If the OAuth credential has no refresh token, the refresh request fails, or the provider is not Anthropic, the provider stays expired and the banner remains visible. Re-authenticate with manual re-login from **Settings → Authentication** or Model Onboarding.
 
-Anthropic also supports a raw `ANTHROPIC_API_KEY` from a separate **Anthropic API Key** card in **Settings → Authentication** and Model Onboarding. Claude subscription OAuth remains on the **Anthropic Subscription** card, so saving or clearing an API key does not affect the OAuth sign-in path. The dashboard only displays masked key hints after a key is saved.
+Anthropic also supports a raw `ANTHROPIC_API_KEY` from a separate **Anthropic API Key** card in **Settings → Authentication** and Model Onboarding. Claude subscription OAuth remains on the **Anthropic Subscription** card for auth status, usage/subscription checks, banner clearing, and subscription-backed direct agent execution through the dedicated `anthropic-subscription` path; CLI-backed execution remains the distinct **Claude CLI** provider (`pi-claude-cli`). Saving or clearing an API key does not affect the OAuth sign-in path or turn OAuth tokens into raw API-key material. The dashboard only displays masked key hints after a key is saved.
 
 ## Smart Pull
 

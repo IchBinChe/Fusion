@@ -7651,6 +7651,41 @@ export class TaskExecutor {
     return failedNode === "merge-manual-hold" || failedNode === "merge-retry";
   }
 
+  /*
+  FNXC:WorkflowRemediation 2026-07-01-23:40:
+  A live agent session surface for a task proves the work is still executing, independent of the persisted column/pause/status row that handleGraphFailure re-fetches. This mirrors clearPhantomExecutorBinding's `hasLiveSessionSurface` (FN-6736) but deliberately EXCLUDES `this.executing` and graph-routing membership: those are still set for the graph run that is currently ending (graphRouting is cleared in maybeExecuteWorkflowGraph's finally, AFTER handleGraphFailure returns), so including them would report every ending run as "still executing" and suppress all failures. Only a registered coding/step/CLI session surface means a SEPARATE, live agent is working the task.
+  */
+  private hasLiveTaskSessionSurface(taskId: string): boolean {
+    return (
+      this.activeSessions.has(taskId)
+      || this.activeStepExecutors.has(taskId)
+      || this.activeWorkflowStepSessions.has(taskId)
+      || this.activeCliTaskSessions.has(taskId)
+    );
+  }
+
+  /*
+  FNXC:WorkflowRemediation 2026-07-01-23:40:
+  A `pre-merge-remediation` / `plan-replan` node (e.g. `code-review-remediation`) is a FIRE-AND-FORGET async scheduler, not a terminal work node: its job is to hand off an implementation fix (sendTaskBackForFix re-dispatches the coding session) and stop traversal. These nodes carry only a `success` rework edge back to their gate and NO `failure` out-edge, so when their schedule call cannot re-arm (missing rehydrated failureContext after a restart → `missing-remediation-context`, `remediation-not-scheduled`, or an exhausted rework budget) the failure bubbles out as the terminal graph outcome and handleGraphFailure would stamp `status:"failed"` — even while a previously-scheduled fix/reviewer session is still live. Classify these nodes so that terminal sink can preserve a still-executing task instead of flagging a spurious failure. Detection prefers the resolved IR `workflowAction` (covers custom workflows), with a node-id fallback for the built-in ids when the IR cannot be resolved.
+  */
+  private async isRemediationGraphNode(taskId: string, failedNode: string | undefined): Promise<boolean> {
+    if (!failedNode) return false;
+    try {
+      const ir = await resolveWorkflowIrForTask(this.store, taskId);
+      const node = ir?.nodes?.find((n) => n.id === failedNode);
+      const action = node?.config?.workflowAction;
+      if (action === "pre-merge-remediation" || action === "plan-replan") return true;
+      if (node) return false;
+    } catch {
+      // Best-effort IR resolution; fall through to the built-in id fallback.
+    }
+    return (
+      failedNode === "code-review-remediation"
+      || failedNode === "browser-verification-remediation"
+      || failedNode === "plan-replan"
+    );
+  }
+
   private isTerminalMergeGraphFailureValue(value: string | undefined): boolean {
     if (!value) return false;
     const normalized = value.toLowerCase();
@@ -8450,6 +8485,17 @@ export class TaskExecutor {
           }
           return;
         }
+      }
+      /*
+      FNXC:WorkflowRemediation 2026-07-01-23:40:
+      Do NOT flag a still-executing task as failed. A `pre-merge-remediation` / `plan-replan` node (e.g. `code-review-remediation`) is a fire-and-forget async scheduler with no `failure` out-edge, so a failed re-arm (missing rehydrated failureContext after restart, remediation-not-scheduled, or an exhausted rework budget) bubbles out as the terminal graph outcome here. When a SEPARATE live agent session surface is still registered for this task, the previously-scheduled fix/reviewer is genuinely mid-flight — parking `status:"failed"` would surface a spurious "Task Failed" over live work. Preserve the row and let the live session drive its own terminal handoff instead. Scoped strictly to remediation nodes + a live session surface so genuine execute/merge terminal failures (and remediation failures with NO live session, e.g. a truly exhausted budget) still park exactly as before.
+      */
+      if (this.hasLiveTaskSessionSurface(task.id) && await this.isRemediationGraphNode(task.id, failedNode)) {
+        const benignMessage = `Workflow graph ended at remediation node '${failedNode ?? "unknown"}' while a live agent session is still executing — not flagging as failed; live session preserved`;
+        executorLog.warn(`${task.id}: ${benignMessage}`);
+        await this.store.logEntry(task.id, benignMessage, undefined, this.getRunContextFor(task.id));
+        await this.persistTokenUsage(task.id);
+        return;
       }
       const message = `Workflow graph terminated with failure at node '${failedNode ?? "unknown"}'`;
       executorLog.warn(`${task.id}: ${message}`);

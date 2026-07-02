@@ -183,7 +183,7 @@ export function isFts5CorruptionError(error: unknown): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 135;
+const SCHEMA_VERSION = 136;
 
 const TASKS_FTS_AUTOMERGE = 8;
 const TASKS_FTS_CRISISMERGE = 16;
@@ -1548,6 +1548,23 @@ export const MIGRATION_ONLY_TABLE_SCHEMAS: Record<string, Record<string, string>
     metadata: "TEXT",
     createdAt: "TEXT NOT NULL",
     attachments: "TEXT",
+  },
+  chat_token_usage: {
+    id: "TEXT PRIMARY KEY",
+    sourceKind: "TEXT NOT NULL",
+    chatSessionId: "TEXT",
+    roomId: "TEXT",
+    messageId: "TEXT",
+    projectId: "TEXT",
+    agentId: "TEXT",
+    modelProvider: "TEXT",
+    modelId: "TEXT",
+    inputTokens: "INTEGER NOT NULL DEFAULT 0",
+    outputTokens: "INTEGER NOT NULL DEFAULT 0",
+    cachedTokens: "INTEGER NOT NULL DEFAULT 0",
+    cacheWriteTokens: "INTEGER NOT NULL DEFAULT 0",
+    totalTokens: "INTEGER NOT NULL DEFAULT 0",
+    createdAt: "TEXT NOT NULL",
   },
   runAuditEvents: {
     id: "TEXT PRIMARY KEY",
@@ -5503,6 +5520,39 @@ export class Database {
     if (version < 135) {
       this.applyMigration(135, () => {
         this.addColumnIfMissing("tasks", "gitlabTracking", "TEXT");
+      });
+    }
+
+    if (version < 136) {
+      this.applyMigration(136, () => {
+        /*
+         * FNXC:ChatTokenAccounting 2026-07-02-00:00:
+         * Durable chat token rows must be queryable independently from task.tokenUsage so Command Center can sum chat consumers while task detail panels remain execution-only.
+         */
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS chat_token_usage (
+            id TEXT PRIMARY KEY,
+            sourceKind TEXT NOT NULL,
+            chatSessionId TEXT,
+            roomId TEXT,
+            messageId TEXT,
+            projectId TEXT,
+            agentId TEXT,
+            modelProvider TEXT,
+            modelId TEXT,
+            inputTokens INTEGER NOT NULL DEFAULT 0,
+            outputTokens INTEGER NOT NULL DEFAULT 0,
+            cachedTokens INTEGER NOT NULL DEFAULT 0,
+            cacheWriteTokens INTEGER NOT NULL DEFAULT 0,
+            totalTokens INTEGER NOT NULL DEFAULT 0,
+            createdAt TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idxChatTokenUsageCreatedAt ON chat_token_usage(createdAt);
+          CREATE INDEX IF NOT EXISTS idxChatTokenUsageProjectCreatedAt ON chat_token_usage(projectId, createdAt);
+          CREATE INDEX IF NOT EXISTS idxChatTokenUsageSessionMessage ON chat_token_usage(chatSessionId, messageId);
+          CREATE INDEX IF NOT EXISTS idxChatTokenUsageRoomMessage ON chat_token_usage(roomId, messageId);
+          CREATE INDEX IF NOT EXISTS idxChatTokenUsageAgentCreatedAt ON chat_token_usage(agentId, createdAt);
+        `);
       });
     }
 

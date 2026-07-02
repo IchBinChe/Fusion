@@ -1987,6 +1987,9 @@ export type {
   ChatRoomUpdateInput,
   ChatRoomMessageCreateInput,
   ChatRoomMessagesFilter,
+  ChatTokenUsageSourceKind,
+  ChatTokenUsageRecord,
+  ChatTokenUsageCreateInput,
 } from "./chat-types.js";
 export { ChatStore } from "./chat-store.js";
 export type { ChatStoreEvents } from "./chat-store.js";

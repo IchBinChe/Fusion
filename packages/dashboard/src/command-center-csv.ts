@@ -85,6 +85,7 @@ export function tokenAnalyticsToTable(result: TokenAnalytics): CsvTable {
     "cacheWriteTokens",
     "totalTokens",
     "nTasks",
+    "nChatMessages",
     "costUsd",
     "costUnavailable",
   ];
@@ -98,6 +99,7 @@ export function tokenAnalyticsToTable(result: TokenAnalytics): CsvTable {
       g.cacheWriteTokens,
       g.totalTokens,
       g.nTasks,
+      g.nChatMessages ?? 0,
       g.cost.usd,
       g.cost.unavailable,
     ]);
@@ -116,6 +118,7 @@ export function tokenAnalyticsToTable(result: TokenAnalytics): CsvTable {
         t.cacheWriteTokens,
         t.totalTokens,
         t.nTasks,
+        t.nChatMessages ?? 0,
         result.cost.usd,
         result.cost.unavailable,
       ],

@@ -52,6 +52,48 @@ function insertTask(db: Database, t: TaskSeed): void {
   );
 }
 
+function insertChatTokenUsage(db: Database, t: {
+  id: string;
+  sourceKind?: string;
+  chatSessionId?: string | null;
+  roomId?: string | null;
+  messageId?: string | null;
+  projectId?: string | null;
+  agentId?: string | null;
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedTokens?: number;
+  cacheWriteTokens?: number;
+  totalTokens?: number;
+  modelProvider?: string | null;
+  modelId?: string | null;
+  createdAt: string;
+}): void {
+  db.prepare(
+    `INSERT INTO chat_token_usage
+       (id, sourceKind, chatSessionId, roomId, messageId, projectId, agentId,
+        modelProvider, modelId, inputTokens, outputTokens, cachedTokens,
+        cacheWriteTokens, totalTokens, createdAt)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    t.id,
+    t.sourceKind ?? "chat",
+    t.chatSessionId ?? null,
+    t.roomId ?? null,
+    t.messageId ?? null,
+    t.projectId ?? null,
+    t.agentId ?? null,
+    t.modelProvider ?? null,
+    t.modelId ?? null,
+    t.inputTokens ?? 0,
+    t.outputTokens ?? 0,
+    t.cachedTokens ?? 0,
+    t.cacheWriteTokens ?? 0,
+    t.totalTokens ?? ((t.inputTokens ?? 0) + (t.outputTokens ?? 0) + (t.cachedTokens ?? 0) + (t.cacheWriteTokens ?? 0)),
+    t.createdAt,
+  );
+}
+
 describe("token-analytics", () => {
   let tmpDir: string;
   let db: Database;
@@ -401,8 +443,111 @@ describe("token-analytics", () => {
     );
   });
 
+  it("includes chat token usage in mixed task and chat totals exactly once", () => {
+    insertTask(db, {
+      id: "task-usage",
+      inputTokens: 100,
+      outputTokens: 50,
+      cachedTokens: 10,
+      cacheWriteTokens: 5,
+      totalTokens: 165,
+      lastUsedAt: "2026-03-01T01:00:00.000Z",
+      tokenUsageModelProvider: "anthropic",
+      tokenUsageModelId: "claude-sonnet-4-5",
+      agentId: "executor-agent",
+    });
+    insertChatTokenUsage(db, {
+      id: "chat-1",
+      chatSessionId: "chat-a",
+      messageId: "msg-a",
+      agentId: "agent-chat",
+      inputTokens: 20,
+      outputTokens: 10,
+      cachedTokens: 3,
+      cacheWriteTokens: 2,
+      totalTokens: 35,
+      modelProvider: "openai",
+      modelId: "gpt-4o",
+      createdAt: "2026-03-01T02:00:00.000Z",
+    });
+    insertChatTokenUsage(db, {
+      id: "planner-1",
+      sourceKind: "task-planner-chat",
+      chatSessionId: "chat-planner",
+      messageId: "msg-planner",
+      agentId: "task-planner:task-usage",
+      inputTokens: 5,
+      outputTokens: 7,
+      totalTokens: 12,
+      modelProvider: "openai",
+      modelId: "gpt-4o",
+      createdAt: "2026-03-01T03:00:00.000Z",
+    });
+
+    const result = aggregateTokenAnalytics(db, {
+      from: "2026-03-01T00:00:00.000Z",
+      to: "2026-03-01T23:59:59.999Z",
+      groupBy: "model",
+      granularity: "day",
+    });
+
+    expect(result.totals).toMatchObject({
+      inputTokens: 125,
+      outputTokens: 67,
+      cachedTokens: 13,
+      cacheWriteTokens: 7,
+      totalTokens: 212,
+      nTasks: 1,
+      nChatMessages: 2,
+    });
+    expect(result.series).toHaveLength(1);
+    expect(result.series?.[0]).toMatchObject({ bucket: "2026-03-01", totalTokens: 212, nTasks: 1, nChatMessages: 2 });
+    const groups = new Map(result.groups.map((group) => [group.key, group]));
+    expect(groups.get("claude-sonnet-4-5")).toMatchObject({ totalTokens: 165, nTasks: 1, nChatMessages: 0 });
+    expect(groups.get("gpt-4o")).toMatchObject({ totalTokens: 47, nTasks: 0, nChatMessages: 2 });
+    expect(result.groups.reduce((sum, group) => sum + group.totalTokens, 0)).toBe(result.totals.totalTokens);
+  });
+
+  it("groups chat token usage by provider and agent without inflating task counts", () => {
+    insertChatTokenUsage(db, {
+      id: "room-a",
+      sourceKind: "room-chat",
+      roomId: "room-1",
+      messageId: "room-msg-a",
+      agentId: "agent-a",
+      inputTokens: 8,
+      outputTokens: 4,
+      totalTokens: 12,
+      modelProvider: "anthropic",
+      modelId: "claude-sonnet-4-5",
+      createdAt: "2026-03-01T00:00:00.000Z",
+    });
+    insertChatTokenUsage(db, {
+      id: "room-b",
+      sourceKind: "room-chat",
+      roomId: "room-1",
+      messageId: "room-msg-b",
+      agentId: "agent-b",
+      inputTokens: 10,
+      outputTokens: 5,
+      totalTokens: 15,
+      modelProvider: "anthropic",
+      modelId: "claude-sonnet-4-5",
+      createdAt: "2026-03-01T00:01:00.000Z",
+    });
+
+    const byProvider = aggregateTokenAnalytics(db, { groupBy: "provider" });
+    expect(byProvider.totals).toMatchObject({ totalTokens: 27, nTasks: 0, nChatMessages: 2 });
+    expect(byProvider.groups).toHaveLength(1);
+    expect(byProvider.groups[0]).toMatchObject({ key: "anthropic", totalTokens: 27, nTasks: 0, nChatMessages: 2 });
+
+    const byAgent = aggregateTokenAnalytics(db, { groupBy: "agent" });
+    expect(new Map(byAgent.groups.map((group) => [group.key, group.totalTokens]))).toEqual(new Map([["agent-b", 15], ["agent-a", 12]]));
+  });
+
   it("empty range returns zeroed structures, not nulls", () => {
     insertTask(db, { id: "t1", inputTokens: 100, totalTokens: 100, lastUsedAt: "2026-03-01T00:00:00.000Z", modelId: "model-A" });
+    insertChatTokenUsage(db, { id: "chat-out", inputTokens: 100, totalTokens: 100, createdAt: "2026-03-01T00:00:00.000Z" });
 
     const result = aggregateTokenAnalytics(db, {
       from: "2027-01-01T00:00:00.000Z",
@@ -416,6 +561,7 @@ describe("token-analytics", () => {
       cacheWriteTokens: 0,
       totalTokens: 0,
       nTasks: 0,
+      nChatMessages: 0,
     });
     expect(result.groups).toEqual([]);
   });

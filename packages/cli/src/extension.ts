@@ -18,8 +18,11 @@ import {
   type InsightRunTrigger,
   type ResearchRun,
   type ResearchRunStatus,
+  type AgentCapability,
+  type AgentUpdateInput,
   RESEARCH_RUN_STATUSES,
   isResearchExperimentalEnabled,
+  isEphemeralAgent,
   resolveResearchSettings,
   canAgentTakeImplementationTaskForExplicitRouting,
   formatRoleMismatchReason,
@@ -4231,6 +4234,233 @@ export default function kbExtension(pi: ExtensionAPI) {
       return {
         content: [{ type: "text" as const, text: `Created agent ${created.name} (${created.id})` }],
         details: { outcome: "created", matchedRule: policy.matchedRule, effectiveMode: policy.effectiveMode, agent: created, agentId: created.id },
+      };
+    },
+  });
+
+  // ── fn_agent_update ─────────────────────────────────────────────
+
+  /**
+   * FNXC:AgentManagement 2026-07-02-12:00:
+   * Chat operators need broad in-place edits for existing non-ephemeral agent configuration so they can change role, instructions, manager links, and heartbeat settings without delete/recreate churn.
+   * Keep the update org-scoped for agent callers and funnel successful edits through one AgentStore.updateAgent call so hierarchy checks and config revisions stay auditable.
+   */
+  pi.registerTool({
+    name: "fn_agent_update",
+    label: "fn: Update Agent",
+    description:
+      "Update editable configuration for an existing non-ephemeral agent. " +
+      "Agent callers can only update direct or indirect reports inside their management subtree; user/operator calls are privileged.",
+    promptSnippet: "Update an existing Fusion agent without deleting and recreating it",
+    promptGuidelines: [
+      "Use to update editable agent configuration such as role, instructions, manager, and heartbeat settings",
+      "Agent callers can only target direct or indirect reports, never themselves, peers, ancestors, or unrelated agents",
+      "Use reportsTo as an agent ID/name for a new manager; privileged user/operator calls may pass reportsTo: \"\" to clear the manager",
+    ],
+    parameters: Type.Object({
+      agent_id: Type.String({ description: "Target agent ID or name to update" }),
+      name: Type.Optional(Type.String({ description: "New display name" })),
+      role: Type.Optional(Type.Union([
+        Type.Literal("triage"),
+        Type.Literal("executor"),
+        Type.Literal("reviewer"),
+        Type.Literal("merger"),
+        Type.Literal("engineer"),
+        Type.Literal("custom"),
+      ], { description: "Agent role/capability" })),
+      title: Type.Optional(Type.String({ description: "Optional title shown for the agent" })),
+      icon: Type.Optional(Type.String({ description: "Optional compact icon/emoji" })),
+      soul: Type.Optional(Type.String({ description: "Agent personality/identity text", maxLength: 10000 })),
+      instructions_text: Type.Optional(Type.String({ description: "Inline custom instructions", maxLength: 50000 })),
+      instructions_path: Type.Optional(Type.String({ description: "Path to instructions markdown", maxLength: 500 })),
+      heartbeat_procedure_path: Type.Optional(Type.String({ description: "Path to heartbeat procedure markdown", maxLength: 500 })),
+      reportsTo: Type.Optional(Type.String({ description: "Manager agent ID/name. Pass empty string to clear for privileged user/operator calls." })),
+      heartbeat_interval_ms: Type.Optional(Type.Number({ minimum: 1000, description: "Heartbeat polling interval in ms" })),
+      heartbeat_timeout_ms: Type.Optional(Type.Number({ minimum: 5000, description: "Heartbeat timeout in ms" })),
+      max_concurrent_runs: Type.Optional(Type.Number({ minimum: 1, description: "Max concurrent heartbeat runs" })),
+      message_response_mode: Type.Optional(Type.Union([
+        Type.Literal("immediate"),
+        Type.Literal("on-heartbeat"),
+      ], { description: "How agent responds to messages" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const { AgentStore } = await import("@fusion/core");
+      const agentStore = new AgentStore({ rootDir: getFusionDir(ctx.cwd) });
+      await agentStore.init();
+
+      const updateParamKeys = [
+        "name",
+        "role",
+        "title",
+        "icon",
+        "soul",
+        "instructions_text",
+        "instructions_path",
+        "heartbeat_procedure_path",
+        "reportsTo",
+        "heartbeat_interval_ms",
+        "heartbeat_timeout_ms",
+        "max_concurrent_runs",
+        "message_response_mode",
+      ] as const;
+      const providedKeys = updateParamKeys.filter((key) => params[key] !== undefined);
+      const invalid = (field: string, message: string, extra: Record<string, unknown> = {}) => ({
+        content: [{ type: "text" as const, text: `ERROR: ${message}` }],
+        isError: true,
+        details: { outcome: "invalid", field, error: message, ...extra },
+      });
+      const denied = (message: string, extra: Record<string, unknown> = {}) => ({
+        content: [{ type: "text" as const, text: `ERROR: ${message}` }],
+        isError: true,
+        details: { outcome: "denied", error: message, ...extra },
+      });
+
+      if (providedKeys.length === 0) {
+        return invalid("fields", "Provide at least one field to update");
+      }
+      if (params.soul !== undefined && params.soul.length > 10000) {
+        return invalid("soul", "soul exceeds 10000 character limit");
+      }
+      if (params.instructions_text !== undefined && params.instructions_text.length > 50000) {
+        return invalid("instructions_text", "instructions_text exceeds 50000 character limit");
+      }
+      if (params.instructions_path !== undefined && params.instructions_path.length > 500) {
+        return invalid("instructions_path", "instructions_path exceeds 500 character limit");
+      }
+      if (params.heartbeat_procedure_path !== undefined && params.heartbeat_procedure_path.length > 500) {
+        return invalid("heartbeat_procedure_path", "heartbeat_procedure_path exceeds 500 character limit");
+      }
+      if (params.heartbeat_interval_ms !== undefined && params.heartbeat_interval_ms < 1000) {
+        return invalid("heartbeat_interval_ms", "heartbeat_interval_ms must be at least 1000");
+      }
+      if (params.heartbeat_timeout_ms !== undefined && params.heartbeat_timeout_ms < 5000) {
+        return invalid("heartbeat_timeout_ms", "heartbeat_timeout_ms must be at least 5000");
+      }
+      if (params.max_concurrent_runs !== undefined && params.max_concurrent_runs < 1) {
+        return invalid("max_concurrent_runs", "max_concurrent_runs must be at least 1");
+      }
+
+      const target = (await agentStore.getAgent(params.agent_id)) ?? (await agentStore.resolveAgent(params.agent_id));
+      if (!target) {
+        return {
+          content: [{ type: "text" as const, text: `Agent '${params.agent_id}' not found` }],
+          isError: true,
+          details: { outcome: "not_found", error: "Agent not found", agentId: params.agent_id },
+        };
+      }
+      if (isEphemeralAgent(target)) {
+        return invalid("agent_id", `Cannot update ephemeral/runtime agent ${target.id}`, { agentId: target.id });
+      }
+
+      const fnCtx = ctx as typeof ctx & { agentId?: string };
+      const callerAgentId = fnCtx.agentId;
+      const targetChain = await agentStore.getChainOfCommand(target.id);
+      if (callerAgentId) {
+        if (callerAgentId === target.id) {
+          return denied("You can only update your own direct or indirect reports, not yourself.", {
+            agentId: target.id,
+            callerAgentId,
+            rule: "direct-or-indirect-reports-only",
+          });
+        }
+        const callerIndex = targetChain.findIndex((agent) => agent.id === callerAgentId);
+        if (callerIndex < 1) {
+          return denied("You can only update your own direct or indirect reports.", {
+            agentId: target.id,
+            callerAgentId,
+            rule: "direct-or-indirect-reports-only",
+          });
+        }
+      }
+
+      let resolvedReportsTo: string | undefined;
+      let managerForCycleCheck: string | undefined;
+      if (params.reportsTo !== undefined) {
+        if (params.reportsTo === "") {
+          if (callerAgentId) {
+            return denied("Only privileged user/operator calls can clear an agent's manager.", {
+              agentId: target.id,
+              callerAgentId,
+              rule: "privileged-clear-manager-only",
+            });
+          }
+          resolvedReportsTo = undefined;
+        } else {
+          const manager = await agentStore.resolveAgent(params.reportsTo);
+          if (!manager) {
+            return invalid("reportsTo", `Manager '${params.reportsTo}' not found`, { agentId: target.id });
+          }
+          if (manager.id === target.id) {
+            return invalid("reportsTo", "An agent cannot report to itself", { agentId: target.id });
+          }
+          const managerChain = await agentStore.getChainOfCommand(manager.id);
+          if (managerChain.some((agent) => agent.id === target.id)) {
+            return invalid("reportsTo", "reportsTo would create a management cycle", {
+              agentId: target.id,
+              managerId: manager.id,
+            });
+          }
+          if (callerAgentId) {
+            const managerCallerIndex = managerChain.findIndex((agent) => agent.id === callerAgentId);
+            if (manager.id !== callerAgentId && managerCallerIndex < 1) {
+              return denied("You can only reparent reports to yourself or another agent in your management subtree.", {
+                agentId: target.id,
+                callerAgentId,
+                managerId: manager.id,
+                rule: "reparent-within-subtree-only",
+              });
+            }
+          }
+          resolvedReportsTo = manager.id;
+          managerForCycleCheck = manager.id;
+        }
+      }
+
+      const hasRuntimeConfigUpdates = [
+        params.heartbeat_interval_ms,
+        params.heartbeat_timeout_ms,
+        params.max_concurrent_runs,
+        params.message_response_mode,
+      ].some((value) => value !== undefined);
+      const updateInput: AgentUpdateInput = {};
+      const updatedFields: string[] = [];
+      const setField = <K extends keyof AgentUpdateInput>(field: K, value: AgentUpdateInput[K]) => {
+        updateInput[field] = value;
+        updatedFields.push(String(field));
+      };
+
+      if (params.name !== undefined) setField("name", params.name);
+      if (params.role !== undefined) setField("role", params.role as AgentCapability);
+      if (params.title !== undefined) setField("title", params.title);
+      if (params.icon !== undefined) setField("icon", params.icon);
+      if (params.soul !== undefined) setField("soul", params.soul);
+      if (params.instructions_text !== undefined) setField("instructionsText", params.instructions_text);
+      if (params.instructions_path !== undefined) setField("instructionsPath", params.instructions_path);
+      if (params.heartbeat_procedure_path !== undefined) setField("heartbeatProcedurePath", params.heartbeat_procedure_path);
+      if (params.reportsTo !== undefined) {
+        setField("reportsTo", resolvedReportsTo);
+      }
+      if (hasRuntimeConfigUpdates) {
+        setField("runtimeConfig", {
+          ...((target.runtimeConfig ?? {}) as Record<string, unknown>),
+          ...(params.heartbeat_interval_ms !== undefined ? { heartbeatIntervalMs: params.heartbeat_interval_ms } : {}),
+          ...(params.heartbeat_timeout_ms !== undefined ? { heartbeatTimeoutMs: params.heartbeat_timeout_ms } : {}),
+          ...(params.max_concurrent_runs !== undefined ? { maxConcurrentRuns: params.max_concurrent_runs } : {}),
+          ...(params.message_response_mode !== undefined ? { messageResponseMode: params.message_response_mode } : {}),
+        });
+      }
+
+      if (managerForCycleCheck && managerForCycleCheck === target.id) {
+        return invalid("reportsTo", "An agent cannot report to itself", { agentId: target.id });
+      }
+
+      const updated = await agentStore.updateAgent(target.id, updateInput);
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Updated ${updated.name} (${updated.id}): ${updatedFields.join(", ")}`,
+        }],
+        details: { outcome: "updated", agentId: updated.id, updatedFields, agent: updated },
       };
     },
   });

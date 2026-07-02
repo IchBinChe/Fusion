@@ -81,6 +81,7 @@ All skill/extension tool invocations in this catalog use the public `fn_*` names
 | `fn_agent_stop` | Stop a running agent — pauses its execution. Transitions the agent from running/active to paused state. |
 | `fn_agent_start` | Start a stopped agent — resumes its execution. Transitions the agent from paused to active state. |
 | `fn_agent_create` | Create a new non-ephemeral agent. |
+| `fn_agent_update` | Update editable configuration for an existing non-ephemeral agent. Agent callers can only update direct or indirect reports inside their management subtree; user/operator calls are privileged. |
 | `fn_agent_set_instructions` | Set the instructionsText and/or instructionsPath of one of the caller's direct or indirect reports. At least one of instructions_text or instructions_path is required; pass an empty string to clear a field. The change is persisted and recorded as a config revision. |
 | `fn_agent_delete` | Delete a non-ephemeral agent. |
 | `fn_list_agents` | List all available agents in the system. Shows each agent's name, role, state, personality (soul), and current assignment. Use this to discover which agents exist and what they specialize in before delegating work. |

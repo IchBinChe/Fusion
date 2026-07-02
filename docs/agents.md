@@ -72,17 +72,26 @@ printf "deploy report" | fn chat agent-abc123 --once --non-interactive
 
 > Replies require a running engine for the same project (for example `fn` dashboard or `fn serve`).
 
-## Agent instruction updates from agents
+## Agent configuration updates from agents
 
-The `fn_agent_set_instructions` extension tool lets a managing agent update a report's operating instructions without opening the dashboard. It accepts:
+The `fn_agent_update` extension tool lets chat/extension callers update existing non-ephemeral agents in place instead of deleting and recreating them. It accepts `agent_id` plus any editable subset of:
+
+- Identity fields: `name`, `role` (`triage`, `executor`, `reviewer`, `merger`, `engineer`, `custom`), `title`, `icon`, and `soul`.
+- Instruction fields: `instructions_text`, `instructions_path`, and `heartbeat_procedure_path`.
+- Hierarchy field: `reportsTo` as a manager agent ID/name; privileged CLI/user calls may pass `reportsTo: ""` to clear the manager.
+- Heartbeat/runtime fields: `heartbeat_interval_ms`, `heartbeat_timeout_ms`, `max_concurrent_runs`, and `message_response_mode` (`immediate` or `on-heartbeat`). Runtime updates merge into the existing `runtimeConfig` and preserve unrelated keys.
+
+At least one update field must be provided. The tool rejects missing targets, ephemeral/runtime agents, self-targeting, string/number limit violations (`soul` 10,000 chars, `instructions_text` 50,000 chars, path fields 500 chars, heartbeat interval ≥1000ms, heartbeat timeout ≥5000ms, max concurrent runs ≥1), missing managers, self-manager assignments, and hierarchy cycles before mutating storage. Successful calls persist through one `AgentStore.updateAgent` call, so normal config revision history records the full edit.
+
+Authorization is scoped to the org hierarchy. When the caller is an agent (`ctx.agentId` is present), the target must already be one of that caller's direct or indirect reports; self-targeting, peer/unrelated targets, and ancestors are rejected. Reparenting must stay inside the caller's subtree: the new manager may be the caller or one of the caller's direct/indirect reports, but not an unrelated agent or ancestor. Direct CLI/user calls that do not carry `ctx.agentId` are treated as privileged operator actions and may update any non-ephemeral agent, including clearing `reportsTo`.
+
+The legacy `fn_agent_set_instructions` extension tool remains available for backward compatibility and narrower instruction-only edits. It accepts:
 
 - `agent_id` — target agent ID or resolvable agent name.
 - `instructions_text` — optional inline instructions; pass an explicit empty string to clear `instructionsText`.
 - `instructions_path` — optional markdown file path; pass an explicit empty string to clear `instructionsPath`.
 
-At least one instruction field must be provided. The tool persists changes through `AgentStore.updateAgent`, so instruction edits are captured as normal agent config revisions.
-
-Authorization is scoped to the org hierarchy. When the caller is an agent (`ctx.agentId` is present), the target must be one of that caller's direct or indirect reports; self-targeting, peer/unrelated targets, and ancestors are rejected. Direct CLI/user calls that do not carry `ctx.agentId` are treated as privileged operator actions and may update any agent.
+At least one instruction field must be provided. The legacy tool uses the same direct/indirect-report authorization model for agent callers and persists changes through `AgentStore.updateAgent`, so instruction edits are captured as normal agent config revisions.
 
 ## Agent Field Parity Matrix
 
@@ -187,7 +196,7 @@ Approval pause/resume lifecycle (FN-3548):
 
 Agent provisioning approvals (`agent_provisioning` category):
 
-- `fn_agent_create` / `fn_agent_delete` can return `pending_approval` under `projectSettings.agentProvisioning` policy (`approvalMode`, trusted roles/IDs, `alwaysApproveDelete`).
+- `fn_agent_create` / `fn_agent_delete` can return `pending_approval` under `projectSettings.agentProvisioning` policy (`approvalMode`, trusted roles/IDs, `alwaysApproveDelete`). `fn_agent_update` is an in-place configuration edit for existing agents, so it uses org-hierarchy authorization and `AgentStore.updateAgent` revision auditing rather than the create/delete provisioning approval policy.
 - Dashboard surface: Project Settings → Agent Permissions → **Agent Provisioning Approvals** editor (project-scoped only).
 - Approval request is persisted with provisioning context (`tool` + `params`) and visible in mailbox/API approval queues.
 - Dashboard/API decision route `POST /api/approvals/:id/decision` executes deferred provisioning on `approve` via engine dispatcher (`executeApprovedAgentProvisioning`) and never executes on `deny`.

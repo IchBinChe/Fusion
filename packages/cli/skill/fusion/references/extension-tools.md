@@ -555,6 +555,27 @@ Create a new non-ephemeral agent.
 | `max_concurrent_runs` | number | — |  |
 | `message_response_mode` | union | — |  |
 
+### fn_agent_update
+
+Update editable configuration for an existing non-ephemeral agent. Agent callers can only update direct or indirect reports inside their management subtree; user/operator calls are privileged.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `agent_id` | string | ✓ | Target agent ID or name to update |
+| `name` | string | — | New display name |
+| `role` | union | — | Agent role/capability |
+| `title` | string | — | Optional title shown for the agent |
+| `icon` | string | — | Optional compact icon/emoji |
+| `soul` | string | — | Agent personality/identity text |
+| `instructions_text` | string | — | Inline custom instructions |
+| `instructions_path` | string | — | Path to instructions markdown |
+| `heartbeat_procedure_path` | string | — | Path to heartbeat procedure markdown |
+| `reportsTo` | string | — | Manager agent ID/name. Pass empty string to clear for privileged user/operator calls. |
+| `heartbeat_interval_ms` | number | — | Heartbeat polling interval in ms |
+| `heartbeat_timeout_ms` | number | — | Heartbeat timeout in ms |
+| `max_concurrent_runs` | number | — | Max concurrent heartbeat runs |
+| `message_response_mode` | union | — | How agent responds to messages |
+
 ### fn_agent_set_instructions
 
 Set the instructionsText and/or instructionsPath of one of the caller's direct or indirect reports. At least one of instructions_text or instructions_path is required; pass an empty string to clear a field. The change is persisted and recorded as a config revision.

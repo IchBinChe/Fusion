@@ -90,11 +90,15 @@ Start the dashboard:
 fn dashboard
 ```
 
-On first launch, Fusion opens an onboarding wizard with three steps:
+On first launch, Fusion opens an onboarding wizard with guided setup steps:
 
 1. **AI Setup** — choose a provider and authenticate (you only need one to start). Anthropic/Claude and OpenAI Codex use a pasted authorization-code OAuth flow in onboarding and Settings (sign in, then paste the final redirect URL or code back into Fusion), and Fusion warns before login so you remember to copy the browser address bar URL before the redirect tab appears to fail. After the initial Claude OAuth login, Fusion normally refreshes the OAuth credential automatically with the stored refresh token when the access token expires, so repeated manual re-login is not usually required. **Anthropic — via Claude CLI** remains available as a separate optional path. Deprecated Google Gemini CLI / Antigravity entries are hidden; Google/Gemini API key, Google Generative AI, Vertex, and Cloud Code options remain available.
-2. **GitHub (Optional)** — connect GitHub for issue import and PR workflows
-3. **First Task** — create your first task or import one from GitHub
+2. **GitHub (Optional)** — connect GitHub for issue import and PR workflows.
+3. **Project Setup** — choose how Fusion should prepare a repository:
+   - **Use Existing Directory** registers a folder that is already a git repository or a workspace root with detected sub-repositories.
+   - **Initialize New Repository** registers an existing local folder and lets the server run `git init` during registration when the folder is not already a git repository.
+   - **Clone Git Repository** runs `git clone` from a remote URL into an empty or absent destination directory, then registers the cloned folder. Fusion rejects blank clone URLs and populated destinations.
+4. **First Task** — create your first task or import one from GitHub.
 
 The wizard is dismissible and non-blocking. You can skip it and continue using Fusion, then reopen it later from **Settings → Authentication**.
 

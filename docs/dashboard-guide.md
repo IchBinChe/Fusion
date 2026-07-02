@@ -778,6 +778,16 @@ Memory view provides a multi-file editor for project and daily memory files. Its
 
 ![Memory view](./screenshots/memory-view.png)
 
+## Setup Wizard Project Registration
+
+First-run setup and embedded project setup both expose a **Repository setup** section before path entry:
+
+- **Use Existing Directory** registers an existing git repository or workspace root. Workspace detection and the workspace-mode checkbox only appear in this mode.
+- **Initialize New Repository** registers the selected local folder and relies on the server-side project registration path to run `git init` if the folder is not already a git repository.
+- **Clone Git Repository** requires a non-blank remote URL and an absolute destination path. Fusion runs `git clone` with argument-vector execution, requires the destination to be absent or empty, cleans up a newly-created failed destination best-effort, then registers the cloned folder.
+
+Advanced setup remains limited to runtime node and isolation-mode choices, so repository mode selection is not hidden behind the advanced panel.
+
 ## Agents View
 
 Agent list and detail surfaces now surface pending approvals per agent:

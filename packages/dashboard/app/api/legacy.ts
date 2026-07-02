@@ -6981,6 +6981,7 @@ export interface ProjectCreateInput {
   path: string;
   isolationMode?: "in-process" | "child-process";
   nodeId?: string;
+  gitSetupMode?: "existing" | "init" | "clone";
   cloneUrl?: string;
   workspaceMode?: boolean;
   taskPrefix?: string;

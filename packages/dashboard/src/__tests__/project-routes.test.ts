@@ -760,6 +760,57 @@ describe("POST /api/projects route handler", () => {
     expect((res.body as any).status).toBe("active");
   });
 
+  it("accepts explicit initialize mode for a non-git folder through ensureProjectForPath", async () => {
+    const store = new MockStoreForRoutes();
+    const app = await createApp(store);
+
+    const res = await request(
+      app,
+      "POST",
+      "/api/projects",
+      JSON.stringify({
+        name: "New Git Project",
+        path: "/tmp/new-git-project",
+        gitSetupMode: "init",
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(mockFsAccess).toHaveBeenCalledWith("/tmp/new-git-project");
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
+    expect(mockEnsureProjectForPath).toHaveBeenCalledWith({
+      path: "/tmp/new-git-project",
+      identity: undefined,
+      name: "New Git Project",
+      isolationMode: "in-process",
+      nodeId: undefined,
+    });
+  });
+
+  it("keeps existing registration on the git-init fallback path when no mode is provided", async () => {
+    const store = new MockStoreForRoutes();
+    const app = await createApp(store);
+
+    const res = await request(
+      app,
+      "POST",
+      "/api/projects",
+      JSON.stringify({ name: "Existing Or Init", path: "/tmp/existing-or-init" }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
+    expect(mockEnsureProjectForPath).toHaveBeenCalledWith({
+      path: "/tmp/existing-or-init",
+      identity: undefined,
+      name: "Existing Or Init",
+      isolationMode: "in-process",
+      nodeId: undefined,
+    });
+  });
+
   it("passes nodeId to ensureProjectForPath when provided", async () => {    const store = new MockStoreForRoutes();
     const app = await createApp(store);
 
@@ -912,6 +963,7 @@ describe("POST /api/projects route handler", () => {
         JSON.stringify({
           name: "Cloned Project",
           path: cloneDestination,
+          gitSetupMode: "clone",
           cloneUrl: bareRepo,
         }),
         { "Content-Type": "application/json" },
@@ -971,6 +1023,7 @@ describe("POST /api/projects route handler", () => {
       JSON.stringify({
         name: "Existing Destination",
         path: "/tmp/existing-destination",
+        gitSetupMode: "clone",
         cloneUrl: "https://github.com/runfusion/fusion.git",
       }),
       { "Content-Type": "application/json" },
@@ -978,6 +1031,51 @@ describe("POST /api/projects route handler", () => {
 
     expect(res.status).toBe(400);
     expect((res.body as { error?: string }).error).toContain("Clone destination must be empty");
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
+    expect(mockEnsureProjectForPath).not.toHaveBeenCalled();
+  });
+
+  it("rejects explicit clone mode when cloneUrl is missing", async () => {
+    const store = new MockStoreForRoutes();
+    const app = await createApp(store);
+
+    const res = await request(
+      app,
+      "POST",
+      "/api/projects",
+      JSON.stringify({
+        name: "Missing Clone Url",
+        path: "/tmp/missing-clone-url",
+        gitSetupMode: "clone",
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(400);
+    expect((res.body as { error?: string }).error).toContain("cloneUrl must be a non-empty string");
+    expect(mockExecFileAsync).not.toHaveBeenCalled();
+    expect(mockEnsureProjectForPath).not.toHaveBeenCalled();
+  });
+
+  it("rejects cloneUrl when explicit mode is initialize", async () => {
+    const store = new MockStoreForRoutes();
+    const app = await createApp(store);
+
+    const res = await request(
+      app,
+      "POST",
+      "/api/projects",
+      JSON.stringify({
+        name: "Conflicting Clone Url",
+        path: "/tmp/conflicting-clone-url",
+        gitSetupMode: "init",
+        cloneUrl: "https://github.com/runfusion/fusion.git",
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(400);
+    expect((res.body as { error?: string }).error).toContain("cloneUrl can only be provided");
     expect(mockExecFileAsync).not.toHaveBeenCalled();
     expect(mockEnsureProjectForPath).not.toHaveBeenCalled();
   });

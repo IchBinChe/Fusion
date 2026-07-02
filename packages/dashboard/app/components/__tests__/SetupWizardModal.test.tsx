@@ -84,11 +84,12 @@ vi.mock("../ExperimentalAgentOnboardingModal", () => ({
   ),
 }));
 
-import { createAgent, registerProject } from "../../api";
+import { createAgent, registerProject, detectWorkspace } from "../../api";
 import { useNodes } from "../../hooks/useNodes";
 
 const mockRegisterProject = vi.mocked(registerProject);
 const mockCreateAgent = vi.mocked(createAgent);
+const mockDetectWorkspace = vi.mocked(detectWorkspace);
 const mockUseNodes = vi.mocked(useNodes);
 
 function buildMockProject(overrides = {}) {
@@ -133,6 +134,7 @@ describe("SetupWizardModal", () => {
     vi.clearAllMocks();
     mockRegisterProject.mockReset();
     mockCreateAgent.mockReset();
+    mockDetectWorkspace.mockResolvedValue({ repos: [], isWorkspace: false });
   });
 
   it("starts on the project form without an auth token step", () => {
@@ -146,6 +148,10 @@ describe("SetupWizardModal", () => {
     expect(screen.getByText("Welcome to Fusion")).toBeDefined();
     expect(screen.getByText("Project Name")).toBeDefined();
     expect(screen.getByLabelText("Fusion logo")).toBeDefined();
+    expect(screen.getByText("Repository setup")).toBeDefined();
+    expect(screen.getByLabelText("Use Existing Directory")).toBeDefined();
+    expect(screen.getByLabelText("Initialize New Repository")).toBeDefined();
+    expect(screen.getByLabelText("Clone Git Repository")).toBeDefined();
     expect(screen.getByText("Advanced settings")).toBeDefined();
     expect(screen.queryByText("Set Auth Token")).toBeNull();
     expect(screen.queryByText("Set Token & Continue")).toBeNull();
@@ -250,6 +256,7 @@ describe("SetupWizardModal", () => {
         path: "/existing/project",
         isolationMode: "in-process",
         nodeId: undefined,
+        gitSetupMode: "existing",
         cloneUrl: undefined,
         workspaceMode: false,
         taskPrefix: "PROJ",
@@ -257,7 +264,7 @@ describe("SetupWizardModal", () => {
     });
   });
 
-  it("clone mode renders repository url input and destination picker", () => {
+  it("renders first-class repository setup modes without opening advanced settings", () => {
     render(
       <SetupWizardModal
         onProjectRegistered={vi.fn()}
@@ -265,11 +272,17 @@ describe("SetupWizardModal", () => {
       />
     );
 
-    fireEvent.click(screen.getByText("Advanced settings"));
+    expect(screen.getByText("Repository setup")).toBeDefined();
+    expect(screen.getByText(/Register a folder that is already a git repository/)).toBeDefined();
+    expect(screen.getByText(/let Fusion run git init/)).toBeDefined();
+    expect(screen.getByText(/Clone a remote repository/)).toBeDefined();
+    expect(screen.queryByLabelText("Repository URL")).toBeNull();
+
     fireEvent.click(screen.getByLabelText("Clone Git Repository"));
 
     expect(screen.getByLabelText("Repository URL")).toBeDefined();
     expect(screen.getByPlaceholderText("/path/for/new-clone")).toBeDefined();
+    expect(screen.getByText(/destination must be empty or absent/)).toBeDefined();
     expect(screen.getByText(/Fusion will run git clone into the destination directory/)).toBeDefined();
   });
 
@@ -292,7 +305,6 @@ describe("SetupWizardModal", () => {
       />
     );
 
-    fireEvent.click(screen.getByText("Advanced settings"));
     fireEvent.click(screen.getByLabelText("Clone Git Repository"));
     fireEvent.change(screen.getByLabelText("Repository URL"), {
       target: { value: "https://github.com/runfusion/fusion.git" },
@@ -301,7 +313,7 @@ describe("SetupWizardModal", () => {
       target: { value: "/tmp/fusion" },
     });
 
-    fireEvent.click(screen.getByText("Register Project"));
+    fireEvent.click(screen.getByText("Clone and Register Project"));
 
     await waitFor(() => {
       /*
@@ -313,6 +325,7 @@ describe("SetupWizardModal", () => {
         path: "/tmp/fusion",
         isolationMode: "in-process",
         nodeId: undefined,
+        gitSetupMode: "clone",
         cloneUrl: "https://github.com/runfusion/fusion.git",
         workspaceMode: false,
         taskPrefix: "FUSI",
@@ -321,6 +334,88 @@ describe("SetupWizardModal", () => {
     expect(await screen.findByText("Create your first agent")).toBeDefined();
     expect(screen.getByRole("radio", { name: "CEO selected" })).toHaveAttribute("aria-checked", "true");
     expect(onProjectRegistered).not.toHaveBeenCalled();
+  });
+
+  it("initialize mode submits an explicit init setup payload without clone or workspace state", async () => {
+    mockRegisterProject.mockResolvedValueOnce({
+      id: "proj_init",
+      name: "new-project",
+      path: "/tmp/new-project",
+      status: "active",
+      isolationMode: "in-process",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    render(
+      <SetupWizardModal
+        onProjectRegistered={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText("Initialize New Repository"));
+    expect(screen.getByText(/Fusion will run git init during registration/)).toBeDefined();
+    fireEvent.change(screen.getByPlaceholderText("/path/to/new-project"), {
+      target: { value: "/tmp/new-project" },
+    });
+
+    fireEvent.click(screen.getByText("Initialize and Register Project"));
+
+    await waitFor(() => {
+      expect(mockRegisterProject).toHaveBeenCalledWith({
+        name: "new-project",
+        path: "/tmp/new-project",
+        isolationMode: "in-process",
+        nodeId: undefined,
+        gitSetupMode: "init",
+        cloneUrl: undefined,
+        workspaceMode: false,
+        taskPrefix: "NEWP",
+      });
+    });
+  });
+
+  it("switching setup modes clears stale clone and workspace state", async () => {
+    mockDetectWorkspace.mockResolvedValueOnce({ repos: ["api"], isWorkspace: true });
+    mockRegisterProject.mockResolvedValueOnce({
+      id: "proj_existing",
+      name: "workspace",
+      path: "/tmp/workspace",
+      status: "active",
+      isolationMode: "in-process",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    render(
+      <SetupWizardModal
+        onProjectRegistered={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.change(screen.getByPlaceholderText("/path/to/your/project"), {
+      target: { value: "/tmp/workspace" },
+    });
+    expect(await screen.findByText(/Found 1 repositories/)).toBeDefined();
+
+    fireEvent.click(screen.getByLabelText("Clone Git Repository"));
+    fireEvent.change(screen.getByLabelText("Repository URL"), {
+      target: { value: "https://github.com/runfusion/fusion.git" },
+    });
+    fireEvent.click(screen.getByLabelText("Initialize New Repository"));
+    expect(screen.queryByLabelText("Repository URL")).toBeNull();
+
+    fireEvent.click(screen.getByText("Initialize and Register Project"));
+
+    await waitFor(() => {
+      expect(mockRegisterProject).toHaveBeenCalledWith(expect.objectContaining({
+        gitSetupMode: "init",
+        cloneUrl: undefined,
+        workspaceMode: false,
+      }));
+    });
   });
 
   it("register button disabled/enabled logic is mode-aware", () => {
@@ -334,7 +429,6 @@ describe("SetupWizardModal", () => {
     const registerBtn = screen.getByText("Register Project").closest("button")!;
     expect(registerBtn.disabled).toBe(true);
 
-    fireEvent.click(screen.getByText("Advanced settings"));
     fireEvent.click(screen.getByLabelText("Clone Git Repository"));
     fireEvent.change(screen.getByPlaceholderText("/path/for/new-clone"), {
       target: { value: "/tmp/repo" },
@@ -358,7 +452,6 @@ describe("SetupWizardModal", () => {
       />
     );
 
-    fireEvent.click(screen.getByText("Advanced settings"));
     fireEvent.click(screen.getByLabelText("Clone Git Repository"));
 
     const nameInput = screen.getByPlaceholderText("my-project") as HTMLInputElement;

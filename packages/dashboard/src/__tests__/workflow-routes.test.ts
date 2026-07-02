@@ -314,23 +314,34 @@ describe("workflow routes (U4)", () => {
     expect(complete?.flags.complete).toBe(true);
   });
 
-  it("POST /workflows/:id/compile returns steps for linear and 422 for branching", async () => {
+  /*
+  FNXC:CustomWorkflows 2026-07-02-07:40:
+  FN-7360 removed the linear WorkflowStep compiler and POST /api/workflows/:id/compile.
+  parseWorkflowIr (which accepts branching graphs) is now the sole validity gate, so
+  branching custom workflows are persistable and run on the graph interpreter instead
+  of being rejected as interpreter-only. This test locks the inverted invariant: a
+  branching IR is accepted at create (201), matching how the equivalent core
+  selection test was reframed. (The removed /compile endpoint is not exercised here
+  because this in-process express harness does not finalize unmatched-route
+  responses.)
+  */
+  it("POST /workflows accepts branching IR (FN-7360 removed the linear compiler /compile gate)", async () => {
+    // Linear IR still creates successfully.
     const linear = await post("/api/workflows", { name: "L", ir: linearIr() });
-    const linearId = (linear.body as { id: string }).id;
-    const okCompile = await post(`/api/workflows/${linearId}/compile`, {});
-    expect(okCompile.status).toBe(200);
-    expect((okCompile.body as { steps: unknown[] }).steps).toHaveLength(1);
+    expect(linear.status).toBe(201);
 
+    // Branching IR used to be rejected as interpreter-only; it now persists (201)
+    // because the graph interpreter runs branching graphs directly.
     const branchy = await post("/api/workflows", { name: "B", ir: branchingIr() });
-    const branchyId = (branchy.body as { id: string }).id;
-    const badCompile = await post(`/api/workflows/${branchyId}/compile`, {});
-    expect(badCompile.status).toBe(422);
-    expect((badCompile.body as { error: string }).error).toMatch(/interpreter \(deferred\)/i);
+    expect(branchy.status).toBe(201);
+    expect((branchy.body as { id: string }).id).toMatch(/^WF-\d{3}$/);
   });
 
   /*
   FNXC:CustomWorkflows 2026-06-18-11:03:
-  FN-6645 locks the per-task workflow selection route contract: missing or non-string workflowId returns 400, unknown ids return 404, uncompilable custom IR returns 422, explicit null clears, and workflow:updated SSE is emitted only after successful select or clear mutations.
+  FN-6645 locks the per-task workflow selection route contract: missing or non-string workflowId returns 400, unknown ids return 404, explicit null clears, and workflow:updated SSE is emitted only after successful select or clear mutations.
+  FNXC:CustomWorkflows 2026-07-02-07:40:
+  FN-7360 removed the linear compiler, so the "uncompilable custom IR returns 422" clause no longer applies — branching IR is now valid and selectable (see the FN-7360 branching-selection test below). The remaining 400/404/null-clear/SSE clauses still hold.
   */
   it("PUT /tasks/:taskId/workflow selects and reflects on the task", async () => {
     const wf = await post("/api/workflows", { name: "QA", ir: linearIr() });
@@ -387,15 +398,26 @@ describe("workflow routes (U4)", () => {
     },
   );
 
-  it("PUT /tasks/:taskId/workflow maps uncompilable custom workflow IR to 422 without SSE", async () => {
+  /*
+  FNXC:CustomWorkflows 2026-07-02-07:40:
+  FN-7360 removed the linear WorkflowStep compiler, so branching custom IR is no
+  longer "uncompilable." parseWorkflowIr is the sole validity gate and the graph
+  interpreter runs branching graphs directly, so selecting a branching workflow now
+  succeeds (200) and emits the workflow:updated SSE exactly like a linear selection.
+  The previous 422-without-SSE contract is inverted.
+  */
+  it("PUT /tasks/:taskId/workflow selects a branching workflow on the graph interpreter (FN-7360)", async () => {
     const branchy = await post("/api/workflows", { name: "Branching", ir: branchingIr() });
     const branchyId = (branchy.body as { id: string }).id;
     const task = await store.createTask({ description: "T", enabledWorkflowSteps: [] });
     vi.mocked(emitWorkflowSseEvent).mockClear();
 
     const res = await put(`/api/tasks/${task.id}/workflow`, { workflowId: branchyId });
-    expect(res.status).toBe(422);
-    expect(emitWorkflowSseEvent).not.toHaveBeenCalled();
+    expect(res.status).toBe(200);
+    expect((res.body as { workflowId: string }).workflowId).toBe(branchyId);
+    // Successful selection emits workflow:updated exactly once (the previous
+    // rejection path asserted SSE was NOT emitted; that contract is inverted).
+    expect(emitWorkflowSseEvent).toHaveBeenCalledTimes(1);
   });
 
   it("PUT /tasks/:taskId/workflow emits workflow:updated exactly once after select and clear", async () => {

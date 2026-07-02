@@ -313,6 +313,8 @@ export const COLOR_THEMES = [
   "parchment",
   "terminal",
   "glass",
+  // FNXC:DashboardTheming 2026-07-01-00:00: Glass Silver is the silver/gray frosted sibling of Glass; keep this id in lockstep with dashboard/desktop validators and selector metadata so persisted explicit choices survive startup.
+  "glass-silver",
   "horizon",
   "vitesse",
   "outrun",

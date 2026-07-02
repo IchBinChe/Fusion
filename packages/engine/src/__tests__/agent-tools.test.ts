@@ -155,6 +155,49 @@ describe("createTaskCreateTool", () => {
     expect(responseText).toContain("(depends on: PROJ-001)");
   });
 
+  // FNXC:EphemeralAgentTaskCreation 2026-07-01-00:00: ephemeral callers are gated by the project toggle.
+  it("rejects ephemeral callers when ephemeralAgentsCanCreateTasks is false", async () => {
+    const store = {
+      getSettings: vi.fn().mockResolvedValue({ autoSummarizeTitles: false, ephemeralAgentsCanCreateTasks: false }),
+      createTask: vi.fn(),
+    };
+
+    const tool = createTaskCreateTool(store as any, { sourceType: "api" }, { callerIsEphemeral: true });
+    const result = await tool.execute("call-1", { description: "Follow-up" } as any, undefined, undefined, {} as any);
+
+    expect((result as { isError?: boolean }).isError).toBe(true);
+    expect(store.createTask).not.toHaveBeenCalled();
+    const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+    expect(text).toContain("not allowed to create tasks");
+  });
+
+  it("allows ephemeral callers when ephemeralAgentsCanCreateTasks is true (default)", async () => {
+    const store = {
+      getSettings: vi.fn().mockResolvedValue({ autoSummarizeTitles: false, ephemeralAgentsCanCreateTasks: true }),
+      createTask: vi.fn().mockResolvedValue({ id: "PROJ-050", description: "Follow-up", dependencies: [], column: "triage" }),
+    };
+
+    const tool = createTaskCreateTool(store as any, { sourceType: "api" }, { callerIsEphemeral: true });
+    const result = await tool.execute("call-1", { description: "Follow-up" } as any, undefined, undefined, {} as any);
+
+    expect((result as { isError?: boolean }).isError).toBeFalsy();
+    expect(store.createTask).toHaveBeenCalled();
+  });
+
+  it("never gates permanent callers even when the toggle is off", async () => {
+    const store = {
+      getSettings: vi.fn().mockResolvedValue({ autoSummarizeTitles: false, ephemeralAgentsCanCreateTasks: false }),
+      createTask: vi.fn().mockResolvedValue({ id: "PROJ-051", description: "Follow-up", dependencies: [], column: "triage" }),
+    };
+
+    // No callerIsEphemeral → permanent-agent/human session; toggle is ignored.
+    const tool = createTaskCreateTool(store as any, { sourceType: "api" });
+    const result = await tool.execute("call-1", { description: "Follow-up" } as any, undefined, undefined, {} as any);
+
+    expect((result as { isError?: boolean }).isError).toBeFalsy();
+    expect(store.createTask).toHaveBeenCalled();
+  });
+
   it("passes explicit priority to store.createTask", async () => {
     const store = {
       getSettings: vi.fn().mockResolvedValue({ autoSummarizeTitles: false }),

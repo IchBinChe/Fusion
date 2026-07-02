@@ -8771,6 +8771,49 @@ export class TaskExecutor {
     return true;
   }
 
+  /*
+  FNXC:EphemeralAgents 2026-07-01-00:00:
+  `ephemeralAgentsEnabled: false` means "never spawn short-lived executor-FN-XXXX workers; only permanent agents run work" (see types.ts ephemeralAgentsEnabled). The legacy spawn refusal lives in EphemeralWorkerManager.onTaskStart (ephemeral-worker-manager.ts), but that runs as a fire-and-forget bookkeeping callback AFTER execution has already begun, so it cannot stop a run. The workflow-engine dispatch paths (maybeExecuteWorkflowGraph, workflowAuthoritativeDispatch, maybeDispatchWorkflowWorkEngine) execute tasks in-process without ever consulting the toggle. Any task that reaches execute() without a permanent assignment via a non-scheduler path (resume-after-restart, heartbeat re-entry, mission/autopilot, work-engine claim) therefore ran despite the operator disabling ephemeral agents.
+
+  This guard is the executor's last line of defense, mirroring the scheduler cutover gate (scheduler.ts:2464) and the spawn refusal (ephemeral-worker-manager.ts:132). It runs once at the top of the outer dispatch — before all three workflow paths — so a single check covers every workflow dispatch entry point. A task explicitly assigned to a permanent (non-ephemeral) agent is exactly how ephemeral-off mode is meant to run, so those are allowed through; everything else is re-queued for the scheduler to auto-assign a permanent agent or hold.
+  */
+  private async blockOuterDispatchWhenEphemeralDisabled(task: Task): Promise<boolean> {
+    const settings = await this.store.getSettings();
+    if (settings.ephemeralAgentsEnabled !== false) return false;
+
+    // A permanent (non-ephemeral) assignment is the sanctioned executor when
+    // ephemeral workers are off. `assignedAgentId` is only ever set by permanent
+    // assignment — default ephemeral mode never sets it — so when we cannot
+    // resolve the agent (no agentStore) we trust the presence of the id and allow
+    // the run rather than starving a legitimately-assigned task.
+    const assignedId = task.assignedAgentId?.trim();
+    if (assignedId) {
+      if (!this.options.agentStore) return false;
+      const agent = await this.options.agentStore.getAgent(assignedId).catch(() => null);
+      if (agent && !isEphemeralAgent(agent)) return false;
+    }
+
+    const liveTask = (await this.store.getTask(task.id).catch(() => null)) ?? task;
+    if (liveTask.column !== "todo") {
+      await this.store.moveTask(liveTask.id, "todo", {
+        preserveProgress: true,
+        preserveWorktree: true,
+        preserveResumeState: true,
+        moveSource: "engine",
+        recoveryRehome: true,
+      });
+    }
+    await this.store.updateTask(liveTask.id, { status: "queued" }, this.getRunContextFor(liveTask.id));
+    await this.store.logEntry(
+      liveTask.id,
+      "queued — ephemeral agents disabled; no permanent executor assigned",
+      "Executor pre-dispatch ephemeral gate blocked workflow/authoritative execution.",
+      this.getRunContextFor(liveTask.id),
+    );
+    executorLog.log(`${liveTask.id}: executor dispatch blocked — ephemeralAgentsEnabled=false and no permanent agent assigned`);
+    return true;
+  }
+
   async execute(task: Task): Promise<void> {
     this.completionFinalizedTaskIds.delete(task.id);
     await this.clearStalePauseAbortBeforeDispatch(task);
@@ -8786,6 +8829,12 @@ export class TaskExecutor {
         return;
       }
       if (await this.blockOuterDispatchWhenDependenciesUnmet(task)) return;
+      // FNXC:EphemeralAgents 2026-07-01-00:00: gate ALL workflow dispatch paths
+      // (graph/authoritative/work-engine) on ephemeralAgentsEnabled before any of
+      // them can claim the task. Placed inside the outer-dispatch block so seam
+      // re-entry (interceptor registered) is unaffected, and ahead of every path
+      // so the single check covers all three entry points.
+      if (await this.blockOuterDispatchWhenEphemeralDisabled(task)) return;
       const graphOwned = await this.maybeExecuteWorkflowGraph(task);
       if (graphOwned) return;
       const authoritativeOwned = await this.options.workflowAuthoritativeDispatch?.(task);
@@ -9919,7 +9968,7 @@ export class TaskExecutor {
       const customTools = [
         this.createTaskUpdateTool(task.id, codeReviewVerdicts, sessionRef, stepCheckpoints, stuckDetector),
         this.createTaskLogTool(task.id),
-        this.createTaskCreateTool(),
+        this.createTaskCreateTool(!identityAgent || isEphemeralAgent(identityAgent)),
         this.createTaskAddDepTool(task.id),
         this.createTaskDoneTool(task.id, worktreePath, detail.prompt ?? "", codeReviewVerdicts, () => { taskDone = true; }, audit),
         createRunVerificationTool({
@@ -11932,8 +11981,12 @@ export class TaskExecutor {
     return sharedCreateTaskLogTool(this.store, taskId);
   }
 
-  private createTaskCreateTool(): ToolDefinition {
-    return sharedCreateTaskCreateTool(this.store, { sourceType: "api" }, { rootDir: this.rootDir });
+  /*
+  FNXC:EphemeralAgentTaskCreation 2026-07-01-00:00:
+  A task-execution session is an ephemeral worker when no permanent identity agent governs it (default executor-FN-XXXX worker) or the governing agent is itself ephemeral. Pass that through so fn_task_create honors the project `ephemeralAgentsCanCreateTasks` toggle; permanent-agent sessions are never gated.
+  */
+  private createTaskCreateTool(callerIsEphemeral: boolean): ToolDefinition {
+    return sharedCreateTaskCreateTool(this.store, { sourceType: "api" }, { rootDir: this.rootDir, callerIsEphemeral });
   }
 
   private createTaskDocumentWriteTool(taskId: string): ToolDefinition {

@@ -699,6 +699,14 @@ export type {
   GithubIssueRepoBreakdown,
   GithubResolvedIssue,
 } from "./github-issue-analytics.js";
+export { aggregateGitlabIssueAnalytics } from "./gitlab-issue-analytics.js";
+export type {
+  GitlabIssueAnalytics,
+  GitlabIssueAnalyticsQuery,
+  GitlabIssueDailyPoint,
+  GitlabIssueProjectBreakdown,
+  GitlabResolvedIssue,
+} from "./gitlab-issue-analytics.js";
 export { aggregateSignalsAnalytics } from "./activity-analytics.js";
 export type {
   SignalSourceCount,

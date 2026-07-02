@@ -4,6 +4,7 @@ import type {
   ActivityAnalytics,
   ProductivityAnalytics,
   GithubIssueAnalytics,
+  GitlabIssueAnalytics,
   WorkflowAnalytics,
 } from "@fusion/core";
 
@@ -287,4 +288,24 @@ export function githubIssueAnalyticsToTable(
   }
   rows.push(["summary", "total", result.filed, result.fixed, result.net, "", "", "", "", ""]);
   return { header, rows };
+}
+
+/** GitLab issue/MR analytics → CSV. Daily, project, resolved detail, and summary rows. */
+export function gitlabIssueAnalyticsToTable(
+  result: GitlabIssueAnalytics,
+): CsvTable {
+  const githubShaped: GithubIssueAnalytics = {
+    ...result,
+    byRepo: result.byProject.map((entry) => ({ repo: entry.project, filed: entry.filed, fixed: entry.fixed })),
+    resolved: result.resolved.map((entry) => ({
+      taskId: entry.taskId,
+      taskTitle: entry.taskTitle,
+      repo: entry.project,
+      issueNumber: entry.issueNumber,
+      url: entry.url,
+      resolvedAt: entry.resolvedAt,
+      resolvedAtExact: entry.resolvedAtExact,
+    })),
+  };
+  return githubIssueAnalyticsToTable(githubShaped);
 }

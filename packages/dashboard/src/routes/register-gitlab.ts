@@ -10,6 +10,7 @@ import {
   type GitLabMergeRequest,
   type GitLabResourceType,
 } from "../gitlab.js";
+import { GitLabSourceIssueReconciler, GITLAB_RECONCILE_SCAN_LIMIT } from "../gitlab-source-issue-reconciler.js";
 import type { ApiRoutesContext } from "./types.js";
 
 function readRequiredString(body: Record<string, unknown>, key: string): string | number {
@@ -38,6 +39,22 @@ function readLimit(body: Record<string, unknown>): number | undefined {
 
 function readState(body: Record<string, unknown>): string | undefined {
   return typeof body.state === "string" && body.state.trim() ? body.state.trim() : undefined;
+}
+
+function readNonNegativeInteger(body: Record<string, unknown>, key: string, fallback: number): number {
+  const value = body[key];
+  if (value === undefined) return fallback;
+  if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
+  throw badRequest(`${key} must be a non-negative integer`);
+}
+
+function readBackfillLimit(body: Record<string, unknown>): number {
+  const value = body.limit;
+  if (value === undefined) return GITLAB_RECONCILE_SCAN_LIMIT;
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+    return Math.min(value, GITLAB_RECONCILE_SCAN_LIMIT);
+  }
+  throw badRequest("limit must be a positive integer");
 }
 
 async function createClient(ctx: ApiRoutesContext, req: Parameters<ApiRoutesContext["getProjectContext"]>[0]): Promise<GitLabClient> {
@@ -96,6 +113,18 @@ async function importItem(ctx: ApiRoutesContext, req: Parameters<ApiRoutesContex
 
 export function registerGitLabRoutes(ctx: ApiRoutesContext): void {
   const { router, rethrowAsApiError } = ctx;
+
+  router.post("/git/gitlab/backfill-source-issue-closed-at", async (req, res) => {
+    try {
+      const { store } = await ctx.getProjectContext(req);
+      const offset = readNonNegativeInteger(req.body ?? {}, "offset", 0);
+      const limit = readBackfillLimit(req.body ?? {});
+      const result = await new GitLabSourceIssueReconciler().backfillSourceIssueClosedAt(store, { offset, limit });
+      res.json(result);
+    } catch (error) {
+      rethrowAsApiError(error);
+    }
+  });
 
   router.post("/gitlab/project/issues/fetch", async (req, res) => {
     try {

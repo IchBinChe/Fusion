@@ -1875,7 +1875,7 @@ export default function kbExtension(pi: ExtensionAPI) {
       const provenance = dashboard.buildGitLabTaskProvenance({ auth: client.auth, resourceType, item, projectInput: resourceType !== "group_issue" ? target : undefined, groupInput: resourceType === "group_issue" ? target : undefined });
       if (existingTasks.some((task) => dashboard.isGitLabAlreadyImported(task, provenance))) continue;
       const title = resourceType === "merge_request" ? `Review MR !${item.iid}: ${item.title.slice(0, 180)}` : item.title.slice(0, 200);
-      const task = await store.createTask({ title: title || undefined, description: dashboard.buildGitLabTaskDescription(item), column: "triage", dependencies: [], sourceIssue: provenance.sourceIssue, source: { sourceType: "gitlab_import", sourceMetadata: provenance.sourceMetadata } });
+      const task = await store.createTask({ title: title || undefined, description: dashboard.buildGitLabTaskDescription(item), column: "triage", dependencies: [], sourceIssue: provenance.sourceIssue, gitlabTracking: provenance.gitlabTracking, source: { sourceType: "gitlab_import", sourceMetadata: provenance.sourceMetadata } });
       await store.logEntry(task.id, resourceType === "merge_request" ? "Imported merge request from GitLab" : "Imported from GitLab", item.webUrl);
       existingTasks.push(task);
       createdTasks.push({ id: task.id, title: task.title || item.title });

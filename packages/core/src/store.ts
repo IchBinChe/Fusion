@@ -6326,21 +6326,32 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
   }
 
   async listTasksForGithubTrackingReconcile(options?: { offset?: number; limit?: number }): Promise<{ tasks: Task[]; hasMore: boolean }> {
+    return this.listTasksForProviderTrackingReconcile("githubTracking", options);
+  }
+
+  async listTasksForGitlabTrackingReconcile(options?: { offset?: number; limit?: number }): Promise<{ tasks: Task[]; hasMore: boolean }> {
+    return this.listTasksForProviderTrackingReconcile("gitlabTracking", options);
+  }
+
+  private listTasksForProviderTrackingReconcile(
+    trackingColumn: "githubTracking" | "gitlabTracking",
+    options?: { offset?: number; limit?: number },
+  ): { tasks: Task[]; hasMore: boolean } {
     const reconcileScanLimit = 200;
     const offset = Math.max(0, options?.offset ?? 0);
     const limit = Math.max(0, options?.limit ?? reconcileScanLimit);
     const selectClause = this.getTaskSelectClause(true);
 
-    // FN-5577: GitHub tracking reconciliation must inspect soft-deleted rows,
-    // so this query intentionally bypasses ACTIVE_TASKS_WHERE.
+    // FN-5577/FN-7428: Provider tracking reconciliation must inspect soft-deleted rows,
+    // so this query intentionally bypasses ACTIVE_TASKS_WHERE while keeping GitHub and GitLab sweeps isolated.
     const deletedTotal = this.db.prepare(
-      "SELECT COUNT(*) as count FROM tasks WHERE \"deletedAt\" IS NOT NULL AND \"githubTracking\" IS NOT NULL",
+      `SELECT COUNT(*) as count FROM tasks WHERE "deletedAt" IS NOT NULL AND "${trackingColumn}" IS NOT NULL`,
     ).get() as { count: number } | undefined;
     const deletedCount = Number(deletedTotal?.count ?? 0);
 
     const deletedOffset = Math.min(offset, deletedCount);
     const deletedRows = this.db.prepare(
-      `SELECT ${selectClause} FROM tasks WHERE "deletedAt" IS NOT NULL AND "githubTracking" IS NOT NULL ORDER BY updatedAt ASC LIMIT ? OFFSET ?`,
+      `SELECT ${selectClause} FROM tasks WHERE "deletedAt" IS NOT NULL AND "${trackingColumn}" IS NOT NULL ORDER BY updatedAt ASC LIMIT ? OFFSET ?`,
     ).all(limit, deletedOffset) as unknown as TaskRow[];
 
     const deletedTasks = deletedRows.map((row) => {
@@ -6356,7 +6367,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       const archivedCandidates = this.archiveDb
         .list()
         .map((entry) => this.archiveEntryToTask(entry, true))
-        .filter((task) => Boolean(task.githubTracking));
+        .filter((task) => Boolean(task[trackingColumn]));
 
       archivedCount = archivedCandidates.length;
       const archivedOffset = Math.max(0, offset - deletedCount);

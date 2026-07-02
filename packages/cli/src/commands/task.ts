@@ -1568,6 +1568,7 @@ export async function runTaskImportFromGitLab(
       column: "triage",
       dependencies: [],
       sourceIssue: provenance.sourceIssue,
+      gitlabTracking: provenance.gitlabTracking,
       source: { sourceType: "gitlab_import", sourceMetadata: provenance.sourceMetadata },
     });
     await store.logEntry(task.id, resource === "merge-requests" ? "Imported merge request from GitLab" : "Imported from GitLab", item.webUrl);

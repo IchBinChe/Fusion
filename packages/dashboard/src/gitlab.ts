@@ -33,6 +33,7 @@ export interface GitLabIssue {
   labels: string[];
   createdAt?: string;
   updatedAt?: string;
+  closedAt?: string;
   commentsCount?: number;
 }
 
@@ -50,6 +51,8 @@ export interface GitLabMergeRequest {
   labels: string[];
   createdAt?: string;
   updatedAt?: string;
+  closedAt?: string;
+  mergedAt?: string;
   commentsCount?: number;
   sourceBranch?: string;
   targetBranch?: string;
@@ -152,6 +155,7 @@ function normalizeIssue(input: unknown, resourceKind: "project_issue" | "group_i
     labels: normalizeLabels(raw.labels),
     ...(typeof raw.created_at === "string" ? { createdAt: raw.created_at } : {}),
     ...(typeof raw.updated_at === "string" ? { updatedAt: raw.updated_at } : {}),
+    ...(typeof raw.closed_at === "string" ? { closedAt: raw.closed_at } : {}),
     ...(typeof raw.user_notes_count === "number" ? { commentsCount: raw.user_notes_count } : {}),
     ...extras,
   };
@@ -173,6 +177,8 @@ function normalizeMergeRequest(input: unknown, extras: Partial<GitLabMergeReques
     labels: normalizeLabels(raw.labels),
     ...(typeof raw.created_at === "string" ? { createdAt: raw.created_at } : {}),
     ...(typeof raw.updated_at === "string" ? { updatedAt: raw.updated_at } : {}),
+    ...(typeof raw.closed_at === "string" ? { closedAt: raw.closed_at } : {}),
+    ...(typeof raw.merged_at === "string" ? { mergedAt: raw.merged_at } : {}),
     ...(typeof raw.user_notes_count === "number" ? { commentsCount: raw.user_notes_count } : {}),
     ...(typeof raw.source_branch === "string" ? { sourceBranch: raw.source_branch } : {}),
     ...(typeof raw.target_branch === "string" ? { targetBranch: raw.target_branch } : {}),
@@ -299,6 +305,8 @@ export function buildGitLabTaskProvenance(args: {
   groupInput?: string | number;
 }): { sourceIssue: TaskSourceIssue; gitlabTracking: TaskGitLabTracking; sourceMetadata: Record<string, unknown> } {
   const { auth, resourceType, item } = args;
+  const groupPathFromInput = typeof args.groupInput === "string" ? args.groupInput : undefined;
+  const groupIdFromInput = typeof args.groupInput === "number" ? args.groupInput : undefined;
   const repository = projectIdentity(item);
   const externalIssueId = resourceType === "merge_request"
     ? `gitlab:mr:${item.projectId ?? repository}:${item.id ?? item.iid}`
@@ -322,8 +330,8 @@ export function buildGitLabTaskProvenance(args: {
         ...(typeof item.id === "number" ? { id: item.id } : {}),
         ...(typeof item.projectId === "number" ? { projectId: item.projectId } : {}),
         ...(typeof item.projectPath === "string" ? { projectPath: item.projectPath } : {}),
-        ...("groupId" in item && item.groupId !== undefined ? { groupId: item.groupId } : {}),
-        ...("groupPath" in item && item.groupPath !== undefined ? { groupPath: item.groupPath } : {}),
+        ...("groupId" in item && item.groupId !== undefined ? { groupId: item.groupId } : groupIdFromInput !== undefined ? { groupId: groupIdFromInput } : {}),
+        ...("groupPath" in item && item.groupPath !== undefined ? { groupPath: item.groupPath } : groupPathFromInput !== undefined ? { groupPath: groupPathFromInput } : {}),
         title: item.title,
         state: item.state,
         createdAt: item.createdAt ?? new Date().toISOString(),
@@ -338,8 +346,8 @@ export function buildGitLabTaskProvenance(args: {
       apiBaseUrl: auth.apiBaseUrl,
       projectId: item.projectId,
       projectPath: item.projectPath,
-      groupId: "groupId" in item ? item.groupId : undefined,
-      groupPath: "groupPath" in item ? item.groupPath : undefined,
+      groupId: "groupId" in item && item.groupId !== undefined ? item.groupId : groupIdFromInput,
+      groupPath: "groupPath" in item && item.groupPath !== undefined ? item.groupPath : groupPathFromInput,
       projectInput: args.projectInput,
       groupInput: args.groupInput,
       iid: item.iid,

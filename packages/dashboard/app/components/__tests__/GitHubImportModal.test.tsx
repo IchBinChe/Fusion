@@ -10,7 +10,11 @@ import {
   apiCloseGitHubIssue,
   apiImportGitHubPull,
   apiFetchGitLabProjectIssues,
+  apiFetchGitLabGroupIssues,
+  apiFetchGitLabMergeRequests,
   apiImportGitLabProjectIssue,
+  apiImportGitLabGroupIssue,
+  apiImportGitLabMergeRequest,
   fetchGitRemotes,
 } from "../../api";
 import type { Task } from "@fusion/core";
@@ -159,7 +163,11 @@ describe("GitHubImportModal", () => {
     vi.mocked(apiCloseGitHubIssue).mockReset();
     vi.mocked(apiImportGitHubPull).mockReset();
     vi.mocked(apiFetchGitLabProjectIssues).mockReset();
+    vi.mocked(apiFetchGitLabGroupIssues).mockReset();
+    vi.mocked(apiFetchGitLabMergeRequests).mockReset();
     vi.mocked(apiImportGitLabProjectIssue).mockReset();
+    vi.mocked(apiImportGitLabGroupIssue).mockReset();
+    vi.mocked(apiImportGitLabMergeRequest).mockReset();
     // Set default mock for apiFetchGitHubIssues to return empty array (prevents undefined issues state)
     vi.mocked(apiFetchGitHubIssues).mockResolvedValue([]);
     vi.mocked(apiFetchGitHubPulls).mockResolvedValue([]);
@@ -167,7 +175,11 @@ describe("GitHubImportModal", () => {
     vi.mocked(apiFetchGitHubIssueDetail).mockResolvedValue({ comments: [] });
     vi.mocked(apiCloseGitHubIssue).mockResolvedValue(undefined);
     vi.mocked(apiFetchGitLabProjectIssues).mockResolvedValue([]);
+    vi.mocked(apiFetchGitLabGroupIssues).mockResolvedValue([]);
+    vi.mocked(apiFetchGitLabMergeRequests).mockResolvedValue([]);
     vi.mocked(apiImportGitLabProjectIssue).mockResolvedValue(mockTask);
+    vi.mocked(apiImportGitLabGroupIssue).mockResolvedValue(mockTask);
+    vi.mocked(apiImportGitLabMergeRequest).mockResolvedValue(mockTask);
     onClose.mockReset();
     onImport.mockReset();
   });
@@ -200,6 +212,40 @@ describe("GitHubImportModal", () => {
 
     await waitFor(() => expect(apiImportGitLabProjectIssue).toHaveBeenCalledWith("group/project", 2, undefined));
     expect(onImport).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-099" }));
+  });
+
+  it("fetches group issues and merge requests without GitHub-only copy", async () => {
+    vi.mocked(fetchGitRemotes).mockResolvedValue([]);
+    vi.mocked(apiFetchGitLabGroupIssues).mockResolvedValueOnce([
+      { resourceKind: "group_issue", id: 3, iid: 7, projectId: 8, projectPath: "group/project", groupPath: "group", title: "Group issue", description: null, webUrl: "https://gitlab.example.com/group/project/-/issues/7", state: "opened", labels: [] },
+    ]);
+    vi.mocked(apiFetchGitLabMergeRequests).mockResolvedValueOnce([
+      { resourceKind: "merge_request", id: 4, iid: 5, projectId: 8, projectPath: "group/project", title: "Review me", description: "MR body", webUrl: "https://gitlab.example.com/group/project/-/merge_requests/5", state: "opened", labels: [], sourceBranch: "feat", targetBranch: "main" },
+    ]);
+    vi.mocked(apiImportGitLabGroupIssue).mockResolvedValueOnce({ ...mockTask, id: "FN-100", title: "Group issue" });
+    vi.mocked(apiImportGitLabMergeRequest).mockResolvedValueOnce({ ...mockTask, id: "FN-101", title: "Review MR !5: Review me" });
+
+    render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
+    fireEvent.click(await screen.findByRole("button", { name: "GitLab" }));
+
+    fireEvent.click(screen.getByRole("tab", { name: "Group issues" }));
+    fireEvent.change(screen.getByLabelText("GitLab group path or ID"), { target: { value: "group" } });
+    fireEvent.click(screen.getByRole("button", { name: /Load/ }));
+    expect(await screen.findByText(/#7 Group issue/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText(/#7 Group issue/));
+    expect(screen.getByTestId("gitlab-import-preview-body")).toHaveTextContent("(no description)");
+    fireEvent.click(screen.getAllByRole("button", { name: "Import" })[0]);
+    await waitFor(() => expect(apiImportGitLabGroupIssue).toHaveBeenCalledWith(expect.objectContaining({ iid: 7 }), "group", undefined));
+
+    fireEvent.click(screen.getByRole("tab", { name: "Merge requests" }));
+    fireEvent.change(screen.getByLabelText("GitLab project path or ID"), { target: { value: "group/project" } });
+    fireEvent.click(screen.getByRole("button", { name: /Load/ }));
+    expect(await screen.findByText(/!5 Review me/)).toBeInTheDocument();
+    fireEvent.click(screen.getByText(/!5 Review me/));
+    expect(screen.getByTestId("gitlab-import-preview-body")).toHaveTextContent("MR body");
+    expect(screen.getByTestId("gitlab-import-panel").textContent).not.toContain("GitHub");
+    fireEvent.click(screen.getAllByRole("button", { name: "Import" })[0]);
+    await waitFor(() => expect(apiImportGitLabMergeRequest).toHaveBeenCalledWith("group/project", 5, undefined));
   });
 
   it("does not render when isOpen is false", () => {

@@ -47,13 +47,17 @@ vi.mock("@fusion/dashboard", () => {
     resolveGitlabAuth: vi.fn(() => ({ ok: true, auth: { apiBaseUrl: "https://gitlab.example.com/api/v4", webBaseUrl: "https://gitlab.example.com", token: "token", tokenType: "personal", headerName: "PRIVATE-TOKEN" } })),
     GitLabClient,
     buildGitLabTaskDescription: (item: any) => `${item.description?.trim() || "(no description)"}\n\nSource: ${item.webUrl ?? item.web_url}`,
-    buildGitLabTaskProvenance: ({ resourceType, item }: any) => ({ sourceIssue: { provider: "gitlab", repository: String(item.projectPath ?? item.project_id ?? "unknown"), externalIssueId: resourceType === "merge_request" ? `gitlab:mr:${item.project_id}:${item.id}` : String(item.id), issueNumber: item.iid, url: item.webUrl ?? item.web_url }, sourceMetadata: { provider: "gitlab", resourceType, iid: item.iid, webUrl: item.webUrl ?? item.web_url } }),
+    buildGitLabTaskProvenance: ({ resourceType, item }: any) => ({ sourceIssue: { provider: "gitlab", repository: String(item.projectPath ?? item.project_id ?? "unknown"), externalIssueId: resourceType === "merge_request" ? `gitlab:mr:${item.project_id}:${item.id}` : String(item.id), issueNumber: item.iid, url: item.webUrl ?? item.web_url }, gitlabTracking: { item: { kind: resourceType, iid: item.iid, url: item.webUrl ?? item.web_url, host: "gitlab.example.com", instanceUrl: "https://gitlab.example.com", projectId: item.project_id, projectPath: item.projectPath, title: item.title, state: item.state } }, sourceMetadata: { provider: "gitlab", resourceType, iid: item.iid, webUrl: item.webUrl ?? item.web_url } }),
     isGitLabAlreadyImported: (task: any, provenance: any) => task.description?.includes(provenance.sourceIssue.url) || task.sourceIssue?.externalIssueId === provenance.sourceIssue.externalIssueId,
   };
 });
 
 import { runTaskImportFromGitLab } from "../commands/task.js";
 
+/*
+FNXC:GitLabCLI 2026-07-02-00:00:
+GitLab CLI import support is HTTP API based through configured tokens and must not require `glab`, a downloaded binary, or real GitLab network calls. These tests mock the GitLab client seam and assert source/tracking metadata is created locally.
+*/
 describe("fn task import-gitlab", () => {
   let fetchSpy: ReturnType<typeof vi.fn>;
 
@@ -78,6 +82,7 @@ describe("fn task import-gitlab", () => {
     expect(fetchSpy.mock.calls[0][0]).toContain("/projects/g%2Fp/issues?");
     expect(mocks.createTask).toHaveBeenCalledWith(expect.objectContaining({
       sourceIssue: expect.objectContaining({ provider: "gitlab", issueNumber: 2 }),
+      gitlabTracking: expect.objectContaining({ item: expect.objectContaining({ kind: "project_issue", iid: 2 }) }),
       source: expect.objectContaining({ sourceType: "gitlab_import", sourceMetadata: expect.objectContaining({ resourceType: "project_issue" }) }),
     }));
   });
@@ -88,10 +93,15 @@ describe("fn task import-gitlab", () => {
     expect(mocks.createTask).not.toHaveBeenCalled();
   });
 
-  it("uses group issue and merge request endpoints", async () => {
-    await runTaskImportFromGitLab("g", { resource: "group-issues", limit: 1 });
+  it("uses group issue and merge request endpoints with filters and review-task metadata", async () => {
+    await runTaskImportFromGitLab("g", { resource: "group-issues", limit: 1, labels: ["ops"] });
     expect(fetchSpy.mock.calls.at(-1)?.[0]).toContain("/groups/g/issues?");
-    await runTaskImportFromGitLab("g/p", { resource: "merge-requests", limit: 1 });
+    fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify([{ id: 9, iid: 2, project_id: 3, title: "GitLab MR", description: "MR", webUrl: "https://gitlab.example.com/g/p/-/merge_requests/2", web_url: "https://gitlab.example.com/g/p/-/merge_requests/2", state: "opened", labels: [], source_branch: "feat", target_branch: "main" }]), { status: 200 }));
+    await runTaskImportFromGitLab("g/p", { resource: "merge-requests", limit: 1, labels: ["review"] });
     expect(fetchSpy.mock.calls.at(-1)?.[0]).toContain("/projects/g%2Fp/merge_requests?");
+    expect(mocks.createTask.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({
+      title: expect.stringMatching(/^Review MR !2:/),
+      gitlabTracking: expect.objectContaining({ item: expect.objectContaining({ kind: "merge_request" }) }),
+    }));
   });
 });

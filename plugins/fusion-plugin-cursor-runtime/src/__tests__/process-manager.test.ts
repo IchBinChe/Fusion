@@ -18,6 +18,16 @@ describe("discoverCursorModels", () => {
     expect(result.fallbackUsed).toBe(false);
   });
 
+  it("passes Windows .bat paths with spaces as one binary string", async () => {
+    vi.mocked(runCursorCommand).mockResolvedValueOnce({ code: 0, stdout: '["cursor/a"]', stderr: "" });
+    const binary = "C:\\Program Files\\Cursor\\cursor-agent.bat";
+
+    const result = await discoverCursorModels(binary);
+
+    expect(runCursorCommand).toHaveBeenCalledWith(binary, ["models", "--json"], 5000);
+    expect(result.models).toEqual(["cursor/a"]);
+  });
+
   it("falls back to text parsing", async () => {
     vi.mocked(runCursorCommand)
       .mockResolvedValueOnce({ code: 1, stdout: "", stderr: "" })

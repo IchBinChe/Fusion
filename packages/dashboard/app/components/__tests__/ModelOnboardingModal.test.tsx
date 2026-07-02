@@ -22,6 +22,7 @@ const mockFetchCustomProviders = vi.fn();
 const mockCreateCustomProvider = vi.fn();
 const mockFetchCursorCliStatus = vi.fn();
 const mockSetCursorCliEnabled = vi.fn();
+const mockSetCursorCliBinaryPath = vi.fn();
 const mockUseShellConnection = vi.fn();
 const mockConfirm = vi.fn();
 
@@ -42,6 +43,7 @@ vi.mock("../../api", () => ({
   createCustomProvider: (...args: unknown[]) => mockCreateCustomProvider(...args),
   fetchCursorCliStatus: (...args: unknown[]) => mockFetchCursorCliStatus(...args),
   setCursorCliEnabled: (...args: unknown[]) => mockSetCursorCliEnabled(...args),
+  setCursorCliBinaryPath: (...args: unknown[]) => mockSetCursorCliBinaryPath(...args),
 }));
 
 // Mock CustomModelDropdown since it has complex portal behavior
@@ -1239,6 +1241,8 @@ describe("ModelOnboardingModal", () => {
 
       expect(await screen.findByTestId("cursor-cli-provider-card")).toBeInTheDocument();
       expect(screen.getByText("Cursor — via Cursor CLI")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Cursor CLI binary path")).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Save & Test" })).not.toBeInTheDocument();
     });
 
     it("renders stable onboarding-provider-icon wrappers for provider cards", async () => {

@@ -1804,10 +1804,14 @@ export interface CursorCliStatus {
     available: boolean;
     version?: string;
     binaryPath?: string;
+    configuredBinaryPath?: string;
+    usingConfiguredBinaryPath?: boolean;
+    diagnostics?: string[];
     reason?: string;
     probeDurationMs: number;
   };
   enabled: boolean;
+  binaryPath?: string;
   extension: null;
   ready: boolean;
 }
@@ -2150,10 +2154,19 @@ export function setDroidCliEnabled(
 
 export function setCursorCliEnabled(
   enabled: boolean,
-): Promise<{ enabled: boolean; restartRequired: boolean }> {
-  return api<{ enabled: boolean; restartRequired: boolean }>("/auth/cursor-cli", {
+): Promise<{ enabled: boolean; binaryPath?: string; restartRequired: boolean }> {
+  return api<{ enabled: boolean; binaryPath?: string; restartRequired: boolean }>("/auth/cursor-cli", {
     method: "POST",
     body: JSON.stringify({ enabled }),
+  });
+}
+
+export function setCursorCliBinaryPath(
+  binaryPath: string | null,
+): Promise<{ enabled: boolean; binaryPath?: string; restartRequired: boolean }> {
+  return api<{ enabled: boolean; binaryPath?: string; restartRequired: boolean }>("/auth/cursor-cli", {
+    method: "POST",
+    body: JSON.stringify({ binaryPath }),
   });
 }
 

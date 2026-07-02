@@ -60,6 +60,7 @@ import {
   mockSetDroidCliEnabled,
   mockFetchCursorCliStatus,
   mockSetCursorCliEnabled,
+  mockSetCursorCliBinaryPath,
   mockUseWorkspaceFileBrowser,
   mockConfirm,
   mockUseWorktrunkInstallStatus,
@@ -131,6 +132,7 @@ vi.mock("../../api", async (importOriginal) => {
     setDroidCliEnabled: (...args: unknown[]) => mockSetDroidCliEnabled(...args),
     fetchCursorCliStatus: (...args: unknown[]) => mockFetchCursorCliStatus(...args),
     setCursorCliEnabled: (...args: unknown[]) => mockSetCursorCliEnabled(...args),
+    setCursorCliBinaryPath: (...args: unknown[]) => mockSetCursorCliBinaryPath(...args),
   });
 });
 

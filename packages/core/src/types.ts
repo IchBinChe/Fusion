@@ -3197,6 +3197,14 @@ export interface GlobalSettings {
    *  by the dashboard auth toggle. Setting this field explicitly (true/false)
    *  always wins. */
   useLlamaCpp?: boolean;
+  /** When true, enable Cursor CLI model-provider support (provider ID: `cursor-cli`)
+   *  through an operator-local Cursor CLI installation. */
+  useCursorCli?: boolean;
+  /**
+   * FNXC:CursorCli 2026-07-02-00:00:
+   * Operators need a global machine-local Cursor CLI executable override when PATH discovery resolves the wrong `cursor-agent`, `cursor`, `.cmd`, or `.bat` shim. Blank/undefined means Fusion must keep auto-detecting through PATH candidates.
+   */
+  cursorCliBinaryPath?: string;
   /** Global baseline AI model provider for task execution (executor agent).
    *  This is the global lane that project-level `executionProvider` can override.
    *  Must be set together with `executionGlobalModelId`. Falls back to

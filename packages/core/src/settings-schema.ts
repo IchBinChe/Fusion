@@ -140,6 +140,12 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   useClaudeCli: undefined,
   useDroidCli: undefined,
   useLlamaCpp: undefined,
+  useCursorCli: undefined,
+  /*
+  FNXC:CursorCli 2026-07-02-00:00:
+  Cursor CLI binary overrides are global operator settings because executable locations are machine-local. Blank/undefined preserves PATH auto-detection through cursor-agent and cursor.
+  */
+  cursorCliBinaryPath: undefined,
   // Global baseline lanes for per-role model selection
   executionGlobalProvider: undefined,
   executionGlobalModelId: undefined,

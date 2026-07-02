@@ -105,6 +105,42 @@ describe("TaskStore branch groups", () => {
     expect(store.getBranchGroup(group.id)?.sourceType).toBe("new-task");
   });
 
+  it("FN-7438: reloads durable branch groups and member tasks after store restart", async () => {
+    const group = store.ensureBranchGroupForSource("planning", "PS-restart", {
+      branchName: "feature/restart-shared",
+      autoMerge: true,
+    });
+    const memberA = await store.createTask({
+      description: "restart member a",
+      branchContext: { groupId: group.id, source: "planning", assignmentMode: "shared" },
+    });
+    const memberB = await store.createTask({
+      description: "restart member b",
+      branchContext: { groupId: group.id, source: "planning", assignmentMode: "shared" },
+    });
+    await store.createTask({ description: "ungrouped after restart" });
+
+    store.close();
+    store = new TaskStore(rootDir, globalDir);
+    await store.init();
+
+    expect(store.listBranchGroups().map((entry) => entry.id)).toContain(group.id);
+    expect(store.listBranchGroups({ status: "open" }).map((entry) => entry.id)).toContain(group.id);
+    expect(store.getBranchGroup(group.id)).toEqual(expect.objectContaining({
+      id: group.id,
+      branchName: "feature/restart-shared",
+      sourceType: "planning",
+      sourceId: "PS-restart",
+      autoMerge: true,
+    }));
+
+    const members = await store.listTasksByBranchGroup(group.id);
+    expect(members.map((task) => task.id).sort()).toEqual([memberA.id, memberB.id].sort());
+    expect((await store.getTask(memberA.id)).sourceMetadata).toEqual({
+      fusionBranchContext: { groupId: group.id, source: "planning", assignmentMode: "shared" },
+    });
+  });
+
   it("enforces unique branchName", () => {
     store.createBranchGroup({ sourceType: "mission", sourceId: "M-1", branchName: "fn/shared" });
     expect(() =>
@@ -173,7 +209,10 @@ describe("TaskStore branch groups", () => {
   });
 
   it("sets and clears task branchContext via setTaskBranchGroup", async () => {
-    const task = await store.createTask({ description: "branch link test" });
+    const task = await store.createTask({
+      description: "branch link test",
+      source: { sourceType: "api", sourceMetadata: { externalKey: "keep-me" } },
+    });
     const group = store.createBranchGroup({ sourceType: "planning", sourceId: "PS-1", branchName: "fn/planning" });
 
     const onUpdated = vi.fn();
@@ -182,10 +221,12 @@ describe("TaskStore branch groups", () => {
     await store.setTaskBranchGroup(task.id, group.id);
     const linked = await store.getTask(task.id);
     expect(linked.branchContext).toEqual({ groupId: group.id, source: "planning", assignmentMode: "shared" });
+    expect(linked.sourceMetadata).toEqual(expect.objectContaining({ externalKey: "keep-me" }));
 
     await store.setTaskBranchGroup(task.id, null);
     const cleared = await store.getTask(task.id);
     expect(cleared.branchContext).toBeUndefined();
+    expect(cleared.sourceMetadata).toEqual({ externalKey: "keep-me" });
     expect(onUpdated).toHaveBeenCalled();
 
     await expect(store.setTaskBranchGroup(task.id, "BG-missing")).rejects.toThrow("not found");

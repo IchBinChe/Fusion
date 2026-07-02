@@ -1740,7 +1740,7 @@ The dashboard now exposes branch-group visibility and controls for shared planni
 
 - `GET /api/branch-groups` lists groups with completion (`landed`/`total`) and tracked PR metadata.
 - `GET /api/branch-groups/:id` returns group details (shared branch, members, per-member landed state, completion, PR state).
-- `POST /api/branch-groups/assign` is the supported online grouping path to attach/detach tasks (`{ taskId, groupId|null, branchName? }`).
+- `POST /api/branch-groups/assign` is the supported online grouping path to attach/detach tasks (`{ taskId, groupId|null, branchName? }`). Passing `groupId: null` clears only that task's branch-group context and preserves unrelated task source metadata.
 - `POST /api/branch-groups/:id/promote` triggers the engine promotion flow (`promoteBranchGroup`) and returns promotion/PR status.
 
 UI surfaces:
@@ -1749,9 +1749,10 @@ UI surfaces:
 - Task cards show grouped/shared branch metadata for grouped tasks.
 - Clicking either grouped badge opens the dedicated **Group Task Modal** for that branch group.
 - Task detail renders a branch-group card with member landed progress.
+- If a task references a stale/missing branch group, Task Detail shows a **Stale branch group reference** recovery message with **Reset branch group for this task**. The action uses the supported assign API to clear only the current task's context, then reloads the detail so the card disappears and the task can proceed ungrouped without raw SQLite surgery.
 - In Task Detail Logs on mobile, the branch-group card includes a collapse/expand toggle so logs can reclaim vertical space while keeping group summary progress visible.
 
-The Group Task Modal shows shared branch name/status, member list (`taskId`, title, column, landed state), quick links to open each member task detail, completion progress (`X of Y members finished`), and tracked PR state when present. It live-refreshes from the same dashboard task-update stream and ignores stale cross-project events.
+The Group Task Modal shows shared branch name/status, member list (`taskId`, title, column, landed state), quick links to open each member task detail, completion progress (`X of Y members finished`), and tracked PR state when present. Branch groups are durable SQLite state keyed by real `BG-*` ids, so valid grouped tasks continue to list/show after a server restart. It live-refreshes from the same dashboard task-update stream and ignores stale cross-project events.
 
 Both the modal and branch-group card are completion-gated: while members are still pending, they show progress only. PR / merge controls are only revealed after all members are landed into the shared branch. When auto-merge is off, promote/open-PR is explicit user action (no automatic push-to-origin behavior).
 

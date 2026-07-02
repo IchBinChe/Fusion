@@ -674,6 +674,8 @@ Recovery/backfill guidance:
 
 ## GitHub Issue Import and PR Creation
 
+Forward-looking GitLab import/tracking parity is mapped in [GitLab Parity Inventory](./gitlab-parity-inventory.md); that document is an implementation plan only and does not imply runtime GitLab support yet.
+
 Import issues:
 
 - GitHub-imported tasks retain typed source issue metadata (`sourceIssue.provider/repository/externalIssueId/issueNumber/url`), which executor and merger flows use to include `Ref: owner/repo#N` in commit bodies.

@@ -8,6 +8,8 @@ POST /api/signals/:provider
 
 Supported providers are `webhook`, `sentry`, `datadog`, and `pagerduty`. Every connector requires an HMAC signing secret configured in the Fusion dashboard process environment. Verified signals still create triage tasks, and they also write to the project-scoped `incidents` table so Command Center → Signals can show source, severity, and open/resolved status breakdowns.
 
+Forward-looking GitLab webhook/system-hook signal planning is mapped in [GitLab Parity Inventory](./gitlab-parity-inventory.md); GitLab is not a Signals connector until a later implementation task defines signed verification and payload normalization.
+
 ## Runtime behavior
 
 - **Open events** create or absorb an incident occurrence by `groupingKey` and preserve the normalized `source`, `severity`, optional `link`, and capped `meta` fields.

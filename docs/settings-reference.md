@@ -587,6 +587,9 @@ Default notes:
 | `githubTrackingDedupEnabled` | `boolean` | `true` | When enabled, tracking issue creation searches open and closed repo issues for likely duplicates before opening a new issue (gh CLI search first, with REST search fallback). Set `false` to skip dedup and always create a new issue when tracking is enabled. Dashboard location: **Settings → Project → General → GitHub Tracking**. |
 | `githubAuthMode` | `"gh-cli" \| "token"` | `"gh-cli"` | Project GitHub auth strategy used by tracking lifecycle integration. `"gh-cli"` requires an installed/authenticated `gh` CLI. `"token"` requires a non-empty `githubAuthToken` (or `GITHUB_TOKEN` env fallback). Tracking lifecycle auth is strict per selected mode (no cross-fallback). |
 | `githubAuthToken` | `string` | `undefined` | Optional project PAT used when `githubAuthMode` is `"token"` (takes precedence over server startup token for tracking flows). |
+
+Forward-looking GitLab auth/settings parity is inventoried in [GitLab Parity Inventory](./gitlab-parity-inventory.md); no GitLab settings keys exist until a later implementation task adds them.
+
 | `autoCreatePr` | `boolean` | `false` | Auto-create PRs for completed tasks. |
 | `autoBackupEnabled` | `boolean` | `false` | Enable scheduled DB backups. |
 | `autoBackupSchedule` | `string` | `"0 2 * * *"` | Backup cron schedule. |

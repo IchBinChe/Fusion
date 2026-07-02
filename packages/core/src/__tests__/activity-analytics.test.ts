@@ -203,6 +203,50 @@ describe("activity-analytics", () => {
     expect(result.stickiness).toBe(1);
   });
 
+  it("counts workflow-step lifecycle upserts once after active to completed update", () => {
+    const runId = "workflow-step-FN-7402-20260701-abcd-step-0";
+    db.prepare(
+      `INSERT OR IGNORE INTO agents (id, name, role, state, createdAt, updatedAt)
+       VALUES (?, ?, 'executor', 'idle', ?, ?)`,
+    ).run("executor-FN-7402", "executor-FN-7402", "2026-03-02T12:00:00.000Z", "2026-03-02T12:00:00.000Z");
+    db.prepare(
+      `INSERT INTO agentRuns (id, agentId, data, startedAt, endedAt, status)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    ).run(
+      runId,
+      "executor-FN-7402",
+      JSON.stringify({ taskId: "FN-7402", contextSnapshot: { workflowStep: true, stepIndex: 0 } }),
+      "2026-03-02T12:00:00.000Z",
+      null,
+      "active",
+    );
+    db.prepare(
+      `INSERT INTO agentRuns (id, agentId, data, startedAt, endedAt, status)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         agentId = excluded.agentId,
+         data = excluded.data,
+         startedAt = excluded.startedAt,
+         endedAt = excluded.endedAt,
+         status = excluded.status`,
+    ).run(
+      runId,
+      "executor-FN-7402",
+      JSON.stringify({ taskId: "FN-7402", contextSnapshot: { workflowStep: true, stepIndex: 0 }, resultJson: { success: true } }),
+      "2026-03-02T12:00:00.000Z",
+      "2026-03-02T12:05:00.000Z",
+      "completed",
+    );
+
+    const result = aggregateActivityAnalytics(db, { from: "2026-03-01T00:00:00.000Z", to: "2026-03-31T23:59:59.999Z" });
+
+    expect(result.agentRuns).toEqual({ total: 1, active: 0, completed: 1, failed: 0 });
+    expect(result.activeAgents).toBe(1);
+    expect(result.daily).toEqual([
+      { day: "2026-03-02", activeNodes: 0, activeAgents: 1, messages: 0, agentRuns: 1 },
+    ]);
+  });
+
   it("counts the same agent once when usage and runs occur on the same day", () => {
     emitUsageEvent(db, { kind: "tool_call", agentId: "agent-dup", nodeId: "node-1", ts: "2026-03-02T09:00:00.000Z" });
     insertAgentRun(db, { agentId: "agent-dup", startedAt: "2026-03-02T10:00:00.000Z", status: "completed" });

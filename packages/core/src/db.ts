@@ -9,7 +9,7 @@
  */
 
 import { DatabaseSync } from "./sqlite-adapter.js";
-import { basename, isAbsolute, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import { mkdirSync, existsSync, statSync, renameSync, rmSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -1888,6 +1888,7 @@ export class Database {
 
   private db: DatabaseSync;
   private readonly dbPath: string;
+  private readonly fusionDir: string;
   private readonly inMemory: boolean;
   /** Returns the database file path (or ":memory:" for in-memory databases). */
   get path(): string { return this.dbPath; }
@@ -1916,6 +1917,7 @@ export class Database {
     // don't need cross-instance persistence.
     const inMemory = options?.inMemory === true;
     this.inMemory = inMemory;
+    this.fusionDir = fusionDir;
     this.dbPath = inMemory ? ":memory:" : join(fusionDir, "fusion.db");
     this.busyTimeoutMs = Math.max(0, options?.busyTimeoutMs ?? DEFAULT_SQLITE_BUSY_TIMEOUT_MS);
     this.lockRecoveryWindowMs = Math.max(0, options?.lockRecoveryWindowMs ?? DEFAULT_SQLITE_LOCK_RECOVERY_WINDOW_MS);
@@ -5972,25 +5974,79 @@ export class Database {
     return fromJson<ProjectIdentity>(value);
   }
 
+  private parseWorkflowSettingsJson(raw: string | null | undefined): Record<string, unknown> {
+    if (!raw) return {};
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
+  private reconcileWorkflowSettingsRootDirProjectId(identityId: string): boolean {
+    if (this.inMemory) return false;
+    const rootDirProjectId = basename(this.fusionDir) === ".fusion" ? dirname(this.fusionDir) : this.fusionDir;
+    if (!rootDirProjectId || rootDirProjectId === identityId) return false;
+
+    const rows = this.db
+      .prepare('SELECT workflowId, "values" FROM workflow_settings WHERE projectId = ?')
+      .all(rootDirProjectId) as Array<{ workflowId: string; values: string }>;
+    if (rows.length === 0) return false;
+
+    let changed = false;
+    const now = new Date().toISOString();
+    for (const row of rows) {
+      const rootValues = this.parseWorkflowSettingsJson(row.values);
+      if (Object.keys(rootValues).length === 0) continue;
+      const identityRow = this.db
+        .prepare('SELECT "values" FROM workflow_settings WHERE workflowId = ? AND projectId = ?')
+        .get(row.workflowId, identityId) as { values: string } | undefined;
+      const identityValues = this.parseWorkflowSettingsJson(identityRow?.values);
+      const carriesEveryRootKey = Object.keys(rootValues).every((key) => Object.prototype.hasOwnProperty.call(identityValues, key));
+      if (carriesEveryRootKey) continue;
+      const next = { ...rootValues, ...identityValues };
+      this.db
+        .prepare(
+          `INSERT INTO workflow_settings (workflowId, projectId, "values", updatedAt)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(workflowId, projectId)
+           DO UPDATE SET "values" = excluded."values", updatedAt = excluded.updatedAt`,
+        )
+        .run(row.workflowId, identityId, JSON.stringify(next), now);
+      changed = true;
+    }
+    return changed;
+  }
+
   setProjectIdentity(identity: ProjectIdentity, options?: { force?: boolean }): void {
     const stored = this.getProjectIdentity();
     const force = options?.force === true;
 
-    if (stored) {
-      if (stored.id === identity.id) {
-        return;
-      }
-      if (!force) {
-        throw new ProjectIdentityConflictError({
-          storedId: stored.id,
-          storedPath: stored.firstSeenPath,
-          incomingId: identity.id,
-          incomingPath: identity.firstSeenPath,
-        });
-      }
+    if (stored && stored.id !== identity.id && !force) {
+      throw new ProjectIdentityConflictError({
+        storedId: stored.id,
+        storedPath: stored.firstSeenPath,
+        incomingId: identity.id,
+        incomingPath: identity.firstSeenPath,
+      });
     }
 
-    this.setMetaValue(Database.PROJECT_IDENTITY_META_KEY, JSON.stringify(identity));
+    this.transactionImmediate(() => {
+      let changed = false;
+      if (!stored || stored.id !== identity.id || force) {
+        this.setMetaValue(Database.PROJECT_IDENTITY_META_KEY, JSON.stringify(identity));
+        changed = true;
+      }
+      /*
+      FNXC:WorkflowSettingsIdentity 2026-07-02-13:18:
+      Workflow setting hard-move migration can run before a durable project identity exists, so rows may be keyed by the TaskStore rootDir fallback. When identity is assigned, reconcile those fallback rows into the identity-keyed table entry and keep existing identity values on conflicts so operator-tuned settings stay visible without stale rootDir values overwriting newer writes.
+      */
+      changed = this.reconcileWorkflowSettingsRootDirProjectId(identity.id) || changed;
+      if (changed) this.bumpLastModified();
+    });
   }
 
   clearProjectIdentity(): void {

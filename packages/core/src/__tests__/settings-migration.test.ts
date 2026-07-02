@@ -17,6 +17,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TaskStore } from "../store.js";
+import { writeProjectIdentity, type ProjectIdentity } from "../db.js";
 import {
   MOVED_SETTINGS_KEYS,
   SETTINGS_MIGRATION_VERSION,
@@ -103,6 +104,29 @@ function seedSelection(store: TaskStore, taskId: string, workflowId: string): vo
        ON CONFLICT(taskId) DO UPDATE SET workflowId = excluded.workflowId`,
     )
     .run(taskId, workflowId, new Date().toISOString());
+}
+
+function seedWorkflowSettingsRow(
+  store: TaskStore,
+  workflowId: string,
+  projectId: string,
+  values: Record<string, unknown> | string,
+): void {
+  rawDb(store)
+    .prepare(
+      `INSERT INTO workflow_settings (workflowId, projectId, "values", updatedAt)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(workflowId, projectId) DO UPDATE SET "values" = excluded."values", updatedAt = excluded.updatedAt`,
+    )
+    .run(workflowId, projectId, typeof values === "string" ? values : JSON.stringify(values), new Date().toISOString());
+}
+
+function durableIdentity(): ProjectIdentity {
+  return {
+    id: "proj_0123456789abcdef",
+    createdAt: "2026-07-02T00:00:00.000Z",
+    firstSeenPath: "/central/projects/deft-ember",
+  };
 }
 
 /** Run the (private) migration directly. */
@@ -380,5 +404,70 @@ describe("settings hard-move migration (U4)", () => {
       : {};
     expect(globalRaw.requirePrApproval).toBeUndefined();
     expect(globalRaw.themeMode).toBe("dark");
+  });
+
+  it("backfills rootDir-keyed workflow settings when durable project identity is assigned", async () => {
+    seedRawProjectSettings(store, { workflowStepTimeoutMs: 120_000, requirePrApproval: true });
+    clearMarker(store);
+
+    await runMigration(store);
+
+    const rootDirProjectId = env.tempDir;
+    expect(store.getWorkflowSettingsProjectId()).toBe(rootDirProjectId);
+    expect(store.getWorkflowSettingValues("builtin:coding", rootDirProjectId).workflowStepTimeoutMs).toBe(120_000);
+
+    const identity = durableIdentity();
+    writeProjectIdentity(env.fusionDir, identity);
+
+    expect(store.getWorkflowSettingsProjectId()).toBe(identity.id);
+    const effective = await resolveEffectiveSettingsById(resolverStore(store), "builtin:coding", store.getWorkflowSettingsProjectId());
+    expect(effective.workflowStepTimeoutMs).toBe(120_000);
+    expect(effective.requirePrApproval).toBe(true);
+    expect(store.getWorkflowSettingValues("builtin:coding", identity.id).workflowStepTimeoutMs).toBe(120_000);
+    expect(store.listWorkflowSettingValuesForProject()["builtin:coding"]?.workflowStepTimeoutMs).toBe(120_000);
+  });
+
+  it("merges duplicate rootDir and identity workflow settings without overwriting identity values", async () => {
+    seedRawProjectSettings(store, {
+      workflowStepTimeoutMs: 120_000,
+      requirePrApproval: true,
+      executionProvider: "anthropic",
+    });
+    clearMarker(store);
+    await runMigration(store);
+
+    const identity = durableIdentity();
+    seedWorkflowSettingsRow(store, "builtin:coding", identity.id, {
+      workflowStepTimeoutMs: 333_000,
+      requirePrApproval: false,
+    });
+
+    writeProjectIdentity(env.fusionDir, identity);
+
+    expect(store.getWorkflowSettingsProjectId()).toBe(identity.id);
+    const values = store.getWorkflowSettingValues("builtin:coding", identity.id);
+    expect(values.workflowStepTimeoutMs).toBe(333_000);
+    expect(values.requirePrApproval).toBe(false);
+    expect(values.executionProvider).toBe("anthropic");
+
+    const effective = await resolveEffectiveSettingsById(resolverStore(store), "builtin:coding", identity.id);
+    expect(effective.workflowStepTimeoutMs).toBe(333_000);
+    expect(effective.requirePrApproval).toBe(false);
+    expect(effective.executionProvider).toBe("anthropic");
+    expect(store.listWorkflowSettingValuesForProject()["builtin:coding"]).toEqual(values);
+  });
+
+  it("identity assignment ignores absent, empty, and corrupt rootDir workflow setting rows", async () => {
+    const identity = durableIdentity();
+    seedWorkflowSettingsRow(store, "builtin:coding", env.tempDir, "not-json");
+    seedWorkflowSettingsRow(store, "builtin:spec", env.tempDir, {});
+
+    expect(() => writeProjectIdentity(env.fusionDir, identity)).not.toThrow();
+
+    expect(store.getWorkflowSettingsProjectId()).toBe(identity.id);
+    expect(store.getWorkflowSettingValues("builtin:coding", identity.id)).toEqual({});
+    expect(store.getWorkflowSettingValues("builtin:spec", identity.id)).toEqual({});
+    const effective = await resolveEffectiveSettingsById(resolverStore(store), "builtin:coding", identity.id);
+    expect(effective.workflowStepTimeoutMs).toBe(900_000);
   });
 });

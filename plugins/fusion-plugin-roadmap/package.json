@@ -7,15 +7,18 @@
   "exports": {
     ".": {
       "types": "./src/index.ts",
-      "import": "./src/index.ts"
+      "source": "./src/index.ts",
+      "import": "./dist/index.js"
     },
     "./server": {
       "types": "./src/server/index.d.ts",
-      "import": "./src/server/index.ts"
+      "source": "./src/server/index.ts",
+      "import": "./dist/server/index.js"
     },
     "./roadmap-suggestions": {
       "types": "./src/roadmap-suggestions.d.ts",
-      "import": "./src/roadmap-suggestions.ts"
+      "source": "./src/roadmap-suggestions.ts",
+      "import": "./dist/roadmap-suggestions.js"
     }
   },
   "scripts": {

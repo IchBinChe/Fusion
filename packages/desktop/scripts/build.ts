@@ -1,7 +1,7 @@
 import { build } from "esbuild";
 import { cp, mkdir, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { buildCore, buildDashboard, buildDashboardClient, buildEngine, packageRoot, workspaceRoot } from "./workspace-tools";
+import { buildCore, buildDashboard, buildDashboardClient, buildEngine, packageRoot, stageDesktopDeploy, workspaceRoot } from "./workspace-tools";
 const dashboardRoot = join(workspaceRoot, "packages", "dashboard");
 const dashboardClientDir = join(dashboardRoot, "dist", "client");
 const dashboardRegistryManifestSource = join(dashboardRoot, "src", "registry-manifest.json");
@@ -121,6 +121,12 @@ async function main(): Promise<void> {
   await ensureDashboardBuild();
   await buildElectronEntrypoints();
   await copyDashboardClient();
+
+  // FNXC:DesktopPackaging 2026-07-01-21:15:
+  // Stage the complete flat production closure last (after all dist exists) so
+  // electron-builder can package it via --projectDir instead of its pnpm collector,
+  // which drops `deduped` subtrees and left the embedded runtime missing deps.
+  await stageDesktopDeploy();
 
   console.log("[desktop:build] Desktop build complete");
 }

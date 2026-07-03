@@ -73,9 +73,16 @@ function runNpmInstall(): Promise<InstallResult> {
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    /*
+     * FNXC:CliBinaryInstall 2026-07-03-03:00:
+     * On Windows `npm` resolves to `npm.cmd`; Node refuses to spawn a .cmd/.bat without a shell
+     * (spawn npm ENOENT / EINVAL since CVE-2024-27980), so the CLI-banner "Install with npm" button
+     * failed with `spawn npm ENOENT`. Use a shell on win32. The command/args are fixed constants
+     * (`npm install -g runfusion.ai`) with no caller-supplied input, so shell quoting is safe.
+     */
     const child = spawn("npm", ["install", "-g", FN_NPM_PACKAGE], {
       stdio: ["ignore", "pipe", "pipe"],
-      shell: false,
+      shell: process.platform === "win32",
     });
     const timer = setTimeout(() => {
       timedOut = true;

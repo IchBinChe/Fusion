@@ -1,7 +1,6 @@
 import { useEffect, useState, type PropsWithChildren } from "react";
 import { useTranslation } from "react-i18next";
 import type { ShellConnectionState } from "../types/native-shell";
-import { getShellHostContext } from "../shell-host";
 import "./DesktopLaunchGate.css";
 
 type Phase =
@@ -51,15 +50,20 @@ async function waitForLocalRuntime(
   throw new Error("Local runtime did not become ready in time");
 }
 
-function applyServerBaseUrl(baseUrl: string): void {
-  // Reload the page with the local runtime URL so shell-host bootstrap reads
-  // it and routes API calls through it (the page itself is loaded via file://
-  // so relative /api fetches would otherwise fail).
-  const url = new URL(window.location.href);
-  url.searchParams.set("serverBaseUrl", baseUrl);
-  url.searchParams.set("shellKind", "desktop-shell");
-  url.searchParams.set("shellMode", "local");
-  window.location.replace(url.toString());
+function navigateToLocalRuntimeOrigin(baseUrl: string): void {
+  /*
+   * FNXC:DesktopLaunchGate 2026-07-03-02:10:
+   * Load the UI FROM the embedded runtime's own origin (http://127.0.0.1:<port>/) rather than
+   * staying on the packaged file:// page. The dashboard client makes RELATIVE /api requests; on a
+   * file:// origin those resolve to file:///api/… and fail ("Can't reach the Fusion backend / Failed
+   * to fetch"), and the embedded server sends no CORS header so a cross-origin fetch would be blocked
+   * too. The embedded server also serves the client HTML at /, so navigating there makes /api
+   * same-origin and everything just works — this mirrors how remote mode navigates to its server URL.
+   */
+  const target = new URL("/", baseUrl);
+  target.searchParams.set("shellKind", "desktop-shell");
+  target.searchParams.set("shellMode", "local");
+  window.location.replace(target.toString());
 }
 
 export function DesktopLaunchGate({ children }: PropsWithChildren) {
@@ -94,22 +98,17 @@ export function DesktopLaunchGate({ children }: PropsWithChildren) {
         // active profile already.
         if (state.desktopMode === "local") {
           /*
-           * FNXC:DesktopLaunchGate 2026-07-03-01:05:
-           * Detect a completed local handoff via the CACHED shell-host context, NOT the raw URL.
-           * applyServerBaseUrl() reloads the page with ?serverBaseUrl=…, but main.tsx calls
-           * bootstrapShellHostContext() at module load (before this effect runs), which STRIPS every
-           * shell query param from the URL via history.replaceState. So reading window.location.search
-           * here always misses serverBaseUrl → we would re-run the handoff → window.location.replace →
-           * reload → strip → an INFINITE reload loop, seen as rapid "Starting local Fusion runtime…"
-           * flashing that never connects. The bootstrap preserves the captured value in
-           * getShellHostContext().serverUrl, so read that (fall back to any not-yet-stripped URL param).
+           * FNXC:DesktopLaunchGate 2026-07-03-02:10:
+           * If this page is already served over http(s), it's the embedded runtime serving the UI,
+           * so /api is same-origin — render the app. The packaged renderer first loads from file://
+           * (where relative /api fetches fail); there we start the runtime and navigate to its origin
+           * (navigateToLocalRuntimeOrigin). Gating on the protocol rather than a serverBaseUrl URL
+           * param also avoids the prior reload loop — main.tsx's bootstrapShellHostContext() strips
+           * shell query params at module load, so a param-based "already handed off" check always
+           * missed and reloaded forever ("rapid Starting Fusion flashing").
            */
-          const shellHost = getShellHostContext();
-          const handoffBaseUrl = shellHost.kind === "desktop-shell" ? shellHost.serverUrl : undefined;
-          const urlParamBaseUrl = new URLSearchParams(window.location.search).get("serverBaseUrl") ?? undefined;
-          const existingBaseUrl = handoffBaseUrl ?? urlParamBaseUrl;
-          if (existingBaseUrl) {
-            setPhase({ kind: "ready", serverBaseUrl: existingBaseUrl });
+          if (window.location.protocol !== "file:") {
+            setPhase({ kind: "ready" });
             return;
           }
           setPhase({ kind: "starting-local", message: t("desktop.startingLocalRuntime", "Starting local Fusion runtime…") });
@@ -141,7 +140,7 @@ export function DesktopLaunchGate({ children }: PropsWithChildren) {
           }
           const { baseUrl } = await waitForLocalRuntime(shell);
           if (cancelled) return;
-          applyServerBaseUrl(baseUrl);
+          navigateToLocalRuntimeOrigin(baseUrl);
           return;
         }
 

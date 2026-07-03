@@ -3,6 +3,10 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 
+/*
+FNXC:DesktopUserDataIsolation 2026-07-03-14:40:
+Isolate Electron desktop user-data/cache/crash artifacts under ~/.fusion/desktop-user-data so the packaged desktop does not share (or collide with) the default per-app Chromium profile across installs and Fusion versions (field report Issue 8). setPath must run before app "ready"; once locked it throws, which is non-fatal here.
+*/
 const fusionUserDataDir = join(os.homedir(), ".fusion", "desktop-user-data");
 try {
   app.commandLine.appendSwitch("user-data-dir", fusionUserDataDir);
@@ -254,6 +258,10 @@ export async function initializeApp(): Promise<void> {
     currentDesktopLaunchMode = "local";
   }
 
+  /*
+  FNXC:DesktopReuseCliServer 2026-07-03-14:40:
+  When `fusion desktop` launches Electron it exports FUSION_SERVER_PORT for the dashboard the CLI already started. In that case the desktop must NOT spin up its own embedded local runtime (which would double-bind ports and conflict on Windows, field report Issue 9): skip startLocalRuntimeOnce() when the port is set, and treat a "choose" mode as already-local so the shell attaches to the external CLI server.
+  */
   if (currentDesktopLaunchMode === "choose" && process.env.FUSION_SERVER_PORT) {
     // The CLI already started a dashboard server; use it without spawning an
     // embedded local runtime. The shell state will report external-cli running.

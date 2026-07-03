@@ -178,14 +178,25 @@ export async function runDesktop(options: RunDesktopOptions = {}): Promise<void>
   const runtime = await startDashboardRuntime(rootDir, Boolean(options.paused), Boolean(options.noAuth));
 
   const electronBinary = resolveElectronBinary();
+
+  /*
+  FNXC:DesktopWindowsGpuFlags 2026-07-03-14:40:
+  Windows Electron renderers observed blank/flickering GPU output and sandbox-related launch instability on some GPUs during the 0.52.0 desktop release (field report Issue 7). Disable GPU acceleration and the Chromium sandbox ONLY on Windows so macOS/Linux keep hardware acceleration and the security sandbox. Applying `--no-sandbox`/`--disable-gpu` on every platform would be a needless security and rendering regression off Windows.
+  */
+  const isWindows = os.platform() === "win32";
+  const windowsGpuFlags = isWindows
+    ? [
+        "--disable-gpu",
+        "--disable-gpu-compositing",
+        "--disable-gpu-sandbox",
+        "--disable-software-rasterizer",
+        "--no-sandbox",
+      ]
+    : [];
   const electronArgs = [
     "--enable-source-maps",
     desktopEntry,
-    "--disable-gpu",
-    "--disable-gpu-compositing",
-    "--disable-gpu-sandbox",
-    "--disable-software-rasterizer",
-    "--no-sandbox",
+    ...windowsGpuFlags,
     ...(options.dev ? ["--dev"] : []),
   ];
 

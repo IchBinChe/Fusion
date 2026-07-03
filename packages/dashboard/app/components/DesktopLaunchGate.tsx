@@ -1,6 +1,7 @@
 import { useEffect, useState, type PropsWithChildren } from "react";
 import { useTranslation } from "react-i18next";
 import type { ShellConnectionState } from "../types/native-shell";
+import { getShellHostContext } from "../shell-host";
 import "./DesktopLaunchGate.css";
 
 type Phase =
@@ -92,9 +93,23 @@ export function DesktopLaunchGate({ children }: PropsWithChildren) {
         // current page URL; if remote, App handles the redirect to the
         // active profile already.
         if (state.desktopMode === "local") {
-          const params = new URLSearchParams(window.location.search);
-          if (params.has("serverBaseUrl")) {
-            setPhase({ kind: "ready", serverBaseUrl: params.get("serverBaseUrl") ?? undefined });
+          /*
+           * FNXC:DesktopLaunchGate 2026-07-03-01:05:
+           * Detect a completed local handoff via the CACHED shell-host context, NOT the raw URL.
+           * applyServerBaseUrl() reloads the page with ?serverBaseUrl=…, but main.tsx calls
+           * bootstrapShellHostContext() at module load (before this effect runs), which STRIPS every
+           * shell query param from the URL via history.replaceState. So reading window.location.search
+           * here always misses serverBaseUrl → we would re-run the handoff → window.location.replace →
+           * reload → strip → an INFINITE reload loop, seen as rapid "Starting local Fusion runtime…"
+           * flashing that never connects. The bootstrap preserves the captured value in
+           * getShellHostContext().serverUrl, so read that (fall back to any not-yet-stripped URL param).
+           */
+          const shellHost = getShellHostContext();
+          const handoffBaseUrl = shellHost.kind === "desktop-shell" ? shellHost.serverUrl : undefined;
+          const urlParamBaseUrl = new URLSearchParams(window.location.search).get("serverBaseUrl") ?? undefined;
+          const existingBaseUrl = handoffBaseUrl ?? urlParamBaseUrl;
+          if (existingBaseUrl) {
+            setPhase({ kind: "ready", serverBaseUrl: existingBaseUrl });
             return;
           }
           setPhase({ kind: "starting-local", message: t("desktop.startingLocalRuntime", "Starting local Fusion runtime…") });

@@ -2139,6 +2139,7 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
   const threadHeaderTitle = activeSession?.agentId === FN_AGENT_ID
     ? (activeModelTag ?? "Fusion")
     : activeSession?.title || agentsMap.get(activeSession?.agentId ?? "")?.name || activeSession?.agentId || "Chat";
+  const mobileDirectSessionTitle = activeSession?.title || t("chat.untitledSession", "Untitled");
 
   const showThreadHeaderModelTag = Boolean(activeModelTag && activeModelTag !== threadHeaderTitle);
   const showThreadHeaderContextWindow = !isChatMobile && hasThreadInView && activeContextWindow !== null;
@@ -2590,8 +2591,11 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
         onClick={() => setMobileSessionMenuOpen((open) => !open)}
       >
         {activeModelProvider ? <ProviderIcon provider={activeModelProvider} size="md" /> : <Bot size={16} />}
-        <span className="chat-thread-header-title">{threadHeaderTitle}</span>
-        {showThreadHeaderModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
+        {/*
+        FNXC:ChatHeader 2026-07-03-00:00:
+        Mobile direct-chat needs one compact, conversation-oriented dropdown trigger. Show the active conversation title (or Untitled) beside only the provider/model logo and chevron; keep model-name badges exclusive to the desktop/thread identity row.
+        */}
+        <span className="chat-thread-header-title">{mobileDirectSessionTitle}</span>
         <ChevronDown size={16} aria-hidden="true" />
       </button>
       {mobileSessionMenuOpen && (
@@ -2685,8 +2689,8 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
             {showMobileDirectThreadHeaderControls ? (
               <>
                 {/*
-                FNXC:ChatHeader 2026-07-02-00:00:
-                Mobile direct-thread view has a single top row: move back navigation and the active conversation switcher into ViewHeader so the transcript gains the height formerly consumed by a second thread header. The ViewHeader still owns the accessible Chat title; CSS only hides its visible text in this direct-thread mobile state.
+                FNXC:ChatHeader 2026-07-02-17:26:
+                Mobile direct-thread view has a single top row: back navigation must be the first visible/focusable control at the far-left edge and the active conversation switcher must stay beside it. The ViewHeader still owns the accessible Chat title; ChatView-scoped CSS hides the entire title/icon shell only in this direct-thread mobile state so it cannot reserve left-edge layout space.
                 */}
                 <button className="btn-icon chat-back-btn" onClick={handleBack} data-testid="chat-back-btn" aria-label={t("chat.backToConversations", "Back to conversations")}>
                   <ChevronLeft size={16} />

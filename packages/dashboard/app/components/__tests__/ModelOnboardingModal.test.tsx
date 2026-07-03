@@ -1698,13 +1698,13 @@ describe("ModelOnboardingModal", () => {
   });
 
   describe("GitHub step", () => {
-    it("GitHub step shows OAuth setup fallback when neither OAuth nor gh CLI auth is available", async () => {
+    it("GitHub step shows optional fallback when neither OAuth nor gh CLI auth is available", async () => {
       render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} projectId="proj_123" />);
 
       await navigateToGitHubStep();
 
-      expect(screen.getByText(/GitHub OAuth isn't connected yet/)).toBeTruthy();
-      expect(screen.getByText(/Settings → Authentication/)).toBeTruthy();
+      expect(screen.getByText(/Dashboard GitHub OAuth is not configured/)).toBeTruthy();
+      expect(screen.getByText(/GitHub CLI setup guidance above/)).toBeTruthy();
       expect(screen.getByRole("button", { name: "Continue without GitHub →" })).toBeTruthy();
     });
 
@@ -1728,7 +1728,7 @@ describe("ModelOnboardingModal", () => {
 
       const ctaContainer = screen.getByTestId("onboarding-github-connect-cta");
       expect(ctaContainer).toHaveClass("onboarding-github-connect-cta");
-      const connectButton = screen.getByRole("button", { name: /Connect/ });
+      const connectButton = screen.getByRole("button", { name: /Connect GitHub OAuth/ });
       expect(connectButton).toHaveClass("btn", "btn-primary", "btn-sm");
     });
 
@@ -1798,6 +1798,99 @@ describe("ModelOnboardingModal", () => {
 
       expect(screen.queryByTestId("onboarding-git-prerequisite")).toBeNull();
       expect(screen.getByTestId("github-status-badge")).toHaveTextContent("Not connected");
+    });
+
+    it("keeps legacy auth status responses without ghCli non-blocking", async () => {
+      mockFetchAuthStatus.mockResolvedValueOnce({
+        providers: [],
+        gitCli: { available: true, version: "2.45.1", installUrl: "https://git-scm.com/downloads" },
+      });
+
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} projectId="proj_123" />);
+
+      await navigateToGitHubStep();
+
+      expect(screen.getByTestId("onboarding-git-prerequisite")).toHaveTextContent("Git prerequisite ready");
+      expect(screen.queryByTestId("github-status-badge")).toBeNull();
+      expect(screen.getByRole("button", { name: "Continue without GitHub →" })).toBeTruthy();
+    });
+
+    it("does not treat GitHub Copilot provider auth as GitHub integration readiness", async () => {
+      mockFetchAuthStatus.mockResolvedValueOnce({
+        providers: [
+          { id: "github-copilot", name: "GitHub Copilot", authenticated: true, type: "oauth" },
+        ],
+        ghCli: { available: false, authenticated: false },
+      });
+
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} projectId="proj_123" />);
+
+      await navigateToGitHubStep();
+
+      expect(screen.queryByTestId("github-status-badge")).toBeNull();
+      expect(screen.getByText(/Dashboard GitHub OAuth is not configured/)).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Continue without GitHub →" })).toBeTruthy();
+      expect(screen.queryByText(/GitHub is connected — issue imports/)).toBeNull();
+    });
+
+    it("models installed but unauthenticated gh CLI as not ready while preserving OAuth connect", async () => {
+      mockFetchAuthStatus.mockResolvedValueOnce({
+        providers: [
+          { id: "github", name: "GitHub", authenticated: false, type: "oauth" },
+        ],
+        ghCli: { available: true, authenticated: false },
+      });
+
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} projectId="proj_123" />);
+
+      await navigateToGitHubStep();
+
+      expect(screen.getByTestId("github-status-badge")).toHaveTextContent("Not connected");
+      const authCard = screen.getByTestId("onboarding-gh-cli-auth-card");
+      expect(authCard).toHaveTextContent("Authenticate GitHub CLI");
+      expect(authCard).toHaveTextContent("gh auth login");
+      expect(screen.getByRole("button", { name: /Connect GitHub OAuth/ })).toBeTruthy();
+      expect(screen.getByText(/task creation works without it/i)).toBeTruthy();
+    });
+
+    it("models missing gh CLI as not ready while preserving optional skip", async () => {
+      mockFetchAuthStatus.mockResolvedValueOnce({
+        providers: [
+          { id: "github", name: "GitHub", authenticated: false, type: "oauth" },
+        ],
+        ghCli: { available: false, authenticated: false },
+      });
+
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} projectId="proj_123" />);
+
+      await navigateToGitHubStep();
+
+      expect(screen.getByTestId("github-status-badge")).toHaveTextContent("Not connected");
+      const installCard = screen.getByTestId("onboarding-gh-cli-install-card");
+      expect(installCard).toHaveTextContent("Install GitHub CLI");
+      expect(installCard).toHaveTextContent("host running Fusion");
+      expect(installCard).toHaveTextContent("macOS");
+      expect(installCard).toHaveTextContent("Windows");
+      expect(installCard).toHaveTextContent("Linux");
+      expect(screen.getByRole("link", { name: "Open GitHub CLI releases" })).toHaveAttribute("href", "https://github.com/cli/cli/releases/latest");
+      expect(screen.getByRole("button", { name: /Connect GitHub OAuth/ })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Skip GitHub →" })).toBeTruthy();
+    });
+
+    it("shows GitHub CLI install guidance even when dashboard GitHub OAuth provider is absent", async () => {
+      mockFetchAuthStatus.mockResolvedValueOnce({
+        providers: [],
+        ghCli: { available: false, authenticated: false },
+      });
+
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} projectId="proj_123" />);
+
+      await navigateToGitHubStep();
+
+      expect(screen.getByTestId("onboarding-gh-cli-install-card")).toHaveTextContent("Install GitHub CLI");
+      expect(screen.getByText(/Dashboard GitHub OAuth is not configured/)).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /Connect GitHub OAuth/ })).toBeNull();
+      expect(screen.getByRole("button", { name: "Continue without GitHub →" })).toBeTruthy();
     });
 
     it("preserves missing-Git guidance when GitHub OAuth provider is absent and gh CLI is ready", async () => {

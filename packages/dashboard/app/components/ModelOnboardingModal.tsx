@@ -590,12 +590,85 @@ export type ProviderConnectionStatus = "connected" | "not-connected" | "skipped"
 /** GitHub-specific status variants for richer connection feedback */
 type GitHubConnectionStatus = "connected" | "failed" | "pending" | "skipped" | "not-connected";
 
+type GitHubOAuthActionState = "unavailable" | "not-connected" | "connected" | "pending" | "failed" | "skipped";
+type GitHubCliActionState = "unknown" | "missing" | "unauthenticated" | "authenticated";
+
 interface GhCliStatus {
   available: boolean;
   authenticated: boolean;
 }
 
+interface GitHubActionViewModel {
+  oauth: {
+    provider?: AuthProvider;
+    providerAvailable: boolean;
+    authenticated: boolean;
+    loginInProgress: boolean;
+    state: GitHubOAuthActionState;
+  };
+  ghCli: {
+    status?: GhCliStatus;
+    state: GitHubCliActionState;
+    authenticated: boolean;
+  };
+  ready: boolean;
+  readyVia: "oauth" | "gh-cli" | null;
+}
+
 const GIT_INSTALL_URL = "https://git-scm.com/downloads";
+const GH_CLI_INSTALL_URL = "https://github.com/cli/cli/releases/latest";
+
+function buildGitHubActionViewModel(params: {
+  providers: AuthProvider[];
+  ghCliStatus?: GhCliStatus;
+  loginOutcomes: Record<string, LoginOutcome>;
+  skipped: boolean;
+}): GitHubActionViewModel {
+  const githubProvider = params.providers.find((provider) => provider.id === "github");
+  const oauthAuthenticated = githubProvider?.authenticated ?? false;
+  const oauthLoginInProgress = githubProvider?.loginInProgress ?? false;
+  const ghCliState: GitHubCliActionState = !params.ghCliStatus
+    ? "unknown"
+    : params.ghCliStatus.authenticated
+      ? "authenticated"
+      : params.ghCliStatus.available
+        ? "unauthenticated"
+        : "missing";
+  const ghCliAuthenticated = ghCliState === "authenticated";
+  let oauthState: GitHubOAuthActionState = "unavailable";
+
+  if (githubProvider) {
+    const outcome = params.loginOutcomes.github;
+    if (oauthAuthenticated) {
+      oauthState = "connected";
+    } else if (outcome === "pending" || oauthLoginInProgress) {
+      oauthState = "pending";
+    } else if (outcome === "failed" || outcome === "timeout") {
+      oauthState = "failed";
+    } else if (params.skipped) {
+      oauthState = "skipped";
+    } else {
+      oauthState = "not-connected";
+    }
+  }
+
+  return {
+    oauth: {
+      provider: githubProvider,
+      providerAvailable: !!githubProvider,
+      authenticated: oauthAuthenticated,
+      loginInProgress: oauthLoginInProgress,
+      state: oauthState,
+    },
+    ghCli: {
+      status: params.ghCliStatus,
+      state: ghCliState,
+      authenticated: ghCliAuthenticated,
+    },
+    ready: oauthAuthenticated || ghCliAuthenticated,
+    readyVia: oauthAuthenticated ? "oauth" : ghCliAuthenticated ? "gh-cli" : null,
+  };
+}
 
 /** Maximum number of poll cycles before timing out (150 × 2s = 5 minutes) */
 const MAX_POLL_CYCLES = 150;
@@ -915,19 +988,32 @@ export function ModelOnboardingModal({
     return () => clearInterval(interval);
   }, [authProviders, loadAuthStatus]);
 
+  /*
+  FNXC:Onboarding 2026-07-03-17:04:
+  The GitHub onboarding step needs an explicit action model so OAuth login, GitHub CLI install/auth, and optional skip states stay independent.
+  GitHub readiness remains OAuth-authenticated OR `gh`-authenticated; GitHub-named AI providers such as `github-copilot` must never satisfy the GitHub integration provider check.
+  */
+  const githubActionState = useMemo(
+    () => buildGitHubActionViewModel({
+      providers: authProviders,
+      ghCliStatus,
+      loginOutcomes,
+      skipped: isGithubSkipped,
+    }),
+    [authProviders, ghCliStatus, loginOutcomes, isGithubSkipped],
+  );
   // OAuth status for the GitHub provider (used for OAuth-specific controls like Connect/Disconnect).
-  const githubProvider = authProviders.find((p) => p.id === "github");
-  const hasGithubProvider = !!githubProvider;
-  const isGithubAuthenticated = githubProvider?.authenticated ?? false;
-  const isGithubLoginInProgress = githubProvider?.loginInProgress ?? false;
-  const isGithubCliAuthenticated = ghCliStatus?.authenticated ?? false;
+  const hasGithubProvider = githubActionState.oauth.providerAvailable;
+  const isGithubAuthenticated = githubActionState.oauth.authenticated;
+  const isGithubLoginInProgress = githubActionState.oauth.loginInProgress;
+  const isGithubCliAuthenticated = githubActionState.ghCli.authenticated;
   const gitInstallUrl = gitCliStatus?.installUrl ?? GIT_INSTALL_URL;
   const gitVersionLabel = gitCliStatus?.version
     ? t("setup.gitPrerequisiteInstalledVersion", "Git is installed on the Fusion host ({{version}}).", { version: gitCliStatus.version })
     : t("setup.gitPrerequisiteInstalled", "Git is installed on the Fusion host.");
   // Effective GitHub readiness (matches useSetupReadiness): OAuth OR authenticated gh CLI session.
-  const isGitHubReady = isGithubAuthenticated || isGithubCliAuthenticated;
-  const isGitHubReadyViaCli = !isGithubAuthenticated && isGithubCliAuthenticated;
+  const isGitHubReady = githubActionState.ready;
+  const isGitHubReadyViaCli = githubActionState.readyVia === "gh-cli";
 
   // Get provider connection status for UI display
   const getProviderStatus = useCallback((provider: AuthProvider): ProviderConnectionStatus => {
@@ -966,23 +1052,22 @@ export function ModelOnboardingModal({
   }
 
   const getGitHubStatus = useCallback((): GitHubConnectionStatus => {
-    if (isGitHubReady) {
+    if (githubActionState.ready) {
       return "connected";
     }
 
-    const githubOutcome = loginOutcomes["github"];
-    if (githubOutcome === "pending") {
+    if (githubActionState.oauth.state === "pending") {
       return "pending";
     }
-    if (githubOutcome === "failed" || githubOutcome === "timeout") {
+    if (githubActionState.oauth.state === "failed") {
       return "failed";
     }
-    if (isGithubSkipped) {
+    if (githubActionState.oauth.state === "skipped") {
       return "skipped";
     }
 
     return "not-connected";
-  }, [isGitHubReady, loginOutcomes, isGithubSkipped]);
+  }, [githubActionState]);
 
   function GitHubStatusBadge({ status }: { status: GitHubConnectionStatus }) {
     const config: Record<GitHubConnectionStatus, { text: string; className: string }> = {
@@ -2759,6 +2844,44 @@ export function ModelOnboardingModal({
                 </p>
               </OnboardingDisclosure>
 
+              {/*
+                FNXC:Onboarding 2026-07-03-17:22:
+                GitHub onboarding must give users in-flow paths for both supported auth modes instead of Settings-only explanatory copy.
+                The dashboard can start OAuth when the GitHub provider exists; `gh` CLI setup remains explicit host-side guidance because Fusion does not install third-party binaries automatically.
+              */}
+              {!isGithubCliAuthenticated && githubActionState.ghCli.state === "missing" && (
+                <div className="onboarding-github-setup-card onboarding-github-setup-card--warning" data-testid="onboarding-gh-cli-install-card" role="status">
+                  <div className="onboarding-github-setup-card__heading">
+                    <ProviderIcon provider="github" size="sm" />
+                    <strong>{t("setup.githubCliInstallTitle", "Install GitHub CLI")}</strong>
+                  </div>
+                  <p>
+                    {t("setup.githubCliInstallBody", "Fusion could not find `gh` on the host running Fusion. Install GitHub CLI there to import issues and track pull requests with CLI authentication.")}
+                  </p>
+                  <ul className="onboarding-github-setup-list">
+                    <li>{t("setup.githubCliInstallMac", "macOS: `brew install gh` or download the installer from GitHub CLI releases.")}</li>
+                    <li>{t("setup.githubCliInstallWindows", "Windows: install GitHub CLI with WinGet, Chocolatey, or the GitHub CLI installer, then restart the Fusion host shell or service.")}</li>
+                    <li>{t("setup.githubCliInstallLinux", "Linux: install `gh` with your distribution package manager or the packages from cli.github.com.")}</li>
+                  </ul>
+                  <a className="btn btn-sm" href={GH_CLI_INSTALL_URL} target="_blank" rel="noreferrer">
+                    {t("setup.githubCliInstallLink", "Open GitHub CLI releases")}
+                  </a>
+                </div>
+              )}
+
+              {!isGithubCliAuthenticated && githubActionState.ghCli.state === "unauthenticated" && (
+                <div className="onboarding-github-setup-card onboarding-github-setup-card--info" data-testid="onboarding-gh-cli-auth-card" role="status">
+                  <div className="onboarding-github-setup-card__heading">
+                    <ProviderIcon provider="github" size="sm" />
+                    <strong>{t("setup.githubCliAuthTitle", "Authenticate GitHub CLI")}</strong>
+                  </div>
+                  <p>
+                    {t("setup.githubCliAuthBody", "GitHub CLI is installed but not authenticated on the Fusion host. Run this command in the environment where Fusion is running, then return here and continue.")}
+                  </p>
+                  <code className="onboarding-github-command">gh auth login</code>
+                </div>
+              )}
+
               {!hasGithubProvider ? (
                 <div className="model-onboarding-github-optional">
                   <div className="optional-icon optional-icon--github" aria-hidden="true">
@@ -2770,7 +2893,7 @@ export function ModelOnboardingModal({
                     </p>
                   ) : (
                     <p>
-                      {t("setup.githubOauthNotConnected", "GitHub OAuth isn't connected yet. You can set it up in Settings → Authentication, or continue now and connect later.")}
+                      {t("setup.githubOauthUnavailable", "Dashboard GitHub OAuth is not configured on this Fusion host. You can still continue without GitHub, or use the GitHub CLI setup guidance above when available.")}
                     </p>
                   )}
                   <div className="model-onboarding-github-optional__actions">
@@ -2862,7 +2985,7 @@ export function ModelOnboardingModal({
                           onClick={() => handleLogin("github")}
                         >
                           <GitPullRequest size={16} />
-                          {t("setup.connect", "Connect")}
+                          {t("setup.connectGitHubOauth", "Connect GitHub OAuth")}
                         </button>
                       )}
                       {(authActionInProgress === "github" || isGithubLoginInProgress) && loginInstructions.github && (

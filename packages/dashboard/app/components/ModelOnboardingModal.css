@@ -819,6 +819,62 @@
   margin: 0;
 }
 
+.onboarding-github-setup-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  padding: var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.onboarding-github-setup-card--warning {
+  border-color: color-mix(in srgb, var(--color-warning) 40%, var(--border));
+  border-left: var(--space-xs) solid var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
+}
+
+.onboarding-github-setup-card--info {
+  border-color: color-mix(in srgb, var(--color-info) 35%, var(--border));
+  background: color-mix(in srgb, var(--color-info) 8%, transparent);
+}
+
+.onboarding-github-setup-card__heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--text);
+}
+
+.onboarding-github-setup-card p {
+  margin: 0;
+}
+
+.onboarding-github-setup-card a {
+  align-self: flex-start;
+}
+
+.onboarding-github-setup-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xxs);
+  margin: 0;
+  padding-left: var(--space-xl);
+}
+
+.onboarding-github-command {
+  align-self: flex-start;
+  padding: var(--space-xs) var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+
 /* === GitHub Connection Status Feedback (FN-1934) === */
 .onboarding-github-feedback {
   margin-top: var(--space-sm);
@@ -1315,8 +1371,18 @@
     min-height: 36px;
   }
 
-  .onboarding-github-git-prerequisite a {
+  .onboarding-github-git-prerequisite a,
+  .onboarding-github-setup-card a,
+  .onboarding-github-command {
     align-self: stretch;
+  }
+
+  .onboarding-github-setup-card {
+    padding: var(--space-sm);
+  }
+
+  .onboarding-github-setup-card__heading {
+    align-items: flex-start;
   }
 
   /* Compact provider card on mobile.

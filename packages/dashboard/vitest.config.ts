@@ -530,6 +530,14 @@ export default defineConfig({
         __dirname,
         "../../plugins/fusion-plugin-cursor-runtime/src/index.ts",
       ),
+      "@fusion-plugin-examples/roadmap/roadmap-suggestions": resolve(
+        __dirname,
+        "../../plugins/fusion-plugin-roadmap/src/roadmap-suggestions.ts",
+      ),
+      "@fusion-plugin-examples/roadmap": resolve(
+        __dirname,
+        "../../plugins/fusion-plugin-roadmap/src/index.ts",
+      ),
     },
   },
   test: {

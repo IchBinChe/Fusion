@@ -109,6 +109,35 @@ function isNearBottom(container: HTMLDivElement): boolean {
   return container.scrollHeight - (container.scrollTop + container.clientHeight) <= BOTTOM_FOLLOW_THRESHOLD_PX;
 }
 
+export function formatAgentLogDuration(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
+}
+
+export function formatAgentLogTimingLabels(entry: Pick<AgentLogEntry, "durationMs" | "timeToFirstTokenMs">, t: TFunction<"app">): string[] {
+  const labels: string[] = [];
+  if (typeof entry.timeToFirstTokenMs === "number" && Number.isFinite(entry.timeToFirstTokenMs)) {
+    labels.push(t("agentLog.timeToFirstToken", "TTFT {{duration}}", { duration: formatAgentLogDuration(entry.timeToFirstTokenMs) }));
+  }
+  if (typeof entry.durationMs === "number" && Number.isFinite(entry.durationMs)) {
+    labels.push(t("agentLog.duration", "Duration {{duration}}", { duration: formatAgentLogDuration(entry.durationMs) }));
+  }
+  return labels;
+}
+
+function AgentLogTimingLabels({ entry }: { entry: AgentLogEntry }): ReactElement | null {
+  const { t } = useTranslation("app");
+  const labels = formatAgentLogTimingLabels(entry, t as TFunction<"app">);
+  if (labels.length === 0) return null;
+  return (
+    <span className="agent-log-timing-labels" data-testid="agent-log-timing-labels" aria-label={labels.join(", ")}>
+      {labels.map((label) => (
+        <span key={label} className="agent-log-timing-label">{label}</span>
+      ))}
+    </span>
+  );
+}
+
 function getEntrySignature(entry: AgentLogEntry): string {
   return [
     entry.taskId,
@@ -117,6 +146,8 @@ function getEntrySignature(entry: AgentLogEntry): string {
     entry.type,
     entry.text,
     entry.detail ?? "",
+    entry.durationMs ?? "",
+    entry.timeToFirstTokenMs ?? "",
   ].join("|");
 }
 
@@ -668,7 +699,7 @@ export function AgentLogViewer({
               return (
                 <div key={group.key} className="agent-log-tool">
                   {agentBadge}
-                  <div className="agent-log-tool-title">⚡ {entry.text}</div>
+                  <div className="agent-log-tool-title">⚡ {entry.text}<AgentLogTimingLabels entry={entry} /></div>
                   {entry.detail ? <CollapsibleToolDetail detail={entry.detail} type="tool" /> : null}
                 </div>
               );
@@ -678,7 +709,7 @@ export function AgentLogViewer({
               return (
                 <div key={group.key} className="agent-log-tool-result">
                   {agentBadge}
-                  <div className="agent-log-tool-title">✓ {entry.text}</div>
+                  <div className="agent-log-tool-title">✓ {entry.text}<AgentLogTimingLabels entry={entry} /></div>
                   {entry.detail ? <CollapsibleToolDetail detail={entry.detail} type="tool_result" /> : null}
                 </div>
               );
@@ -688,7 +719,7 @@ export function AgentLogViewer({
               return (
                 <div key={group.key} className="agent-log-tool-error">
                   {agentBadge}
-                  <div className="agent-log-tool-title">✗ {entry.text}</div>
+                  <div className="agent-log-tool-title">✗ {entry.text}<AgentLogTimingLabels entry={entry} /></div>
                   {entry.detail ? <CollapsibleToolDetail detail={entry.detail} type="tool_error" /> : null}
                 </div>
               );
@@ -703,6 +734,7 @@ export function AgentLogViewer({
             return (
               <div key={group.key} className="agent-log-thinking">
                 {agentBadge}
+                <AgentLogTimingLabels entry={firstEntry} />
                 {renderMarkdown ? (
                   <div className="markdown-body">
                     <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
@@ -719,6 +751,7 @@ export function AgentLogViewer({
           return (
             <div key={group.key} className="agent-log-text">
               {agentBadge}
+              <AgentLogTimingLabels entry={firstEntry} />
               {renderMarkdown ? (
                 <div className="markdown-body">
                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>

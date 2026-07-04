@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import type { AgentLogEntry } from "../types.js";
 import { createTaskStoreTestHarness } from "./store-test-helpers.js";
 
 describe("TaskStore file-backed agent logs", () => {
@@ -59,6 +60,33 @@ describe("TaskStore file-backed agent logs", () => {
     await expect(
       store.getAgentLogsByTimeRange(task.id, "2026-01-01T00:01:00.000Z", "2026-01-01T00:02:00.000Z"),
     ).resolves.toMatchObject([{ text: "tool" }, { text: "third" }]);
+  });
+
+  it("persists and emits optional timing metadata for single and batch appends", async () => {
+    const store = harness.store();
+    const task = await harness.createTestTask();
+    const events: AgentLogEntry[] = [];
+    store.on("agent:log", (entry) => events.push(entry));
+
+    await store.appendAgentLog(task.id, "first visible output", "text", undefined, "executor", { timeToFirstTokenMs: 1200 });
+    await store.appendAgentLogBatch([
+      { taskId: task.id, text: "Bash", type: "tool_result", agent: "executor", durationMs: 842 },
+    ]);
+
+    expect(events).toMatchObject([
+      { text: "first visible output", timeToFirstTokenMs: 1200 },
+      { text: "Bash", type: "tool_result", durationMs: 842 },
+    ]);
+    await expect(store.getAgentLogs(task.id)).resolves.toMatchObject([
+      { text: "first visible output", timeToFirstTokenMs: 1200 },
+      { text: "Bash", type: "tool_result", durationMs: 842 },
+    ]);
+    await expect(
+      store.getAgentLogsByTimeRange(task.id, "2026-01-01T00:00:00.000Z", new Date(Date.now() + 1_000).toISOString()),
+    ).resolves.toMatchObject([
+      { text: "first visible output", timeToFirstTokenMs: 1200 },
+      { text: "Bash", type: "tool_result", durationMs: 842 },
+    ]);
   });
 
   it("emits SSE-facing agent:log events per single and batch append while skipping persistence for deleted tasks", async () => {

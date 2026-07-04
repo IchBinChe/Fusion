@@ -1204,6 +1204,10 @@ export interface AgentLogEntry {
   detail?: string;
   /** Which agent produced this entry. Absent in logs written before this field was added. */
   agent?: AgentRole;
+  /** Request/tool processing duration in milliseconds. Absent for legacy rows and entries without bounded timing. */
+  durationMs?: number;
+  /** Time to first visible model output in milliseconds. Absent after the first visible output and on legacy rows. */
+  timeToFirstTokenMs?: number;
 }
 
 /** How much of `.fusion/tasks/{ID}/agent.log` is copied into cold archive storage. */

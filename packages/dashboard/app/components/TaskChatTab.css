@@ -425,6 +425,26 @@ FN-7241 adds timestamps inside individual task-detail transcript blocks. Keep bl
   justify-content: flex-end;
 }
 
+/* FNXC:AgentLogging 2026-07-04-09:52: Task chat tool groups surface completion duration inline with existing quiet metadata so collapsed/expanded transcripts show request processing time without adding a second timestamp concept. */
+.task-chat-timing-labels {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.task-chat-timing-label {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 0 var(--space-xs);
+  background: var(--bg-secondary);
+}
+
 .task-chat-entry-kicker {
   color: var(--text-muted);
   font-size: var(--space-md);
@@ -574,7 +594,8 @@ FN-6660 corrects the repeated mobile sizing misses from FN-6507, FN-6604, and FN
     justify-content: flex-end;
   }
 
-  .task-chat-timestamp {
+  .task-chat-timestamp,
+  .task-chat-timing-labels {
     white-space: normal;
   }
 

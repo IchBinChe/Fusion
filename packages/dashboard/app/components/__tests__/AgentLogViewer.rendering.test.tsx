@@ -140,6 +140,30 @@ describe("AgentLogViewer", () => {
     expect(openFile).toHaveBeenCalledWith("packages/engine/src/scheduler.ts", { line: undefined, col: undefined });
   });
 
+  it("renders compact timing labels and omits them for legacy entries", () => {
+    const entries = [
+      makeEntry({ text: "first token", type: "text", timeToFirstTokenMs: 1200, agent: "executor" }),
+      makeEntry({ text: "legacy", type: "text", timestamp: "2026-01-01T00:00:01Z", agent: "reviewer" }),
+      makeEntry({ text: "Bash", type: "tool_result", durationMs: 842, timestamp: "2026-01-01T00:00:02Z" }),
+    ];
+
+    const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+
+    expect(screen.getByText("TTFT 1.2s")).toBeInTheDocument();
+    expect(screen.getByText("Duration 842ms")).toBeInTheDocument();
+    expect(container.querySelectorAll(".agent-log-timing-label")).toHaveLength(2);
+  });
+
+  it("keeps timing labels stable for duplicate entries", () => {
+    const duplicateEntry = makeEntry({ text: "Bash", type: "tool_result", durationMs: 25, timestamp: "2026-01-01T00:00:00Z" });
+    const { container, rerender } = render(<AgentLogViewer entries={[duplicateEntry, { ...duplicateEntry }]} loading={false} />);
+
+    rerender(<AgentLogViewer entries={[duplicateEntry, { ...duplicateEntry }, { ...duplicateEntry }]} loading={false} />);
+
+    expect(screen.getAllByText("Duration 25ms")).toHaveLength(3);
+    expect(container.querySelectorAll(".agent-log-tool-result")).toHaveLength(3);
+  });
+
   it("renders tool entries with distinct styling", () => {
     const entries = [
       makeEntry({ text: "Read", type: "tool" }),

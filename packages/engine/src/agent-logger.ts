@@ -221,8 +221,19 @@ export class AgentLogger {
   private readonly persistAgentToolOutput: boolean;
   private readonly persistAgentThinkingLog: boolean;
   private usageContext?: AgentLoggerUsageContext;
-  /** Tracks tool start times so tool_result/tool_error can record a duration. */
-  private readonly toolStartedAt = new Map<string, number>();
+  /*
+   * FNXC:AgentLogging 2026-07-04-09:40:
+   * Task logs must expose Time To First Token once per logger/request on the first persisted visible model output. Capture the arrival time at onText/onThinking instead of flush time so buffered writes do not inflate TTFT.
+   */
+  private readonly requestStartedAtMs = Date.now();
+  private firstVisibleOutputRecorded = false;
+  private textTimeToFirstTokenMs: number | undefined;
+  private thinkingTimeToFirstTokenMs: number | undefined;
+  /*
+   * FNXC:AgentLogging 2026-07-04-09:41:
+   * Tool completion rows need non-sensitive processing duration for Bash and every other tool. Store only start timestamps in FIFO order per tool name so overlapping same-name calls do not leak arguments/results or collapse into one duration.
+   */
+  private readonly toolStartedAt = new Map<string, number[]>();
 
   constructor(options: AgentLoggerOptions) {
     this.store = options.store;
@@ -300,6 +311,9 @@ export class AgentLogger {
    */
   onText(delta: string): void {
     this.externalTextCb?.(this.taskId, delta);
+    if (delta.length > 0 && !this.firstVisibleOutputRecorded) {
+      this.textTimeToFirstTokenMs = this.markFirstVisibleOutput();
+    }
     this.textBuffer += delta;
     if (this.textBuffer.length >= this.flushSizeBytes) {
       if (this.flushTimer) { clearTimeout(this.flushTimer); this.flushTimer = null; }
@@ -316,6 +330,9 @@ export class AgentLogger {
   onThinking(delta: string): void {
     if (!this.persistAgentThinkingLog) {
       return;
+    }
+    if (delta.length > 0 && !this.firstVisibleOutputRecorded) {
+      this.thinkingTimeToFirstTokenMs = this.markFirstVisibleOutput();
     }
     this.thinkingBuffer += delta;
     if (this.thinkingBuffer.length >= this.flushSizeBytes) {
@@ -341,7 +358,9 @@ export class AgentLogger {
     this.writeEntry(name, "tool", detail, `Failed to log tool start "${name}" for ${this.taskId}`);
     // agent-log type "tool" maps to usage_events kind "tool_call". meta carries
     // only non-sensitive descriptors (category) — never the tool arguments.
-    this.toolStartedAt.set(name, Date.now());
+    const starts = this.toolStartedAt.get(name) ?? [];
+    starts.push(Date.now());
+    this.toolStartedAt.set(name, starts);
     this.emitToolUsageEvent("tool_call", name);
   }
 
@@ -357,13 +376,13 @@ export class AgentLogger {
   onToolEnd(name: string, isError: boolean, result?: unknown): void {
     const type = isError ? "tool_error" : "tool_result";
     const detail = summarizeToolResultDetail(result);
-    this.writeEntry(name, type, detail, `Failed to log tool end "${name}" (${type}) for ${this.taskId}`);
+    const startedAt = this.shiftToolStart(name);
+    const durationMs = startedAt !== undefined ? Math.max(0, Date.now() - startedAt) : undefined;
+    this.writeEntry(name, type, detail, `Failed to log tool end "${name}" (${type}) for ${this.taskId}`, false, durationMs !== undefined ? { durationMs } : undefined);
     // Record completion as tool_result/tool_error with a duration descriptor.
     // meta NEVER includes the tool result payload — only non-sensitive metrics.
-    const startedAt = this.toolStartedAt.get(name);
-    if (startedAt !== undefined) this.toolStartedAt.delete(name);
     const meta: Record<string, unknown> = {};
-    if (startedAt !== undefined) meta.durationMs = Date.now() - startedAt;
+    if (durationMs !== undefined) meta.durationMs = durationMs;
     if (isError) meta.isError = true;
     this.emitToolUsageEvent(
       isError ? "tool_error" : "tool_result",
@@ -393,7 +412,29 @@ export class AgentLogger {
    * When only `appendLogCb` is set (no store/taskId), only the callback is used.
    * @param storeWarnMsg - Warning message prefix used when the task-store write fails.
    */
-  private writeEntry(text: string, type: AgentLogEntry["type"], detail: string | undefined, _storeWarnMsg: string, immediate = false): void {
+  private markFirstVisibleOutput(): number {
+    this.firstVisibleOutputRecorded = true;
+    return Math.max(0, Date.now() - this.requestStartedAtMs);
+  }
+
+  private shiftToolStart(name: string): number | undefined {
+    const starts = this.toolStartedAt.get(name);
+    if (!starts || starts.length === 0) return undefined;
+    const startedAt = starts.shift();
+    if (starts.length === 0) {
+      this.toolStartedAt.delete(name);
+    }
+    return startedAt;
+  }
+
+  private writeEntry(
+    text: string,
+    type: AgentLogEntry["type"],
+    detail: string | undefined,
+    _storeWarnMsg: string,
+    immediate = false,
+    timing?: Pick<AgentLogEntry, "durationMs" | "timeToFirstTokenMs">,
+  ): void {
     const isToolEntry = type === "tool" || type === "tool_result" || type === "tool_error";
     const includeDetail = !isToolEntry || this.persistAgentToolOutput;
     const entry: AgentLogEntry = {
@@ -403,6 +444,8 @@ export class AgentLogger {
       type,
       ...(detail !== undefined && includeDetail && { detail }),
       ...(this.agent !== undefined && { agent: this.agent }),
+      ...(timing?.durationMs !== undefined && { durationMs: timing.durationMs }),
+      ...(timing?.timeToFirstTokenMs !== undefined && { timeToFirstTokenMs: timing.timeToFirstTokenMs }),
     };
 
     this.pendingEntries.push(entry);
@@ -431,7 +474,16 @@ export class AgentLogger {
     if (this.textBuffer.length === 0) return Promise.resolve();
     const chunk = this.textBuffer;
     this.textBuffer = "";
-    this.writeEntry(chunk, "text", undefined, `Failed to flush text buffer for ${this.taskId}`, true);
+    const timeToFirstTokenMs = this.textTimeToFirstTokenMs;
+    this.textTimeToFirstTokenMs = undefined;
+    this.writeEntry(
+      chunk,
+      "text",
+      undefined,
+      `Failed to flush text buffer for ${this.taskId}`,
+      true,
+      timeToFirstTokenMs !== undefined ? { timeToFirstTokenMs } : undefined,
+    );
     return this.flushPendingEntries();
   }
 
@@ -442,7 +494,16 @@ export class AgentLogger {
     if (!this.persistAgentThinkingLog) {
       return Promise.resolve();
     }
-    this.writeEntry(chunk, "thinking", undefined, `Failed to flush thinking buffer for ${this.taskId}`, true);
+    const timeToFirstTokenMs = this.thinkingTimeToFirstTokenMs;
+    this.thinkingTimeToFirstTokenMs = undefined;
+    this.writeEntry(
+      chunk,
+      "thinking",
+      undefined,
+      `Failed to flush thinking buffer for ${this.taskId}`,
+      true,
+      timeToFirstTokenMs !== undefined ? { timeToFirstTokenMs } : undefined,
+    );
     return this.flushPendingEntries();
   }
 
@@ -488,6 +549,8 @@ export class AgentLogger {
               type: entry.type,
               detail: entry.detail,
               agent: entry.agent,
+              ...(entry.durationMs !== undefined && { durationMs: entry.durationMs }),
+              ...(entry.timeToFirstTokenMs !== undefined && { timeToFirstTokenMs: entry.timeToFirstTokenMs }),
             })),
           )
           .catch((err) => {
@@ -495,11 +558,17 @@ export class AgentLogger {
           });
       } else {
         await Promise.all(
-          entries.map((entry) =>
-            this.store!.appendAgentLog(entry.taskId, entry.text, entry.type, entry.detail, entry.agent).catch((err) => {
+          entries.map((entry) => {
+            const timing = entry.durationMs !== undefined || entry.timeToFirstTokenMs !== undefined
+              ? { durationMs: entry.durationMs, timeToFirstTokenMs: entry.timeToFirstTokenMs }
+              : undefined;
+            const write = timing === undefined
+              ? this.store!.appendAgentLog(entry.taskId, entry.text, entry.type, entry.detail, entry.agent)
+              : this.store!.appendAgentLog(entry.taskId, entry.text, entry.type, entry.detail, entry.agent, timing);
+            return write.catch((err) => {
               this.log.warn(`Failed to flush agent log entry for ${this.taskId}: ${err instanceof Error ? err.message : String(err)}`);
-            }),
-          ),
+            });
+          }),
         );
       }
     }

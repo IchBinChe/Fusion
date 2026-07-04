@@ -83,7 +83,7 @@ describe("AgentLogger", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(store.appendAgentLogBatch).toHaveBeenCalledWith([
-      { taskId: "FN-BATCH", text: "hello", type: "text", detail: undefined, agent: undefined },
+      { taskId: "FN-BATCH", text: "hello", type: "text", detail: undefined, agent: undefined, timeToFirstTokenMs: 0 },
     ]);
     expect((store.appendAgentLog as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
   });
@@ -105,7 +105,7 @@ describe("AgentLogger", () => {
     logger.onText("worldextra");
     // Allow async flush
     await vi.advanceTimersByTimeAsync(0);
-    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-001", "helloworldextra", "text", undefined, undefined);
+    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-001", "helloworldextra", "text", undefined, undefined, { durationMs: undefined, timeToFirstTokenMs: 0 });
   });
 
   it("flushes on timer when under size threshold", async () => {
@@ -121,7 +121,7 @@ describe("AgentLogger", () => {
     expect(store.appendAgentLog).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(500);
-    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-002", "small", "text", undefined, undefined);
+    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-002", "small", "text", undefined, undefined, { durationMs: undefined, timeToFirstTokenMs: 0 });
   });
 
   it("flushes text before logging tool start", async () => {
@@ -140,7 +140,7 @@ describe("AgentLogger", () => {
     const calls = (store.appendAgentLog as ReturnType<typeof vi.fn>).mock.calls;
     expect(calls.length).toBe(2);
     // Text flushed first
-    expect(calls[0]).toEqual(["FN-003", "pending text", "text", undefined, undefined]);
+    expect(calls[0]).toEqual(["FN-003", "pending text", "text", undefined, undefined, { durationMs: undefined, timeToFirstTokenMs: 0 }]);
     // Tool logged second without detail by default.
     expect(calls[1]).toEqual(["FN-003", "Bash", "tool", undefined, undefined]);
   });
@@ -155,7 +155,7 @@ describe("AgentLogger", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(store.appendAgentLog).toHaveBeenNthCalledWith(1, "FN-004", "Read", "tool", undefined, undefined);
-    expect(store.appendAgentLog).toHaveBeenNthCalledWith(2, "FN-004", "Read", "tool_result", undefined, undefined);
+    expect(store.appendAgentLog).toHaveBeenNthCalledWith(2, "FN-004", "Read", "tool_result", undefined, undefined, { durationMs: 0, timeToFirstTokenMs: undefined });
     expect(store.appendAgentLog).toHaveBeenNthCalledWith(3, "FN-004", "Read", "tool_error", undefined, undefined);
   });
 
@@ -183,7 +183,7 @@ describe("AgentLogger", () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(store.appendAgentLog).toHaveBeenNthCalledWith(1, "FN-004B", "Read", "tool", undefined, undefined);
-    expect(store.appendAgentLog).toHaveBeenNthCalledWith(2, "FN-004B", "Read", "tool_result", undefined, undefined);
+    expect(store.appendAgentLog).toHaveBeenNthCalledWith(2, "FN-004B", "Read", "tool_result", undefined, undefined, { durationMs: 0, timeToFirstTokenMs: undefined });
     expect(store.appendAgentLog).toHaveBeenNthCalledWith(3, "FN-004B", "Read", "tool_error", undefined, undefined);
   });
 
@@ -209,7 +209,7 @@ describe("AgentLogger", () => {
     logger.onText("remaining");
     await logger.flush();
 
-    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-006", "remaining", "text", undefined, undefined);
+    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-006", "remaining", "text", undefined, undefined, { durationMs: undefined, timeToFirstTokenMs: 0 });
   });
 
   it("flush() is safe to call when buffer is empty", async () => {
@@ -255,7 +255,101 @@ describe("AgentLogger", () => {
 
     // All text should be flushed in a single call
     expect(store.appendAgentLog).toHaveBeenCalledTimes(1);
-    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-009", "abc", "text", undefined, undefined);
+    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-009", "abc", "text", undefined, undefined, { durationMs: undefined, timeToFirstTokenMs: 0 });
+  });
+
+  // ── Timing metadata ──────────────────────────────────────────────
+
+  it("records TTFT on the first text entry only", async () => {
+    const store = createMockStore();
+    const logger = new AgentLogger({
+      store,
+      taskId: "FN-TTFT-1",
+      flushSizeBytes: 1024,
+      flushIntervalMs: 500,
+    });
+
+    await vi.advanceTimersByTimeAsync(125);
+    logger.onText("first");
+    await vi.advanceTimersByTimeAsync(500);
+    logger.onText(" second");
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(store.appendAgentLog).toHaveBeenNthCalledWith(
+      1,
+      "FN-TTFT-1",
+      "first",
+      "text",
+      undefined,
+      undefined,
+      { durationMs: undefined, timeToFirstTokenMs: 125 },
+    );
+    expect(store.appendAgentLog).toHaveBeenNthCalledWith(2, "FN-TTFT-1", " second", "text", undefined, undefined);
+  });
+
+  it("records TTFT on persisted thinking when thinking is first visible output", async () => {
+    const store = createMockStore();
+    const logger = new AgentLogger({
+      store,
+      taskId: "FN-TTFT-THINKING",
+      agent: "executor",
+      persistAgentThinkingLog: true,
+      flushSizeBytes: 1024,
+      flushIntervalMs: 500,
+    });
+
+    await vi.advanceTimersByTimeAsync(75);
+    logger.onThinking("thought");
+    await vi.advanceTimersByTimeAsync(500);
+    logger.onText("answer");
+    await vi.advanceTimersByTimeAsync(500);
+
+    expect(store.appendAgentLog).toHaveBeenNthCalledWith(
+      1,
+      "FN-TTFT-THINKING",
+      "thought",
+      "thinking",
+      undefined,
+      "executor",
+      { durationMs: undefined, timeToFirstTokenMs: 75 },
+    );
+    expect(store.appendAgentLog).toHaveBeenNthCalledWith(2, "FN-TTFT-THINKING", "answer", "text", undefined, "executor");
+  });
+
+  it("records tool duration on success and error without leaking payload into timing", async () => {
+    const store = createMockStore();
+    const logger = new AgentLogger({ store, taskId: "FN-DURATION", agent: "executor", persistAgentToolOutput: true });
+
+    logger.onToolStart("Bash", { command: "echo secret-args" });
+    await vi.advanceTimersByTimeAsync(842);
+    logger.onToolEnd("Bash", false, "secret-output");
+    logger.onToolStart("Read", { path: "secret.txt" });
+    await vi.advanceTimersByTimeAsync(13);
+    logger.onToolEnd("Read", true, "secret-error");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(store.appendAgentLog).toHaveBeenNthCalledWith(2, "FN-DURATION", "Bash", "tool_result", "secret-output", "executor", { durationMs: 842, timeToFirstTokenMs: undefined });
+    expect(store.appendAgentLog).toHaveBeenNthCalledWith(4, "FN-DURATION", "Read", "tool_error", "secret-error", "executor", { durationMs: 13, timeToFirstTokenMs: undefined });
+    const timingPayload = JSON.stringify((store.appendAgentLog as ReturnType<typeof vi.fn>).mock.calls.map((call) => call[6]));
+    expect(timingPayload).not.toContain("secret-output");
+    expect(timingPayload).not.toContain("secret-args");
+  });
+
+  it("matches duplicate same-name tool completions with FIFO durations", async () => {
+    const store = createMockStore();
+    const logger = new AgentLogger({ store, taskId: "FN-DUP-TOOLS", agent: "executor" });
+
+    logger.onToolStart("Bash", { command: "first" });
+    await vi.advanceTimersByTimeAsync(10);
+    logger.onToolStart("Bash", { command: "second" });
+    await vi.advanceTimersByTimeAsync(20);
+    logger.onToolEnd("Bash", false, "first done");
+    await vi.advanceTimersByTimeAsync(5);
+    logger.onToolEnd("Bash", false, "second done");
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(store.appendAgentLog).toHaveBeenNthCalledWith(3, "FN-DUP-TOOLS", "Bash", "tool_result", undefined, "executor", { durationMs: 30, timeToFirstTokenMs: undefined });
+    expect(store.appendAgentLog).toHaveBeenNthCalledWith(4, "FN-DUP-TOOLS", "Bash", "tool_result", undefined, "executor", { durationMs: 25, timeToFirstTokenMs: undefined });
   });
 
   // ── Agent field propagation ──────────────────────────────────────
@@ -272,7 +366,7 @@ describe("AgentLogger", () => {
     // Text flush
     logger.onText("hello world");
     await vi.advanceTimersByTimeAsync(0);
-    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-010", "hello world", "text", undefined, "executor");
+    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-010", "hello world", "text", undefined, "executor", { durationMs: undefined, timeToFirstTokenMs: 0 });
 
     // Tool start
     (store.appendAgentLog as ReturnType<typeof vi.fn>).mockClear();
@@ -316,7 +410,7 @@ describe("AgentLogger", () => {
     expect(store.appendAgentLog).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(500);
-    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-011A", "thought 1 thought 2", "thinking", undefined, "executor");
+    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-011A", "thought 1 thought 2", "thinking", undefined, "executor", { durationMs: undefined, timeToFirstTokenMs: 0 });
   });
 
   it("flushes thinking on size threshold", async () => {
@@ -334,7 +428,7 @@ describe("AgentLogger", () => {
 
     logger.onThinking("enough to flush");
     await vi.advanceTimersByTimeAsync(0);
-    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-012", "shortenough to flush", "thinking", undefined, "triage");
+    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-012", "shortenough to flush", "thinking", undefined, "triage", { durationMs: undefined, timeToFirstTokenMs: 0 });
   });
 
   it("flushes thinking buffer on flush()", async () => {
@@ -349,7 +443,7 @@ describe("AgentLogger", () => {
 
     logger.onThinking("remaining thinking");
     await logger.flush();
-    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-013", "remaining thinking", "thinking", undefined, "reviewer");
+    expect(store.appendAgentLog).toHaveBeenCalledWith("FN-013", "remaining thinking", "thinking", undefined, "reviewer", { durationMs: undefined, timeToFirstTokenMs: 0 });
   });
 
   it("flushes thinking buffer before tool start", async () => {
@@ -368,7 +462,7 @@ describe("AgentLogger", () => {
 
     await vi.advanceTimersByTimeAsync(0);
     const calls = (store.appendAgentLog as ReturnType<typeof vi.fn>).mock.calls;
-    expect(calls[0]).toEqual(["FN-014", "pre-tool thought", "thinking", undefined, "executor"]);
+    expect(calls[0]).toEqual(["FN-014", "pre-tool thought", "thinking", undefined, "executor", { durationMs: undefined, timeToFirstTokenMs: 0 }]);
     expect(calls[1]).toEqual(["FN-014", "Read", "tool", "file.ts", "executor"]);
   });
 

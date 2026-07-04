@@ -26,6 +26,7 @@
 ### Agent log storage + soft-delete visibility (FN-5143 / FN-5911)
 
 - Agent logs are no longer stored in SQLite. Each task now appends newline-delimited JSON records to `<rootDir>/.fusion/tasks/{ID}/agent-log.jsonl`.
+- Agent-log JSONL rows may include optional numeric timing metadata: `timeToFirstTokenMs` on the first visible model-output row for a request, and `durationMs` on tool/request completion rows such as `tool_result` or `tool_error`. These fields are additive, non-sensitive millisecond values; legacy rows may omit them and readers must continue to treat omission as normal.
 - `TaskStore.deleteTask` keeps that JSONL file on disk for forensics, but all live read APIs (`getAgentLogs*`, `getAgentLogCount`) gate on task liveness and return zero entries once `deletedAt` is set.
 - Archived-task snapshot behavior (`taskToArchiveEntry` / `archiveTask`) is unchanged in spirit: archive payloads still embed a capped agent-log snapshot, now sourced from the JSONL file instead of `fusion.db`.
 - Retention is now independent from SQLite operational-log pruning. `settings.agentLogFileRetentionDays` controls age-based pruning of JSONL entries for soft-deleted and archived tasks only. Default: `0` (disabled).

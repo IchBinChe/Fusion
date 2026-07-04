@@ -13,7 +13,7 @@ import { linkifyFilePaths } from "../utils/filePathLinkify";
 import { formatRelativeTimeAgo } from "../utils/relativeTimeAgo";
 import { ProviderIcon } from "./ProviderIcon";
 import { clampChatInputHeight, resolveChatInputOverflowY } from "../utils/chatInputAutosize";
-import { markdownComponents } from "./AgentLogViewer";
+import { formatAgentLogTimingLabels, markdownComponents } from "./AgentLogViewer";
 import { parseRuntimeModelMarker } from "./effective-model-resolution";
 import "./TaskChatTab.css";
 
@@ -190,6 +190,19 @@ function TaskChatTimestamp({ timestamp, testId = "task-chat-block-time", label =
   return (
     <span className="task-chat-timestamp" data-testid={testId} aria-label={label}>
       {relativeTime}
+    </span>
+  );
+}
+
+function TaskChatTimingLabels({ entry }: { entry: AgentLogEntry }) {
+  const { t } = useTranslation("app");
+  const labels = formatAgentLogTimingLabels(entry, t as TFunction<"app">);
+  if (labels.length === 0) return null;
+  return (
+    <span className="task-chat-timing-labels" data-testid="task-chat-timing-labels" aria-label={labels.join(", ")}>
+      {labels.map((label) => (
+        <span key={label} className="task-chat-timing-label">{label}</span>
+      ))}
     </span>
   );
 }
@@ -395,6 +408,7 @@ function TaskChatToolEntry({ entry }: { entry: AgentLogEntry }) {
     >
       <div className="task-chat-entry-label-row">
         <span className="task-chat-entry-kicker">{formatEntryLabel(entry, t)}</span>
+        <TaskChatTimingLabels entry={entry} />
         <TaskChatTimestamp timestamp={entry.timestamp} label="Tool entry timestamp" />
       </div>
       <div className="task-chat-entry-text">{entry.text}</div>
@@ -440,6 +454,7 @@ function TaskChatToolInvocation({ row }: { row: Extract<TaskChatToolGroupRow, { 
     <article className={className} data-testid="task-chat-tool-invocation">
       <div className="task-chat-entry-label-row">
         <span className="task-chat-entry-kicker">{completionLabel ? t("taskChat.toolCallTo", "Tool call → {{label}}", { label: completionLabel }) : t("taskChat.toolCall", "Tool call")}</span>
+        <TaskChatTimingLabels entry={completion ?? row.call} />
         <TaskChatTimestamp timestamp={completion?.timestamp ?? row.call.timestamp} label="Tool invocation timestamp" />
       </div>
       <div className="task-chat-entry-text">{row.call.text}</div>

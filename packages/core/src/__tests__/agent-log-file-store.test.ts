@@ -43,6 +43,41 @@ describe("agent-log-file-store", () => {
     expect(readAgentLogEntries(taskDir)).toEqual(appended);
   });
 
+  it("round-trips optional timing metadata while legacy rows can omit it", () => {
+    const taskDir = createTaskDir();
+    appendAgentLogEntriesSync(taskDir, [
+      { timestamp: "2026-01-01T00:00:00.000Z", taskId: "FN-1", text: "legacy", type: "text" },
+      { timestamp: "2026-01-01T00:00:01.000Z", taskId: "FN-1", text: "first", type: "text", timeToFirstTokenMs: 1234.4 },
+      { timestamp: "2026-01-01T00:00:02.000Z", taskId: "FN-1", text: "Bash", type: "tool_result", durationMs: 842.2 },
+    ]);
+
+    const entries = readAgentLogEntries(taskDir);
+    expect(entries).toMatchObject([
+      { text: "legacy" },
+      { text: "first", timeToFirstTokenMs: 1234 },
+      { text: "Bash", durationMs: 842 },
+    ]);
+    expect(entries[0]).not.toHaveProperty("timeToFirstTokenMs");
+    expect(entries[0]).not.toHaveProperty("durationMs");
+    expect(entries[1]).not.toHaveProperty("durationMs");
+    expect(entries[2]).not.toHaveProperty("timeToFirstTokenMs");
+  });
+
+  it("ignores invalid legacy timing fields", () => {
+    const taskDir = createTaskDir();
+    const filePath = getAgentLogFilePath(taskDir);
+    writeFileSync(
+      filePath,
+      `${JSON.stringify({ timestamp: "2026-01-01T00:00:00.000Z", taskId: "FN-1", text: "bad timing", type: "text", durationMs: -1, timeToFirstTokenMs: "secret" })}\n`,
+      "utf8",
+    );
+
+    const [entry] = readAgentLogEntries(taskDir);
+    expect(entry).toMatchObject({ text: "bad timing" });
+    expect(entry).not.toHaveProperty("durationMs");
+    expect(entry).not.toHaveProperty("timeToFirstTokenMs");
+  });
+
   it("supports most-recent tail pagination with offset", () => {
     const taskDir = createTaskDir();
     appendAgentLogEntriesSync(

@@ -1703,6 +1703,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     type: AgentLogEntry["type"];
     detail: string | null;
     agent: AgentLogEntry["agent"] | null;
+    durationMs: number | null;
+    timeToFirstTokenMs: number | null;
   }> = [];
   /** Timer for flushing the agent log buffer. */
   private agentLogFlushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -12792,6 +12794,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     type: AgentLogEntry["type"],
     detail?: string,
     agent?: AgentLogEntry["agent"],
+    timing?: Pick<AgentLogEntry, "durationMs" | "timeToFirstTokenMs">,
   ): Promise<void> {
     const timestamp = new Date().toISOString();
     const normalizedDetail = truncateAgentLogDetail(detail, type);
@@ -12802,6 +12805,8 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       type,
       ...(normalizedDetail !== undefined && { detail: normalizedDetail }),
       ...(agent !== undefined && { agent }),
+      ...(timing?.durationMs !== undefined && { durationMs: timing.durationMs }),
+      ...(timing?.timeToFirstTokenMs !== undefined && { timeToFirstTokenMs: timing.timeToFirstTokenMs }),
     };
 
     // Buffer the entry for batched insertion to reduce WAL pressure.
@@ -12820,6 +12825,8 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       type,
       detail: normalizedDetail ?? null,
       agent: agent ?? null,
+      durationMs: timing?.durationMs ?? null,
+      timeToFirstTokenMs: timing?.timeToFirstTokenMs ?? null,
     });
     this.emit("agent:log", entry);
 
@@ -12958,6 +12965,8 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       type: AgentLogEntry["type"];
       detail?: string;
       agent?: AgentLogEntry["agent"];
+      durationMs?: number;
+      timeToFirstTokenMs?: number;
     }>,
   ): Promise<void> {
     if (entries.length === 0) {
@@ -13003,6 +13012,8 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
           type: entry.type,
           detail: entry.detail ?? null,
           agent: entry.agent ?? null,
+          durationMs: entry.durationMs ?? null,
+          timeToFirstTokenMs: entry.timeToFirstTokenMs ?? null,
         })),
       );
       for (const entry of appended) {
@@ -13041,6 +13052,8 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         type: entry.type,
         ...(entry.detail !== undefined && { detail: entry.detail }),
         ...(entry.agent !== undefined && { agent: entry.agent }),
+        ...(entry.durationMs !== undefined && { durationMs: entry.durationMs }),
+        ...(entry.timeToFirstTokenMs !== undefined && { timeToFirstTokenMs: entry.timeToFirstTokenMs }),
       });
     }
   }

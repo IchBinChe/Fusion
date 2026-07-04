@@ -877,6 +877,24 @@ describe("TaskChatTab", () => {
     expect(screen.getByText("ok")).toBeVisible();
   });
 
+  it("shows Bash tool duration in the expanded invocation and omits legacy timing labels", async () => {
+    const user = userEvent.setup();
+    mockLogs([
+      makeEntry({ agent: "executor", type: "tool", text: "Bash", detail: "pnpm test" }),
+      makeEntry({ agent: "executor", type: "tool_result", text: "Bash", detail: "ok", durationMs: 842 }),
+      makeEntry({ agent: "executor", type: "tool", text: "Read", detail: "file.ts" }),
+      makeEntry({ agent: "executor", type: "tool_result", text: "Read", detail: "contents" }),
+    ]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    expect(screen.queryByText("Duration 842ms")).not.toBeVisible();
+    await user.click(screen.getByText("2 tool calls"));
+
+    expect(screen.getByText("Duration 842ms")).toBeVisible();
+    expect(screen.getAllByTestId("task-chat-timing-labels")).toHaveLength(1);
+  });
+
   it("summarizes multiple invocations with deduped names and overflow", () => {
     mockLogs([
       makeEntry({ agent: "executor", type: "tool", text: "bash", detail: "run tests" }),

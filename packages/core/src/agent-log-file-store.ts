@@ -31,6 +31,8 @@ export interface AgentLogFileAppendInput {
   type: AgentLogEntry["type"];
   detail?: string | null;
   agent?: AgentLogEntry["agent"] | null;
+  durationMs?: number | null;
+  timeToFirstTokenMs?: number | null;
 }
 
 interface AgentLogJsonlRow {
@@ -40,6 +42,8 @@ interface AgentLogJsonlRow {
   type: AgentLogEntry["type"];
   detail?: string;
   agent?: AgentLogEntry["agent"];
+  durationMs?: number;
+  timeToFirstTokenMs?: number;
 }
 
 export function getAgentLogFilePath(taskDir: string): string {
@@ -147,8 +151,17 @@ function readAllAgentLogEntries(
   return entries;
 }
 
+function normalizeTimingMs(value: number | null | undefined): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    return undefined;
+  }
+  return Math.round(value);
+}
+
 function serializeEntry(entry: AgentLogFileAppendInput): string {
   const normalizedDetail = truncateAgentLogDetail(entry.detail, entry.type);
+  const durationMs = normalizeTimingMs(entry.durationMs);
+  const timeToFirstTokenMs = normalizeTimingMs(entry.timeToFirstTokenMs);
   const row: AgentLogJsonlRow = {
     timestamp: entry.timestamp,
     taskId: entry.taskId,
@@ -156,12 +169,16 @@ function serializeEntry(entry: AgentLogFileAppendInput): string {
     type: entry.type,
     ...(normalizedDetail !== undefined && { detail: normalizedDetail }),
     ...(entry.agent != null && { agent: entry.agent }),
+    ...(durationMs !== undefined && { durationMs }),
+    ...(timeToFirstTokenMs !== undefined && { timeToFirstTokenMs }),
   };
   return `${JSON.stringify(row)}\n`;
 }
 
 function materializeEntry(entry: AgentLogFileAppendInput, lineNo: number): StoredAgentLogEntry {
   const normalizedDetail = truncateAgentLogDetail(entry.detail, entry.type);
+  const durationMs = normalizeTimingMs(entry.durationMs);
+  const timeToFirstTokenMs = normalizeTimingMs(entry.timeToFirstTokenMs);
   return {
     timestamp: entry.timestamp,
     taskId: entry.taskId,
@@ -169,6 +186,8 @@ function materializeEntry(entry: AgentLogFileAppendInput, lineNo: number): Store
     type: entry.type,
     ...(normalizedDetail !== undefined && { detail: normalizedDetail }),
     ...(entry.agent != null && { agent: entry.agent }),
+    ...(durationMs !== undefined && { durationMs }),
+    ...(timeToFirstTokenMs !== undefined && { timeToFirstTokenMs }),
     lineNo,
     sourceRef: buildAgentLogSourceRef(entry.taskId, lineNo),
   };

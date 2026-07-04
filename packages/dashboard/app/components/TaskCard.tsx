@@ -1408,6 +1408,16 @@ function TaskCardComponent({
     || Boolean(task.overlapBlockedBy)
     || Boolean(fanout && fanout.totalCount > 0);
   const showStartAction = taskColumnFlags?.intake === true && task.column !== "triage" && Boolean(onMoveTask);
+  /*
+  FNXC:CodingIdeasWorkflow 2026-07-04-12:30:
+  The Start action promotes a card out of a manual intake into the workflow's first working column. Derive the target from the ordered workflow columns instead of hard-coding "todo" so a workflow whose intake feeds a differently-named stage transitions correctly. Falls back to "todo" when the column metadata is unavailable (e.g. the all-workflows board aggregate).
+  */
+  const startTargetColumn: ColumnId = useMemo(() => {
+    const next = taskMoveColumns?.find(
+      (c) => c.id !== task.column && !c.flags?.intake && !c.flags?.archived && !c.flags?.hiddenFromBoard,
+    );
+    return (next?.id ?? "todo") as ColumnId;
+  }, [taskMoveColumns, task.column]);
   const shouldRenderActionRow = Boolean(onPromote) || showCreatePrQuickAction || showAddressPrFeedbackAction || showStartAction || (showInReviewMoveControl && !metaRowVisible);
 
   const renderInReviewMoveControl = () => (
@@ -2191,14 +2201,14 @@ function TaskCardComponent({
     if (!onMoveTask || isStarting) return;
     setIsStarting(true);
     try {
-      await onMoveTask(task.id, "todo");
+      await onMoveTask(task.id, startTargetColumn);
       addToast(t("tasks.startedPlanning", "Started planning {{taskId}}", { taskId: task.id }), "success");
     } catch (err) {
       addToast(getErrorMessage(err), "error");
     } finally {
       setIsStarting(false);
     }
-  }, [addToast, isStarting, onMoveTask, t, task.id]);
+  }, [addToast, isStarting, onMoveTask, startTargetColumn, t, task.id]);
 
   const handleAddressPrFeedbackClick = useCallback(async (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();

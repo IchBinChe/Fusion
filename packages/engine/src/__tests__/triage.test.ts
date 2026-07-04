@@ -22,6 +22,7 @@ const { mockReviewStep, mockCreateFnAgent } = vi.hoisted(() => ({
 }));
 
 const TRIAGE_POLICY_PROMPT = resolveAgentPrompt("triage");
+const STANDARD_PLANNING_PROMPT = builtinSeamPrompt("planning");
 const FAST_PLANNING_PROMPT = builtinSeamPrompt("planning-fast");
 const RENDERED_TRIAGE_POLICY_PROMPT = renderTriagePolicyPlaceholders(TRIAGE_POLICY_PROMPT, {});
 
@@ -732,6 +733,25 @@ describe("FN-5893 invariant regression wording", () => {
     fileURLToPath(new URL("../../../core/src/agent-prompts.ts", import.meta.url)),
     "utf8",
   );
+
+  it("requires before-to-after transformation summaries in standard and fast planning prompts", () => {
+    for (const prompt of [
+      TRIAGE_POLICY_PROMPT,
+      STANDARD_PLANNING_PROMPT,
+      FAST_PLANNING_PROMPT,
+    ]) {
+      expect(prompt).toContain("## Before → After Transformation");
+      expect(prompt).toContain("Before");
+      expect(prompt).toContain("After");
+      expect(prompt).toContain("current state");
+      expect(prompt).toContain("target state");
+      expect(prompt).toContain("satisfies the user's request at a glance");
+    }
+
+    expect(STANDARD_PLANNING_PROMPT).toBe(TRIAGE_POLICY_PROMPT);
+    expect(FAST_PLANNING_PROMPT).not.toContain("## Review Level");
+    expect(FAST_PLANNING_PROMPT).not.toContain("## Proactive Subtask Breakdown");
+  });
 
   it("requires invariant-level regression coverage in standard, fast, and core triage prompts", () => {
     for (const prompt of [

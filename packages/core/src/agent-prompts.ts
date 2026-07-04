@@ -218,21 +218,24 @@ The tool prevents your session from being killed by the inactivity watchdog duri
 FNXC:FastPlanning 2026-06-28-17:05:
 Fast mode resolves the selected workflow's planning-fast seam before falling back to this built-in prompt.
 Keep the prompt lean, but preserve mandatory planning contracts: duplicate search, FN-5893 surface invariants, explicit workflow routing, forensic artifact paths, and no-commit decision specs.
+
+FNXC:FastPlanning 2026-07-04-16:25:
+Fast mode skips heavyweight planning ceremony, but every generated task still needs the same glanceable Before → After Transformation section as standard planning so operators can validate intent quickly.
 */
 const FAST_TRIAGE_PROMPT_TEXT = `You are a task specification agent for "fn". This task is running in **fast mode**.
 
-Write a lean, executable PROMPT.md quickly. Preserve safety-critical gates, but skip heavyweight ceremony, review scoring, and proactive subtask analysis.
+Write a lean, executable PROMPT.md quickly. Preserve safety gates, but skip heavyweight ceremony, review scoring, and proactive subtask analysis.
 
 ## Fast-mode priorities
-- Read only source/docs needed to make the spec precise; keep prose brief with concrete file paths, commands, and expected outcomes.
-- Do not expand scope. If work is already covered, report the duplicate instead of writing a new spec.
+- Read only source/docs needed for precision; keep prose brief with concrete file paths, commands, and outcomes.
+- Do not expand scope. If work is covered, report the duplicate instead of writing a new spec.
 - Preserve required safety sections for bugs, workflow routing, forensic tasks, and decision-only work.
 
 ## Duplicate check
 Before writing a spec, call \`fn_task_list\` for active work, then call \`fn_task_search\` with 2-4 targeted keyword phrases from the title/description, such as file paths, symptoms, and symbols. For any likely match in \`done\` or \`archived\`, call \`fn_task_show\` and inspect it before deciding. If an existing task covers the same work, do not write PROMPT.md; write exactly \`DUPLICATE: {existing-task-id}\`.
 
 ## Required PROMPT.md shape
-Write PROMPT.md with Mission, Dependencies, Context to Read First, File Scope, Steps, Documentation Requirements, Completion Criteria, Git Commit Convention, and Do NOT. In \`## Steps\`, every executable heading MUST use \`### Step N: <name>\` (for example, \`### Step 1: Preflight\`); Do not write bare \`### Preflight\` / \`### Implementation\` headings. Do not add review-level, triage subtask, or proactive subtask headings.
+Write PROMPT.md with Mission, Before → After Transformation, Dependencies, Context to Read First, File Scope, Steps, Documentation Requirements, Completion Criteria, Git Commit Convention, and Do NOT. Include \`## Before → After Transformation\` after Mission with concise Before and After bullets stating current state, target state, and why it satisfies the user's request at a glance. In \`## Steps\`, every executable heading MUST use \`### Step N: <name>\` (for example, \`### Step 1: Preflight\`); Do not write bare \`### Preflight\` / \`### Implementation\` headings. Do not add review-level, triage subtask, or proactive subtask headings.
 
 ## Surface Enumeration
 For bug fixes and UI-affordance add/remove tasks, the spec MUST include a \`## Surface Enumeration\` section. The workflow Plan Review gate validates this before execution when plan review is enabled.
@@ -302,6 +305,11 @@ Follow this structure exactly:
 ## Mission
 
 {One paragraph: what you're building and why it matters}
+
+## Before → After Transformation
+
+- **Before:** {Briefly describe the current state, missing capability, broken behavior, or operator pain point}
+- **After:** {Briefly describe the target state and how it satisfies the user's request at a glance}
 
 ## Surface Enumeration
 
@@ -426,6 +434,15 @@ If this task REMOVES existing functionality (deleting modules, settings, API end
 - Create \`.changeset/{task-id}-removal.md\` explaining what was removed and why
 - This is mandatory for any net-negative change (more deletions than additions to existing files)
 \`\`\`
+
+## Transformation summary requirement
+
+Every normal implementation, documentation, or decision task definition MUST include \`## Before → After Transformation\` after \`## Mission\`. Keep it concise: use brief Before and After bullets (or equivalent short prose) that name the current state, the target state, and why that target satisfies the user's request at a glance.
+
+<!--
+FNXC:TriagePromptStructure 2026-07-04-16:20:
+Task definitions now carry a glanceable before-to-after transformation summary near the top so operators and reviewers can confirm the intended outcome before reading the full specification.
+-->
 
 ## Testing requirements
 

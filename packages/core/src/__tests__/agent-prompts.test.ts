@@ -295,6 +295,23 @@ describe("resolveAgentPrompt", () => {
     expect(fastPrompt.split("\n").length).toBeLessThan(120);
   });
 
+  it("requires before-to-after transformation summaries across planning prompts", () => {
+    const prompts = [
+      resolveAgentPrompt("triage"),
+      builtinSeamPrompt("planning"),
+      builtinSeamPrompt("planning-fast"),
+    ];
+
+    for (const prompt of prompts) {
+      expect(prompt).toContain("## Before → After Transformation");
+      expect(prompt).toContain("Before");
+      expect(prompt).toContain("After");
+      expect(prompt).toContain("current state");
+      expect(prompt).toContain("target state");
+      expect(prompt).toContain("satisfies the user's request at a glance");
+    }
+  });
+
   it("triage planning prompt is sourced from workflow IR without an engine duplicate", () => {
     const corePrompt = resolveAgentPrompt("triage");
     const planningPrompt = resolvePlanningPromptFromIr(BUILTIN_CODING_WORKFLOW_IR);

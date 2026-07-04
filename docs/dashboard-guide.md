@@ -1821,6 +1821,8 @@ UI surfaces:
 
 The Group Task Modal shows shared branch name/status, member list (`taskId`, title, column, landed state), quick links to open each member task detail, completion progress (`X of Y members finished`), and tracked PR state when present. Branch groups are durable SQLite state keyed by real `BG-*` ids, so valid grouped tasks continue to list/show after a server restart. It live-refreshes from the same dashboard task-update stream and ignores stale cross-project events.
 
+> **FN-7532:** a member only counts as "landed" once it merge-confirms onto its OWN group's branch via the branch-group-integration path (`mergeDetails.mergeTargetSource === "branch-group-integration"` and a matching `mergeTargetBranch`) — this is the same predicate the engine's promotion gate uses, so the checklist can never show "complete" when a real promotion would still be refused (or vice versa). The merge engine now stamps this attribution for every merge (previously only the legacy merge path did, so shared-group members merged through the current path were undercounted).
+
 Both the modal and branch-group card are completion-gated: while members are still pending, they show progress only. PR / merge controls are only revealed after all members are landed into the shared branch. When auto-merge is off, promote/open-PR is explicit user action (no automatic push-to-origin behavior).
 
 ### CLI-onboarding backfill runbook

@@ -336,6 +336,126 @@ Atlas Notes task-board artifacts only:
     expect(store.handoffToReview).not.toHaveBeenCalled();
   });
 
+  it("FN-7487 allows source-free gitignored task-artifact delivery with zero commits", async () => {
+    const fn7487Prompt = `# Task: FN-7487 - Audit FN-6902 spec compliance
+
+**Created:** 2026-07-03
+**Size:** S
+
+## Review Level: 0 (None)
+
+## Mission
+
+Deliver the requested source-free task-artifact audit. The deliverables are gitignored task artifacts only, not product source changes.
+
+## File Scope
+
+- .fusion/tasks/FN-6902/PROMPT.md
+- .fusion/tasks/FN-7487/attachments/fn-6902-spec-compliance.test.mjs
+
+## Steps
+
+### Step 0: Preflight
+- [x] Read the source task prompt.
+
+### Step 1: Write source-free task artifact evidence
+- [x] Save the audit artifact under .fusion/tasks/.
+
+## Do NOT
+
+- Do not force-add gitignored .fusion/ artifacts.
+- Do not create empty commits or fabricate commits for this source-free delivery.
+`;
+    const { store, tool } = await setup({
+      id: "FN-7487",
+      title: "Audit FN-6902 spec compliance",
+      description: "Source-free task-artifact delivery only.",
+      prompt: fn7487Prompt,
+      branch: "fusion/fn-7487",
+      noCommitsExpected: undefined,
+      reviewLevel: 0,
+      steps: [
+        { name: "Preflight", status: "done" as const },
+        { name: "Write source-free task artifact evidence", status: "done" as const },
+      ],
+      currentStep: 1,
+    });
+    mockedExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("rev-parse --show-toplevel")) return Buffer.from("/repo/.worktrees/swift-falcon\n");
+      if (cmd.includes("rev-parse --abbrev-ref HEAD")) return Buffer.from("fusion/fn-7487\n");
+      if (cmd.includes("rev-list --count")) return Buffer.from("0\n");
+      if (cmd.includes("rev-parse HEAD")) return Buffer.from("def456\n");
+      return Buffer.from("");
+    });
+
+    store.moveTask.mockClear();
+    const result = await tool.execute("id", { summary: "Saved the source-free task-artifact audit and verified the artifact path." });
+
+    expect(result.content[0].text).toContain("Task marked complete");
+    expect(result.content[0].text).not.toContain("fn_task_done refused: no_commits");
+    expect(store.moveTask).not.toHaveBeenCalledWith("FN-7487", "todo", { preserveProgress: true });
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-7487",
+      expect.stringContaining("prompt-derived source-free task-artifact contract"),
+      undefined,
+      undefined,
+    );
+    const revListCalled = mockedExecSync.mock.calls.some(([cmd]) => String(cmd).includes("rev-list --count"));
+    expect(revListCalled).toBe(false);
+  });
+
+  it("FN-7487 refuses mixed task artifacts and tracked source scope with zero commits", async () => {
+    const mixedPrompt = `# Task: FN-7487 - Audit and update executor
+
+## Review Level: 0 (None)
+
+## Mission
+Deliver source-free task artifacts if possible, but also update tracked documentation.
+
+## File Scope
+
+- .fusion/tasks/FN-6902/PROMPT.md
+- .fusion/tasks/FN-7487/attachments/fn-6902-spec-compliance.test.mjs
+- docs/testing.md
+
+## Steps
+
+### Step 1: Deliver
+- [x] Work completed.
+
+## Do NOT
+
+- Do not force-add gitignored .fusion/ artifacts.
+- Do not create empty commits or fabricate commits for this source-free delivery.
+`;
+    const { store, tool } = await setup({
+      id: "FN-7487",
+      prompt: mixedPrompt,
+      branch: "fusion/fn-7487",
+      noCommitsExpected: undefined,
+      reviewLevel: 0,
+      steps: [{ name: "Deliver", status: "done" as const }],
+    });
+    mockedExecSync.mockImplementation((cmd: string) => {
+      if (cmd.includes("rev-parse --show-toplevel")) return Buffer.from("/repo/.worktrees/swift-falcon\n");
+      if (cmd.includes("rev-parse --abbrev-ref HEAD")) return Buffer.from("fusion/fn-7487\n");
+      if (cmd.includes("rev-list --count")) return Buffer.from("0\n");
+      if (cmd.includes("rev-parse HEAD")) return Buffer.from("def456\n");
+      return Buffer.from("");
+    });
+
+    const result = await tool.execute("id", { summary: "Saved artifacts and documentation." });
+
+    expect(result.content[0].text).toContain("fn_task_done refused: no_commits");
+    expect(store.moveTask).toHaveBeenCalledWith("FN-7487", "todo", { preserveProgress: true });
+    expect(store.logEntry).not.toHaveBeenCalledWith(
+      "FN-7487",
+      expect.stringContaining("prompt-derived source-free task-artifact contract"),
+      undefined,
+      undefined,
+    );
+  });
+
   it("FN-350 refuses contradictory implementation plus coordination fallback prompts", async () => {
     const prompt = `# Task: FN-350 - Route Ready Swift Tasks to Executor Owner
 

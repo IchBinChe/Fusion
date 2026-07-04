@@ -819,6 +819,11 @@ function extractPromptListEntries(section: string): string[] {
     .filter(Boolean);
 }
 
+function isFusionTaskArtifactScopeEntry(entry: string): boolean {
+  const normalized = entry.trim().toLowerCase().replace(/^<rootdir>\//, "").replace(/^\.\//, "");
+  return normalized.startsWith(".fusion/tasks/");
+}
+
 function isNoSourceScopeEntry(entry: string): boolean {
   const normalized = entry.toLowerCase();
   return (
@@ -827,22 +832,41 @@ function isNoSourceScopeEntry(entry: string): boolean {
     normalized.includes("no code") ||
     normalized.includes("no file mutations") ||
     normalized.includes("task document") ||
+    normalized.includes("task documents") ||
+    normalized.includes("task metadata") ||
     normalized.includes("task log") ||
     normalized.includes("agent log") ||
+    normalized.includes("task artifacts") ||
     normalized.includes("read-only evidence") ||
-    normalized.startsWith(".fusion/tasks/") ||
-    normalized.startsWith("<rootdir>/.fusion/tasks/")
+    isFusionTaskArtifactScopeEntry(normalized)
   );
 }
 
 function hasSourceChangingScopeEntry(entry: string): boolean {
   const normalized = entry.toLowerCase();
   if (!normalized) return false;
-  if (normalized.startsWith(".fusion/tasks/") || normalized.startsWith("<rootdir>/.fusion/tasks/")) return false;
-  if (/\b(source|sources|packages|tests|src|app|scripts|\.changeset)\b/.test(normalized)) return true;
+  if (isFusionTaskArtifactScopeEntry(normalized)) return false;
+  const sourcePathPattern = /(?:^|[\s`'"(])(?:packages|src|source|sources|app|apps|lib|libs|components|scripts|docs|\.github|config|test|tests|__tests__|\.changeset)\//m;
+  if (sourcePathPattern.test(normalized)) return true;
   if (/\.(ts|tsx|js|jsx|mjs|cjs|swift|kt|java|py|rs|go|rb|md|json|ya?ml|toml|css|scss|html)\b/.test(normalized)) return true;
   if (normalized.includes("read-only") || isNoSourceScopeEntry(normalized)) return false;
   return false;
+}
+
+function promptDeclaresSourceFreeTaskArtifactContract(combinedText: string): boolean {
+  const forbidsForceAddingFusionArtifacts = /(?:do not|don't|never|must not)\s+(?:force[- ]?add|git add -f)[^\n]*(?:\.fusion|gitignored)/.test(combinedText)
+    || /(?:\.fusion|gitignored)[^\n]*(?:do not|don't|never|must not)\s+(?:force[- ]?add|git add -f)/.test(combinedText);
+  const forbidsFabricatedCommits = /(?:do not|don't|never|must not)\s+(?:create|make|fabricate|manufacture)[^\n]*(?:empty|fabricated|zero[- ]diff)[^\n]*commits?/.test(combinedText)
+    || /(?:empty|fabricated|zero[- ]diff)[^\n]*commits?[^\n]*(?:do not|don't|never|must not|forbidden)/.test(combinedText);
+  const declaresOnlySourceFreeArtifacts = /(?:source[- ]free|gitignored)[^\n]*(?:task[- ]artifact|task artifact|\.fusion\/tasks|deliver(?:y|able)|artifact)/.test(combinedText)
+    || /(?:only|limited to)[^\n]*(?:source[- ]free|gitignored)[^\n]*(?:task[- ]artifact|task artifact|\.fusion\/tasks)/.test(combinedText);
+  return (forbidsForceAddingFusionArtifacts && forbidsFabricatedCommits) || declaresOnlySourceFreeArtifacts;
+}
+
+function promptScopeIsSourceFreeTaskArtifacts(promptScopeEntries: string[], declaredScope: string[]): boolean {
+  if (promptScopeEntries.length === 0 || declaredScope.length === 0) return false;
+  if (declaredScope.some(hasSourceChangingScopeEntry)) return false;
+  return declaredScope.every((entry) => isFusionTaskArtifactScopeEntry(entry) || isNoSourceScopeEntry(entry));
 }
 
 function getTaskTextForNoCommitEligibility(task: Task, promptContent: string): string {
@@ -857,6 +881,27 @@ function getTaskTextForNoCommitEligibility(task: Task, promptContent: string): s
 
 function evaluatePromptDerivedNoCommitEligibility(task: Task, promptContent: string): { eligible: boolean; reason?: string } {
   const combined = getTaskTextForNoCommitEligibility(task, promptContent).toLowerCase();
+  const promptScopeEntries = extractPromptListEntries(extractPromptSection(promptContent, "File Scope"));
+  const metadataScope = Array.isArray(task.sourceMetadata?.fileScope)
+    ? task.sourceMetadata.fileScope.filter((entry): entry is string => typeof entry === "string")
+    : [];
+  const declaredScope = [...promptScopeEntries, ...metadataScope];
+  const stepsComplete = Array.isArray(task.steps) && task.steps.length > 0
+    ? task.steps.every((step) => step.status === "done" || step.status === "skipped")
+    : false;
+
+  /*
+  FNXC:TaskDoneCompletion 2026-07-03-00:00:
+  Source-free deliveries that only write gitignored `.fusion/tasks/...` task artifacts must not fabricate empty commits or force-add ignored evidence just to satisfy fn_task_done. This exemption is intentionally narrower than Review Level 0/1: the PROMPT must declare a source-free task-artifact contract, every declared scope entry must be board/task artifact only, and any tracked source/docs/config/test/changeset path keeps the no_commits refusal intact.
+  */
+  if (
+    stepsComplete &&
+    promptDeclaresSourceFreeTaskArtifactContract(combined) &&
+    promptScopeIsSourceFreeTaskArtifacts(promptScopeEntries, declaredScope)
+  ) {
+    return { eligible: true, reason: "prompt-derived source-free task-artifact contract" };
+  }
+
   const reviewLevel = typeof task.reviewLevel === "number" ? task.reviewLevel : parseReviewLevelFromPrompt(promptContent);
   const isPlanOnly = reviewLevel === 1 && (/plan\s*only/.test(combined) || combined.includes("plan-only"));
   if (!isPlanOnly) return { eligible: false };
@@ -877,18 +922,10 @@ function evaluatePromptDerivedNoCommitEligibility(task: Task, promptContent: str
   const operationalIntent = /\b(operational|routing|route|assign|assignment|owner|handoff|coordination|coordinate|no-route|triage)\b/.test(combined);
   if (!operationalIntent || excludedImplementationIntent) return { eligible: false };
 
-  const promptScopeEntries = extractPromptListEntries(extractPromptSection(promptContent, "File Scope"));
-  const metadataScope = Array.isArray(task.sourceMetadata?.fileScope)
-    ? task.sourceMetadata.fileScope.filter((entry): entry is string => typeof entry === "string")
-    : [];
-  const declaredScope = [...promptScopeEntries, ...metadataScope];
   if (declaredScope.length === 0) return { eligible: false };
   if (declaredScope.some(hasSourceChangingScopeEntry)) return { eligible: false };
   if (!declaredScope.every(isNoSourceScopeEntry)) return { eligible: false };
 
-  const stepsComplete = Array.isArray(task.steps) && task.steps.length > 0
-    ? task.steps.every((step) => step.status === "done" || step.status === "skipped")
-    : false;
   const logText = (task.log ?? [])
     .map((entry) => `${entry.action ?? ""}\n${entry.outcome ?? ""}`)
     .join("\n")

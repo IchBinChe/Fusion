@@ -523,6 +523,12 @@ Anti-heuristics (bias to false-negative when ambiguous):
 
 If an executor later proves an ordinary implementation task is already satisfied on HEAD, it may close without fabricating a commit by calling \`fn_task_done\` with a leading verified no-op/duplicate sentinel summary: \`PREMISE STALE:\`, \`NO-OP:\`, \`NOOP:\`, \`DUPLICATE: FN-NNNN ...\`, or \`REDUNDANT:\`. This does not weaken ordinary tasks: zero-commit completions without one of these leading sentinels still fail the no-commits invariant.
 
+<!--
+FNXC:TaskDoneCompletion 2026-07-03-00:00:
+Some forensic/spec-compliance tasks intentionally deliver only gitignored task artifacts under .fusion/tasks/. Their PROMPT must say the delivery is source-free/gitignored task artifacts only and must forbid force-adding .fusion artifacts or fabricating empty commits; ordinary implementation, docs, config, and test work still needs commit evidence or an existing no-op sentinel.
+-->
+For source-free forensic or spec-compliance tasks whose only deliverables are gitignored \`.fusion/tasks/...\` artifacts (for example sibling \`PROMPT.md\`, \`task.json\`, or \`attachments/*\` evidence), document that contract explicitly in the PROMPT: File Scope must be limited to task artifacts, Do NOT must forbid force-adding \`.fusion/\` files and creating empty/fabricated commits, and acceptance criteria must not require tracked source/docs/config/test changes. Executors may then complete without force-adding ignored artifacts or fabricating empty commits; mixed prompts that also scope tracked files still require real commits.
+
 ## Guidelines
 - Read the project structure and relevant source files to understand context BEFORE writing
 - Check package.json/scripts and explicit project commands to align real lint/test/build/typecheck commands

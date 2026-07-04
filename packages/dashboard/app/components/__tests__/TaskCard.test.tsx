@@ -2564,6 +2564,79 @@ describe("TaskCard", () => {
     expect(container.querySelector(".card-step-name.active")?.textContent).toBe("Step 1");
   });
 
+  it("shows running Plan Review progress while the task is still in triage", () => {
+    const { container } = render(
+      <TaskCard
+        task={makeTask({
+          column: "triage",
+          status: "planning" as any,
+          steps: [],
+          enabledWorkflowSteps: ["plan-review", "code-review"],
+          workflowStepResults: [
+            {
+              workflowStepId: "plan-review",
+              workflowStepName: "Plan Review",
+              status: "pending",
+              startedAt: "2026-07-04T00:00:00.000Z",
+            },
+          ],
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.getByText("0/2")).toBeDefined();
+    expect(screen.getByText("1 active")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show steps" }));
+
+    expect(container.querySelector(".card-step-name.active")?.textContent).toBe("Plan Review");
+    expect(container.querySelector(".card-step-active-badge")?.textContent).toBe("active");
+    const dots = container.querySelectorAll(".card-step-dot");
+    expect(dots[0]?.className).toContain("card-step-dot--running");
+    expect(dots[0]?.className).not.toContain("card-step-dot--pending");
+  });
+
+  it("does not show a false triage active indicator for enabled-but-not-started Plan Review", () => {
+    const { container } = render(
+      <TaskCard
+        task={makeTask({
+          column: "triage",
+          status: "planning" as any,
+          steps: [],
+          enabledWorkflowSteps: ["plan-review", "code-review"],
+          workflowStepResults: [],
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.queryByText("1 active")).toBeNull();
+    expect(container.querySelector(".card-progress")).toBeNull();
+    expect(container.querySelector(".card-steps-toggle")).toBeNull();
+  });
+
+  it("does not render an empty triage progress shell without workflow progress", () => {
+    const { container } = render(
+      <TaskCard
+        task={makeTask({
+          column: "triage",
+          status: undefined as any,
+          steps: [],
+          enabledWorkflowSteps: undefined,
+          workflowStepResults: undefined,
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    expect(container.querySelector(".card-progress")).toBeNull();
+    expect(container.querySelector(".card-steps-toggle")).toBeNull();
+  });
+
   it("uses singular step label when unified progress total is one", () => {
     render(
       <TaskCard

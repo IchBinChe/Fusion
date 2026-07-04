@@ -1163,8 +1163,13 @@ function TaskCardComponent({
     () => unifiedProgress.items.filter((item) => item.status === "in-progress" || item.status === "running").length,
     [unifiedProgress.items],
   );
+  /*
+  FNXC:TaskCardWorkflowProgress 2026-07-04-09:08:
+  Prompt Reviewer / Plan Review can run before a task leaves Triage. Show the existing card progress affordance when Triage has an actually active unified progress item, but keep enabled-only workflow steps hidden so idle review gates do not create false active indicators or empty progress shells.
+  */
   const showProgressSection =
-    unifiedProgress.total > 0 && (task.status === "executing" || task.column === "in-progress");
+    unifiedProgress.total > 0 &&
+    (task.status === "executing" || task.column === "in-progress" || (task.column === "triage" && activeProgressCount > 0));
 
   useEffect(() => {
     if (task.column !== "in-progress" && task.column !== "in-review") {

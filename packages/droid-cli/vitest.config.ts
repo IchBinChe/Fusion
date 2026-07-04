@@ -5,6 +5,16 @@ import { computeMaxWorkers } from "../core/src/__test-utils__/vitest-workers";
 const maxWorkers = computeMaxWorkers();
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      /*
+      FNXC:PluginTests 2026-07-04-09:30:
+      droid-cli's index.test.ts imports @fusion-plugin-examples/droid-runtime, but without a source alias Vite tries to resolve the package's dist/ exports which don't exist in a source checkout, causing every droid-cli test to fail with 'Failed to resolve entry for package'.
+      */
+      "@fusion-plugin-examples/droid-runtime/probe": resolve(__dirname, "../../plugins/fusion-plugin-droid-runtime/src/probe.ts"),
+      "@fusion-plugin-examples/droid-runtime": resolve(__dirname, "../../plugins/fusion-plugin-droid-runtime/src/index.ts"),
+    },
+  },
   test: {
     globals: true,
     setupFiles: [

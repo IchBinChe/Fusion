@@ -90,6 +90,22 @@ export default defineConfig({
         find: /^@fusion-plugin-examples\/cursor-runtime$/,
         replacement: resolve(__dirname, "../../plugins/fusion-plugin-cursor-runtime/src/index.ts"),
       },
+      /*
+      FNXC:PluginTests 2026-07-04-09:30:
+      The roadmap plugin (@fusion-plugin-examples/roadmap) is imported by the CLI extension. Without source aliases, Vite resolves to the dist/ exports which don't exist in a source checkout.
+      */
+      {
+        find: /^@fusion-plugin-examples\/roadmap\/server$/,
+        replacement: resolve(__dirname, "../../plugins/fusion-plugin-roadmap/src/server/index.ts"),
+      },
+      {
+        find: /^@fusion-plugin-examples\/roadmap\/roadmap-suggestions$/,
+        replacement: resolve(__dirname, "../../plugins/fusion-plugin-roadmap/src/roadmap-suggestions.ts"),
+      },
+      {
+        find: /^@fusion-plugin-examples\/roadmap$/,
+        replacement: resolve(__dirname, "../../plugins/fusion-plugin-roadmap/src/index.ts"),
+      },
       { find: /^@fusion\/test-utils$/, replacement: resolve(__dirname, "../core/src/__test-utils__/workspace.ts") },
     ],
   },

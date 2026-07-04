@@ -1120,6 +1120,7 @@ Inspect task definition, logs, review feedback, comments, artifacts, workflow ou
 - Backstop reconciliation runs every 15 minutes to close tracked GitHub issues for soft-deleted and archived tasks even after restart; the sweep is paginated so large archive backlogs are eventually drained.
 - In shared task edit/create forms, GitHub Tracking appears at the bottom of **More options**, after **Workflow Steps**.
 - From this section you can explicitly enable/disable tracking and manage a per-task repo override (`owner/repo`). Clearing the override saves `null` and falls back to project/global defaults.
+- The **Plan** tab shows the stored **Original prompt** as read-only plain text before the generated `PROMPT.md` content, so the exact task prompt remains visible after planning. Editing or requesting AI revision still applies only to the generated plan.
 - In `in-review`, pull-request controls/status (including stall badges) are in a dedicated **Pull Request** tab instead of the Definition tab.
 - In the task detail **Pull Request** tab, PR numbers open the linked pull request on GitHub when a PR URL is available.
 - Task Detail and list split-pane PR affordances follow the live project auto-merge setting: when auto-merge is off, manual **Create PR** / merge actions are shown; when it is on, the tab shows the automatic auto-merge hint unless a per-task override changes the effective behavior.

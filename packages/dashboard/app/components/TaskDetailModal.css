@@ -2015,13 +2015,37 @@ The desktop table needs a token-scale min-width and non-anywhere model-name wrap
 /*
 FNXC:TaskDetailPlan 2026-06-30-00:00:
 The Plan prompt editor is a task-detail body surface, not a narrow prose inset. Scope full-width guards to the Plan prompt section so modal and embedded cards align markdown, empty fallback, inline edit, and AI revision controls without changing unrelated detail sections.
+
+FNXC:TaskDetailPlan 2026-07-04-00:00:
+The Plan tab must display task.description as the immutable original operator prompt even after PROMPT.md exists. Style the original prompt as plain preserved text, not markdown, and keep the empty state unboxed so absent descriptions do not create a misleading prompt shell.
 */
+.detail-section--original-prompt,
 .detail-section--plan-prompt {
   display: flex;
   flex-direction: column;
   width: 100%;
   min-width: 0;
   max-width: 100%;
+}
+
+.detail-original-prompt-text {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: var(--space-md);
+  border: var(--btn-border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.detail-original-prompt-empty {
+  margin: 0;
+  color: var(--text-muted);
 }
 
 .detail-section--plan-prompt .markdown-body,
@@ -2236,6 +2260,12 @@ The Plan prompt editor is a task-detail body surface, not a narrow prose inset. 
   .detail-section--spec {
     flex: 1;
     min-height: 0;
+  }
+
+  .detail-section--original-prompt,
+  .detail-section--original-prompt .detail-original-prompt-text {
+    min-width: 0;
+    max-width: 100%;
   }
 
   .detail-section--plan-prompt .detail-spec-edit-trigger,

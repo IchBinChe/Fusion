@@ -70,6 +70,19 @@ function getRuleBlock(css: string, selector: string): string {
   return ruleMatch?.[1] ?? "";
 }
 
+function getRuleBlockFromSelectorList(css: string, selector: string): string {
+  const selectorIndex = css.indexOf(selector);
+  if (selectorIndex === -1) {
+    return "";
+  }
+  const ruleStart = css.indexOf("{", selectorIndex);
+  if (ruleStart === -1) {
+    return "";
+  }
+  const ruleEnd = css.indexOf("}", ruleStart);
+  return ruleEnd === -1 ? "" : css.slice(ruleStart + 1, ruleEnd);
+}
+
 describe("TaskDetailModal", () => {
   describe("source issue metadata", () => {
     beforeEach(() => {
@@ -386,6 +399,118 @@ describe("TaskDetailModal", () => {
         expect(addToast).toHaveBeenCalledWith("Failed to update FN-001: source patch failed", "error");
       });
       expect(container.querySelector("#task-form-title")).toBeTruthy();
+    });
+  });
+
+  describe("Plan tab original prompt", () => {
+    it("shows the exact original prompt beside the generated plan in the modal", () => {
+      const originalPrompt = "Exact user prompt\nwith **markdown** and `code`\n```ts\nconst answer = 42;\n```\nhttps://example.com/task";
+      const generatedPrompt = "# FN-TEST\n\n## Mission\nGenerated plan";
+      const { container } = render(
+        <TaskDetailModal
+          initialTab="definition"
+          task={makeTask({
+            id: "FN-TEST",
+            title: "Title must not replace description",
+            description: originalPrompt,
+            prompt: generatedPrompt,
+          })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      expect(screen.getByRole("heading", { name: "Original prompt" })).toBeTruthy();
+      const originalPromptNode = screen.getByTestId("task-detail-original-prompt");
+      expect(originalPromptNode.textContent).toBe(originalPrompt);
+      expect(originalPromptNode.innerHTML).toContain("**markdown**");
+      expect(originalPromptNode.querySelector("strong, code, pre, a")).toBeNull();
+      expect(screen.getByRole("heading", { name: "Mission" })).toBeTruthy();
+      expect(screen.getByText("Generated plan")).toBeTruthy();
+
+      const originalSection = container.querySelector(".detail-section--original-prompt");
+      const planSection = container.querySelector(".detail-section--plan-prompt");
+      expect(originalSection?.contains(screen.getByText("Original prompt"))).toBe(true);
+      expect(planSection?.contains(screen.getByRole("button", { name: "Edit" }))).toBe(true);
+      expect(originalSection?.contains(screen.getByRole("button", { name: "Edit" }))).toBe(false);
+      expect(originalPromptNode.textContent).not.toBe("Title must not replace description");
+    });
+
+    it("renders a non-boxed empty fallback without hiding the generated plan", () => {
+      const { container } = render(
+        <TaskDetailModal
+          initialTab="definition"
+          task={makeTask({
+            id: "FN-EMPTY",
+            description: "   \n\t ",
+            prompt: "# FN-EMPTY\n\n## Mission\nGenerated plan still visible",
+          })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      expect(screen.getByText("No original prompt recorded.")).toBeTruthy();
+      expect(screen.queryByTestId("task-detail-original-prompt")).toBeNull();
+      expect(container.querySelector(".detail-section--original-prompt .detail-original-prompt-text")).toBeNull();
+      expect(screen.getByText("Generated plan still visible")).toBeTruthy();
+    });
+
+    it("shows the same original prompt section in embedded task detail content", () => {
+      const originalPrompt = "Embedded prompt\nwith a second line";
+      const { container } = render(
+        <TaskDetailContent
+          embedded
+          initialTab="definition"
+          task={makeTask({
+            id: "FN-EMBED",
+            description: originalPrompt,
+            prompt: "# FN-EMBED\n\n## Mission\nEmbedded generated plan",
+          })}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      expect(container.querySelector(".task-detail-content--embedded")).toBeTruthy();
+      expect(screen.getByTestId("task-detail-original-prompt").textContent).toBe(originalPrompt);
+      expect(screen.getByText("Embedded generated plan")).toBeTruthy();
+    });
+
+    it("applies wrapping and mobile CSS contracts to the original prompt section", () => {
+      const css = readDashboardStylesSource();
+      const promptTextBlock = getRuleBlock(css, ".detail-original-prompt-text");
+      const emptyBlock = getRuleBlock(css, ".detail-original-prompt-empty");
+      const mobileBlock = getMediaBlocks(css, "@media (max-width: 768px)").find((block) =>
+        block.includes(".detail-section--original-prompt"),
+      ) ?? "";
+
+      expect(css).toContain(".detail-section--original-prompt,\n.detail-section--plan-prompt");
+      expect(promptTextBlock).toContain("box-sizing: border-box;");
+      expect(promptTextBlock).toContain("width: 100%;");
+      expect(promptTextBlock).toContain("min-width: 0;");
+      expect(promptTextBlock).toContain("max-width: 100%;");
+      expect(promptTextBlock).toContain("padding: var(--space-md);");
+      expect(promptTextBlock).toContain("border: var(--btn-border-width) solid var(--border);");
+      expect(promptTextBlock).toContain("white-space: pre-wrap;");
+      expect(promptTextBlock).toContain("overflow-wrap: anywhere;");
+      expect(promptTextBlock).not.toMatch(/#[0-9a-fA-F]{3,8}|rgb\(/);
+      expect(emptyBlock).toContain("margin: 0;");
+      expect(emptyBlock).toContain("color: var(--text-muted);");
+      expect(mobileBlock).toContain(".detail-section--original-prompt,");
+      expect(mobileBlock).toContain(".detail-section--original-prompt .detail-original-prompt-text");
+      expect(mobileBlock).toContain("max-width: 100%;");
     });
   });
 
@@ -2810,7 +2935,7 @@ describe("TaskDetailModal", () => {
       const mobileCss = getMediaBlocks(css, "@media (max-width: 768px)").join("\n");
       const enableRule = getRuleBlock(mobileCss, ".detail-github-tracking-enable");
       const headerRule = getRuleBlock(mobileCss, ".detail-source-header");
-      const githubSummaryRule = getRuleBlock(mobileCss, ".detail-github-tracking-section .detail-source-summary");
+      const githubSummaryRule = getRuleBlockFromSelectorList(mobileCss, ".detail-github-tracking-section .detail-source-summary");
       const sourceSummaryRule = getRuleBlock(mobileCss, ".detail-source-section .detail-source-summary");
 
       expect(mobileCss).toBeTruthy();

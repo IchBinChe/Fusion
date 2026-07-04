@@ -667,6 +667,8 @@ export function TaskDetailContent({
         : task.overlapBlockedBy === undefined ? fullDetail.overlapBlockedBy : task.overlapBlockedBy,
     } as TaskDetail)
     : ({ ...task, prompt: "" } as TaskDetail);
+  const originalTaskPrompt = workingTask.description ?? "";
+  const hasOriginalTaskPrompt = originalTaskPrompt.trim().length > 0;
   /*
   FNXC:WorkflowStepResults 2026-06-26-18:00:
   The detail Progress bar must show a segment for each ENABLED workflow step, not only
@@ -4269,6 +4271,22 @@ export function TaskDetailContent({
               </div>
             ) : (
               <div className="step-progress-empty">{t("taskDetail.progress.noSteps", "(no steps defined)")}</div>
+            )}
+          </div>
+          <div className="detail-section detail-section--original-prompt">
+            {/**
+             * FNXC:TaskDetailPlan 2026-07-04-00:00:
+             * Operators need the exact prompt they entered to stay visible after planning generates PROMPT.md. Keep this section read-only and backed by task.description so PROMPT.md editing/revision controls cannot imply they mutate the original request.
+             */}
+            <h4>{t("taskDetail.originalPrompt.heading", "Original prompt")}</h4>
+            {hasOriginalTaskPrompt ? (
+              <div className="detail-original-prompt-text" data-testid="task-detail-original-prompt">
+                {originalTaskPrompt}
+              </div>
+            ) : (
+              <p className="detail-original-prompt-empty">
+                {t("taskDetail.originalPrompt.empty", "No original prompt recorded.")}
+              </p>
             )}
           </div>
           <div className="detail-section detail-section--plan-prompt">

@@ -42,7 +42,11 @@ const quarantinedCliTests: string[] = [
 
   FNXC:CliTests 2026-06-27-10:05:
   FN-7119 re-ran extension.test.ts twice with the exclude removed and the fn_delegate_task null-target symptom no longer reproduces at HEAD. Keep this list empty so delegate-task validation coverage stays active in the package lane.
+
+  FNXC:CliTests 2026-07-04-10:40:
+  FN-7447 re-quarantines extension.test.ts after its built-dist-barrel fn_task_list test (line ~3084) timed out at 5000ms in full-suite shard 4/4 (run 28697507894) while passing locally at ~1.2s and in 3 of the 4 surrounding CI runs. The root-cause invariant is the loaded-lane signature: in-test dist-barrel recompilation (vi.resetModules + vi.importActual of the full @fusion/core dist barrel + a fresh dynamic import of extension.js) inside the default 5s timeout is CPU-bound and degrades non-linearly under 4-shard CI contention. This is the same signature rescued in FN-6483/FN-6705/FN-6795/FN-6839; widening the timeout is forbidden by the flaky-test rule and removing the recompilation removes the test's only purpose, so the file is excluded per the deletion ratchet rather than re-attempting a fifth fixture rescue. Mirrors scripts/lib/test-quarantine.json; collateral is the ~68 otherwise-stable tests in this file, recoverable via rescue before the 2026-07-18 deletion deadline.
   */
+  "src/__tests__/extension.test.ts",
 ];
 
 export default defineConfig({

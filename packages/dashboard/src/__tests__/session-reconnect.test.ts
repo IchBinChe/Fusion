@@ -11,7 +11,12 @@ import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { Database, TaskStore } from "@fusion/core";
+import {
+  Database,
+  TaskStore,
+  PLANNING_DEEPEN_CHECKPOINT_ID,
+  PLANNING_DEEPEN_PROCEED_OPTION_ID,
+} from "@fusion/core";
 import { createApiRoutes } from "../routes.js";
 import { request, get } from "../test-request.js";
 import { AiSessionStore, type AiSessionRow } from "../ai-session-store.js";
@@ -205,7 +210,15 @@ describe("session reconnect + replay", () => {
     const { sessionId } = await createSession("127.0.0.11", "Build reconnect tests", store, "/tmp/project");
     await submitResponse(sessionId, { "q-1": "medium" }, "/tmp/project");
     await submitResponse(sessionId, { "q-2": "none" }, "/tmp/project");
-
+    /*
+    FNXC:DashboardSessionTests 2026-07-04-10:30:
+    FN-7444 holds the completed planning summary behind a mandatory deepening checkpoint before finalization. The agent's third response returns a "complete" payload, which now sets a pending summary plus checkpoint question instead of finalizing. Respond with the reserved proceed option so finalizePendingSummary runs, session.summary is set, and the summary/complete events are buffered for SSE replay.
+    */
+    await submitResponse(
+      sessionId,
+      { [PLANNING_DEEPEN_CHECKPOINT_ID]: [PLANNING_DEEPEN_PROCEED_OPTION_ID] },
+      "/tmp/project",
+    );
     const firstStream = await get(app, `/api/planning/${sessionId}/stream?lastEventId=0`);
     expect(firstStream.status).toBe(200);
     const firstBody = String(firstStream.body);

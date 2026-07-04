@@ -1,4 +1,10 @@
 {
   "$comment": "Flaky-test quarantine ledger (deletion ratchet — see AGENTS.md 'Flaky tests: quarantine on sight' and docs/testing.md 'Quarantine ledger and the deletion ratchet'). A test observed failing without a corresponding real bug is quarantined ON SIGHT: add an entry here AND a matching one-line `exclude` entry in that package's vitest config, in the same commit. Every entry needs a non-empty `reason` (link the failing run) and a `quarantinedAt` date — the entry expires 14 days later, at which point the test file is DELETED unless someone rescues it with evidence it catches real regressions plus a root-cause fix (never appeasement). There is deliberately no loader module and no automation around this file: it is a dated record, the vitest config exclude is the mechanism, and the sweep is policy executed by whoever touches the suite.",
-  "entries": []
+  "entries": [
+    {
+      "file": "packages/cli/src/__tests__/extension.test.ts",
+      "reason": "Loaded-lane CI timeout: the dist-barrel fn_task_list test (extension.test.ts line ~3084) timed out at 5000ms in the full-suite shard 4/4 while passing locally in ~1.2s and in 3 of the 4 surrounding CI runs. Root-cause invariant: the test does in-test module recompilation (vi.resetModules + vi.importActual of the full @fusion/core dist barrel + a fresh dynamic import of extension.js) inside the default 5s test timeout; that work is CPU-bound and degrades non-linearly under 4-shard CI contention. This is the same loaded-lane signature rescued in FN-6483/FN-6705/FN-6795/FN-6839; widening the timeout is forbidden by the flaky-test rule and removing the recompilation removes the test's only purpose. The sibling source-@fusion/core test 'bounds large column-filtered listings' covers the identical truncation invariant, so the dist-barrel slice's marginal coverage is dist-resolution, which has been stable. Collateral: file-granular exclude also drops ~68 otherwise-stable tests in this file until a rescue. Failing run: https://github.com/Runfusion/Fusion/actions/runs/28697507894 (Test shard 4/4).",
+      "quarantinedAt": "2026-07-04"
+    }
+  ]
 }

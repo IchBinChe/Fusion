@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
 /*
@@ -26,7 +26,6 @@ import kbExtension, { closeCachedStores, resolveTaskListFormatter } from "../ext
 import { TaskStore, AgentStore, MANUAL_RETRY_RESET_COUNTER_KEYS, RESEARCH_RUN_STATUSES, MAX_TASK_LIST_TEXT_CHARS, formatTaskListText, COLUMN_LABELS } from "@fusion/core";
 import type { WorkflowIr } from "@fusion/core";
 import { isGhAvailable, isGhAuthenticated, runGhJsonAsync } from "@fusion/core/gh-cli";
-import { hasBuiltCoreDistBarrel } from "@fusion/test-utils";
 import { runTaskPlan } from "../commands/task.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -3024,6 +3023,10 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       expect(result.details.count).toBe(15);
     });
 
+    /*
+    FNXC:CliTests 2026-07-04-13:50:
+    FN-7530 split the sibling "executes with @fusion/core resolved through the built dist barrel" case (formerly directly below this test) into packages/cli/src/__tests__/extension-dist-barrel.test.ts. That test's own in-test dist-barrel recompilation (vi.resetModules + vi.importActual of the built @fusion/core dist barrel) is CPU-bound and timeout-prone under 4-shard CI contention (FN-6483/FN-6705/FN-6795/FN-6839/FN-7447 same signature); isolating it kept the ~68 stable tests in this file on the default lane while only the isolated file carries its own quarantine entry. This test covers the identical truncation invariant against the source-aliased @fusion/core.
+    */
     it("bounds large column-filtered listings as a single plain-text block", async () => {
       const store = createStore();
       await store.init();
@@ -3067,100 +3070,6 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       expect(text).toContain("truncated to fit; narrow with column/limit");
       expect(result.details.count).toBe(20);
     });
-
-    /**
-     * FNXC:TaskListOutput 2026-06-17-02:37:
-     * FN-6535 reproduces the heartbeat failure at the actual CLI tool surface while forcing @fusion/core to resolve through the built dist barrel. The normal CLI suite aliases @fusion/core to source, so this targeted mock is the regression guard for stale exports.import dist artifacts.
-     *
-     * FNXC:CoreTests 2026-06-18-01:35:
-     * FN-6627 aligns the skip gate with every built @fusion/core dist artifact this runtime-dist mock loads, so a partial stale dist skips cleanly while a complete dist still exercises the heartbeat fn_task_list surface.
-     *
-     * FNXC:CliTests 2026-06-19-11:17:
-     * FN-6734 keeps this guard in the default 5s lane by preserving the runtime-dist truncation invariant with fewer fixture writes instead of appeasing timeouts or reducing workers.
-     *
-     * FNXC:CliTests 2026-06-19-13:16:
-     * The full CLI affected lane runs this file beside many module-mocking suites; verify the built barrel is importable in the executing worker before installing the mock, then skip like the partial-dist gate if a concurrent lane observes stale dist artifacts.
-     */
-    it.skipIf(!hasBuiltCoreDistBarrel(resolve(__dirname, "../../../core/dist")))(
-      "executes with @fusion/core resolved through the built dist barrel",
-      async () => {
-        const distCoreIndex = resolve(__dirname, "../../../core/dist/index.js");
-
-        const store = createStore();
-        await store.init();
-        try {
-          const first = await store.createTask({
-            title: `Runtime-dist todo task 001 ${"x".repeat(300)}`,
-            description: "Runtime-dist todo task 001",
-            column: "todo",
-          });
-          for (let i = 2; i <= 20; i += 1) {
-            await store.createTask({
-              title: `Runtime-dist todo task ${String(i).padStart(3, "0")} ${"x".repeat(300)}`,
-              description: `Runtime-dist todo task ${String(i).padStart(3, "0")}`,
-              column: "todo",
-              dependencies: [first.id],
-            });
-          }
-        } finally {
-          await store.close();
-        }
-
-        vi.resetModules();
-        const distCoreUrl = pathToFileURL(distCoreIndex).href;
-        let distCoreModule: typeof import("@fusion/core");
-        try {
-          distCoreModule = await vi.importActual<typeof import("@fusion/core")>(distCoreUrl);
-        } catch (error) {
-          const code = error instanceof Error && "code" in error ? (error as Error & { code?: string }).code : undefined;
-          if (code === "ERR_MODULE_NOT_FOUND") {
-            return;
-          }
-          throw error;
-        }
-        vi.doMock("@fusion/core", () => distCoreModule);
-        try {
-          const { default: runtimeCoreExtension } = await import("../extension.js?fn6535-runtime-core-dist");
-          const runtimeApi = createMockAPI();
-          runtimeCoreExtension(runtimeApi);
-          const listTool = runtimeApi.tools.get("fn_task_list")!;
-
-          const broadResult = await listTool.execute(
-            "list-runtime-dist-broad",
-            { limit: 20 },
-            undefined,
-            undefined,
-            makeCtx(tmpDir),
-          );
-          const broadText = broadResult.content[0].text;
-          expect(broadResult.content).toHaveLength(1);
-          expect(broadResult.content[0].type).toBe("text");
-          expect(broadText.length).toBeLessThanOrEqual(MAX_TASK_LIST_TEXT_CHARS);
-          expect(broadText).toContain("Todo (20):");
-          expect(broadText).toContain("truncated to fit; narrow with column/limit");
-
-          const todoResult = await listTool.execute(
-            "list-runtime-dist-todo",
-            { column: "todo", limit: 20 },
-            undefined,
-            undefined,
-            makeCtx(tmpDir),
-          );
-          const todoText = todoResult.content[0].text;
-          expect(todoResult.content).toHaveLength(1);
-          expect(todoResult.content[0].type).toBe("text");
-          expect(todoText.length).toBeLessThanOrEqual(MAX_TASK_LIST_TEXT_CHARS);
-          expect(todoText).toContain("Todo (20):");
-          expect(todoText).toContain("FN-001");
-          expect(todoText).toContain("[deps: FN-001]");
-          expect(todoText).toContain("truncated to fit; narrow with column/limit");
-          expect(todoResult.details.count).toBe(20);
-        } finally {
-          vi.doUnmock("@fusion/core");
-          vi.resetModules();
-        }
-      },
-    );
 
     it("degrades to bounded text when formatter exports are unavailable", () => {
       const boardLinesWithoutParams = [

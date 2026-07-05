@@ -2296,7 +2296,7 @@ FNXC:TaskDetailPlan 2026-06-30-00:00:
 The Plan prompt editor is a task-detail body surface, not a narrow prose inset. Scope full-width guards to the Plan prompt section so modal and embedded cards align markdown, empty fallback, inline edit, and AI revision controls without changing unrelated detail sections.
 
 FNXC:TaskDetailPlan 2026-07-04-00:00:
-The Plan tab must display task.description as the immutable original operator prompt even after PROMPT.md exists. Style the original prompt as plain preserved text, not markdown, and keep the empty state unboxed so absent descriptions do not create a misleading prompt shell.
+The original operator prompt is now rendered as Markdown (shared PROMPT.md renderer) and collapsed by default behind a chevron toggle, superseding the earlier plain-preserved-text rule. It reuses the .detail-source-header/.detail-source-toggle collapsible pattern already used for GitLab tracking/retries, and shares the .detail-section--plan-prompt markdown width/wrapping contract so expanded content never overflows. The empty state stays unboxed and toggle-free so absent descriptions do not create a misleading prompt shell.
 */
 .detail-section--original-prompt,
 .detail-section--plan-prompt {
@@ -2307,18 +2307,11 @@ The Plan tab must display task.description as the immutable original operator pr
   max-width: 100%;
 }
 
-.detail-original-prompt-text {
+.detail-section--original-prompt .markdown-body {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  padding: var(--space-md);
-  border: var(--btn-border-width) solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-  color: var(--text);
-  line-height: 1.6;
-  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
@@ -2542,7 +2535,7 @@ The Plan tab must display task.description as the immutable original operator pr
   }
 
   .detail-section--original-prompt,
-  .detail-section--original-prompt .detail-original-prompt-text {
+  .detail-section--original-prompt .markdown-body {
     min-width: 0;
     max-width: 100%;
   }

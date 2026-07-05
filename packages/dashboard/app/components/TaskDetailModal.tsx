@@ -1059,6 +1059,8 @@ export function TaskDetailContent({
   const [sourceIssueExpanded, setSourceIssueExpanded] = useState(false);
   const [retriesExpanded, setRetriesExpanded] = useState(initialTab === "retries");
   const [gitlabTrackingExpanded, setGitlabTrackingExpanded] = useState(false);
+  // FNXC:TaskDetailPlan 2026-07-04-00:00: Original prompt is collapsed by default (see render site below); operator must click the chevron toggle to reveal the markdown-rendered text.
+  const [originalPromptExpanded, setOriginalPromptExpanded] = useState(false);
   const [githubTrackingExpanded, setGithubTrackingExpanded] = useState(false);
   const [githubRepoOverrideDraft, setGithubRepoOverrideDraft] = useState(task.githubTracking?.repoOverride ?? "");
   const [githubTrackingEnabledDraft, setGithubTrackingEnabledDraft] = useState<boolean | null>(null);
@@ -4686,12 +4688,32 @@ export function TaskDetailContent({
             {/**
              * FNXC:TaskDetailPlan 2026-07-04-00:00:
              * Operators need the exact prompt they entered to stay visible after planning generates PROMPT.md. Keep this section read-only and backed by task.description so PROMPT.md editing/revision controls cannot imply they mutate the original request.
+             *
+             * FNXC:TaskDetailPlan 2026-07-04-00:00:
+             * The original operator prompt is now rendered as Markdown (shared PROMPT.md renderer) and collapsed by default behind a chevron toggle, superseding the earlier plain-preserved-text rule. It remains read-only and backed by task.description; the generated PROMPT.md editor/revision flow is unaffected. The toggle only renders when there is content — the empty fallback never shows a chevron.
              */}
-            <h4>{t("taskDetail.originalPrompt.heading", "Original prompt")}</h4>
+            <div className="detail-source-header">
+              <h4>{t("taskDetail.originalPrompt.heading", "Original prompt")}</h4>
+              {hasOriginalTaskPrompt && (
+                <button
+                  type="button"
+                  className="detail-source-toggle"
+                  aria-expanded={originalPromptExpanded}
+                  aria-label={originalPromptExpanded ? t("taskDetail.originalPrompt.collapse", "Collapse original prompt") : t("taskDetail.originalPrompt.expand", "Expand original prompt")}
+                  onClick={() => setOriginalPromptExpanded((expanded) => !expanded)}
+                >
+                  <ChevronRight size={16} className={originalPromptExpanded ? "detail-source-chevron--expanded" : undefined} />
+                </button>
+              )}
+            </div>
             {hasOriginalTaskPrompt ? (
-              <div className="detail-original-prompt-text" data-testid="task-detail-original-prompt">
-                {originalTaskPrompt}
-              </div>
+              originalPromptExpanded && (
+                <div className="markdown-body" data-testid="task-detail-original-prompt">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={sharedRehypePlugins} components={markdownLinkifyComponents}>
+                    {originalTaskPrompt}
+                  </ReactMarkdown>
+                </div>
+              )
             ) : (
               <p className="detail-original-prompt-empty">
                 {t("taskDetail.originalPrompt.empty", "No original prompt recorded.")}

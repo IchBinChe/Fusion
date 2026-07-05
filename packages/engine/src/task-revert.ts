@@ -11,8 +11,24 @@
  *
  * This is the git path ONLY. Conflicting reverts are handed back to the
  * caller/UI unresolved — the AI-undo fallback is sibling task FN-7524, and the
- * UI affordance is sibling task FN-7525. Multi-repo workspace-task revert is
- * out of scope here (see `resolveTaskRevertCommits`'s workspace guard).
+ * UI affordance is sibling task FN-7525.
+ *
+ * FNXC:TaskRevert 2026-07-04-00:00 (FN-7547 — workspace/multi-repo support):
+ * Workspace tasks (`task.workspaceWorktrees` populated, see `isWorkspaceTask`)
+ * land squash commits across MULTIPLE sub-repo integration branches. This
+ * module reasons about the WHOLE task's revert as one ALL-OR-NOTHING unit:
+ * `resolveWorkspaceTaskRevertCommits` resolves per-repo attribution,
+ * `revertWorkspaceTask` dry-run classifies EVERY sub-repo first and only
+ * commits a revert on ANY sub-repo when EVERY acquired sub-repo classifies
+ * clean/already-reverted. If any sub-repo conflicts, NO sub-repo is committed
+ * and every touched sub-repo worktree is rolled back byte-identical to its
+ * pre-call state — see `revertWorkspaceTask`'s doc comment for the full
+ * contract. The single-repo path below (`resolveTaskRevertCommits` /
+ * `classifyTaskRevert` / `performTaskRevert`) is UNCHANGED and continues to
+ * serve non-workspace tasks; `revertWorkspaceTask` reuses its dry-run
+ * (`classifyTaskRevert`) and apply/commit (`applyAndCommitRevert`) machinery
+ * per sub-repo rather than duplicating it. `granularity` (FN-7548, below)
+ * only applies to the single-repo path.
  *
  * Safety invariant (the core contract of this module): the working tree and
  * index are NEVER left dirty on any failure path. `classifyTaskRevert` always
@@ -21,8 +37,11 @@
  * `finally` block, regardless of how the dry-run terminates.
  */
 import { exec } from "node:child_process";
+import { join } from "node:path";
 import { promisify } from "node:util";
-import type { Task, TaskCommitAssociation, TaskCreateInput } from "@fusion/core";
+import { isWorkspaceTask, type Task, type TaskCommitAssociation, type TaskCreateInput } from "@fusion/core";
+import { collectOwnTaskCommitsForRange } from "./branch-attribution.js";
+import { resolveIntegrationBranch, type IntegrationBranchSettings } from "./integration-branch.js";
 
 const defaultExecAsync = promisify(exec);
 type ExecAsyncImpl = typeof defaultExecAsync;
@@ -433,7 +452,7 @@ export type TaskRevertResult =
 export type TaskRevertGranularity = "squash" | "per-sha";
 
 export interface PerformTaskRevertOptions {
-  task: Pick<Task, "id" | "lineageId" | "column" | "mergeDetails" | "autoMerge" | "userPaused" | "paused">;
+  task: Pick<Task, "id" | "lineageId" | "column" | "mergeDetails" | "autoMerge" | "userPaused" | "paused" | "workspaceWorktrees">;
   worktreePath: string;
   baseBranch: string;
   execAsyncImpl?: ExecAsyncImpl;
@@ -476,6 +495,16 @@ export async function performTaskRevert(opts: PerformTaskRevertOptions): Promise
   // parameter (not silently dropped) for FN-7524/FN-7525 call-site clarity.
   const { task, worktreePath, baseBranch: _baseBranch } = opts;
   const execImpl = opts.execAsyncImpl ?? defaultExecAsync;
+
+  // FNXC:TaskRevert 2026-07-04-00:00 (FN-7547 dispatch guard): this function
+  // is the single-repo entry point ONLY. Workspace tasks (`isWorkspaceTask`)
+  // must be routed by the caller to `revertWorkspaceTask` instead — refuse
+  // explicitly here (rather than silently reverting one arbitrary sub-repo)
+  // so a caller that forgets to check `isWorkspaceTask` first gets a clear
+  // signal instead of a half-coherent single-repo revert.
+  if (isWorkspaceTask(task)) {
+    return { mode: "git", unsupported: true, reason: "workspace-task-revert-unsupported-by-single-repo-path; use revertWorkspaceTask" };
+  }
 
   if (!REVERTABLE_COLUMNS.has(task.column)) {
     return { mode: "git", needsHuman: true, reason: `task is in column "${task.column}"; only done/archived tasks are revertable` };
@@ -629,6 +658,417 @@ export async function performTaskRevert(opts: PerformTaskRevertOptions): Promise
     }
     throw error instanceof TaskRevertError ? error : new TaskRevertError("failed to apply revert commit", "revert-apply-failed", error);
   }
+}
+
+// ---------------------------------------------------------------------------
+// FN-7547: workspace/multi-repo task revert support.
+// ---------------------------------------------------------------------------
+
+/**
+ * FNXC:TaskRevert 2026-07-04-00:00 (extracted for FN-7547 reuse):
+ * The squash-granularity apply+commit phase, factored out so the workspace
+ * multi-repo path (`revertWorkspaceTask`) can run the IDENTICAL single-repo
+ * apply/commit machinery once per sub-repo, keeping the commit message/trailer
+ * contract and the live-conflict-during-apply rollback identical between the
+ * single-repo and workspace paths. Built on the same `applyRevertNoCommit`
+ * shared primitive `performTaskRevert`'s squash branch uses above — it is NOT
+ * a second reimplementation. Callers MUST have already run `classifyTaskRevert`
+ * and confirmed "clean" for these `commits` — this function does not
+ * re-classify; it assumes the dry-run already proved the revert applies
+ * cleanly and only guards against the branch moving between classify and
+ * apply (a live conflict here rolls back THIS repo/worktree only — the caller
+ * is responsible for any cross-repo rollback in the workspace all-or-nothing
+ * contract). `granularity` (FN-7548) does not apply to the workspace path;
+ * this always produces one commit per sub-repo.
+ */
+async function applyAndCommitRevert(opts: {
+  worktreePath: string;
+  /** Attributable commit SHAs, newest first. */
+  commits: string[];
+  taskId: string;
+  execAsyncImpl?: ExecAsyncImpl;
+}): Promise<
+  | { applied: true; revertCommitSha: string }
+  | { applied: false; alreadyReverted: true }
+  | { applied: false; conflicts: TaskRevertConflict[] }
+> {
+  const { worktreePath, commits, taskId } = opts;
+  const execImpl = opts.execAsyncImpl ?? defaultExecAsync;
+
+  let preRevertHead: string;
+  try {
+    const { stdout } = await runGit(execImpl, "git rev-parse HEAD", worktreePath);
+    preRevertHead = stdout.trim();
+  } catch (error) {
+    throw new TaskRevertError("failed to resolve HEAD before applying revert", "head-resolve-failed", error);
+  }
+
+  let mutated = false;
+  let anyStaged = false;
+  try {
+    for (const sha of commits) {
+      mutated = true;
+      const outcome = await applyRevertNoCommit(execImpl, worktreePath, sha);
+      if (outcome.kind === "conflict") {
+        await runGit(execImpl, "git revert --abort", worktreePath).catch(() => undefined);
+        await runGit(execImpl, `git reset --hard ${quoteShellArg(preRevertHead)}`, worktreePath).catch(() => undefined);
+        return { applied: false, conflicts: outcome.conflicts };
+      }
+      if (outcome.kind === "staged") anyStaged = true;
+    }
+
+    if (!anyStaged) {
+      // Defensive: every sha in this batch turned out to be a no-op during the
+      // apply pass even though classify saw at least one real change (branch
+      // moved between classify and apply, or a race). Nothing to commit —
+      // report already-reverted rather than attempting an empty commit.
+      return { applied: false, alreadyReverted: true };
+    }
+
+    let originalSubject = "";
+    try {
+      const { stdout } = await runGit(execImpl, `git log -1 --format=%s ${quoteShellArg(commits[0] ?? "HEAD")}`, worktreePath);
+      originalSubject = stdout.trim();
+    } catch {
+      originalSubject = "";
+    }
+
+    const shortSummary = deriveShortSummary(originalSubject);
+    const subject = `revert(${taskId}): ${shortSummary}`;
+    const referencedSha = commits[0] ?? "unknown";
+    const body1 = `Fusion-Task-Id: ${taskId}`;
+    const body2 = `Reverts work landed by task ${taskId} (${originalSubject || referencedSha} @ ${referencedSha.slice(0, 8)}).`;
+
+    await runGit(
+      execImpl,
+      `git commit -m ${quoteShellArg(subject)} -m ${quoteShellArg(body1)} -m ${quoteShellArg(body2)}`,
+      worktreePath,
+    );
+
+    const { stdout: newHead } = await runGit(execImpl, "git rev-parse HEAD", worktreePath);
+    return { applied: true, revertCommitSha: newHead.trim() };
+  } catch (error) {
+    if (mutated) {
+      await runGit(execImpl, "git revert --abort", worktreePath).catch(() => undefined);
+      await runGit(execImpl, `git reset --hard ${quoteShellArg(preRevertHead)}`, worktreePath).catch(() => undefined);
+    }
+    throw error instanceof TaskRevertError ? error : new TaskRevertError("failed to apply revert commit", "revert-apply-failed", error);
+  }
+}
+
+export interface WorkspaceRepoRevertCommits {
+  commits: string[];
+  source: TaskRevertCommitSource;
+}
+
+export interface ResolveWorkspaceTaskRevertCommitsOptions {
+  workspaceRootDir: string;
+  execAsyncImpl?: ExecAsyncImpl;
+  /** Lineage-snapshot fallback source (typically the scoped TaskStore). */
+  commitAssociationSource?: TaskCommitAssociationSource;
+}
+
+/**
+ * FNXC:TaskRevert 2026-07-04-00:00 (FN-7547 per-repo attribution):
+ * Resolves the attributable commit(s) for EACH sub-repo of a workspace task,
+ * keyed by repo-relative path, iterating `Object.keys(task.workspaceWorktrees)
+ * .sort()` for the SAME deterministic order `landWorkspaceTask`/self-healing
+ * use (KTD1) — this determinism matters because Step 2/3's all-or-nothing
+ * commit ordering depends on a stable, reproducible repo iteration order.
+ *
+ * Precedence per sub-repo (mirrors the single-repo precedence in
+ * `resolveTaskRevertCommits`, adapted to the workspace land model where each
+ * sub-repo has its own representative squash sha rather than one task-wide
+ * `mergeDetails.commitSha`):
+ *   1. Squash — `mergeDetails.workspaceLandedShas[repoRel]` alone, when the
+ *      sub-repo's `workspaceWorktrees[repoRel].baseCommitSha` is unset (the
+ *      representative squash sha landed the entire sub-repo's contribution).
+ *   2. Rebase/range — when `baseCommitSha` IS set, filter the range
+ *      `baseCommitSha..landedSha` to this task's own commits via
+ *      `collectOwnTaskCommitsForRange` (shared with branch-attribution.ts),
+ *      falling back to the range endpoint (`landedSha`) when no per-commit
+ *      attribution is possible.
+ *   3. Lineage snapshot fallback — `TaskCommitAssociation` rows keyed by
+ *      `taskLineageId`, filtered to commits that are reachable in THIS
+ *      sub-repo (`git cat-file -e <sha>`) — a lineage snapshot is task-wide,
+ *      not per-repo, so it must be filtered per sub-repo to avoid attributing
+ *      another sub-repo's commit here.
+ */
+export async function resolveWorkspaceTaskRevertCommits(
+  task: Pick<Task, "id" | "lineageId" | "mergeDetails" | "workspaceWorktrees">,
+  opts: ResolveWorkspaceTaskRevertCommitsOptions,
+): Promise<Record<string, WorkspaceRepoRevertCommits>> {
+  const execImpl = opts.execAsyncImpl ?? defaultExecAsync;
+  const workspaceWorktrees = task.workspaceWorktrees ?? {};
+  const repoKeys = Object.keys(workspaceWorktrees).sort();
+  const workspaceLandedShas = task.mergeDetails?.workspaceLandedShas ?? {};
+
+  const result: Record<string, WorkspaceRepoRevertCommits> = {};
+
+  for (const repoRel of repoKeys) {
+    const entry = workspaceWorktrees[repoRel];
+    const repoRootDir = join(opts.workspaceRootDir, repoRel);
+    const landedSha = workspaceLandedShas[repoRel] ?? entry?.landedSha;
+
+    if (landedSha && !entry?.baseCommitSha) {
+      result[repoRel] = { commits: [landedSha], source: "squash" };
+      continue;
+    }
+
+    if (landedSha && entry?.baseCommitSha) {
+      const rangeRef = `${entry.baseCommitSha}..${landedSha}`;
+      let ownCommitShas: string[];
+      try {
+        const collected = await collectOwnTaskCommitsForRange({
+          worktreePath: repoRootDir,
+          rangeRef,
+          taskId: task.id,
+          execAsyncImpl: execImpl,
+        });
+        ownCommitShas = collected.ownCommitShas;
+      } catch (error) {
+        throw new TaskRevertError(`git log failed for sub-repo ${repoRel} range ${rangeRef}`, "git-log-failed", error);
+      }
+      if (ownCommitShas.length > 0) {
+        result[repoRel] = { commits: ownCommitShas, source: "rebase" };
+      } else {
+        result[repoRel] = { commits: [landedSha], source: "rebase" };
+      }
+      continue;
+    }
+
+    // No representative landed sha recorded for this sub-repo — fall back to
+    // the lineage-snapshot association table, filtered to commits reachable
+    // in THIS sub-repo (a lineage snapshot is task-wide, not per-repo).
+    const lineageId = task.lineageId ?? task.id;
+    if (!opts.commitAssociationSource) {
+      result[repoRel] = { commits: [], source: "none" };
+      continue;
+    }
+    const associations = await opts.commitAssociationSource.getTaskCommitAssociationsByLineageId(lineageId);
+    const reachableShas: string[] = [];
+    for (const association of associations) {
+      try {
+        await runGit(execImpl, `git cat-file -e ${quoteShellArg(`${association.commitSha}^{commit}`)}`, repoRootDir);
+        reachableShas.push(association.commitSha);
+      } catch {
+        // Not reachable in this sub-repo — belongs to another sub-repo or is stale.
+      }
+    }
+    result[repoRel] = { commits: reachableShas, source: reachableShas.length > 0 ? "lineage" : "none" };
+  }
+
+  return result;
+}
+
+export interface WorkspaceRepoRevertResult {
+  repo: string;
+  classification: TaskRevertClassification;
+  revertCommitSha?: string;
+  conflicts?: TaskRevertConflict[];
+  alreadyReverted?: boolean;
+}
+
+export type WorkspaceTaskRevertResult =
+  | { mode: "git"; clean: true; workspace: { repos: WorkspaceRepoRevertResult[] } }
+  | { mode: "git"; clean: false; workspace: { repos: WorkspaceRepoRevertResult[] }; conflicts: (TaskRevertConflict & { repo: string })[] }
+  | { mode: "git"; unsupported: true; reason: string }
+  | { mode: "git"; needsHuman: true; reason: string };
+
+export interface RevertWorkspaceTaskOptions {
+  task: Pick<Task, "id" | "lineageId" | "column" | "mergeDetails" | "workspaceWorktrees" | "autoMerge" | "userPaused" | "paused">;
+  /** Project root dir; each sub-repo lives at `join(workspaceRootDir, repoRel)` (mirrors `landWorkspaceTask`). */
+  workspaceRootDir: string;
+  /** Project settings, passed through to `resolveIntegrationBranch` per sub-repo with `integrationBranch`/`baseBranch` stripped (KTD1 — each sub-repo resolves its OWN default). */
+  settings: IntegrationBranchSettings;
+  execAsyncImpl?: ExecAsyncImpl;
+  commitAssociationSource?: TaskCommitAssociationSource;
+  /** Resolved effective project autoMerge setting (task.autoMerge overrides this when set). Defaults to true (autoMerge on) when omitted. */
+  effectiveAutoMerge?: boolean;
+}
+
+interface WorkspaceRepoRevertContext {
+  repo: string;
+  repoRootDir: string;
+  preRevertHead: string;
+  commits: string[];
+  classification: ClassifyTaskRevertResult;
+}
+
+/**
+ * FNXC:TaskRevert 2026-07-04-00:00 (FN-7547 — the core safety invariant of
+ * this module's workspace path):
+ *
+ * ALL-OR-NOTHING WHOLE-TASK CLASSIFICATION: this function dry-run classifies
+ * EVERY sub-repo FIRST (via the shared `classifyTaskRevert`, which already
+ * guarantees a byte-identical per-repo rollback in its own `finally`). The
+ * whole task is `clean` iff EVERY acquired sub-repo classifies clean or
+ * already-reverted; if ANY sub-repo classifies conflicting, the whole task is
+ * `conflicting` and the commit phase never runs for ANY sub-repo.
+ *
+ * TWO-PHASE COMMIT ORDERING: only after every sub-repo classifies
+ * clean/already-reverted does this function re-apply and commit per repo
+ * (reusing `applyAndCommitRevert`, the same machinery `performTaskRevert`
+ * uses for the single-repo squash path). This classify-all-then-commit-all
+ * ordering means a late conflict (the sub-repo's branch moved between
+ * classify and apply) can only ever occur DURING the commit phase, never
+ * invalidating an already-clean classification from an earlier repo in the
+ * same pass.
+ *
+ * MULTI-REPO ROLLBACK GUARANTEE: if a LATER sub-repo conflicts during the
+ * commit phase after an EARLIER sub-repo in this same pass already committed,
+ * every already-committed sub-repo is rolled back (`git revert --abort` +
+ * `git reset --hard <preRevertHead>`) before returning — so a late conflict
+ * can never leave some sub-repos reverted while others are not. Every touched
+ * sub-repo worktree is guaranteed byte-identical to its pre-call state on any
+ * non-success path.
+ *
+ * GUARD RAILS (mirrors `performTaskRevert`): only done/archived tasks are
+ * revertable; `autoMerge:false` refuses with `needsHuman` instead of forcing
+ * a write; this function NEVER mutates the source task's store row/column.
+ */
+export async function revertWorkspaceTask(opts: RevertWorkspaceTaskOptions): Promise<WorkspaceTaskRevertResult> {
+  const { task, workspaceRootDir } = opts;
+  const execImpl = opts.execAsyncImpl ?? defaultExecAsync;
+
+  if (!REVERTABLE_COLUMNS.has(task.column)) {
+    return { mode: "git", needsHuman: true, reason: `task is in column "${task.column}"; only done/archived tasks are revertable` };
+  }
+
+  const effectiveAutoMerge = task.autoMerge ?? opts.effectiveAutoMerge ?? true;
+  if (effectiveAutoMerge === false) {
+    return { mode: "git", needsHuman: true, reason: "autoMerge is disabled for this task/project; refusing to force-write a revert commit" };
+  }
+
+  const workspaceWorktrees = task.workspaceWorktrees ?? {};
+  const repoKeys = Object.keys(workspaceWorktrees).sort();
+  if (repoKeys.length === 0) {
+    return { mode: "git", unsupported: true, reason: "task has no workspaceWorktrees entries; not a workspace task" };
+  }
+
+  const attribution = await resolveWorkspaceTaskRevertCommits(task, {
+    workspaceRootDir,
+    execAsyncImpl: execImpl,
+    commitAssociationSource: opts.commitAssociationSource,
+  });
+
+  // Phase 1: resolve each sub-repo's integration branch, capture its
+  // pre-revert HEAD, refuse (without mutating) on a dirty tree, then dry-run
+  // classify. classifyTaskRevert already guarantees its OWN byte-identical
+  // rollback per repo, so no additional rollback bookkeeping is needed here
+  // for the classify phase itself.
+  const contexts: WorkspaceRepoRevertContext[] = [];
+  for (const repoRel of repoKeys) {
+    const repoRootDir = join(workspaceRootDir, repoRel);
+
+    // Re-resolve THIS sub-repo's integration branch with the shared overrides
+    // stripped (KTD1), mirroring `landWorkspaceTask`/self-healing, so each
+    // sub-repo resolves its own default rather than inheriting a workspace-wide override.
+    let integrationBranch: string;
+    try {
+      integrationBranch = await resolveIntegrationBranch(repoRootDir, { ...opts.settings, integrationBranch: undefined, baseBranch: undefined });
+    } catch (error) {
+      throw new TaskRevertError(`failed to resolve integration branch for sub-repo ${repoRel}`, "integration-branch-resolve-failed", error);
+    }
+
+    // FNXC:TaskRevert 2026-07-04-00:00: each sub-repo checkout under
+    // `workspaceRootDir` can legitimately sit on any branch (mirrors the
+    // single-repo route's `rootDir` branch-mismatch guard) — refuse rather
+    // than silently committing a revert onto the wrong branch.
+    const currentBranch = (await runGit(execImpl, "git rev-parse --abbrev-ref HEAD", repoRootDir)).stdout.trim();
+    if (currentBranch !== integrationBranch) {
+      throw new TaskRevertError(
+        `sub-repo ${repoRel} checkout is on "${currentBranch}", not its integration branch "${integrationBranch}"; switch to "${integrationBranch}" before reverting`,
+        "branch-mismatch",
+      );
+    }
+
+    const { stdout: statusOut } = await runGit(execImpl, "git status --porcelain", repoRootDir);
+    if (statusOut.trim().length > 0) {
+      throw new TaskRevertError(
+        `working tree for sub-repo ${repoRel} is dirty; refusing to attempt a revert dry-run`,
+        "dirty-working-tree",
+      );
+    }
+
+    const { stdout: headOut } = await runGit(execImpl, "git rev-parse HEAD", repoRootDir);
+    const preRevertHead = headOut.trim();
+
+    const commits = attribution[repoRel]?.commits ?? [];
+    const classification = await classifyTaskRevert({ worktreePath: repoRootDir, commits, execAsyncImpl: execImpl });
+
+    contexts.push({ repo: repoRel, repoRootDir, preRevertHead, commits, classification });
+  }
+
+  const anyConflicting = contexts.some((ctx) => ctx.classification.classification === "conflicting");
+  if (anyConflicting) {
+    const repos: WorkspaceRepoRevertResult[] = contexts.map((ctx) => ({
+      repo: ctx.repo,
+      classification: ctx.classification.classification,
+      conflicts: ctx.classification.conflicts,
+      alreadyReverted: ctx.classification.alreadyReverted,
+    }));
+    const conflicts = contexts.flatMap((ctx) =>
+      (ctx.classification.conflicts ?? []).map((conflict) => ({ ...conflict, repo: ctx.repo })),
+    );
+    return { mode: "git", clean: false, workspace: { repos }, conflicts };
+  }
+
+  // Phase 2: every sub-repo classified clean/already-reverted — apply+commit
+  // per repo. Track committed repos so a LATE conflict (branch moved between
+  // classify and apply) can roll back every already-committed sub-repo too.
+  const repos: WorkspaceRepoRevertResult[] = [];
+  const committedRepos: { repo: string; repoRootDir: string; preRevertHead: string }[] = [];
+
+  try {
+    for (const ctx of contexts) {
+      if (ctx.classification.classification === "already-reverted" || ctx.commits.length === 0) {
+        repos.push({ repo: ctx.repo, classification: "already-reverted", alreadyReverted: true });
+        continue;
+      }
+
+      const applied = await applyAndCommitRevert({
+        worktreePath: ctx.repoRootDir,
+        commits: ctx.commits,
+        taskId: task.id,
+        execAsyncImpl: execImpl,
+      });
+
+      if (applied.applied) {
+        repos.push({ repo: ctx.repo, classification: "clean", revertCommitSha: applied.revertCommitSha });
+        committedRepos.push({ repo: ctx.repo, repoRootDir: ctx.repoRootDir, preRevertHead: ctx.preRevertHead });
+        continue;
+      }
+
+      if ("alreadyReverted" in applied) {
+        repos.push({ repo: ctx.repo, classification: "already-reverted", alreadyReverted: true });
+        continue;
+      }
+
+      // Late conflict — applyAndCommitRevert already rolled back THIS repo.
+      // Roll back every PREVIOUSLY committed sub-repo in this pass so the
+      // whole-task revert stays all-or-nothing.
+      for (const committed of committedRepos) {
+        await runGit(execImpl, "git revert --abort", committed.repoRootDir).catch(() => undefined);
+        await runGit(execImpl, `git reset --hard ${quoteShellArg(committed.preRevertHead)}`, committed.repoRootDir).catch(() => undefined);
+      }
+      const conflictRepos: WorkspaceRepoRevertResult[] = [
+        ...repos,
+        { repo: ctx.repo, classification: "conflicting", conflicts: applied.conflicts },
+      ];
+      const conflicts = (applied.conflicts ?? []).map((conflict) => ({ ...conflict, repo: ctx.repo }));
+      return { mode: "git", clean: false, workspace: { repos: conflictRepos }, conflicts };
+    }
+  } catch (error) {
+    // Unexpected failure mid-pass — roll back every already-committed sub-repo.
+    for (const committed of committedRepos) {
+      await runGit(execImpl, "git revert --abort", committed.repoRootDir).catch(() => undefined);
+      await runGit(execImpl, `git reset --hard ${quoteShellArg(committed.preRevertHead)}`, committed.repoRootDir).catch(() => undefined);
+    }
+    throw error instanceof TaskRevertError ? error : new TaskRevertError("failed to apply workspace revert", "workspace-revert-apply-failed", error);
+  }
+
+  return { mode: "git", clean: true, workspace: { repos } };
 }
 
 // ────────────────────────────────────────────────────────────────────────

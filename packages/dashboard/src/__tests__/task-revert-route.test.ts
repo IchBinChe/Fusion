@@ -35,12 +35,14 @@ function makeGitRepoOnMain(): string {
 }
 
 const performTaskRevertMock = vi.fn();
+const revertWorkspaceTaskMock = vi.fn();
 
 vi.mock("@fusion/engine", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@fusion/engine")>();
   return {
     ...actual,
     performTaskRevert: (...args: unknown[]) => performTaskRevertMock(...args),
+    revertWorkspaceTask: (...args: unknown[]) => revertWorkspaceTaskMock(...args),
   };
 });
 
@@ -62,6 +64,22 @@ function makeTask(overrides: Partial<Task>): Task {
     updatedAt: new Date().toISOString(),
     ...overrides,
   } as Task;
+}
+
+// FNXC:TaskRevert 2026-07-04-00:00 (FN-7547 — workspace dispatch coverage):
+// Workspace tasks (`workspaceWorktrees` populated) must route to
+// `revertWorkspaceTask` instead of `performTaskRevert` — real per-repo git
+// behavior (attribution/classification/all-or-nothing rollback) is proven in
+// packages/engine/src/__tests__/task-revert.workspace.real-git.test.ts; this
+// suite only asserts the route dispatch and per-repo response shape.
+function makeWorkspaceTask(overrides: Partial<Task>): Task {
+  return makeTask({
+    workspaceWorktrees: {
+      "repo-a": { worktreePath: "/tmp/repo-a", branch: "fusion/FN-100", landedSha: "aaa111" },
+      "repo-b": { worktreePath: "/tmp/repo-b", branch: "fusion/FN-100", landedSha: "bbb222" },
+    },
+    ...overrides,
+  });
 }
 
 function createMockStore(
@@ -209,6 +227,90 @@ describe("POST /tasks/:id/revert", () => {
     expect(res.status).toBe(409);
     expect((res.body as { details?: { code?: string } }).details?.code ?? (res.body as { error?: string }).error).toBeTruthy();
     expect(performTaskRevertMock).not.toHaveBeenCalled();
+  });
+
+  it("dispatches a done workspace task to revertWorkspaceTask and returns the per-repo breakdown (clean)", async () => {
+    const task = makeWorkspaceTask({ column: "done" });
+    const store = createMockStore(task);
+    revertWorkspaceTaskMock.mockResolvedValue({
+      mode: "git",
+      clean: true,
+      workspace: {
+        repos: [
+          { repo: "repo-a", classification: "clean", revertCommitSha: "rev-a" },
+          { repo: "repo-b", classification: "clean", revertCommitSha: "rev-b" },
+        ],
+      },
+    });
+
+    const res = await REQUEST(createApp(store), "POST", `/api/tasks/${task.id}/revert`);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      mode: "git",
+      clean: true,
+      workspace: { repos: [{ repo: "repo-a" }, { repo: "repo-b" }] },
+    });
+    expect(revertWorkspaceTaskMock).toHaveBeenCalledTimes(1);
+    expect(performTaskRevertMock).not.toHaveBeenCalled();
+  });
+
+  it("mode:'git' dispatches a workspace task conflict to the per-repo conflict shape without creating an AI-undo task or calling performTaskRevert", async () => {
+    const task = makeWorkspaceTask({ column: "archived" });
+    const store = createMockStore(task);
+    revertWorkspaceTaskMock.mockResolvedValue({
+      mode: "git",
+      clean: false,
+      workspace: {
+        repos: [
+          { repo: "repo-a", classification: "clean", revertCommitSha: "rev-a" },
+          { repo: "repo-b", classification: "conflicting", conflicts: [{ file: "b.ts", status: "UU" }] },
+        ],
+      },
+      conflicts: [{ repo: "repo-b", file: "b.ts", status: "UU" }],
+    });
+
+    const res = await POST_JSON(createApp(store), `/api/tasks/${task.id}/revert`, { mode: "git" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      mode: "git",
+      clean: false,
+      conflicts: [{ repo: "repo-b", file: "b.ts" }],
+    });
+    expect(performTaskRevertMock).not.toHaveBeenCalled();
+  });
+
+  // FN-7547 + FN-7524: default mode is "auto", which falls back to the AI-undo
+  // task on a conflicting WORKSPACE result too, same as the single-repo contract.
+  it("auto (default) mode falls back to the AI-undo task on a conflicting workspace result", async () => {
+    const task = makeWorkspaceTask({ id: "FN-950", column: "archived" });
+    const store = createMockStore(task);
+    revertWorkspaceTaskMock.mockResolvedValue({
+      mode: "git",
+      clean: false,
+      workspace: {
+        repos: [
+          { repo: "repo-a", classification: "clean", revertCommitSha: "rev-a" },
+          { repo: "repo-b", classification: "conflicting", conflicts: [{ file: "b.ts", status: "UU" }] },
+        ],
+      },
+      conflicts: [{ repo: "repo-b", file: "b.ts", status: "UU" }],
+    });
+
+    const res = await REQUEST(createApp(store), "POST", `/api/tasks/${task.id}/revert`);
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ mode: "ai" });
+    expect((res.body as { createdTaskId?: string }).createdTaskId).toBeTruthy();
+    expect(performTaskRevertMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-done/archived workspace task with a 4xx guard before invoking the workspace service", async () => {
+    const task = makeWorkspaceTask({ column: "in-progress" });
+    const store = createMockStore(task);
+
+    const res = await REQUEST(createApp(store), "POST", `/api/tasks/${task.id}/revert`);
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
+    expect(revertWorkspaceTaskMock).not.toHaveBeenCalled();
   });
 });
 

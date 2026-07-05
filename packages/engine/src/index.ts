@@ -270,6 +270,8 @@ export {
   resolveTaskRevertCommits,
   classifyTaskRevert,
   performTaskRevert,
+  resolveWorkspaceTaskRevertCommits,
+  revertWorkspaceTask,
   TaskRevertError,
   type TaskRevertCommitSource,
   type ResolvedTaskRevertCommits,
@@ -286,6 +288,10 @@ export {
   type CreateAiUndoTaskDeps,
   type TaskRevertGranularity,
   type PerformTaskRevertOptions,
+  type WorkspaceRepoRevertCommits,
+  type WorkspaceRepoRevertResult,
+  type WorkspaceTaskRevertResult,
+  type RevertWorkspaceTaskOptions,
 } from "./task-revert.js";
 export {
   resolveBranchGroupMergeRouting,

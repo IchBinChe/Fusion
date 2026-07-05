@@ -359,19 +359,24 @@ describe("TaskDetailModal oversight controls", () => {
 });
 
 /*
- * FNXC:PlannerOversight 2026-07-04-19:45:
- * FN-7521 Surface Enumeration requirement: cover the oversight quick-controls
- * cluster (`.detail-meta-inline-controls`) at both desktop AND mobile
- * (@media max-width: 768px) breakpoints. TaskDetailModal.tsx has no JS-side
- * isMobile/matchMedia branch for this cluster — TaskDetailModal.css only
- * wraps `.detail-meta-inline-controls` via a `@media (max-width: 768px)` CSS
- * rule (flex-wrap, no conditional DOM). This suite proves the same controls
- * are present (no leftover/missing shell) at a narrow `window.innerWidth`,
- * guarding against a future mobile-only regression (FN-6115→FN-6123
- * precedent in AGENTS.md: an affordance removal left an empty control shell
- * on mobile only, because only the desktop surface was checked).
+ * FNXC:PlannerOversight 2026-07-04-20:30 (FN-7558):
+ * FN-7521's original mobile suite asserted the oversight quick-controls
+ * cluster rendered its FLAT inline testids at a narrow `window.innerWidth`,
+ * matching the pre-FN-7545 DOM (CSS-only `@media (max-width: 768px)` wrap,
+ * no conditional mount). FN-7545 then collapsed that cluster's action
+ * controls (level select / nudge / stop / explain) into a mobile overflow
+ * menu: at `window.innerWidth <= OVERSIGHT_MENU_MOBILE_BREAKPOINT` (768) the
+ * mount-time `updateOversightMenuMobile()` effect flips `isOversightMenuMobile`
+ * to true, so those controls now render INSIDE a closed `detail-oversight-menu`
+ * behind a `detail-oversight-menu-trigger` button instead of inline — the old
+ * flat queries no longer find them. This suite is corrected to drive the real
+ * FN-7545 mobile affordance: open the trigger, then query the menu items. It
+ * still asserts the same invariants FN-7521 required — select-writes-on-change,
+ * enabled nudge/stop/explain when the overseer is active, and no leftover
+ * empty-menu shell for the off+inactive default — just through the shipped
+ * mobile surface. The desktop branch (first `describe` above) is unchanged.
  */
-describe("TaskDetailModal oversight controls — mobile breakpoint (FN-7521, @media max-width: 768px)", () => {
+describe("TaskDetailModal oversight controls — mobile breakpoint (FN-7521, FN-7545 overflow menu)", () => {
   const originalInnerWidth = window.innerWidth;
 
   beforeEach(async () => {
@@ -383,6 +388,10 @@ describe("TaskDetailModal oversight controls — mobile breakpoint (FN-7521, @me
     vi.mocked(api.nudgeOverseer).mockResolvedValue({ applied: false, reason: "oversight-off" });
     vi.mocked(api.stopOverseer).mockResolvedValue({ applied: true, reason: "stopped" });
     vi.mocked(api.explainOverseer).mockResolvedValue({ snapshot: null });
+    // Setting innerWidth before render is sufficient: TaskDetailModal's mount
+    // effect calls `updateOversightMenuMobile()` once on mount, reading
+    // `window.innerWidth` synchronously, which flips `isOversightMenuMobile`
+    // before the first paint the tests observe.
     Object.defineProperty(window, "innerWidth", { value: 375, configurable: true });
   });
 
@@ -390,7 +399,13 @@ describe("TaskDetailModal oversight controls — mobile breakpoint (FN-7521, @me
     Object.defineProperty(window, "innerWidth", { value: originalInnerWidth, configurable: true });
   });
 
-  it("still renders the quick level-change select at a 375px mobile viewport and writes on change", async () => {
+  async function openOversightMenu() {
+    const trigger = await screen.findByTestId("detail-oversight-menu-trigger");
+    fireEvent.click(trigger);
+    return trigger;
+  }
+
+  it("still renders the quick level-change select behind the mobile overflow menu and writes on change", async () => {
     const api = await import("../../api");
     const mockUpdate = vi.fn().mockResolvedValue(makeTask({ id: "FN-201", plannerOversightLevel: "steer" }));
     vi.mocked(api.updateTask).mockImplementation(mockUpdate as any);
@@ -407,8 +422,10 @@ describe("TaskDetailModal oversight controls — mobile breakpoint (FN-7521, @me
       />,
     );
 
+    await openOversightMenu();
+
     const select = await screen.findByTestId("detail-oversight-level-select");
-    expect(select).toBeTruthy();
+    expect((select as HTMLSelectElement).value).toBe("observe");
     fireEvent.change(select, { target: { value: "steer" } });
 
     await waitFor(() => {
@@ -416,7 +433,7 @@ describe("TaskDetailModal oversight controls — mobile breakpoint (FN-7521, @me
     });
   });
 
-  it("still renders enabled nudge/stop/explain controls at a 375px mobile viewport when the overseer is actively watching", async () => {
+  it("still renders enabled nudge/stop/explain controls behind the mobile overflow menu when the overseer is actively watching", async () => {
     render(
       <TaskDetailModal
         task={makeTask({ id: "FN-202", column: "in-progress", plannerOversightLevel: "autonomous", plannerOverseerState: activeSnapshot })}
@@ -429,12 +446,14 @@ describe("TaskDetailModal oversight controls — mobile breakpoint (FN-7521, @me
       />,
     );
 
+    await openOversightMenu();
+
     expect(await screen.findByTestId("detail-overseer-nudge")).not.toBeDisabled();
     expect(await screen.findByTestId("detail-overseer-stop")).toBeTruthy();
     expect(await screen.findByTestId("detail-overseer-explain")).toBeTruthy();
   });
 
-  it("still renders no oversight-control leftover shell at a 375px mobile viewport for the off+inactive default case", async () => {
+  it("still renders no oversight-control leftover shell behind the mobile overflow menu for the off+inactive default case", async () => {
     render(
       <TaskDetailModal
         task={makeTask({ id: "FN-203", column: "todo", plannerOversightLevel: "off" })}
@@ -446,6 +465,11 @@ describe("TaskDetailModal oversight controls — mobile breakpoint (FN-7521, @me
         addToast={noop}
       />,
     );
+
+    // The overflow-menu trigger itself always renders (an operator must still
+    // be able to opt IN to oversight), but the menu must not carry an empty
+    // nudge/stop/explain shell for the common off+inactive default.
+    await openOversightMenu();
 
     await screen.findByTestId("detail-oversight-level-select");
     expect(screen.queryByTestId("detail-overseer-nudge")).not.toBeInTheDocument();

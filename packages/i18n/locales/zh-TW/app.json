@@ -5847,7 +5847,10 @@
       "warnOnTheBoardWhenTodoWorkExceeds": "",
       "whenEnabledDefaultFusionSpawnsShortLived": "",
       "whenEnabledFusionChecksOpenAndClosedIssues": "",
-      "workflowsOrChangelogModeWhenContributorsShouldUpdate": ""
+      "workflowsOrChangelogModeWhenContributorsShouldUpdate": "",
+      "aiUndoTaskWorkflow": "",
+      "aiUndoTaskWorkflowInherit": "",
+      "aiUndoTaskWorkflowHelp": ""
     },
     "globalGeneral": {
       "andShowsUpdateNoticesInTheCLIAnd": "",

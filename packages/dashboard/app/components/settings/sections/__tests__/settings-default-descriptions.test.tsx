@@ -242,6 +242,7 @@ const SETTING_DESCRIPTION_KEYS: Record<string, string> = {
   workspaceMode: "general.workspaceModeHint",
   defaultWorkflowId: "general.newTasksInheritThisCustomWorkflowsStepsOverridable",
   enabledBuiltinWorkflowIds: "general.disabledFusionWorkflowsAreHiddenFromWorkflow",
+  aiUndoTaskWorkflowId: "general.aiUndoTaskWorkflowHelp",
   // ProjectModelsSection
   autoSelectModelPreset: "projectModels.autoSelectModelPresetHint",
   autoSummarizeTitles: "projectModels.whenEnabledTasksCreatedWithoutATitleBut",
@@ -468,8 +469,6 @@ const NOT_SURFACED_ALLOWLIST: Record<string, string> = {
   prerebaseDivergenceThreshold: "internal pre-rebase tuning constant, no UI field",
   maxSpawnedAgentsPerParent: "internal spawn-limit constant, no UI field",
   maxSpawnedAgentsGlobal: "internal spawn-limit constant, no UI field",
-  // FN-7556: AI-undo workflow default — Settings UI is a follow-up task.
-  aiUndoTaskWorkflowId: "AI-undo workflow default — Settings UI is a follow-up task",
 };
 
 describe("FN-7505 settings default-value description guard", () => {

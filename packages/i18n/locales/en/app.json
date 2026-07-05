@@ -5881,7 +5881,10 @@
       "gitLabEnabledHint": "Configure GitLab.com or self-managed GitLab URLs. Blank values inherit global fallbacks and then GitLab.com. No default — unset (unset behaves as enabled until explicitly disabled).",
       "allowEphemeralAgentsToCreateTasksHint": "When enabled (default), ephemeral task-worker agents can open follow-up tasks via fn_task_create. When disabled, only humans and permanent agents can create tasks; ephemeral callers are rejected.",
       "quickChatCloseOnOutsideClickHint": "When enabled, clicking outside the Quick Chat window closes it. Disable to keep it open until you close it explicitly. Default: enabled.",
-      "disabledFusionWorkflowsAreHiddenFromWorkflow": "Disabled Fusion workflows are hidden from workflow pickers. Existing tasks that already use one continue to resolve. Default: all built-in workflows enabled (unset)."
+      "disabledFusionWorkflowsAreHiddenFromWorkflow": "Disabled Fusion workflows are hidden from workflow pickers. Existing tasks that already use one continue to resolve. Default: all built-in workflows enabled (unset).",
+      "aiUndoTaskWorkflow": "AI-undo task workflow",
+      "aiUndoTaskWorkflowInherit": "Inherit project default workflow",
+      "aiUndoTaskWorkflowHelp": "Workflow assigned to AI-undo (revert) tasks, which reverse already-shipped code and warrant stricter review. Choose \"Inherit project default workflow\" to leave them on the project default. Default: review-heavy."
     },
     "globalGeneral": {
       "andShowsUpdateNoticesInTheCLIAnd": " and shows update notices in the CLI and dashboard. Cadence is governed by the frequency below. Default: enabled. ",

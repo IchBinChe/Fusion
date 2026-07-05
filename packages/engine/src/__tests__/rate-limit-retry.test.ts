@@ -218,4 +218,91 @@ describe("withRateLimitRetry", () => {
     const result = await promise;
     expect(result).toBe("ok");
   });
+
+  it("retries a transient auth error and succeeds after credential rotation", async () => {
+    const authErr = new Error(
+      '401 {"type":"error","error":{"type":"authentication_error","message":"Invalid authentication credentials"}}',
+    );
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(authErr)
+      .mockResolvedValueOnce("recovered");
+    const onRetry = vi.fn();
+
+    const promise = withRateLimitRetry(fn, { onRetry });
+
+    // Auth retry uses a flat ~5s delay (5000ms ±10 %), not the 30s backoff
+    await vi.advanceTimersByTimeAsync(6000);
+
+    const result = await promise;
+    expect(result).toBe("recovered");
+    expect(fn).toHaveBeenCalledTimes(2);
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(onRetry).toHaveBeenCalledWith(1, expect.any(Number), authErr);
+  });
+
+  it("throws after the transient-auth retry budget is exhausted", async () => {
+    const authErr = new Error("invalid authentication credentials");
+    const fn = vi.fn().mockRejectedValue(authErr);
+    const onRetry = vi.fn();
+
+    const promise = withRateLimitRetry(fn, { onRetry });
+    const assertion = expect(promise).rejects.toThrow(
+      "invalid authentication credentials",
+    );
+
+    for (let i = 0; i < 4; i++) {
+      await vi.advanceTimersByTimeAsync(6000);
+    }
+
+    await assertion;
+    expect(fn).toHaveBeenCalledTimes(3); // initial + 2 auth retries
+    expect(onRetry).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not let auth retries consume rate-limit attempts", async () => {
+    const fn = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("token_expired"))
+      .mockRejectedValueOnce(new Error("429 too many requests"))
+      .mockResolvedValueOnce("ok");
+
+    // maxRetries: 1 — if the auth retry consumed the single rate-limit
+    // attempt, the 429 on the next call would exhaust the budget and throw.
+    const promise = withRateLimitRetry(fn, {
+      maxRetries: 1,
+      baseDelayMs: 100,
+      maxDelayMs: 1000,
+    });
+
+    await vi.advanceTimersByTimeAsync(6000); // auth retry delay
+    await vi.advanceTimersByTimeAsync(500); // rate-limit backoff
+
+    const result = await promise;
+    expect(result).toBe("ok");
+    expect(fn).toHaveBeenCalledTimes(3);
+  });
+
+  it("classifies various transient auth error patterns correctly", async () => {
+    const patterns = [
+      '{"type":"error","error":{"type":"authentication_error"}}',
+      "Invalid authentication credentials",
+      "token_expired",
+      "token expired",
+      "OAuth token does not meet scope requirements",
+    ];
+
+    for (const msg of patterns) {
+      const fn = vi
+        .fn()
+        .mockRejectedValueOnce(new Error(msg))
+        .mockResolvedValueOnce("ok");
+
+      const promise = withRateLimitRetry(fn);
+      await vi.advanceTimersByTimeAsync(6000);
+      const result = await promise;
+      expect(result).toBe("ok");
+      expect(fn).toHaveBeenCalledTimes(2);
+    }
+  });
 });

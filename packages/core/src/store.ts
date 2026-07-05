@@ -1664,6 +1664,19 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private lastKnownModified: number = 0;
   /** ISO timestamp of last poll — used to filter changed tasks */
   private lastPollTime: string | null = null;
+  /**
+   * FNXC:ArtifactRegistry 2026-07-04-20:10:
+   * Cross-instance artifact registration (e.g. an engine-owned TaskStore writing while the dashboard
+   * reads through a separately-cached `getOrCreateProjectStore` instance) was invisible to the polling
+   * change-detector: registerArtifact() never bumped lastModified and checkForChanges() only diffed the
+   * `tasks` table, so a second TaskStore instance on the same project never observed or re-emitted
+   * `artifact:registered` for rows it did not write itself. Track the highest SQLite `rowid` this
+   * instance has already accounted for (seeded at watch() startup, advanced in-process on local writes
+   * and by the poll below) rather than a timestamp — `artifacts.createdAt` is millisecond-precision and
+   * ties with the poll's own "as of" timestamp are possible, while `rowid` is a strictly-increasing,
+   * never-reused integer so a `> cursor` comparison can never miss or double-count a row.
+   */
+  private lastArtifactRowId = 0;
   /** One-shot startup sweep flag for clearing stale pause fields on done tasks. */
   private donePauseBackfillDone = false;
   /** Short-lived startup memo for repeated slim listTasks reads before steady-state watch/polling. */
@@ -12466,6 +12479,14 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       this.taskCache.set(task.id, { ...task });
     }
 
+    /*
+     * FNXC:ArtifactRegistry 2026-07-04-20:10:
+     * Seed the artifact rowid cursor with the highest rowid already on disk so checkForChanges() only
+     * ever treats rows written by ANOTHER TaskStore instance (after this watch() call) as newly discovered.
+     */
+    const artifactRowIdSeed = this.db.prepare("SELECT COALESCE(MAX(rowid), 0) as maxRowId FROM artifacts").get() as { maxRowId: number };
+    this.lastArtifactRowId = artifactRowIdSeed.maxRowId;
+
     try {
       await this.markLegacyAutoMergeStampsOnce();
     } catch (err) {
@@ -12662,6 +12683,25 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         if (i > 0 && i % 50 === 0) {
           await new Promise<void>((resolve) => setImmediate(resolve));
         }
+      }
+
+      /*
+       * FNXC:ArtifactRegistry 2026-07-04-20:10:
+       * Mirror the task-change replication above for the artifacts table: pick up rows inserted by
+       * ANOTHER TaskStore instance on this project since the last poll (rowid > lastArtifactRowId) and
+       * re-emit `artifact:registered` so already-open Documents/task Artifacts galleries in this process
+       * live-refresh. registerArtifact() advances lastArtifactRowId for this instance's own writes so
+       * this poll never double-emits for a row it already emitted directly.
+       */
+      const changedArtifactRows = this.db
+        .prepare("SELECT rowid as _rowid, * FROM artifacts WHERE rowid > ? ORDER BY rowid ASC")
+        .all(this.lastArtifactRowId) as unknown as Array<ArtifactRow & { _rowid: number }>;
+
+      for (const artifactRow of changedArtifactRows) {
+        if (artifactRow._rowid > this.lastArtifactRowId) {
+          this.lastArtifactRowId = artifactRow._rowid;
+        }
+        this.emit("artifact:registered", this.rowToArtifact(artifactRow));
       }
 
       const elapsed = Date.now() - startTime;
@@ -13434,7 +13474,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
   }
 
   private insertArtifactRow(input: ArtifactCreateInput, id: string, now: string, stored: { uri?: string; sizeBytes?: number }): Artifact {
-    this.db.prepare(
+    const info = this.db.prepare(
       `INSERT INTO artifacts (
         id, type, title, description, mimeType, sizeBytes, uri, content, authorId, authorType, taskId, metadata, createdAt, updatedAt
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -13454,6 +13494,17 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       now,
       now,
     );
+
+    /*
+     * FNXC:ArtifactRegistry 2026-07-04-20:10:
+     * Advance this instance's own artifact-poll rowid cursor past the row it just inserted so its next
+     * checkForChanges() cycle does not re-emit `artifact:registered` for a write it already emitted
+     * directly in registerArtifact() below.
+     */
+    const insertedRowId = Number(info.lastInsertRowid);
+    if (insertedRowId > this.lastArtifactRowId) {
+      this.lastArtifactRowId = insertedRowId;
+    }
 
     const row = this.db.prepare("SELECT * FROM artifacts WHERE id = ?").get(id) as ArtifactRow | undefined;
     if (!row) {
@@ -13501,6 +13552,16 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     };
 
     const artifact = input.taskId ? await this.withTaskLock(input.taskId, register) : await register();
+    /*
+     * FNXC:ArtifactRegistry 2026-07-04-20:10:
+     * bumpLastModified() is the signal checkForChanges() gates on before doing any polling work at all;
+     * without it, a second TaskStore instance on this project (dashboard vs engine, or two dashboard
+     * processes) never even looks at the artifacts table, so its SSE listeners silently never fire
+     * `artifact:registered` for artifacts written by the OTHER instance. insertArtifactRow() already
+     * advanced lastArtifactRowId past this row so this same instance's own poll cycle does not
+     * double-emit for the write we already emit directly below.
+     */
+    this.db.bumpLastModified();
     this.emit("artifact:registered", artifact);
     return artifact;
   }

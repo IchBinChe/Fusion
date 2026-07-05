@@ -92,6 +92,91 @@ describe("TaskStore artifacts", () => {
     expect(registered).toHaveBeenCalledWith(artifact);
   });
 
+  /*
+   * FNXC:ArtifactRegistry 2026-07-04-20:10:
+   * Reproduces FN-7544: an agent registers an artifact through one TaskStore instance (e.g. the
+   * engine's own store) while a SECOND TaskStore instance on the same project (e.g. the dashboard's
+   * cached getOrCreateProjectStore instance, or a second dashboard process) is the one whose SSE
+   * listeners actually serve the Documents/task Artifacts galleries. Before the fix, registerArtifact()
+   * never bumped lastModified and checkForChanges() never looked at the artifacts table at all, so the
+   * observer instance's `artifact:registered` subscribers never fired for artifacts written elsewhere —
+   * the exact symptom reported: the artifact exists in the DB (a plain GET/listArtifacts finds it) but
+   * nothing tells an already-open dashboard gallery to refresh, and any subscriber relying solely on the
+   * live event has no way to discover the row.
+   */
+  it("a second TaskStore polling the same DB observes artifact:registered for artifacts it did not write", async () => {
+    const task = await store.createTask({ title: "Cross-instance artifact task", description: "Cross-instance artifact registration" });
+
+    const observer = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
+    await observer.init();
+    await observer.watch();
+    const observerRegistered = vi.fn();
+    observer.on("artifact:registered", observerRegistered);
+
+    try {
+      const artifact = await store.registerArtifact({
+        type: "document",
+        title: "Written by another instance",
+        content: "# Cross-instance",
+        authorId: "agent-cross-instance",
+        authorType: "agent",
+        taskId: task.id,
+      });
+
+      // Drive the observer's poll cycle directly so we don't wait on the 1s interval.
+      await (observer as unknown as { checkForChanges: () => Promise<void> }).checkForChanges();
+
+      expect(observerRegistered).toHaveBeenCalledTimes(1);
+      expect(observerRegistered).toHaveBeenCalledWith(expect.objectContaining({ id: artifact.id, title: "Written by another instance" }));
+
+      // The observer must not re-emit on a second poll cycle for the same row.
+      observerRegistered.mockClear();
+      await (observer as unknown as { checkForChanges: () => Promise<void> }).checkForChanges();
+      expect(observerRegistered).not.toHaveBeenCalled();
+
+      // Confirm the artifact is also readable via the observer's own listArtifacts query
+      // (the store-query surface, independent of the live SSE event).
+      const observerList = await observer.listArtifacts({ taskId: task.id });
+      expect(observerList.map((a) => a.id)).toContain(artifact.id);
+    } finally {
+      await observer.close();
+    }
+  });
+
+  /*
+   * FNXC:ArtifactRegistry 2026-07-04-20:10:
+   * FN-7544: the cross-instance polling fix must never leak an artifact registered in one project's
+   * TaskStore/DB into a completely separate project's store or its `artifact:registered` subscribers.
+   * Each project is a distinct rootDir/DB file, so this proves the fix stays scoped per-project.
+   */
+  it("does not leak artifact:registered or listArtifacts rows across separate project stores", async () => {
+    const otherRootDir = makeTmpDir();
+    const otherStore = new TaskStore(otherRootDir, join(otherRootDir, ".fusion-global-settings"));
+    await otherStore.init();
+    await otherStore.watch();
+    const otherRegistered = vi.fn();
+    otherStore.on("artifact:registered", otherRegistered);
+
+    try {
+      await store.registerArtifact({
+        type: "document",
+        title: "Project A only",
+        content: "# Project A",
+        authorId: "agent-project-a",
+        authorType: "agent",
+      });
+
+      await (otherStore as unknown as { checkForChanges: () => Promise<void> }).checkForChanges();
+
+      expect(otherRegistered).not.toHaveBeenCalled();
+      const otherList = await otherStore.listArtifacts();
+      expect(otherList).toHaveLength(0);
+    } finally {
+      await otherStore.close();
+      await rm(otherRootDir, { recursive: true, force: true });
+    }
+  });
+
   it("stores binary artifacts on disk under the task artifacts directory", async () => {
     const task = await store.createTask({ description: "Binary artifact task" });
     const data = Buffer.from([0, 1, 2, 3, 255]);

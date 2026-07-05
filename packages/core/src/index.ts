@@ -32,6 +32,15 @@ export { isActiveNearDuplicateColumn, isNearDuplicateCanonicalInactive } from ".
 export type { NearDuplicateCanonicalState } from "./near-duplicate-canonical.js";
 export { formatGitLabTrackedItemRef, isGitLabTrackingStale } from "./gitlab-tracking.js";
 export * from "./planner-intervention.js";
+export {
+  emitOverseerObservation,
+  emitOverseerSteering,
+  emitOverseerRecoveryAttempt,
+  emitOverseerRetry,
+  emitOverseerConfirmation,
+  emitOverseerEscalation,
+} from "./planner-overseer-events.js";
+export type { OverseerEventInput } from "./planner-overseer-events.js";
 export * from "./frontend-ux-policy.js";
 export * from "./file-scope-classification.js";
 export { MAX_TASK_LIST_TEXT_CHARS, clampTaskListText, formatTaskListText } from "./task-list-format.js";

@@ -49,7 +49,14 @@ import {
 import { GitHubClient } from "../github.js";
 import { createTrackingIssueForTask } from "../github-tracking-hook.js";
 import { parseGitHubBadgeUrl } from "./register-git-github.js";
-import { planTaskWorktreePath, promoteHeldTask, performTaskRevert, TaskRevertError } from "@fusion/engine";
+import {
+  planTaskWorktreePath,
+  promoteHeldTask,
+  performTaskRevert,
+  TaskRevertError,
+  createAiUndoTask,
+  type AiUndoTaskResult,
+} from "@fusion/engine";
 import { buildBoardWorkflowsPayload } from "./board-workflows.js";
 import { isBackwardMoveBlockedByOpenPr, PR_OPEN_BLOCKS_MOVE_BACK_MESSAGE } from "./register-pull-requests-routes.js";
 import type { RunAuditEventInput } from "@fusion/core";
@@ -1663,16 +1670,29 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
   });
 
   /*
-  FNXC:TaskRevert 2026-07-04-00:00:
-  POST /tasks/:id/revert — intelligent git-revert for Done/Archived tasks (FN-7523, foundation
-  for FN-7501). Guard rails (enforced here AND in the engine service):
+  FNXC:TaskRevert 2026-07-04-00:00 (FN-7524 mode contract):
+  POST /tasks/:id/revert — intelligent git-revert for Done/Archived tasks (FN-7523), with an
+  AI-undo fallback (FN-7524, foundation for FN-7501). Guard rails (enforced here AND in the
+  engine service):
     - only done/archived tasks are revertable (400/409 otherwise);
-    - autoMerge-off is a needsHuman result, not a forced write;
-    - the source task's column/status is NEVER mutated as a side effect of a revert.
-  Response contract: `{ mode: "git", clean, revertCommitSha?, conflicts?, alreadyReverted?, unsupported?, needsHuman?, reason? }`.
-  On conflict, this route does NOT create the AI-undo follow-up task — that is sibling FN-7524's
-  job; the UI/caller decides what to do with the conflict result. This route also never moves the
-  source task backward through its lifecycle.
+    - autoMerge-off is a needsHuman result, not a forced write, and NEVER triggers the AI fallback
+      (leave that for a human / sibling FN-7525 to decide);
+    - the source task's column/status is NEVER mutated as a side effect of a revert (git OR AI path).
+
+  Optional request body: `{ mode?: "git" | "ai" | "auto" }` (default `"auto"`; unknown values reject
+  with 400). Semantics:
+    - `"git"`  — FN-7523 behavior only; the git result (incl. a conflict/unsupported result) is
+      returned as-is and the AI-undo path is NEVER invoked.
+    - `"ai"`   — skip git entirely; always take the AI-undo fallback.
+    - `"auto"` — attempt git first. A clean/alreadyReverted/needsHuman git result is returned
+      unchanged (NO AI task created). A conflicting or unsupported (e.g. workspace-task) git result
+      falls through to the AI-undo fallback.
+
+  Response contract is ADDITIVE over FN-7523: `{ mode: "git", ... }` (unchanged shape) OR
+  `{ mode: "ai", createdTaskId: "FN-YYYY", alreadyOpen?: true }`. The AI-undo task is created via
+  `createAiUndoTask` (engine) + `TaskStore.findOpenRevertTaskForSource` (core) for the idempotency
+  guard — a second call while an undo task is still open returns the SAME `createdTaskId` with
+  `alreadyOpen: true` rather than creating a duplicate.
   */
   router.post("/tasks/:id/revert", async (req, res) => {
     try {
@@ -1683,6 +1703,24 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       }
       if (task.column !== "done" && task.column !== "archived") {
         throw conflict(`Task ${task.id} is in column "${task.column}"; only done/archived tasks can be reverted`);
+      }
+
+      const requestedMode = (req.body as { mode?: unknown } | undefined)?.mode;
+      if (requestedMode !== undefined && requestedMode !== "git" && requestedMode !== "ai" && requestedMode !== "auto") {
+        throw badRequest(`Invalid revert mode "${String(requestedMode)}"; expected "git", "ai", or "auto"`);
+      }
+      const mode: "git" | "ai" | "auto" = (requestedMode as "git" | "ai" | "auto" | undefined) ?? "auto";
+
+      const createAiUndoResult = async (): Promise<AiUndoTaskResult> =>
+        createAiUndoTask({
+          createTask: (input) => scopedStore.createTask(input),
+          findOpenRevertTaskForSource: (id) => scopedStore.findOpenRevertTaskForSource(id),
+          sourceTask: task,
+        });
+
+      if (mode === "ai") {
+        res.json(await createAiUndoResult());
+        return;
       }
 
       const rootDir = scopedStore.getRootDir();
@@ -1721,6 +1759,23 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         },
         effectiveAutoMerge: settings.autoMerge,
       });
+
+      if (mode === "git") {
+        res.json(result);
+        return;
+      }
+
+      // mode === "auto": fall back to the AI-undo task ONLY on conflict or an
+      // unsupported (e.g. workspace) git result. Clean/alreadyReverted/needsHuman
+      // results are returned as-is — needsHuman (autoMerge-off) NEVER triggers AI.
+      const shouldFallBackToAi =
+        (result.mode === "git" && "clean" in result && result.clean === false) ||
+        (result.mode === "git" && "unsupported" in result && result.unsupported === true);
+
+      if (shouldFallBackToAi) {
+        res.json(await createAiUndoResult());
+        return;
+      }
 
       res.json(result);
     } catch (err: unknown) {

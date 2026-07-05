@@ -6840,6 +6840,37 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
   }
 
   /**
+   * FNXC:TaskRevert 2026-07-04-00:00 (FN-7524 idempotency guard):
+   * Reverse lookup for `sourceMetadata.revertOf === sourceTaskId`, restricted
+   * to OPEN (non `done`/`archived`) tasks — mirrors the `nearDuplicateOf`
+   * reverse-lookup pattern above. Only an OPEN AI-undo task suppresses
+   * creating a new one: a prior undo task that itself reached `done`/`archived`
+   * must NOT block a fresh undo request (the work may need undoing again,
+   * e.g. redone then relanded). Returns the most recently created open match,
+   * or `null` when none exists.
+   */
+  async findOpenRevertTaskForSource(sourceTaskId: string): Promise<Task | null> {
+    const trimmedId = sourceTaskId.trim();
+    if (trimmedId.length === 0) {
+      return null;
+    }
+
+    const selectClause = this.getTaskSelectClause(false, "t");
+    const row = this.db.prepare(`
+      SELECT ${selectClause}
+      FROM tasks t
+      WHERE t."deletedAt" IS NULL
+        AND t."column" != 'archived'
+        AND t."column" != 'done'
+        AND json_extract(t.sourceMetadata, '$.revertOf') = ?
+      ORDER BY t.createdAt DESC
+      LIMIT 1
+    `).get(trimmedId) as TaskRow | undefined;
+
+    return row ? this.rowToTask(row) : null;
+  }
+
+  /**
    * FNXC:NearDuplicateDetection 2026-06-14-12:00:
    * FN-6439 requires the store to reconcile persisted duplicate flags after a canonical becomes inactive.
    * sourceMetadataPatch only merges, so this reverse lookup performs a bounded read-modify-write that strips stale near-duplicate keys without pausing or failing the referencing tasks.

@@ -673,13 +673,18 @@ Recovery/backfill guidance:
 - If both the active row and archive snapshot were overwritten, Fusion cannot reconstruct lost attachments/comments automatically; recreate them from git history, branch/worktree contents, screenshots, or external issue trackers.
 - Record the incident in the replacement task so future audits understand why the task ID and commit history diverge.
 
-## Reverting Done/Archived tasks (git path)
+## Reverting Done/Archived tasks (git path + AI-undo fallback)
 
 - `POST /api/tasks/:id/revert` (FN-7523) reverts a **Done** or **Archived** task's landed work via git. Only `done`/`archived` tasks are revertable; the source task's column/status is never mutated as a side effect.
 - The engine resolves the task's attributable commit(s) (squash single-commit, rebase/cherry-pick trailer-filtered subset, or lineage-snapshot fallback), performs a non-committing dry-run to classify the outcome, and only writes a real commit when the dry-run is clean.
-- Response contract: `{ mode: "git", clean, revertCommitSha?, conflicts?, alreadyReverted?, unsupported?, needsHuman?, reason? }`. A clean revert lands a `revert(FN-xxxx): ...` commit carrying a `Fusion-Task-Id` trailer on the resolved base branch. A conflicting result creates no commit and leaves the tree/HEAD untouched — this is where a future AI-undo fallback (sibling task) can take over.
-- Workspace (multi-repo) tasks and `autoMerge:false` projects are out of scope for the forced git write and return `unsupported`/`needsHuman` results instead.
-- This is the git path only; no dashboard UI affordance ships with it (see sibling follow-up tasks for the card action and the AI-undo fallback).
+- The route accepts an optional request body `{ mode?: "git" | "ai" | "auto" }` (default `"auto"`; unknown values reject with 400):
+  - `"git"` — the FN-7523 git-only behavior. The result (including a conflicting/unsupported result) is returned as-is and never creates a follow-up task.
+  - `"ai"` — skip git entirely and always create the AI-undo fallback task (FN-7524).
+  - `"auto"` — try git first. A clean/alreadyReverted/needsHuman result is returned unchanged. A conflicting or unsupported (e.g. workspace-task) result falls back to creating the AI-undo task.
+- Git-path response contract (unchanged, additive only): `{ mode: "git", clean, revertCommitSha?, conflicts?, alreadyReverted?, unsupported?, needsHuman?, reason? }`. A clean revert lands a `revert(FN-xxxx): ...` commit carrying a `Fusion-Task-Id` trailer on the resolved base branch.
+- AI-undo response contract: `{ mode: "ai", createdTaskId: "FN-YYYY", alreadyOpen?: true }`. The created task is an ordinary `triage`-column board task (via the normal `store.createTask` path) that references the source task's id, mission, and landed files, and instructs undoing the source task's behavior while preserving unrelated later changes to the same files, using a `revert(FN-xxxx): ...` commit convention. It carries NO dependency on the (already done/archived) source task. A `sourceMetadata.revertOf` marker makes repeated fallback calls idempotent — while an AI-undo task for that source is still open, a further call returns the same `createdTaskId` with `alreadyOpen: true` instead of creating a duplicate; a prior undo task that itself reached `done`/`archived` does not suppress a fresh one.
+- Workspace (multi-repo) tasks return `unsupported` from the git path (routing `auto` to the AI-undo fallback); `autoMerge:false` projects return `needsHuman` and never trigger the AI-undo fallback (a human/future UI decides).
+- No dashboard UI affordance ships with this yet (see the Done/Archived card action follow-up task).
 
 ## GitHub Issue Import and PR Creation
 

@@ -279,6 +279,11 @@ export {
   type ClassifyTaskRevertResult,
   type TaskRevertResult,
   type TaskCommitAssociationSource,
+  createAiUndoTask,
+  buildAiUndoTaskDescription,
+  REVERT_OF_METADATA_KEY,
+  type AiUndoTaskResult,
+  type CreateAiUndoTaskDeps,
 } from "./task-revert.js";
 export {
   resolveBranchGroupMergeRouting,

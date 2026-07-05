@@ -22,7 +22,7 @@
  */
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
-import type { Task, TaskCommitAssociation } from "@fusion/core";
+import type { Task, TaskCommitAssociation, TaskCreateInput } from "@fusion/core";
 
 const defaultExecAsync = promisify(exec);
 type ExecAsyncImpl = typeof defaultExecAsync;
@@ -521,4 +521,119 @@ export async function performTaskRevert(opts: PerformTaskRevertOptions): Promise
     }
     throw error instanceof TaskRevertError ? error : new TaskRevertError("failed to apply revert commit", "revert-apply-failed", error);
   }
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// FN-7524: AI-undo fallback
+// ────────────────────────────────────────────────────────────────────────
+
+/**
+ * FNXC:TaskRevert 2026-07-04-00:00 (AI-undo marker contract):
+ * `REVERT_OF_METADATA_KEY` is the idempotency key stamped onto an AI-undo
+ * board task's `source.sourceMetadata`. The route's dedup guard
+ * (`TaskStore.findOpenRevertTaskForSource`, core) scans OPEN (non
+ * done/archived) tasks for `sourceMetadata.revertOf === sourceTaskId` before
+ * creating a new one — a second `mode:"ai"`/conflict-fallback call for the
+ * same source task while an undo task is still open MUST return the existing
+ * task's id (`alreadyOpen: true`) instead of creating a duplicate. A prior
+ * undo task that has itself reached `done`/`archived` does NOT suppress a
+ * fresh one — the work may need undoing again (e.g. redone, then relanded).
+ * NEVER repurpose this key for another meaning.
+ */
+export const REVERT_OF_METADATA_KEY = "revertOf" as const;
+
+export type AiUndoTaskResult = { mode: "ai"; createdTaskId: string; alreadyOpen?: boolean };
+
+function formatLandedFiles(landedFiles: string[] | undefined): string {
+  if (!landedFiles || landedFiles.length === 0) {
+    return "(no landed-files list recorded on this task; inspect its merge commit(s) directly)";
+  }
+  return landedFiles.map((file) => `- ${file}`).join("\n");
+}
+
+/**
+ * FNXC:TaskRevert 2026-07-04-00:00 (AI-undo mission contract):
+ * Builds the triage-ready description for the AI-undo board task. References
+ * the source task's id, its mission (`task.prompt` when present, else
+ * `task.description` — `prompt` carries the fuller generated spec when
+ * available), its landed files (`mergeDetails.landedFiles`) plus a pointer to
+ * `GET /api/tasks/<id>/diff` for the full landed diff (reused, not
+ * recomputed), an explicit instruction to undo the BEHAVIOR/FILES the source
+ * task introduced while PRESERVING unrelated changes later tasks made to the
+ * same files, and the `revert(FN-xxxx): …` commit convention with a
+ * `Fusion-Task-Id: FN-xxxx` trailer referencing the ORIGINAL task (consistent
+ * with the git-path commit convention above `performTaskRevert`).
+ */
+export function buildAiUndoTaskDescription(params: {
+  task: Pick<Task, "id" | "title" | "description" | "prompt" | "mergeDetails">;
+}): string {
+  const { task } = params;
+  const mission = task.prompt?.trim() ? task.prompt : task.description;
+  const landedFiles = task.mergeDetails?.landedFiles;
+
+  return [
+    `Undo the work landed by task ${task.id}${task.title ? ` — "${task.title}"` : ""}.`,
+    "",
+    "## Why this task exists",
+    `A direct \`git revert\` of ${task.id} could not be applied automatically (later commits conflict with it, the task's revert is unsupported, or AI-undo mode was explicitly requested). This task undoes the BEHAVIOR/FILES ${task.id} introduced WHILE PRESERVING unrelated changes made by later tasks that also touched the same files — do not blindly restore the pre-${task.id} version of any shared file.`,
+    "",
+    `## Original mission (${task.id})`,
+    mission,
+    "",
+    `## Files landed by ${task.id}`,
+    formatLandedFiles(landedFiles),
+    `See \`GET /api/tasks/${task.id}/diff\` for the full landed diff.`,
+    "",
+    "## What to do",
+    `1. Read ${task.id}'s original mission above and its landed diff.`,
+    `2. For each file ${task.id} touched, remove or reverse ONLY the behavior/changes it introduced. If a later task also modified the same file, preserve that later task's unrelated changes.`,
+    `3. Commit the undo work using the \`revert(${task.id}): <short summary>\` commit-message convention with a \`Fusion-Task-Id: ${task.id}\` trailer, so the commit stays attributable back to ${task.id} (mirrors the direct git-revert commit convention).`,
+    "4. Verify the original behavior is gone (tests/build) and that later, unrelated changes to the same files still work as intended.",
+  ].join("\n");
+}
+
+/**
+ * FNXC:TaskRevert 2026-07-04-00:00 (dependency-free creation rule):
+ * The AI-undo task is created via the store's normal `createTask` path
+ * (lands in `triage`, gets its own generated PROMPT.md) with `dependencies: []`
+ * — it must NEVER depend on the source task. The source task is already
+ * done/archived; a dependency on it would be a permanently-satisfied no-op
+ * that misrepresents the relationship in dependency UIs.
+ */
+export interface CreateAiUndoTaskDeps {
+  createTask(input: TaskCreateInput): Promise<Task>;
+  /** Idempotency lookup — see `REVERT_OF_METADATA_KEY`. Implemented by `TaskStore.findOpenRevertTaskForSource` (core). */
+  findOpenRevertTaskForSource(sourceTaskId: string): Promise<Task | null>;
+  sourceTask: Pick<Task, "id" | "title" | "description" | "prompt" | "mergeDetails" | "priority">;
+}
+
+/**
+ * FNXC:TaskRevert 2026-07-04-00:00 (Step 1 entry point):
+ * Creates (or, if an open one already exists for this source task, returns
+ * the existing) AI-undo board task. This is the fallback the route uses when
+ * the git-revert path cannot apply cleanly / is unsupported, or when the
+ * caller explicitly requests `mode:"ai"`.
+ */
+export async function createAiUndoTask(deps: CreateAiUndoTaskDeps): Promise<AiUndoTaskResult> {
+  const { sourceTask } = deps;
+
+  // Idempotency FIRST — never create a duplicate while one is still open.
+  const existing = await deps.findOpenRevertTaskForSource(sourceTask.id);
+  if (existing) {
+    return { mode: "ai", createdTaskId: existing.id, alreadyOpen: true };
+  }
+
+  const description = buildAiUndoTaskDescription({ task: sourceTask });
+  const created = await deps.createTask({
+    title: `Undo ${sourceTask.id}: ${sourceTask.title ?? sourceTask.description.slice(0, 80)}`,
+    description,
+    dependencies: [],
+    priority: sourceTask.priority,
+    source: {
+      sourceType: "recovery",
+      sourceMetadata: { [REVERT_OF_METADATA_KEY]: sourceTask.id },
+    },
+  });
+
+  return { mode: "ai", createdTaskId: created.id };
 }

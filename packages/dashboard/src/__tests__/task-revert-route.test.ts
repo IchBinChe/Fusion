@@ -44,6 +44,11 @@ vi.mock("@fusion/engine", async (importOriginal) => {
   };
 });
 
+// FNXC:TaskRevert 2026-07-04-00:00 (FN-7524): `createAiUndoTask` is NOT mocked —
+// these route tests exercise the real engine helper against a fake store
+// (`createTask`/`findOpenRevertTaskForSource`), proving the route wires the
+// AI-undo fallback correctly rather than merely asserting it was "called".
+
 function makeTask(overrides: Partial<Task>): Task {
   return {
     id: "FN-100",
@@ -59,13 +64,34 @@ function makeTask(overrides: Partial<Task>): Task {
   } as Task;
 }
 
-function createMockStore(task: Task): TaskStore {
+function createMockStore(
+  task: Task,
+  opts?: { openUndoTask?: Task | null; createdUndoTask?: Task },
+): TaskStore {
+  let nextId = 800;
+  const createTask = vi.fn().mockImplementation(async (input: { description: string; source?: { sourceParentTaskId?: string; sourceMetadata?: Record<string, unknown> } }) => {
+    const created = opts?.createdUndoTask ?? ({
+      id: `FN-${nextId++}`,
+      lineageId: `FN-${nextId}`,
+      description: input.description,
+      column: "triage",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      sourceParentTaskId: input.source?.sourceParentTaskId,
+      sourceMetadata: input.source?.sourceMetadata,
+    } as unknown as Task);
+    return created;
+  });
+  const findOpenRevertTaskForSource = vi.fn().mockResolvedValue(opts?.openUndoTask ?? null);
   return {
     getSettings: vi.fn().mockResolvedValue({}),
     getSettingsFast: vi.fn().mockResolvedValue({ autoMerge: true }),
     getRootDir: vi.fn().mockReturnValue(makeGitRepoOnMain()),
     getTask: vi.fn().mockResolvedValue(task),
     getTaskCommitAssociationsByLineageId: vi.fn().mockResolvedValue([]),
+    createTask,
+    findOpenRevertTaskForSource,
     on: vi.fn(),
     off: vi.fn(),
   } as unknown as TaskStore;
@@ -80,6 +106,10 @@ function createApp(store: TaskStore) {
 
 async function REQUEST(app: express.Express, method: string, path: string) {
   return performRequest(app, method, path);
+}
+
+async function POST_JSON(app: express.Express, path: string, body: Record<string, unknown>) {
+  return performRequest(app, "POST", path, JSON.stringify(body), { "content-type": "application/json" });
 }
 
 describe("POST /tasks/:id/revert", () => {
@@ -108,7 +138,7 @@ describe("POST /tasks/:id/revert", () => {
     expect(res.body).toMatchObject({ mode: "git", clean: true, alreadyReverted: true });
   });
 
-  it("returns a conflicting result without creating an AI-undo follow-up task", async () => {
+  it("mode:'git' returns a conflicting result without creating an AI-undo follow-up task (FN-7524: default mode is now 'auto', which DOES fall back to AI on conflict — explicit 'git' is required to preserve the FN-7523 git-only contract)", async () => {
     const task = makeTask({ column: "done" });
     const store = createMockStore(task);
     performTaskRevertMock.mockResolvedValue({
@@ -117,7 +147,7 @@ describe("POST /tasks/:id/revert", () => {
       conflicts: [{ file: "foo.ts", status: "UU" }],
     });
 
-    const res = await REQUEST(createApp(store), "POST", `/api/tasks/${task.id}/revert`);
+    const res = await POST_JSON(createApp(store), `/api/tasks/${task.id}/revert`, { mode: "git" });
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
       mode: "git",
@@ -176,5 +206,112 @@ describe("POST /tasks/:id/revert", () => {
     expect(res.status).toBe(409);
     expect((res.body as { details?: { code?: string } }).details?.code ?? (res.body as { error?: string }).error).toBeTruthy();
     expect(performTaskRevertMock).not.toHaveBeenCalled();
+  });
+});
+
+// FN-7524 Symptom Verification: `{ mode }` request handling + the AI-undo fallback.
+describe("POST /tasks/:id/revert — FN-7524 mode + AI-undo fallback", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("rejects an invalid mode value with 400 before invoking the engine service", async () => {
+    const task = makeTask({ column: "done" });
+    const store = createMockStore(task);
+
+    const res = await POST_JSON(createApp(store), `/api/tasks/${task.id}/revert`, { mode: "bogus" });
+    expect(res.status).toBe(400);
+    expect(performTaskRevertMock).not.toHaveBeenCalled();
+    expect((store.createTask as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled();
+  });
+
+  it("(a) auto + conflict: creates an AI-undo task and returns { mode: 'ai', createdTaskId }, stamped with the revertOf marker", async () => {
+    const task = makeTask({ id: "FN-901", column: "done" });
+    const store = createMockStore(task);
+    performTaskRevertMock.mockResolvedValue({
+      mode: "git",
+      clean: false,
+      conflicts: [{ file: "foo.ts", status: "UU" }],
+    });
+
+    const res = await POST_JSON(createApp(store), `/api/tasks/${task.id}/revert`, { mode: "auto" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ mode: "ai" });
+    expect((res.body as { createdTaskId?: string }).createdTaskId).toBeTruthy();
+    expect(store.createTask as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(1);
+    const createInput = (store.createTask as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+      source?: { sourceParentTaskId?: string; sourceMetadata?: Record<string, unknown> };
+    };
+    expect(createInput.source?.sourceMetadata?.revertOf).toBe("FN-901");
+  });
+
+  it("(b) mode:'ai' forced: creates the AI-undo task without ever invoking the git path", async () => {
+    const task = makeTask({ id: "FN-902", column: "done" });
+    const store = createMockStore(task);
+
+    const res = await POST_JSON(createApp(store), `/api/tasks/${task.id}/revert`, { mode: "ai" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ mode: "ai" });
+    expect(performTaskRevertMock).not.toHaveBeenCalled();
+    expect(store.createTask as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(1);
+  });
+
+  it("(c) duplicate guard: a second call while an AI-undo task is already open returns the SAME createdTaskId and creates no duplicate", async () => {
+    const task = makeTask({ id: "FN-903", column: "done" });
+    const existingUndo = makeTask({ id: "FN-950", column: "triage", sourceParentTaskId: "FN-903", sourceMetadata: { revertOf: "FN-903" } });
+    const store = createMockStore(task, { openUndoTask: existingUndo });
+
+    const res = await POST_JSON(createApp(store), `/api/tasks/${task.id}/revert`, { mode: "ai" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ mode: "ai", createdTaskId: "FN-950", alreadyOpen: true });
+    expect(store.createTask as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+  });
+
+  it("(d) auto + clean: returns the git result and does NOT create an AI-undo task", async () => {
+    const task = makeTask({ id: "FN-904", column: "done" });
+    const store = createMockStore(task);
+    performTaskRevertMock.mockResolvedValue({ mode: "git", clean: true, revertCommitSha: "abc123" });
+
+    const res = await POST_JSON(createApp(store), `/api/tasks/${task.id}/revert`, { mode: "auto" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ mode: "git", clean: true, revertCommitSha: "abc123" });
+    expect(store.createTask as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+  });
+
+  it("mode:'git' on a conflicting result returns the raw conflict and NEVER creates an AI-undo task", async () => {
+    const task = makeTask({ id: "FN-905", column: "done" });
+    const store = createMockStore(task);
+    performTaskRevertMock.mockResolvedValue({
+      mode: "git",
+      clean: false,
+      conflicts: [{ file: "foo.ts", status: "UU" }],
+    });
+
+    const res = await POST_JSON(createApp(store), `/api/tasks/${task.id}/revert`, { mode: "git" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ mode: "git", clean: false });
+    expect(store.createTask as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
+  });
+
+  it("auto + unsupported (workspace) git result falls back to the AI-undo task", async () => {
+    const task = makeTask({ id: "FN-906", column: "done" });
+    const store = createMockStore(task);
+    performTaskRevertMock.mockResolvedValue({ mode: "git", unsupported: true, reason: "workspace-task-revert-unsupported" });
+
+    const res = await POST_JSON(createApp(store), `/api/tasks/${task.id}/revert`, { mode: "auto" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ mode: "ai" });
+    expect(store.createTask as ReturnType<typeof vi.fn>).toHaveBeenCalledTimes(1);
+  });
+
+  it("auto + needsHuman (autoMerge-off) returns the git result and does NOT create an AI-undo task", async () => {
+    const task = makeTask({ id: "FN-907", column: "done" });
+    const store = createMockStore(task);
+    performTaskRevertMock.mockResolvedValue({ mode: "git", needsHuman: true, reason: "autoMerge is disabled" });
+
+    const res = await POST_JSON(createApp(store), `/api/tasks/${task.id}/revert`, { mode: "auto" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ mode: "git", needsHuman: true });
+    expect(store.createTask as ReturnType<typeof vi.fn>).not.toHaveBeenCalled();
   });
 });

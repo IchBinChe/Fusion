@@ -2085,6 +2085,46 @@ describe("POST /tasks/:id/approve-plan", () => {
     expect(res.status).toBe(200);
     expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo");
   });
+
+  /*
+   * FNXC:PlanApproval 2026-07-04-22:41:
+   * FN-7569 — approve-plan must persist an approvedPlanFingerprint hash of the current
+   * on-disk PROMPT.md so a later re-specification of the SAME plan can skip re-asking.
+   */
+  it("records an approvedPlanFingerprint hash of the on-disk PROMPT.md", async () => {
+    const root = mkdtempSync(join(tmpdir(), "kb-dashboard-approve-plan-"));
+    try {
+      mkdirSync(join(root, ".fusion", "tasks", "FN-001"), { recursive: true });
+      writeFileSync(join(root, ".fusion", "tasks", "FN-001", "PROMPT.md"), "# Task: FN-001\n\nApproved plan body.\n");
+
+      const localStore = createMockStore({
+        getTask: vi.fn(),
+        moveTask: vi.fn(),
+        updateTask: vi.fn(),
+        logEntry: vi.fn().mockResolvedValue(undefined),
+        getRootDir: vi.fn().mockReturnValue(root),
+      });
+      const awaitingTask = { ...FAKE_TASK_DETAIL, column: "triage" as const, status: "awaiting-approval" as const };
+      const movedTask = { ...FAKE_TASK_DETAIL, column: "todo" as const };
+      (localStore.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(awaitingTask);
+      (localStore.moveTask as ReturnType<typeof vi.fn>).mockResolvedValue(movedTask);
+      (localStore.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({ ...movedTask, status: undefined });
+
+      const app = express();
+      app.use(express.json());
+      app.use("/api", createApiRoutes(localStore));
+
+      const res = await REQUEST(app, "POST", "/api/tasks/KB-001/approve-plan");
+
+      expect(res.status).toBe(200);
+      expect(localStore.updateTask).toHaveBeenCalledWith(
+        "FN-001",
+        expect.objectContaining({ status: undefined, approvedPlanFingerprint: expect.stringMatching(/^[0-9a-f]{64}$/) }),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("POST /tasks/:id/reject-plan", () => {
@@ -2117,7 +2157,9 @@ describe("POST /tasks/:id/reject-plan", () => {
 
     expect(res.status).toBe(200);
     expect(store.logEntry).toHaveBeenCalledWith("FN-001", "Plan rejected by user", "Specification will be regenerated");
-    expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: undefined });
+    // FN-7569: reject-plan clears any previously-recorded approval fingerprint so a
+    // regenerated plan is always treated as new and requires fresh manual approval.
+    expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: undefined, approvedPlanFingerprint: null });
     expect(res.body.column).toBe("triage");
   });
 
@@ -2199,7 +2241,30 @@ describe("POST /tasks/:id/reject-plan", () => {
     const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/reject-plan");
 
     expect(res.status).toBe(200);
-    expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: undefined });
+    expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: undefined, approvedPlanFingerprint: null });
+  });
+
+  /*
+   * FNXC:PlanApproval 2026-07-04-22:41:
+   * FN-7569 — reject-plan must clear a previously-recorded approval fingerprint
+   * regardless of its prior value, so a regenerated plan never inherits it.
+   */
+  it("clears an existing approvedPlanFingerprint on reject", async () => {
+    const awaitingTask = {
+      ...FAKE_TASK_DETAIL,
+      column: "triage" as const,
+      status: "awaiting-approval" as const,
+      approvedPlanFingerprint: "deadbeef",
+    };
+    const updatedTask = { ...FAKE_TASK_DETAIL, column: "triage" as const, status: undefined, approvedPlanFingerprint: undefined };
+
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(awaitingTask);
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(updatedTask);
+
+    const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/reject-plan");
+
+    expect(res.status).toBe(200);
+    expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: undefined, approvedPlanFingerprint: null });
   });
 });
 

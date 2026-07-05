@@ -60,7 +60,7 @@ import {
 } from "@fusion/engine";
 import { buildBoardWorkflowsPayload } from "./board-workflows.js";
 import { isBackwardMoveBlockedByOpenPr, PR_OPEN_BLOCKS_MOVE_BACK_MESSAGE } from "./register-pull-requests-routes.js";
-import { isWorkspaceTask, type RunAuditEventInput } from "@fusion/core";
+import { computePlanApprovalFingerprint, isWorkspaceTask, type RunAuditEventInput } from "@fusion/core";
 import { ApiError, badRequest, conflict, notFound } from "../api-error.js";
 import type { ApiRoutesContext } from "./types.js";
 import { deriveAutoTaskBranch, derivePerTaskBranch, getBranchSelectionMode, resolveBranchSelection } from "./branch-selection.js";
@@ -2754,11 +2754,34 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       // Log the approval
       await scopedStore.logEntry(task.id, "Plan approved by user");
 
+      /*
+       * FNXC:PlanApproval 2026-07-04-22:41:
+       * FN-7569 — persist a fingerprint of the exact PROMPT.md the operator just approved
+       * so a later re-specification (replan, plan-review retry, self-healing rebound) that
+       * produces the identical plan can skip re-parking at awaiting-approval. Read the
+       * on-disk PROMPT.md directly (best-effort) since the task row does not always carry
+       * full prompt text; a missing/unreadable file leaves the fingerprint unset and the
+       * manual gate falls back to today's always-re-park behavior for this task.
+       */
+      let approvedPlanFingerprint: string | undefined;
+      try {
+        const { readFile } = await import("node:fs/promises");
+        const { join } = await import("node:path");
+        const promptPath = join(scopedStore.getRootDir(), ".fusion", "tasks", task.id, "PROMPT.md");
+        const promptText = await readFile(promptPath, "utf8");
+        approvedPlanFingerprint = computePlanApprovalFingerprint(promptText);
+      } catch {
+        // No PROMPT.md to fingerprint (unusual for an awaiting-approval task) — leave unset.
+      }
+
       // Move to todo and clear status
       const updated = await scopedStore.moveTask(task.id, "todo");
-      await scopedStore.updateTask(task.id, { status: undefined });
+      await scopedStore.updateTask(task.id, {
+        status: undefined,
+        ...(approvedPlanFingerprint ? { approvedPlanFingerprint } : {}),
+      });
 
-      res.json({ ...updated, status: undefined });
+      res.json({ ...updated, status: undefined, ...(approvedPlanFingerprint ? { approvedPlanFingerprint } : {}) });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;
@@ -2797,7 +2820,13 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       await scopedStore.logEntry(task.id, "Plan rejected by user", "Specification will be regenerated");
 
       // Clear status to return to normal triage state
-      await scopedStore.updateTask(task.id, { status: undefined });
+      /*
+       * FNXC:PlanApproval 2026-07-04-22:41:
+       * FN-7569 — clear any previously-recorded approval fingerprint alongside the status
+       * clear and PROMPT.md removal, so the regenerated plan is always treated as new and
+       * requires fresh manual approval (it must never inherit the rejected plan's fingerprint).
+       */
+      await scopedStore.updateTask(task.id, { status: undefined, approvedPlanFingerprint: null });
 
       // Remove PROMPT.md to force regeneration
       const { rm } = await import("node:fs/promises");

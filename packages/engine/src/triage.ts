@@ -28,6 +28,7 @@ import {
   compareTaskIdNumeric,
   resolveAgentMemoryInclusionMode,
   resolvePlanApprovalRequired,
+  computePlanApprovalFingerprint,
   extractIntentSignature,
   findNearDuplicates,
   isNearDuplicateCanonicalInactive,
@@ -2574,24 +2575,49 @@ export class TriageProcessor {
     */
     if (resolvePlanApprovalRequired(settings)) {
       /*
-       * FNXC:PlanApproval 2026-07-04-21:35:
-       * FN-7559: explicitly clear awaitingApprovalReason on the manual gate's own
-       * awaiting-approval write so a stale "release-authorization" reason left over
-       * from an earlier pass on this same task (e.g. a replan after the release
-       * gate parked it, now passing the release gate but still requiring manual
-       * approval) never survives into this genuinely-manual hold.
+       * FNXC:PlanApproval 2026-07-04-22:41:
+       * FN-7569 — idempotency short-circuit. Compare the freshly written PROMPT.md against
+       * the fingerprint recorded when the operator last approved a plan for this task
+       * (POST /tasks/:id/approve-plan, packages/core/src/plan-approval.ts). If they match,
+       * this is a re-specification of an already-approved, unchanged plan (replan,
+       * plan-review reviewer-outage retry, self-healing rebound to triage, duplicate-marker
+       * retry) and must proceed straight through like an approved task rather than re-parking
+       * at awaiting-approval and asking the operator to re-approve. A genuinely changed plan
+       * (or one whose approval was cleared by reject-plan) produces a different/absent
+       * fingerprint and falls through to the ordinary park below. This check lives strictly
+       * inside the manual-gate branch, after release authorization and Plan Review have
+       * already made their independent decisions, so it never weakens either of those gates
+       * or auto-approve-all (which never reaches this branch at all).
        */
-      const approvalUpdates: Record<string, unknown> = { status: "awaiting-approval", awaitingApprovalReason: null };
-      if (shouldApplyPromptDeclaredTitle && promptDeclaredTitle) {
-        approvalUpdates.title = promptDeclaredTitle;
+      const priorFingerprint = latestTransitionTask?.approvedPlanFingerprint ?? task.approvedPlanFingerprint;
+      const currentFingerprint = computePlanApprovalFingerprint(written);
+      if (priorFingerprint && priorFingerprint === currentFingerprint) {
+        await this.store.logEntry(
+          task.id,
+          "Plan unchanged since prior approval — proceeding without re-approval",
+        );
+        planLog.log(`${task.id} plan unchanged since prior approval — proceeding without re-approval`);
+      } else {
+        /*
+         * FNXC:PlanApproval 2026-07-04-21:35:
+         * FN-7559: explicitly clear awaitingApprovalReason on the manual gate's own
+         * awaiting-approval write so a stale "release-authorization" reason left over
+         * from an earlier pass on this same task (e.g. a replan after the release
+         * gate parked it, now passing the release gate but still requiring manual
+         * approval) never survives into this genuinely-manual hold.
+         */
+        const approvalUpdates: Record<string, unknown> = { status: "awaiting-approval", awaitingApprovalReason: null };
+        if (shouldApplyPromptDeclaredTitle && promptDeclaredTitle) {
+          approvalUpdates.title = promptDeclaredTitle;
+        }
+        await this.store.updateTask(task.id, approvalUpdates);
+        await this.store.logEntry(
+          task.id,
+          options.recoveryLogAction ?? "Specification approved by AI — awaiting manual approval",
+        );
+        planLog.log(`✓ ${task.id} specified and awaiting manual approval`);
+        return;
       }
-      await this.store.updateTask(task.id, approvalUpdates);
-      await this.store.logEntry(
-        task.id,
-        options.recoveryLogAction ?? "Specification approved by AI — awaiting manual approval",
-      );
-      planLog.log(`✓ ${task.id} specified and awaiting manual approval`);
-      return;
     }
 
     if (shouldClearWorkflowRunStepInstances) {

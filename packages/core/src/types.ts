@@ -2485,6 +2485,19 @@ export interface Task {
    * no hold or an ordinary manual-approval hold.
    */
   awaitingApprovalReason?: "release-authorization";
+  /*
+   * FNXC:PlanApproval 2026-07-04-22:41:
+   * FN-7569 — records the computePlanApprovalFingerprint (packages/core/src/plan-approval.ts)
+   * hash of the exact PROMPT.md content an operator last approved via POST /tasks/:id/approve-plan.
+   * The manual plan-approval gate (packages/engine/src/triage.ts finalizeApprovedTask) compares this
+   * against the freshly written PROMPT.md on every re-specification (replan, plan-review retry,
+   * self-healing rebound to triage) and skips re-parking at "awaiting-approval" when they match, so an
+   * unchanged, already-approved plan is never re-asked. A genuine spec change produces a different
+   * fingerprint and still re-asks. POST /tasks/:id/reject-plan clears this field (null) alongside
+   * deleting PROMPT.md so the regenerated plan is treated as new. Stores only a hash, never plan text.
+   * Additive-only, nullable: legacy/never-approved rows stay NULL and behave exactly as before.
+   */
+  approvedPlanFingerprint?: string;
   /** Thinking level for AI agent sessions — controls reasoning effort (off/minimal/low/medium/high) */
   thinkingLevel?: ThinkingLevel;
   /** Execution mode for task implementation.

@@ -1715,6 +1715,39 @@ FN-6500 fixes a tablet regression from FN-5599: the task-detail overlay offset a
 
 }
 
+/*
+FNXC:TaskDetailSwipeBack 2026-07-05-12:30:
+FN-7587 — non-interactive predictive-back polish: a short slide/fade enter animation for the
+mobile list/modal/nested task-detail surface, layered purely on top of the unchanged
+FN-7583/FN-7586 dismissal routing (popstate / fusion:native-back / useNavigationHistory stack).
+Gated to mobile via `.task-detail-modal--mobile-transition` (TaskDetailModal.tsx local resize
+listener); desktop never receives this class. A true finger-tracked interactive predictive-back
+is not feasible from a Capacitor single-page WebView today — see task FN-7587 notes.
+*/
+@media (max-width: 768px) {
+  .task-detail-modal--mobile-transition {
+    animation: task-detail-modal-mobile-slide-fade-in var(--duration-normal) ease-out;
+  }
+}
+
+@keyframes task-detail-modal-mobile-slide-fade-in {
+  from {
+    opacity: 0;
+    transform: translateX(var(--space-xl, 24px));
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-detail-modal--mobile-transition {
+    animation: none;
+  }
+}
+
 .detail-actions-menu-item-danger {
   color: var(--color-error);
 }

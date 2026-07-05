@@ -45,6 +45,36 @@ Manual invocation (e.g. after a bare `npx cap sync` outside `build:mobile`):
 pnpm --filter @fusion/mobile patch:android-manifest
 ```
 
+### Mobile task-detail predictive-back transition (FN-7587)
+
+FN-7583 (Android back-gesture parity) and FN-7586 (iOS edge-swipe-back parity) made native
+"back" gestures **functionally** dismiss Fusion's mobile task-detail surfaces (board
+main-panel, list-mobile, modal, and nested detail) through the dashboard's shared
+nav-history invariant (`useNavigationHistory` / `popstate` / `fusion:native-back`). FN-7587
+layers a **presentation-only** slide/fade transition on top of that unchanged routing:
+
+- Mobile/native-only — the transition is gated to the mobile viewport (`<= 768px`, matching
+  the existing `isMobile`/`OVERSIGHT_MENU_MOBILE_BREAKPOINT` convention in the dashboard);
+  desktop task-detail never receives the animation class.
+- Non-interactive — the transition is a short CSS `@keyframes` slide/fade (~200ms) triggered
+  by mount/prop-state change, not by gesture progress. It does **not** intercept, delay, or
+  reorder when the `useNavigationHistory` pop / `fusion:native-back` / empty-stack fallback
+  fires; the animation is purely a CSS class applied to the already-real DOM node.
+- Honors `prefers-reduced-motion: reduce` (neutralizes to an instant, transform-free show),
+  mirroring the dashboard's existing reduced-motion convention (`WorkflowSwitcher.css`,
+  `TopProgressBar.css`).
+- **Interactive predictive-back is not implemented** and is not feasible today from a
+  Capacitor single-page WebView on either platform: iOS's `allowsBackForwardNavigationGestures`
+  gesture (used by FN-7586) exposes only a discrete `popstate` on commit, with no
+  interactive-progress callback reachable from JS; Android's OS-owned predictive-back preview
+  animates outside the single-Activity WebView and is not driveable from in-page DOM. A
+  follow-up task is filed to revisit this if/when platform APIs expose gesture-progress
+  callbacks to JS.
+
+Implementation lives entirely in the dashboard package (`packages/dashboard/app/styles.css`,
+`packages/dashboard/app/components/TaskDetailModal.css`, `MainContent.tsx`,
+`TaskDetailModal.tsx`) — no mobile-shell-native code changes were required for this task.
+
 ### Regression coverage locked by tests
 
 `packages/mobile/src/__tests__/connection-profiles.test.ts`, `native-shell.test.ts`, and `qr-scanner.test.ts` now lock these contracts:

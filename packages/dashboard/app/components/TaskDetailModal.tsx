@@ -88,6 +88,8 @@ const ACTIVITY_VIEW_MENU_MAX_HEIGHT = 320;
 const ACTIVITY_VIEW_MENU_OPEN_VIEWPORT_GUARD_MS = 350;
 // FNXC:PlannerOversight 2026-07-04-19:00: FN-7545 — mobile breakpoint for collapsing the oversight action cluster into an overflow menu; matches the `@media (max-width: 768px)` breakpoint used across TaskDetailModal.css.
 const OVERSIGHT_MENU_MOBILE_BREAKPOINT = 768;
+// FNXC:TaskDetailSwipeBack 2026-07-05-12:30: FN-7587 — mobile breakpoint gating the presentation-only predictive-back slide/fade transition on the modal/list/nested task-detail surface; matches OVERSIGHT_MENU_MOBILE_BREAKPOINT/the `@media (max-width: 768px)` convention already used in this file.
+const TASK_DETAIL_MOBILE_TRANSITION_BREAKPOINT = 768;
 
 type ActivityViewMenuPosition = {
   top: number;
@@ -5997,6 +5999,30 @@ export function TaskDetailModal({ onClose, ...props }: TaskDetailModalProps) {
   useModalResizePersist(modalRef, true, "task-detail-modal-size");
   useMobileScrollLock(true);
   const overlayDismissProps = useOverlayDismiss(onClose);
+  /*
+  FNXC:TaskDetailSwipeBack 2026-07-05-12:30:
+  FN-7587 — track the mobile breakpoint locally (mirrors the OVERSIGHT_MENU_MOBILE_BREAKPOINT
+  resize-listener pattern above) so the list/modal/nested task-detail surface gets the same
+  presentation-only predictive-back slide/fade enter transition as the board main-panel
+  (MainContent.tsx), without threading a new isMobile prop through App.tsx/AppModals.tsx. This
+  is presentation-only: it never touches onClose/onRequestClose timing or the underlying
+  useNavigationHistory dismissal routing, and honors prefers-reduced-motion (see
+  TaskDetailModal.css). Defaults false so JSDOM/unit tests keep exercising the desktop (no
+  animation) branch unless a test explicitly narrows the viewport.
+  */
+  const [isMobileTransition, setIsMobileTransition] = useState(false);
+  useEffect(() => {
+    const updateIsMobileTransition = () => {
+      setIsMobileTransition(window.innerWidth <= TASK_DETAIL_MOBILE_TRANSITION_BREAKPOINT);
+    };
+
+    updateIsMobileTransition();
+    window.addEventListener("resize", updateIsMobileTransition);
+
+    return () => {
+      window.removeEventListener("resize", updateIsMobileTransition);
+    };
+  }, []);
 
   return (
     <div
@@ -6005,7 +6031,10 @@ export function TaskDetailModal({ onClose, ...props }: TaskDetailModalProps) {
       role="dialog"
       aria-modal="true"
     >
-      <div className="modal modal-lg task-detail-modal" ref={modalRef}>
+      <div
+        className={`modal modal-lg task-detail-modal${isMobileTransition ? " task-detail-modal--mobile-transition" : ""}`}
+        ref={modalRef}
+      >
         <TaskDetailContent
           {...props}
           onRequestClose={onClose}

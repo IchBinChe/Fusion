@@ -751,7 +751,15 @@ export function MainContent({
     }
     return (
       <PageErrorBoundary>
-        <div className="task-detail-main-panel">
+        {/*
+        FNXC:TaskDetailSwipeBack 2026-07-05-12:30:
+        FN-7587 — presentation-only predictive-back polish layered on top of the unchanged
+        FN-7583/FN-7586 dismissal routing (popstate / fusion:native-back / useNavigationHistory
+        stack). The `--mobile-transition` modifier only adds a CSS enter animation gated to the
+        existing `isMobile` prop; it never defers or reorders when onRequestClose/onBackToBoard
+        fire, and honors prefers-reduced-motion (see styles.css).
+        */}
+        <div className={`task-detail-main-panel${isMobile ? " task-detail-main-panel--mobile-transition" : ""}`}>
           <div className="task-detail-main-panel-body">
             <TaskDetailContent
               task={liveDetailTask}

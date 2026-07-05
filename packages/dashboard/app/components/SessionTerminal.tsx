@@ -341,6 +341,15 @@ export function SessionTerminal({
         try {
           (fitAddonRef.current as { fit?: () => void } | null)?.fit?.();
           sendResizeMessage(terminal.cols, terminal.rows);
+          /*
+          FNXC:Terminal 2026-07-04-11:45:
+          FN-7567 recurrence #4: `_setDefaultSpacing()` only recomputes from a
+          genuine option-change remeasure or a devicePixelRatio change, never
+          from the `fit()`/resize above, so re-bake spacing once more here
+          against the settled (post-fit) column count instead of the stale
+          pre-fit one baked by the `forceTerminalFontRemeasure` call above.
+          */
+          forceTerminalFontRemeasure(terminal, resolvedFontFamily);
           terminal.refresh(0, Math.max(0, terminal.rows - 1));
         } catch {
           /* ignore teardown or transient measure failures */
@@ -507,11 +516,25 @@ export function SessionTerminal({
 
           FNXC:Terminal 2026-07-04-09:40:
           FN-7561 recurrence #3: reassigning fontFamily to the SAME already-resolved value is a no-op against real xterm's OptionsService (no onOptionChange fires), so CharSizeService/DomRenderer never remeasure the web font that only just finished loading after xterm's initial pre-load measurement. Force a genuine value transition via `forceTerminalFontRemeasure`.
+
+          FNXC:Terminal 2026-07-04-11:45:
+          FN-7567 recurrence #4: the remeasure above is necessary but not
+          sufficient. Real xterm's `DomRenderer._setDefaultSpacing()` (the
+          letter-spacing compensation baked onto `.xterm-rows`) only recomputes
+          from a genuine option-change remeasure (what `forceTerminalFontRemeasure`
+          triggers) or a devicePixelRatio change — NEVER from `handleResize()`,
+          which is what `fitAddon.fit()` -> `terminal.resize(cols, rows)`
+          triggers. Baking spacing BEFORE `fit()` bakes it against the stale
+          pre-fit column count; force a second genuine remeasure AFTER `fit()`
+          settles the column count so spacing is re-baked against the FINAL
+          geometry, not the pre-fit one. See
+          `docs/solutions/ui-bugs/xterm-options-noop-remeasure-after-font-settle.md`.
           */
           forceTerminalFontRemeasure(term, resolvedFontFamily);
           term.options.fontSize = terminalPreferences.fontSize;
           (fitAddon as unknown as { fit: () => void }).fit();
           sendResize(term.cols, term.rows);
+          forceTerminalFontRemeasure(term, resolvedFontFamily);
           term.refresh(0, Math.max(0, term.rows - 1));
         } catch {
           /* ignore teardown or transient measure failures */

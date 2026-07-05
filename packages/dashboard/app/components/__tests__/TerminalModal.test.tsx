@@ -60,7 +60,73 @@ vi.mock("../../api", () => ({
 }));
 
 // Mock xterm modules to prevent DOM errors in jsdom
-const mockFitAddonFit = vi.fn();
+/*
+FNXC:Terminal 2026-07-04-11:05:
+FN-7567 recurrence #4: forcing a genuine fontFamily/fontSize transition
+(FN-7561's `forceTerminalFontRemeasure`) is necessary but not sufficient. Real
+xterm's `DomRenderer._setDefaultSpacing()` — the letter-spacing compensation
+baked onto `.xterm-rows` (`spacing = dimensions.css.cell.width -
+widthCache.get('W')`) — is recomputed on `CharSizeService.onCharSizeChange`
+(any genuine option change) and on `handleDevicePixelRatioChange`, but NOT on
+`handleResize()` (the path `fitAddon.fit()` -> `terminal.resize(cols, rows)`
+takes; see `@xterm/xterm` `src/browser/renderer/dom/DomRenderer.ts`). Both
+settle sites call `forceTerminalFontRemeasure()` (which bakes spacing against
+the column count that predates `fit()`) and only THEN call `fitAddon.fit()`
+(which changes cols/cell-width but never re-bakes spacing), leaving a stale,
+oversized letter-spacing baked in until an unrelated later event happens to
+force another genuine option/DPR change. `mockFitAddonFit`/`mockTerminalInstance.cols`
+model this ordering-sensitive geometry (measured char width, cell width
+derived from cols, and the baked letter-spacing) directly, mirroring xterm's
+real internals, so the regression asserts actual geometry instead of a
+CSS-property or call-count check.
+*/
+const MOCK_CONTAINER_WIDTH_PX = 728;
+const MOCK_FALLBACK_CHAR_WIDTH_PX = 9;
+const MOCK_SETTLED_CHAR_WIDTH_PX = 7;
+let mockFontsSettledForCharSize = false;
+let mockMeasuredCharWidthPx = MOCK_FALLBACK_CHAR_WIDTH_PX;
+let mockBakedLetterSpacingPx = 0;
+
+function resetMockTerminalGeometry(): void {
+  mockFontsSettledForCharSize = false;
+  mockMeasuredCharWidthPx = MOCK_FALLBACK_CHAR_WIDTH_PX;
+  mockBakedLetterSpacingPx = 0;
+  mockTerminalInstance.cols = 80;
+}
+
+/** Mirrors the real web font finishing its network load/paint settle. */
+function settleMockTerminalFontForCharSize(): void {
+  mockFontsSettledForCharSize = true;
+}
+
+/** The rendered cell/advance-width geometry invariant under test: 0 == tight contiguous monospace. */
+function getMockBakedLetterSpacingPx(): number {
+  return mockBakedLetterSpacingPx;
+}
+
+// Mirrors xterm's CharSizeService.measure() -> onCharSizeChange ->
+// DomRenderer.handleCharSizeChanged() -> _updateDimensions() +
+// _setDefaultSpacing(): runs on every GENUINE fontFamily/fontSize option
+// transition, using the CURRENT (possibly stale, pre-fit) column count.
+function mockHandleCharSizeChanged(): void {
+  mockMeasuredCharWidthPx = mockFontsSettledForCharSize
+    ? MOCK_SETTLED_CHAR_WIDTH_PX
+    : MOCK_FALLBACK_CHAR_WIDTH_PX;
+  const cols = (mockTerminalInstance.cols as number) || 1;
+  const cellWidthPx = MOCK_CONTAINER_WIDTH_PX / cols;
+  mockBakedLetterSpacingPx = cellWidthPx - mockMeasuredCharWidthPx;
+}
+
+// Mirrors FitAddon.fit() -> terminal.resize(cols, rows) ->
+// DomRenderer.handleResize(): recomputes cols/cell-width from the CURRENT
+// measured char width but deliberately does NOT touch letter-spacing (real
+// xterm's handleResize() never calls _setDefaultSpacing()).
+const mockFitAddonFit = vi.fn(() => {
+  mockTerminalInstance.cols = Math.max(
+    1,
+    Math.floor(MOCK_CONTAINER_WIDTH_PX / mockMeasuredCharWidthPx),
+  );
+});
 
 let terminalKeyEventHandler: ((event: KeyboardEvent) => boolean) | null = null;
 let terminalDataHandler: ((data: string) => void) | null = null;
@@ -106,6 +172,7 @@ function createMockTerminalOptions(): Record<string, unknown> {
           store[key] = value;
           if (key === "fontFamily" || key === "fontSize") {
             fontRemeasureCount += 1;
+            mockHandleCharSizeChanged();
           }
         }
       },
@@ -286,6 +353,7 @@ describe("TerminalModal", () => {
     mockTerminalInstance.options.cursorStyle = "block";
     mockTerminalInstance.options.cursorBlink = true;
     resetFontRemeasureCount();
+    resetMockTerminalGeometry();
     mockCreateTerminalSession.mockResolvedValue({
       sessionId: "test-session-123",
       shell: "/bin/bash",
@@ -7151,6 +7219,7 @@ describe("TerminalModal — FN-7561 mobile inter-character spacing (xterm no-op 
   beforeEach(() => {
     vi.clearAllMocks();
     resetFontRemeasureCount();
+    resetMockTerminalGeometry();
     vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
       matches: false,
       media: query,
@@ -7171,6 +7240,7 @@ describe("TerminalModal — FN-7561 mobile inter-character spacing (xterm no-op 
     mockTerminalInstance.options.cursorStyle = "block";
     mockTerminalInstance.options.cursorBlink = true;
     resetFontRemeasureCount();
+    resetMockTerminalGeometry();
     mockUseTerminal.mockReturnValue(createMockTerminalState());
     mockUseTerminalSessions.mockReturnValue(defaultSessionState);
     mockUseWorkspaces.mockReturnValue({
@@ -7231,6 +7301,7 @@ describe("TerminalModal — FN-7561 mobile inter-character spacing (xterm no-op 
     // application done during xterm construction/effect setup — reset it and
     // isolate exactly what happens once the deferred font-load settles.
     resetFontRemeasureCount();
+    resetMockTerminalGeometry();
 
     await act(async () => {
       resolveLoad?.();
@@ -7297,6 +7368,7 @@ describe("TerminalModal — FN-7561 mobile inter-character spacing (xterm no-op 
 
     await waitFor(() => expect(mockTerminalInstance.open).toHaveBeenCalled());
     resetFontRemeasureCount();
+    resetMockTerminalGeometry();
 
     await act(async () => {
       resolveLoad?.();
@@ -7311,5 +7383,265 @@ describe("TerminalModal — FN-7561 mobile inter-character spacing (xterm no-op 
     expectMeasurementSafeFontStack(mockTerminalInstance.options.fontFamily as string);
 
     Object.defineProperty(window, "visualViewport", { value: undefined, writable: true, configurable: true });
+  });
+});
+
+/*
+FNXC:Terminal 2026-07-04-11:20:
+FN-7567 (recurrence #4 of mobile terminal inter-character spacing, after
+FN-7456's DOM glyph-fallback fix, FN-7460's `text-size-adjust: none`, and
+FN-7561's `forceTerminalFontRemeasure`) root cause: real xterm.js's
+`DomRenderer._setDefaultSpacing()` bakes the letter-spacing compensation used
+to correct rounding drift between the measured character width and the
+computed cell width (`dimensions.css.cell.width`, which is itself derived from
+the container width divided by the CURRENT column count). That bake only runs
+from `handleCharSizeChanged()` (wired to `CharSizeService.onCharSizeChange`,
+i.e. any genuine `fontFamily`/`fontSize` option transition) and from
+`handleDevicePixelRatioChange()` \u2014 NEVER from `handleResize()`, which is what
+`fitAddon.fit()` -> `terminal.resize(cols, rows)` triggers. Both mobile
+settle sites (`remeasureAfterTerminalFontLoad` in TerminalModal.tsx and its
+SessionTerminal.tsx sibling, plus the live-preferences-apply settle path in
+both files) call `forceTerminalFontRemeasure()` \u2014 which correctly forces a
+genuine option transition and DOES bake letter-spacing \u2014 but they bake it
+using the STALE column count that predates `fitAddon.fit()`. `fitAddon.fit()`
+then changes the column count (and therefore the true cell width) but never
+re-bakes the letter-spacing, so the terminal keeps rendering with a spacing
+value computed against a column count that no longer matches reality. This
+produces genuinely excessive inter-character gaps that persist until an
+unrelated later event (device-pixel-ratio change, orientation, reconnect)
+happens to force another *genuine* option/DPR-triggered remeasure \u2014 exactly
+matching the "only repairs itself after an incidental refit" report. See
+`docs/solutions/ui-bugs/xterm-options-noop-remeasure-after-font-settle.md`
+recurrence-#4 addendum.
+
+This suite asserts the actual rendered geometry invariant (baked letter-spacing
+== 0, i.e. cell width matches the settled glyph advance width) using a
+xterm-internals-accurate model (`mockHandleCharSizeChanged`/`mockFitAddonFit`),
+not a re-assertion of the FN-7456/FN-7460/FN-7561 CSS-property/call-count
+checks. It fails on pre-fix code (stale pre-fit letter-spacing survives the
+settle) and passes once the fix re-bakes spacing AFTER `fitAddon.fit()`
+settles the column count.
+*/
+describe("TerminalModal — FN-7567 mobile inter-character spacing (stale post-fit letter-spacing bake)", () => {
+  const mockOnClose = vi.fn();
+  const mockSendInput = vi.fn();
+  const mockResize = vi.fn();
+  const mockReconnect = vi.fn();
+
+  const createMockTerminalState = (overrides = {}) => ({
+    connectionStatus: "connected" as const,
+    sendInput: mockSendInput,
+    resize: mockResize,
+    onData: vi.fn(() => vi.fn()),
+    onExit: vi.fn(() => vi.fn()),
+    onConnect: vi.fn(() => vi.fn()),
+    onScrollback: vi.fn(() => vi.fn()),
+    reconnect: mockReconnect,
+    onSessionInvalid: vi.fn(() => vi.fn()),
+    ...overrides,
+  });
+
+  let previousInnerWidth: number;
+  let previousOntouchstart: unknown;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetFontRemeasureCount();
+    resetMockTerminalGeometry();
+    vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+    previousInnerWidth = window.innerWidth;
+    previousOntouchstart = window.ontouchstart;
+    // Real reported device: a narrow touch-primary mobile viewport.
+    Object.defineProperty(window, "innerWidth", { value: 390, configurable: true });
+    Object.defineProperty(window, "ontouchstart", { value: null, configurable: true });
+    mockTerminalInstance.options.fontFamily = XTERM_FONT_FAMILY;
+    mockTerminalInstance.options.fontSize = 12;
+    mockTerminalInstance.options.cursorStyle = "block";
+    mockTerminalInstance.options.cursorBlink = true;
+    resetFontRemeasureCount();
+    resetMockTerminalGeometry();
+    mockUseTerminal.mockReturnValue(createMockTerminalState());
+    mockUseTerminalSessions.mockReturnValue(defaultSessionState);
+    mockUseWorkspaces.mockReturnValue({
+      projectName: "kb",
+      workspaces: [],
+      loading: false,
+      error: null,
+    });
+    mockCreateTerminalSession.mockResolvedValue({
+      sessionId: "test-session-123",
+      shell: "/bin/bash",
+      cwd: "/project",
+    });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "innerWidth", { value: previousInnerWidth, configurable: true });
+    if (previousOntouchstart === undefined) {
+      delete (window as unknown as { ontouchstart?: unknown }).ontouchstart;
+    } else {
+      Object.defineProperty(window, "ontouchstart", { value: previousOntouchstart, configurable: true });
+    }
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("renders contiguous monospace cells (zero baked letter-spacing) once the mobile web font settles after xterm's initial fit", async () => {
+    let resolveLoad: (() => void) | undefined;
+    let resolveReady: (() => void) | undefined;
+    Object.defineProperty(document, "fonts", {
+      value: {
+        load: vi.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              resolveLoad = resolve;
+            }),
+        ),
+        ready: new Promise<void>((resolve) => {
+          resolveReady = resolve;
+        }),
+      },
+      configurable: true,
+    });
+
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+    await waitFor(() => expect(mockTerminalInstance.open).toHaveBeenCalled());
+    resetFontRemeasureCount();
+
+    // Simulate the real recurrence: the custom web font finishes downloading
+    // AFTER xterm's initial fallback-font measurement/fit already ran and
+    // baked a letter-spacing value that was internally consistent for the
+    // FALLBACK font at that (stale) column count.
+    settleMockTerminalFontForCharSize();
+
+    await act(async () => {
+      resolveLoad?.();
+      resolveReady?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(getFontRemeasureCount()).toBeGreaterThan(0);
+    });
+
+    // The measured geometry invariant: once font metrics settle and xterm
+    // refits to the correct column count for the SETTLED font, the baked
+    // letter-spacing compensation must be recomputed against that FINAL
+    // column count, not the stale pre-fit one. A nonzero value here means
+    // rendered cells are wider (or narrower) than the glyph advance width \u2014
+    // exactly the reported "characters spread across cells" symptom \u2014 and
+    // this assertion fails on pre-fix code, which bakes spacing only BEFORE
+    // `fitAddon.fit()` runs and never re-bakes it afterward.
+    await waitFor(() => {
+      expect(getMockBakedLetterSpacingPx()).toBeCloseTo(0, 5);
+    });
+  });
+
+  it("also settles to zero baked letter-spacing at persisted 10px with the mobile keyboard already open at initial render", async () => {
+    window.localStorage.setItem(TERMINAL_FONT_SIZE_KEY, "10");
+
+    const mockVV = {
+      width: 375,
+      height: 300,
+      offsetTop: 0,
+      offsetLeft: 0,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    };
+    Object.defineProperty(window, "visualViewport", {
+      value: mockVV,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "innerHeight", { value: 300, writable: true, configurable: true });
+
+    let resolveLoad: (() => void) | undefined;
+    let resolveReady: (() => void) | undefined;
+    Object.defineProperty(document, "fonts", {
+      value: {
+        load: vi.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              resolveLoad = resolve;
+            }),
+        ),
+        ready: new Promise<void>((resolve) => {
+          resolveReady = resolve;
+        }),
+      },
+      configurable: true,
+    });
+
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+    await waitFor(() => expect(mockTerminalInstance.open).toHaveBeenCalled());
+    resetFontRemeasureCount();
+    settleMockTerminalFontForCharSize();
+
+    await act(async () => {
+      resolveLoad?.();
+      resolveReady?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(getFontRemeasureCount()).toBeGreaterThan(0);
+    });
+
+    // Same measured geometry invariant, but with the keyboard already
+    // constraining the viewport at initial render and a persisted 10px font —
+    // the exact FN-7460 screenshot conditions — to prove the fix is not
+    // accidentally scoped to only the default font-size/no-keyboard case.
+    await waitFor(() => {
+      expect(getMockBakedLetterSpacingPx()).toBeCloseTo(0, 5);
+    });
+
+    Object.defineProperty(window, "visualViewport", { value: undefined, writable: true, configurable: true });
+  });
+
+  it("also settles to zero baked letter-spacing when a live font-size preference change resettles after fit", async () => {
+    Object.defineProperty(document, "fonts", {
+      value: {
+        load: vi.fn(() => Promise.resolve()),
+        ready: Promise.resolve(),
+      },
+      configurable: true,
+    });
+
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+    await waitFor(() => expect(mockTerminalInstance.open).toHaveBeenCalled());
+
+    // Let the initial-open settle path finish and reach a consistent baseline.
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    settleMockTerminalFontForCharSize();
+    resetFontRemeasureCount();
+
+    fireEvent.click(await screen.findByTestId("terminal-font-size-increase"));
+
+    await waitFor(() => {
+      expect(getFontRemeasureCount()).toBeGreaterThan(0);
+    });
+
+    await waitFor(() => {
+      expect(getMockBakedLetterSpacingPx()).toBeCloseTo(0, 5);
+    });
   });
 });

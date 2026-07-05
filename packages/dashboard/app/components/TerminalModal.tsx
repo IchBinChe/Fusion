@@ -1254,11 +1254,32 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
 
         FNXC:Terminal 2026-07-04-09:35:
         FN-7561 recurrence #3: reassigning `fontFamily` to the SAME already-resolved value (the common case, since preferences are unchanged) is a no-op against real xterm's OptionsService — no `onOptionChange` fires, so CharSizeService/DomRenderer never remeasure the web font that only just finished loading. Force a genuine value transition via `forceTerminalFontRemeasure` so the character/cell metrics and `_setDefaultSpacing()` letter-spacing compensation are recomputed against the settled font on every settle, not just when the preference itself changed.
+
+        FNXC:Terminal 2026-07-04-11:35:
+        FN-7567 recurrence #4: forcing the remeasure above is necessary but not
+        sufficient. Real xterm's `DomRenderer._setDefaultSpacing()` (the
+        letter-spacing compensation baked onto `.xterm-rows`, computed as
+        `dimensions.css.cell.width - widthCache.get('W')`) only recomputes from
+        `handleCharSizeChanged()` (wired to `CharSizeService.onCharSizeChange`,
+        i.e. exactly what `forceTerminalFontRemeasure` above triggers) and from
+        `handleDevicePixelRatioChange()` — NEVER from `handleResize()`, which is
+        what `fitAddon.fit()` -> `terminal.resize(cols, rows)` triggers. Calling
+        `forceTerminalFontRemeasure` BEFORE `fitAddon.fit()` bakes spacing
+        against the column count that predates the fit, so once fit() changes
+        the column count (and therefore the true cell width) the baked spacing
+        goes stale and stays wrong until an unrelated later event (DPR change,
+        orientation) coincidentally forces another genuine option/DPR-change
+        remeasure — exactly the reported "only repairs itself after an
+        incidental refit" symptom. Force a SECOND genuine remeasure AFTER
+        `fitAddon.fit()` settles the column count so the letter-spacing bake is
+        recomputed against the FINAL geometry, not the pre-fit one. See
+        `docs/solutions/ui-bugs/xterm-options-noop-remeasure-after-font-settle.md`.
         */
         forceTerminalFontRemeasure(terminal, resolvedFontFamilyRef.current);
         terminal.options.fontSize = fontSizeRef.current;
         fitAddon.fit();
         resizeRef.current?.(terminal.cols, terminal.rows);
+        forceTerminalFontRemeasure(terminal, resolvedFontFamilyRef.current);
         terminal.refresh(0, Math.max(0, terminal.rows - 1));
       } catch {
         // Ignore fit/refresh errors during teardown or viewport transitions.
@@ -1757,7 +1778,22 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
     // Defer fit until the next frame so layout reflects the new font metrics
     // before FitAddon measures rows/cols. Reuse pendingFitRef so font changes and
     // visualViewport-triggered fits are coalesced into a single scheduled fit.
-    const scheduleRefit = () => {
+    /*
+    FNXC:Terminal 2026-07-04-11:40:
+    FN-7567 recurrence #4: `rebakeSpacingAfterFit` is set only by the settled
+    (font-metrics-ready) call site below. Real xterm's `DomRenderer._setDefaultSpacing()`
+    letter-spacing bake only recomputes from a genuine option-change remeasure,
+    never from `handleResize()` (what `fitAddon.fit()` triggers), so a settle
+    that calls `forceTerminalFontRemeasure()` and THEN fits must force one more
+    genuine remeasure AFTER the fit to re-bake spacing against the FINAL
+    (post-fit) column count — otherwise the bake stays computed against the
+    stale pre-fit column count until an unrelated later event happens to force
+    another remeasure. The unsettled immediate frame intentionally does not
+    rebake: at that point the web font has not necessarily loaded yet, so
+    forcing another remeasure there would just re-bake against the same
+    (possibly still-fallback) metrics.
+    */
+    const scheduleRefit = (rebakeSpacingAfterFit = false) => {
       if (pendingFitRef.current !== null) {
         cancelAnimationFrame(pendingFitRef.current);
         pendingFitRef.current = null;
@@ -1770,6 +1806,9 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
         }
         refitTerminal();
         xtermRef.current?.refresh?.(0, Math.max(0, xtermRef.current.rows - 1));
+        if (rebakeSpacingAfterFit && xtermRef.current) {
+          forceTerminalFontRemeasure(xtermRef.current, resolvedFontFamily);
+        }
       });
       pendingFitRef.current = frame;
       return frame;
@@ -1797,7 +1836,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
         }
         forceTerminalFontRemeasure(xtermRef.current, resolvedFontFamily);
         xtermRef.current.options.fontSize = terminalPreferences.fontSize;
-        scheduleRefit();
+        scheduleRefit(true);
       },
       () => {
         // FontFaceSet failures are non-fatal; the immediate frame above still

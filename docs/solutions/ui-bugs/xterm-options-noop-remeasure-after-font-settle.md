@@ -23,12 +23,15 @@ related_components:
   - FN-7456
   - FN-7460
   - FN-7561
+  - FN-7567
 tags:
   - xterm
   - font-loading
   - options-service
   - mobile-safari
   - remeasure
+  - letter-spacing
+  - domrenderer
 ---
 
 # xterm OptionsService no-op reassignment silently skips post-load remeasure
@@ -118,3 +121,89 @@ jsdom cannot exercise real xterm.js internals, so the regression coverage models
 - Cover both `TerminalModal` (mobile viewport, keyboard-open and keyboard-closed initial render) and `SessionTerminal` (embedded attach surface) — both surfaces independently reapply font options after settle and both had the bug.
 - Run: `pnpm --filter @fusion/dashboard exec vitest run app/components/__tests__/TerminalModal.test.tsx app/components/__tests__/SessionTerminal.test.tsx app/components/__tests__/SessionTerminal.mobile.test.tsx app/__tests__/terminal-input.test.ts app/utils/__tests__/terminalPreferences.test.ts --silent=passed-only --reporter=dot`.
 - Real mobile Safari/Chrome verification remains the strongest signal for this class of bug; if unavailable, record that as an explicit gap rather than treating desktop WebKit/jsdom as proof (see `docs/ios-acceptance.md`).
+
+## Recurrence #4 (FN-7567): forcing a genuine remeasure BEFORE `fit()` bakes stale spacing
+
+FN-7561's `forceTerminalFontRemeasure()` fix (above) is necessary but was not sufficient. On the real
+mobile device, ordinary ASCII (`test`, `ls`, filenames) still rendered with visible gaps on the
+initial paint even with the FN-7561 fix, FN-7460's `text-size-adjust: none`, and FN-7456's
+symbols-free font stack all present.
+
+### New root cause
+
+Real xterm's `DomRenderer._setDefaultSpacing()` — the letter-spacing compensation baked onto
+`.xterm-rows` as `spacing = dimensions.css.cell.width - widthCache.get('W')` — only recomputes from
+two call sites:
+
+- `handleCharSizeChanged()`, wired to `CharSizeService.onCharSizeChange`, which fires on any
+  **genuine** (distinct-value) `fontFamily`/`fontSize` option transition — exactly what
+  `forceTerminalFontRemeasure()` forces.
+- `handleDevicePixelRatioChange()`.
+
+It is **never** recomputed from `handleResize()` — the path `fitAddon.fit()` →
+`terminal.resize(cols, rows)` takes.
+
+Both mobile settle sites in `TerminalModal.tsx` and `SessionTerminal.tsx` (the initial post-font-load
+settle and the live-preferences-apply settle) called `forceTerminalFontRemeasure()` **before**
+`fitAddon.fit()`. That correctly forces a genuine option transition and does bake letter-spacing —
+but it bakes it against the column count that predates the fit. `fitAddon.fit()` then changes the
+column count (and therefore the true cell width) but never re-bakes the spacing, so the terminal keeps
+rendering with a spacing value computed against a column count that no longer matches reality. The
+gap persists until an unrelated later event (device-pixel-ratio change, orientation, reconnect)
+happens to force another genuine option/DPR-triggered remeasure — exactly matching the report that
+the terminal "only repairs itself after an incidental refit."
+
+### Why FN-7456/FN-7460/FN-7561 missed this
+
+All three prior fixes and their regressions asserted CSS-property presence (`text-size-adjust: none`,
+symbols-free `fontFamily`) or a remeasure **call count** (`fontRemeasureCount`), never the actual baked
+letter-spacing value relative to the **post-fit** column count. A test that only checks "a remeasure
+happened" cannot distinguish "remeasure happened but was baked against stale pre-fit geometry" from
+"remeasure happened and reflects final geometry."
+
+### Solution
+
+Force a **second** genuine remeasure **after** `fitAddon.fit()` settles the column count, so the
+letter-spacing bake is recomputed against the FINAL (post-fit) geometry, not the pre-fit one:
+
+```ts
+// packages/dashboard/app/components/TerminalModal.tsx (mirrored in SessionTerminal.tsx)
+forceTerminalFontRemeasure(terminal, resolvedFontFamilyRef.current);
+terminal.options.fontSize = fontSizeRef.current;
+fitAddon.fit();
+resizeRef.current?.(terminal.cols, terminal.rows);
+forceTerminalFontRemeasure(terminal, resolvedFontFamilyRef.current); // re-bake against final cols
+terminal.refresh(0, Math.max(0, terminal.rows - 1));
+```
+
+The `scheduleRefit(rebakeSpacingAfterFit)` path in `TerminalModal.tsx` only re-bakes on the *settled*
+(font-metrics-ready) call site, not on the immediate first frame — at that point the web font may not
+have loaded yet, so re-baking there would only bake against fallback-font metrics again.
+
+Do not:
+
+- Re-bake unconditionally on every frame/resize — only after a settle that already forced a genuine
+  remeasure and then fit.
+- Replace this with a hardcoded letter-spacing/cell-width compensation.
+
+### Regression coverage (geometry-based, not CSS/call-count)
+
+jsdom cannot exercise real xterm.js internals, so the FN-7567 regression models the real
+`CharSizeService`/`DomRenderer` contracts directly on the test double instead of a plain mock:
+
+- `mockHandleCharSizeChanged()` mirrors `CharSizeService.measure()` → `DomRenderer.handleCharSizeChanged()`
+  → `_setDefaultSpacing()`: recomputes `bakedLetterSpacingPx = cellWidthPx - measuredCharWidthPx` using
+  the **current** (possibly stale, pre-fit) column count, firing only on a genuine option transition.
+- `mockFitAddonFit()` mirrors `FitAddon.fit()` → `terminal.resize(cols, rows)` →
+  `DomRenderer.handleResize()`: recomputes `cols`/cell-width from the current measured char width but
+  deliberately does **not** touch the baked letter-spacing (matching real xterm).
+- The assertion is the actual rendered geometry invariant: baked letter-spacing must equal `0` (cell
+  width matches the settled glyph advance width) after the full settle+fit sequence — not merely that
+  `forceTerminalFontRemeasure`/`fontRemeasureCount` was called.
+- See `TerminalModal.test.tsx` describe block "FN-7567 mobile inter-character spacing (stale post-fit
+  letter-spacing bake)" and the mirrored `SessionTerminal.test.tsx` coverage.
+- Run: `pnpm --filter @fusion/dashboard exec vitest run app/components/__tests__/TerminalModal.test.tsx app/components/__tests__/SessionTerminal.test.tsx app/components/__tests__/SessionTerminal.mobile.test.tsx app/utils/__tests__/terminalPreferences.test.ts app/__tests__/terminal-input.test.ts --silent=passed-only --reporter=dot`.
+- Real mobile Safari/Chrome sanity check remains the strongest signal; a real-device screenshot was not
+  obtainable in this execution environment (headless coding agent, no physical device access) — this
+  gap is recorded explicitly rather than treating jsdom/desktop WebKit as proof. See task document
+  key="repro" on FN-7567 and `docs/ios-acceptance.md`.

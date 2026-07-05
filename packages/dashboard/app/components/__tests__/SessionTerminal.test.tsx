@@ -2,7 +2,64 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 
 // ── Mock xterm + addon dynamic imports (jsdom has no canvas/WebGL) ──────────
-const mockFitAddon = { fit: vi.fn() };
+/*
+FNXC:Terminal 2026-07-04-11:50:
+FN-7567 recurrence #4: forcing a genuine fontFamily/fontSize transition
+(FN-7561's `forceTerminalFontRemeasure`) is necessary but not sufficient. Real
+xterm's `DomRenderer._setDefaultSpacing()` (the letter-spacing compensation
+baked onto `.xterm-rows`) is recomputed on `CharSizeService.onCharSizeChange`
+(any genuine option change) and on `handleDevicePixelRatioChange`, but NOT on
+`handleResize()` (the path `fitAddon.fit()` -> `terminal.resize(cols, rows)`
+takes). `mockFitAddon.fit`/`mockTerm.cols` model this ordering-sensitive
+geometry (measured char width, cell width derived from cols, and the baked
+letter-spacing) directly, mirroring xterm's real internals, so the regression
+asserts actual rendered geometry instead of a CSS-property or call-count check.
+*/
+const MOCK_CONTAINER_WIDTH_PX = 728;
+const MOCK_FALLBACK_CHAR_WIDTH_PX = 9;
+const MOCK_SETTLED_CHAR_WIDTH_PX = 7;
+let mockFontsSettledForCharSize = false;
+let mockMeasuredCharWidthPx = MOCK_FALLBACK_CHAR_WIDTH_PX;
+let mockBakedLetterSpacingPx = 0;
+
+function resetMockTerminalGeometry(): void {
+  mockFontsSettledForCharSize = false;
+  mockMeasuredCharWidthPx = MOCK_FALLBACK_CHAR_WIDTH_PX;
+  mockBakedLetterSpacingPx = 0;
+  mockTerm.cols = 80;
+}
+
+/** Mirrors the real web font finishing its network load/paint settle. */
+function settleMockTerminalFontForCharSize(): void {
+  mockFontsSettledForCharSize = true;
+}
+
+/** The rendered cell/advance-width geometry invariant under test: 0 == tight contiguous monospace. */
+function getMockBakedLetterSpacingPx(): number {
+  return mockBakedLetterSpacingPx;
+}
+
+// Mirrors xterm's CharSizeService.measure() -> onCharSizeChange ->
+// DomRenderer.handleCharSizeChanged(): runs on every GENUINE fontFamily/fontSize
+// option transition, using the CURRENT (possibly stale, pre-fit) column count.
+function mockHandleCharSizeChanged(): void {
+  mockMeasuredCharWidthPx = mockFontsSettledForCharSize
+    ? MOCK_SETTLED_CHAR_WIDTH_PX
+    : MOCK_FALLBACK_CHAR_WIDTH_PX;
+  const cols = (mockTerm.cols as number) || 1;
+  const cellWidthPx = MOCK_CONTAINER_WIDTH_PX / cols;
+  mockBakedLetterSpacingPx = cellWidthPx - mockMeasuredCharWidthPx;
+}
+
+// Mirrors FitAddon.fit() -> terminal.resize(cols, rows) ->
+// DomRenderer.handleResize(): recomputes cols from the CURRENT measured char
+// width but deliberately does NOT touch letter-spacing (real xterm's
+// handleResize() never calls _setDefaultSpacing()).
+const mockFitAddon = {
+  fit: vi.fn(() => {
+    mockTerm.cols = Math.max(1, Math.floor(MOCK_CONTAINER_WIDTH_PX / mockMeasuredCharWidthPx));
+  }),
+};
 let sessionKeyEventHandler: ((event: KeyboardEvent) => boolean) | null = null;
 
 /*
@@ -38,6 +95,7 @@ function wrapMockTerminalOptions(initial: Record<string, unknown>): Record<strin
           store[key] = value;
           if (key === "fontFamily" || key === "fontSize") {
             fontRemeasureCount += 1;
+            mockHandleCharSizeChanged();
           }
         }
       },
@@ -151,6 +209,7 @@ beforeEach(() => {
   mockTerm.dispose.mockClear();
   mockTerm.options = {};
   resetFontRemeasureCount();
+  resetMockTerminalGeometry();
   Object.defineProperty(document, "fonts", {
     value: undefined,
     configurable: true,
@@ -404,6 +463,7 @@ describe("SessionTerminal", () => {
     // touched terminal preferences), so this must be a forced remeasure, not
     // an incidental preference-driven one.
     resetFontRemeasureCount();
+    resetMockTerminalGeometry();
 
     await act(async () => {
       resolveLoad?.();
@@ -418,6 +478,71 @@ describe("SessionTerminal", () => {
 
     expectMeasurementSafeFontStack(mockTerm.options.fontFamily as string);
     expect(mockTerm.options.fontFamily).toBe(resolveTerminalFontFamily("nerd-font"));
+  });
+
+  /*
+  FNXC:Terminal 2026-07-04-11:55:
+  FN-7567 recurrence #4: forcing a genuine remeasure (the assertion above) is
+  necessary but not sufficient. Real xterm's `DomRenderer._setDefaultSpacing()`
+  letter-spacing bake only recomputes from a genuine option-change remeasure or
+  a devicePixelRatio change, never from the `fitAddon.fit()`/resize that
+  follows it, so a settle that bakes spacing BEFORE fit() leaves it stale
+  against the post-fit column count until an unrelated later event happens to
+  force another remeasure. This asserts the measured rendered geometry
+  invariant (baked letter-spacing == 0) using a xterm-internals-accurate model,
+  not a re-assertion of the FN-7561 call-count/CSS-property checks; it fails on
+  pre-fix code and passes once the settle re-bakes spacing AFTER fit().
+  */
+  it("renders contiguous monospace cells (zero baked letter-spacing) once the mobile web font settles after xterm's initial fit", async () => {
+    let resolveLoad: (() => void) | undefined;
+    let resolveReady: (() => void) | undefined;
+    Object.defineProperty(document, "fonts", {
+      value: {
+        load: vi.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              resolveLoad = resolve;
+            }),
+        ),
+        ready: new Promise<void>((resolve) => {
+          resolveReady = resolve;
+        }),
+      },
+      configurable: true,
+    });
+
+    render(<SessionTerminal sessionId="s1" />);
+
+    await waitFor(() => {
+      expect(FakeWS.instances.length).toBe(1);
+    });
+    resetFontRemeasureCount();
+
+    // Simulate the real recurrence: the custom web font finishes downloading
+    // AFTER xterm's initial fallback-font measurement/fit already ran and
+    // baked a letter-spacing value that was internally consistent for the
+    // FALLBACK font at that (stale) column count.
+    settleMockTerminalFontForCharSize();
+
+    await act(async () => {
+      resolveLoad?.();
+      resolveReady?.();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(getFontRemeasureCount()).toBeGreaterThan(0);
+    });
+
+    // The measured geometry invariant: once font metrics settle and xterm
+    // refits to the correct column count for the SETTLED font, the baked
+    // letter-spacing compensation must be recomputed against that FINAL
+    // column count, not the stale pre-fit one.
+    await waitFor(() => {
+      expect(getMockBakedLetterSpacingPx()).toBeCloseTo(0, 5);
+    });
   });
 
   it("applies validated terminal preferences at xterm init", async () => {

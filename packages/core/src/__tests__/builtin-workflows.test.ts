@@ -10,6 +10,7 @@ import {
 } from "../builtin-workflows.js";
 import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
 import { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "../builtin-stepwise-coding-workflow-ir.js";
+import { BUILTIN_PR_WORKFLOW_IR } from "../builtin-pr-workflow-ir.js";
 import { BROWSER_VERIFICATION_GROUP_ID, BROWSER_VERIFICATION_STEP_NODE_ID } from "../builtin-browser-verification-group.js";
 import { CODE_REVIEW_STEP_NODE_ID } from "../builtin-code-review-group.js";
 import { PLAN_REVIEW_GROUP_ID, PLAN_REVIEW_STEP_NODE_ID } from "../builtin-plan-review-group.js";
@@ -415,6 +416,17 @@ describe("built-in workflows", () => {
     expect(BUILTIN_CODING_WORKFLOW_IR.columns.map((c) => c.id)).toEqual([
       ...DEFAULT_WORKFLOW_COLUMN_IDS,
     ]);
+  });
+
+  // FNXC:Workflows 2026-07-05-00:00: FN-7599 — hand-authored default workflows (stepwise-coding, pr-workflow)
+  // must also label the intake column "Planning" while keeping the "triage" id, matching builtin-coding.
+  it("hand-authored default workflows label the intake column 'Planning' (FN-7599)", () => {
+    for (const ir of [BUILTIN_STEPWISE_CODING_WORKFLOW_IR, BUILTIN_PR_WORKFLOW_IR]) {
+      expect(ir.version).toBe("v2");
+      if (ir.version !== "v2") throw new Error("expected v2");
+      const triageColumn = ir.columns.find((column) => column.id === "triage");
+      expect(triageColumn).toEqual({ id: "triage", name: "Planning", traits: [{ trait: "intake" }] });
+    }
   });
 
   it("builtin:coding catalog entry is backed by the stepwise final-review IR", () => {

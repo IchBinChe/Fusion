@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { memo, useCallback, useState, useRef, useEffect, useLayoutEffect, useMemo, type CSSProperties, type ReactElement } from "react";
 import { createPortal } from "react-dom";
-import { Link, Clock, Layers, Pencil, ChevronDown, Folder, Target, Bot, Trash2, RotateCw, Zap, GitBranch, GitPullRequest, AlertTriangle, ArrowUpRight } from "lucide-react";
+import { Link, Clock, Layers, Pencil, ChevronDown, Folder, Target, Bot, Trash2, RotateCw, Zap, GitBranch, GitPullRequest, AlertTriangle, ArrowUpRight, Eye } from "lucide-react";
 import type { Task, TaskDetail, Column, ColumnId, PrInfo, IssueInfo, TaskPriority, GithubIssueAction, MergeResult, PlannerOversightLevel } from "@fusion/core";
 import {
   DEFAULT_PLANNER_OVERSIGHT_LEVEL,
@@ -2889,15 +2889,25 @@ function TaskCardComponent({
           board payload) plus a repaint-correct memo comparator; FN-7516 owns the styled
           badge/design and surface-by-surface rendering. This is a minimal, type-safe,
           guarded read only — nothing renders for an absent field or the "idle" state.
+
+          FNXC:PlannerOversight 2026-07-05-00:00:
+          FN-7592 replaces the uppercase text label with a small state-colored `Eye` icon so
+          the badge reads as a compact glyph. The readable label and composed tooltip stay
+          available for accessibility: `aria-label` carries the state name (screen readers)
+          and `title` keeps the existing tooltip (hover). Per-state color comes from the
+          `data-planner-overseer-state` attribute in TaskCard.css — do not fork the label
+          logic here; `plannerOverseerStateLabel`/`plannerOverseerBadgeTooltip` remain the
+          single source of truth.
         */}
         {task.plannerOverseerState && task.plannerOverseerState.state !== "idle" && (
           <span
             className="card-status-badge card-planner-overseer-state"
             title={plannerOverseerBadgeTooltip(task.plannerOverseerState, t)}
+            aria-label={plannerOverseerStateLabel(task.plannerOverseerState.state, t)}
             data-testid="planner-overseer-state-badge"
             data-planner-overseer-state={task.plannerOverseerState.state}
           >
-            {plannerOverseerStateLabel(task.plannerOverseerState.state, t)}
+            <Eye aria-hidden="true" />
           </span>
         )}
         {showStalledReview && stalledReview && (

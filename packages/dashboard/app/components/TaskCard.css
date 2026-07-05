@@ -397,6 +397,46 @@ not a restyle of the ordinary manual-approval badge.
   border-color: color-mix(in srgb, var(--color-warning) 45%, transparent);
 }
 
+/*
+FNXC:PlannerOversight 2026-07-05-00:00:
+FN-7592 replaces the overseer badge's uppercase text label with a small `Eye` icon so it
+reads as a compact glyph rather than a wide pill. Size the badge to the icon (no min-width,
+tight padding) and color it per `PlannerOverseerState` via the `data-planner-overseer-state`
+attribute so operators can distinguish watching/steering/recovering/awaiting-confirmation at
+a glance without reading text. Colors reuse existing semantic tokens: neutral/info for the
+passive "watching" state, warning for the more active "steering"/"recovering" states, and the
+triage token for "awaiting-confirmation" (a human-decision hold), matching the hue conventions
+used elsewhere in this file (e.g. .card-oversight-badge--*, .card-status-badge--triage).
+*/
+.card-planner-overseer-state {
+  padding: calc(var(--space-xs) / 2);
+  line-height: 0;
+}
+
+.card-planner-overseer-state svg {
+  width: 12px;
+  height: 12px;
+}
+
+.card-planner-overseer-state[data-planner-overseer-state="watching"] {
+  background: color-mix(in srgb, var(--color-info) 15%, transparent);
+  color: var(--color-info);
+  border-color: color-mix(in srgb, var(--color-info) 40%, transparent);
+}
+
+.card-planner-overseer-state[data-planner-overseer-state="steering"],
+.card-planner-overseer-state[data-planner-overseer-state="recovering"] {
+  background: color-mix(in srgb, var(--color-warning) 18%, transparent);
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 45%, transparent);
+}
+
+.card-planner-overseer-state[data-planner-overseer-state="awaiting-confirmation"] {
+  background: color-mix(in srgb, var(--triage) 18%, transparent);
+  color: var(--triage);
+  border-color: color-mix(in srgb, var(--triage) 45%, transparent);
+}
+
 .card.awaiting-input {
   border-left: 3px solid var(--color-warning);
   background: color-mix(in srgb, var(--color-warning) 6%, transparent);

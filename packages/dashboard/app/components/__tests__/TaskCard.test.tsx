@@ -26,7 +26,9 @@ vi.mock("lucide-react", () => ({
   Zap: () => <svg data-testid="icon-zap" />,
   AlertTriangle: () => null,
   ArrowUpRight: () => null,
-  Eye: () => null,
+  // FN-7592: the overseer badge now renders an icon child instead of a text label,
+  // so tests must see a real SVG (like Zap) rather than a no-op render.
+  Eye: () => <svg data-testid="icon-eye" />,
 }));
 
 vi.mock("../ProviderIcon", () => ({
@@ -317,9 +319,13 @@ describe("TaskCard", () => {
 
     render(<TaskCard task={task} onOpenDetail={noop} addToast={noop} />);
 
+    // FN-7592: the badge is now an icon-only glyph. The readable label moved from
+    // textContent to aria-label; the composed tooltip is unchanged on title.
     const badge = screen.getByTestId("planner-overseer-state-badge");
-    expect(badge.textContent).not.toBe("awaiting-confirmation");
-    expect(badge.textContent).toBe("Awaiting confirmation");
+    expect(badge.querySelector("svg")).toBeInTheDocument();
+    expect(badge.getAttribute("aria-label")).not.toBe("awaiting-confirmation");
+    expect(badge.getAttribute("aria-label")).toBe("Awaiting confirmation");
+    expect(badge.getAttribute("data-planner-overseer-state")).toBe("awaiting-confirmation");
 
     const title = badge.getAttribute("title") ?? "";
     expect(title).not.toBe("Planner overseer: awaiting-confirmation");
@@ -343,8 +349,12 @@ describe("TaskCard", () => {
       },
     });
     const { unmount } = render(<TaskCard task={watchingTask} onOpenDetail={noop} addToast={noop} />);
+    // FN-7592: icon-only badge — assert the accessible name via aria-label and the
+    // per-state color hook via data-planner-overseer-state, not raw text content.
     let badge = screen.getByTestId("planner-overseer-state-badge");
-    expect(badge.textContent).toBe("Overseer watching");
+    expect(badge.querySelector("svg")).toBeInTheDocument();
+    expect(badge.getAttribute("aria-label")).toBe("Overseer watching");
+    expect(badge.getAttribute("data-planner-overseer-state")).toBe("watching");
     expect(badge.getAttribute("title")).not.toMatch(/undefined/);
     unmount();
 
@@ -361,7 +371,12 @@ describe("TaskCard", () => {
     });
     render(<TaskCard task={recoveringTask} onOpenDetail={noop} addToast={noop} />);
     badge = screen.getByTestId("planner-overseer-state-badge");
-    expect(badge.textContent).toBe("Overseer recovering");
+    expect(badge.querySelector("svg")).toBeInTheDocument();
+    expect(badge.getAttribute("aria-label")).toBe("Overseer recovering");
+    // Distinct states expose distinct data-planner-overseer-state values, which is the
+    // hook TaskCard.css keys per-state color off of (jsdom cannot compute color-mix()).
+    expect(badge.getAttribute("data-planner-overseer-state")).toBe("recovering");
+    expect(badge.getAttribute("data-planner-overseer-state")).not.toBe("watching");
     const title = badge.getAttribute("title") ?? "";
     expect(title).not.toMatch(/undefined/);
     expect(title.length).toBeGreaterThan(0);

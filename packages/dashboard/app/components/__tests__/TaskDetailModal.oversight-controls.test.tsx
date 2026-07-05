@@ -140,6 +140,47 @@ describe("TaskDetailModal oversight controls", () => {
     expect(nudgeBtn).toBeDisabled();
   });
 
+  it("shows a visible group label and an in-DOM disabled-reason helper (not just a hover title) when Nudge is unavailable (FN-7546)", async () => {
+    render(
+      <TaskDetailModal
+        task={makeTask({ id: "FN-111", column: "todo", plannerOversightLevel: "autonomous" })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    const label = await screen.findByTestId("detail-oversight-controls-label");
+    expect(label).toHaveTextContent("Overseer controls");
+
+    const nudgeBtn = await screen.findByTestId("detail-overseer-nudge");
+    expect(nudgeBtn).toBeDisabled();
+
+    const reason = await screen.findByTestId("detail-overseer-nudge-disabled-reason");
+    expect(reason).toHaveTextContent("Nudge unavailable: overseer is not actively watching this task");
+  });
+
+  it("does not show the disabled-reason helper when Nudge is enabled", async () => {
+    render(
+      <TaskDetailModal
+        task={makeTask({ id: "FN-112", column: "in-progress", plannerOversightLevel: "autonomous", plannerOverseerState: activeSnapshot })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    const nudgeBtn = await screen.findByTestId("detail-overseer-nudge");
+    expect(nudgeBtn).not.toBeDisabled();
+    expect(screen.queryByTestId("detail-overseer-nudge-disabled-reason")).not.toBeInTheDocument();
+  });
+
   it("nudge is disabled while the task is user-paused", async () => {
     render(
       <TaskDetailModal
@@ -260,6 +301,34 @@ describe("TaskDetailModal oversight controls", () => {
     );
 
     const explainBtn = await screen.findByTestId("detail-overseer-explain");
+    fireEvent.click(explainBtn);
+
+    const panel = await screen.findByTestId("detail-overseer-explain-panel");
+    expect(panel).toHaveTextContent("not currently watching");
+  });
+
+  it("Explain is never disabled while the overseer is inactive and always opens the read-only panel (FN-7546)", async () => {
+    const api = await import("../../api");
+    vi.mocked(api.explainOverseer).mockResolvedValueOnce({ snapshot: null });
+
+    render(
+      <TaskDetailModal
+        task={makeTask({ id: "FN-113", column: "todo", plannerOversightLevel: "autonomous" })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    const explainBtn = await screen.findByTestId("detail-overseer-explain");
+    // Read-only Explain must never be disabled purely because the overseer
+    // isn't actively watching — that inactive state is exactly what the
+    // panel's empty-state message communicates.
+    expect(explainBtn).not.toBeDisabled();
+
     fireEvent.click(explainBtn);
 
     const panel = await screen.findByTestId("detail-overseer-explain-panel");

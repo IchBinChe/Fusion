@@ -3874,6 +3874,11 @@ export function TaskDetailContent({
                               </select>
                             </label>
                             {!oversightIsOff && (
+                              <span className="detail-oversight-controls-label" data-testid="detail-oversight-controls-label">
+                                {t("taskDetail.oversight.controlsLabel", "Overseer controls")}
+                              </span>
+                            )}
+                            {!oversightIsOff && (
                               <button
                                 type="button"
                                 className={`detail-oversight-menu-item detail-overseer-nudge ${isNudgingOverseer ? "detail-overseer-nudge--saving" : ""}`}
@@ -3891,6 +3896,11 @@ export function TaskDetailContent({
                                 {isNudgingOverseer ? <Loader2 className="spin" aria-hidden="true" /> : <Send aria-hidden="true" />}
                                 <span>{t("taskDetail.oversight.nudge", "Nudge")}</span>
                               </button>
+                            )}
+                            {!oversightIsOff && !canNudgeOverseer && (
+                              <span className="detail-oversight-controls-helper" data-testid="detail-overseer-nudge-disabled-reason">
+                                {t("taskDetail.oversight.nudgeDisabledTitle", "Nudge unavailable: overseer is not actively watching this task")}
+                              </span>
                             )}
                             {showStopOverseer && (
                               <button
@@ -3921,8 +3931,7 @@ export function TaskDetailContent({
                                   setShowOversightMenu(false);
                                 }}
                                 onKeyDown={handleOversightMenuKeyDown}
-                                disabled={!canExplainOverseer && !overseerExplainOpen}
-                                title={canExplainOverseer ? t("taskDetail.oversight.explainTitle", "Explain the overseer's current action") : t("taskDetail.oversight.explainDisabledTitle", "Explain unavailable: overseer is not actively watching this task")}
+                                title={canExplainOverseer ? t("taskDetail.oversight.explainTitle", "Explain the overseer's current action") : t("taskDetail.oversight.explainInactiveTitle", "Overseer is not currently watching this task — Explain shows its last known state")}
                                 aria-label={t("taskDetail.oversight.explainAriaLabel", "Explain current action")}
                                 aria-expanded={overseerExplainOpen}
                               >
@@ -3971,7 +3980,27 @@ export function TaskDetailContent({
                       silently vanishing; stop is hidden once oversight is already off
                       (nothing left to stop) per the PROMPT's enablement rule, avoiding
                       an always-on empty shell for the common oversight-off default.
+
+                      FNXC:PlannerOversight 2026-07-04-20:30:
+                      FN-7546 — operators reported these controls were confusing:
+                      unlabeled inline chips, greyed out most of the time, with the
+                      only "why" behind a mouse-hover `title`. Add a visible,
+                      non-interactive `detail-oversight-controls-label` group label
+                      (gated by the SAME condition as the buttons) so the cluster is
+                      identifiable, and a `detail-overseer-nudge-disabled-reason`
+                      helper line that surfaces the disabled reason in-DOM (not just
+                      on hover) whenever Nudge is unavailable. Explain is read-only
+                      and non-mutating, so its disabled gate is removed entirely
+                      (see handleExplainOverseer below) — it always opens its panel,
+                      which already renders an informative "not currently watching"
+                      empty state. Nudge's mutating gate (`canNudgeOverseer`) and
+                      Stop's confirm dialog are unchanged.
                       */}
+                      {(hasTaskOversightOverride || workflowOversightResolved) && !oversightIsOff && (
+                        <span className="detail-oversight-controls-label" data-testid="detail-oversight-controls-label">
+                          {t("taskDetail.oversight.controlsLabel", "Overseer controls")}
+                        </span>
+                      )}
                       {(hasTaskOversightOverride || workflowOversightResolved) && !oversightIsOff && (
                         <button
                           type="button"
@@ -3987,6 +4016,11 @@ export function TaskDetailContent({
                           {isNudgingOverseer ? <Loader2 className="spin" aria-hidden="true" /> : <Send aria-hidden="true" />}
                           <span>{t("taskDetail.oversight.nudge", "Nudge")}</span>
                         </button>
+                      )}
+                      {(hasTaskOversightOverride || workflowOversightResolved) && !oversightIsOff && !canNudgeOverseer && (
+                        <span className="detail-oversight-controls-helper" data-testid="detail-overseer-nudge-disabled-reason">
+                          {t("taskDetail.oversight.nudgeDisabledTitle", "Nudge unavailable: overseer is not actively watching this task")}
+                        </span>
                       )}
                       {(hasTaskOversightOverride || workflowOversightResolved) && showStopOverseer && (
                         <button
@@ -4011,8 +4045,7 @@ export function TaskDetailContent({
                           onClick={() => {
                             void handleExplainOverseer();
                           }}
-                          disabled={!canExplainOverseer && !overseerExplainOpen}
-                          title={canExplainOverseer ? t("taskDetail.oversight.explainTitle", "Explain the overseer's current action") : t("taskDetail.oversight.explainDisabledTitle", "Explain unavailable: overseer is not actively watching this task")}
+                          title={canExplainOverseer ? t("taskDetail.oversight.explainTitle", "Explain the overseer's current action") : t("taskDetail.oversight.explainInactiveTitle", "Overseer is not currently watching this task — Explain shows its last known state")}
                           aria-label={t("taskDetail.oversight.explainAriaLabel", "Explain current action")}
                           aria-expanded={overseerExplainOpen}
                         >

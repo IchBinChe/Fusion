@@ -528,6 +528,35 @@ renders at a uniform height.
   opacity: 0.5;
 }
 
+/*
+FNXC:PlannerOversight 2026-07-04-20:30:
+FN-7546 — group label + always-visible disabled-reason helper for the
+Nudge/Stop/Explain cluster, so operators no longer rely on a mouse-hover
+`title` alone to understand what the controls are or why Nudge is inert.
+Both are gated by the same condition as the buttons themselves (never an
+empty shell when oversight is Off/unresolved). Uses the same muted-text /
+small-caption convention as `.detail-overseer-explain-panel__empty` rather
+than a one-off style.
+*/
+.detail-oversight-controls-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--detail-priority-control-min-height);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm, 0.875rem);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.detail-oversight-controls-helper {
+  display: inline-flex;
+  align-items: center;
+  flex-basis: 100%;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm, 0.875rem);
+}
+
 .detail-overseer-explain-panel {
   margin-top: var(--space-xs);
   padding: var(--space-sm);
@@ -667,6 +696,19 @@ button.detail-oversight-menu-item:disabled {
 button.detail-oversight-menu-item svg {
   width: 1em;
   height: 1em;
+}
+
+/*
+FNXC:PlannerOversight 2026-07-04-20:30:
+FN-7546 — the same group label / disabled-reason helper as the desktop
+cluster above, adapted to the mobile overflow-menu's padded list-item layout
+so they read as ordinary (non-interactive) menu rows rather than floating
+text.
+*/
+.detail-oversight-menu .detail-oversight-controls-label,
+.detail-oversight-menu .detail-oversight-controls-helper {
+  padding: var(--space-xs) var(--space-md);
+  min-height: 0;
 }
 
 /*

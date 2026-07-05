@@ -16,13 +16,20 @@ import {
   getResetIneligibleReason,
   getSectionKeyEntry,
 } from "./settings/section-keys";
-import { describeShortcutValidation, normalizeKeyboardShortcut } from "../utils/keyboardShortcuts";
+import {
+  describeShortcutValidation,
+  normalizeKeyboardShortcut,
+  resolveDashboardKeyboardShortcuts,
+  type DashboardShortcutAction,
+} from "../utils/keyboardShortcuts";
+import type { DashboardKeyboardShortcutMap } from "../utils/keyboardShortcuts";
 import type { SectionSaveHandler } from "./settings/sections/context";
 import { AppearanceSection } from "./settings/sections/AppearanceSection";
 import { ExperimentalSection } from "./settings/sections/ExperimentalSection";
 import { NodeSyncSection } from "./settings/sections/NodeSyncSection";
 import { NotificationsSection } from "./settings/sections/NotificationsSection";
 import { GlobalGeneralSection } from "./settings/sections/GlobalGeneralSection";
+import { KeyboardShortcutsSection } from "./settings/sections/KeyboardShortcutsSection";
 import { ResearchGlobalSection } from "./settings/sections/ResearchGlobalSection";
 import { RemoteSection } from "./settings/sections/RemoteSection";
 import { GlobalMcpSection } from "./settings/sections/GlobalMcpSection";
@@ -346,6 +353,7 @@ const SETTINGS_SECTIONS: SettingsSection[] = [
   // Global group (shared across all Fusion projects)
   { id: "__global_header", label: "Global", labelKey: "settings.nav.globalHeader", scope: undefined, isGroupHeader: true },
   { id: "global-general", label: "General", labelKey: "settings.nav.globalGeneral", scope: "global", searchableText: ["global defaults", "modal outside dismiss", "agent logs", "persist tool output", "thinking logs", "GitLab instance URL", "global tracking repo"] },
+  { id: "keyboard-shortcuts", label: "Keyboard Shortcuts", labelKey: "settings.nav.keyboardShortcuts", scope: "global", searchableText: ["keyboard shortcuts", "hotkeys", "quick chat shortcut", "terminal shortcut", "open files", "open settings", "command center", "new task shortcut", "record shortcut"] },
   { id: "authentication", label: "Authentication", labelKey: "settings.nav.authentication", scope: undefined, icon: Globe, searchableText: ["login", "OAuth", "API key", "custom providers", "Anthropic", "OpenAI", "provider credentials"] },
   { id: "appearance", label: "Appearance", labelKey: "settings.nav.appearance", scope: "global", searchableText: ["theme", "color", "sidebar", "dock", "task popup", "open tasks as popups", "quick chat"] },
   { id: "notifications", label: "Notifications", labelKey: "settings.nav.notifications", scope: "global", searchableText: ["ntfy", "webhook", "events", "failure notifications", "sticky", "toast"] },
@@ -2733,10 +2741,14 @@ export function SettingsModal({
         maxAutoMergeRetries: resolveMaxAutoMergeRetriesForSettingsForm(form),
         taskPrefix: form.taskPrefix?.trim() || undefined,
         githubTrackingDefaultRepo: form.githubTrackingDefaultRepo?.trim() || undefined,
-        dashboardKeyboardShortcuts: {
-          quickChat: normalizeKeyboardShortcut(form.dashboardKeyboardShortcuts?.quickChat ?? "").normalized,
-          terminal: normalizeKeyboardShortcut(form.dashboardKeyboardShortcuts?.terminal ?? "").normalized,
-        },
+        /*
+        FNXC:DashboardShortcuts 2026-07-04-00:00:
+        FN-7553 normalizes every declared shortcut action (derived from resolveDashboardKeyboardShortcuts' key set) on save, not just quickChat/terminal, so newly-added actions get the same trim/normalize-before-persist treatment.
+        */
+        dashboardKeyboardShortcuts: Object.fromEntries(
+          (Object.entries(resolveDashboardKeyboardShortcuts(form.dashboardKeyboardShortcuts)) as [DashboardShortcutAction, string][])
+            .map(([action, shortcut]) => [action, normalizeKeyboardShortcut(shortcut).normalized]),
+        ) as DashboardKeyboardShortcutMap,
         gitlabEnabled: gitlabFormForSave.gitlabEnabled,
         gitlabInstanceUrl: gitlabFormForSave.gitlabInstanceUrl?.trim() || undefined,
         gitlabApiBaseUrl: gitlabFormForSave.gitlabApiBaseUrl?.trim() || undefined,
@@ -3143,6 +3155,14 @@ export function SettingsModal({
             globalTrackingRepoOptions={globalTrackingRepoOptions}
             globalTrackingRepoLoading={globalTrackingRepoLoading}
             globalTrackingRepoError={globalTrackingRepoError}
+          />
+        );
+      case "keyboard-shortcuts":
+        return (
+          <KeyboardShortcutsSection
+            scopeBanner={renderScopeBanner()}
+            form={form}
+            setForm={setForm}
           />
         );
       case "global-models":

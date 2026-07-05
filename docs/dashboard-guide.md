@@ -30,15 +30,25 @@ Both actions are irreversible; there is no undo after confirming. The dialog clo
 
 ## Keyboard shortcuts
 
-<!-- FNXC:DashboardShortcuts 2026-07-04-00:00: Dashboard keyboard shortcuts are configurable global operator preferences. The docs must state the defaults, editable-field safety guard, duplicate/invalid save behavior, and one-popup Escape semantics so operators know why Space/Terminal/Escape act differently in text fields than on the board. -->
-Open **Settings → General → Keyboard shortcuts** to configure dashboard-wide shortcut bindings. Defaults are:
+<!--
+FNXC:DashboardShortcuts 2026-07-04-00:00:
+Dashboard keyboard shortcuts are configurable global operator preferences. The docs must state the defaults, editable-field safety guard, duplicate/invalid save behavior, and one-popup Escape semantics so operators know why Space/Terminal/Escape act differently in text fields than on the board.
 
-- **Quick Chat:** `Space`
-- **Terminal:** <kbd>Ctrl+`</kbd>
+FNXC:DashboardShortcuts 2026-07-04-12:00:
+FN-7553 promotes shortcuts to a dedicated Settings section (Keyboard Shortcuts, moved out of General), adds a press-to-record capture control, and adds four more configurable actions (Open Files, Open Settings, Open Command Center, New Task) grouped into categories. The docs must state the new location, the capture control's record/manual/clear/Escape-cancels behavior, and the full action list with defaults so operators can find and rebind every shortcut, not just the original two.
+-->
+Open **Settings → Keyboard Shortcuts** (its own dedicated section, no longer under General) to configure dashboard-wide shortcut bindings. Actions are grouped by category:
 
-Leave a shortcut field blank to disable that action. Settings validates each shortcut before saving: unsupported key strings are marked invalid, and duplicate populated shortcuts (for example binding both Quick Chat and Terminal to `Ctrl+K`) are rejected until one binding changes or is disabled.
+- **Communication:** Quick Chat (`Space`)
+- **Workspace:** Terminal (<kbd>Ctrl+`</kbd>), Open Files (`Ctrl+E`)
+- **Navigation:** Open Command Center (`Ctrl+K`), Open Settings (`Ctrl+,`)
+- **Tasks:** New Task (`Ctrl+Shift+N`)
 
-Shortcut handling is intentionally guarded. Fusion ignores global shortcuts while focus is inside inputs, textareas, selects, contenteditable editors, chat composers, task fields, Settings fields, search boxes, and terminal input, so typing Space or shortcut letters never opens another surface unexpectedly. Hardware keyboards on desktop, tablet, and mobile use the same bindings when focus is on the page/body.
+Each row uses a press-to-record capture control: click **Record**, then press the key combination you want — it fills in automatically. Manual typing remains supported as a fallback. **Clear** disables that action (blank = disabled). While recording, pressing `Escape` cancels the recording instead of binding Escape, so Escape stays permanently reserved for the dashboard's topmost-popup-close shortcut; the capture control also never leaks the recorded keystroke to the global shortcut listener while it is focused/recording.
+
+Leave a shortcut field blank to disable that action. Settings validates each shortcut before saving: unsupported key strings are marked invalid, and duplicate populated shortcuts across ANY two actions (for example binding both Quick Chat and Open Command Center to `Ctrl+K`) are rejected until one binding changes or is disabled.
+
+Shortcut handling is intentionally guarded. Fusion ignores global shortcuts while focus is inside inputs, textareas, selects, contenteditable editors, chat composers, task fields, Settings fields, search boxes, and terminal input, so typing Space or shortcut letters never opens another surface unexpectedly. Hardware keyboards on desktop, tablet, and mobile use the same bindings when focus is on the page/body. Open Files, Open Settings, Open Command Center, and New Task each reuse the dashboard's existing navigation entry points (the same handlers as their header/sidebar buttons), so no shortcut opens a second/duplicate destination.
 
 Press `Escape` to close the current/topmost dashboard popup. Popped-out task windows and floating Quick Chat close before fixed app modals such as Terminal, Settings, Files, or Task Detail, and only one surface closes per key press. Nested editors and menus that already handle Escape keep first ownership by preventing the global handler.
 

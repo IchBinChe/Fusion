@@ -3041,11 +3041,23 @@ export interface McpServersSettings {
   servers?: McpServerDefinition[];
 }
 
+/*
+FNXC:DashboardShortcuts 2026-07-04-00:00:
+FN-7553 adds four more configurable actions on top of the FN-7494/FN-7507 base (quickChat, terminal), each reusing an existing App navigation handler (no new nav destinations). All fields share blank-to-disable semantics: an empty string disables that action's runtime listener.
+*/
 export interface DashboardKeyboardShortcuts {
   /** Opens the dashboard Quick Chat surface. Empty string disables this shortcut. Default: "Space". */
   quickChat?: string;
   /** Opens or toggles the dashboard Terminal surface. Empty string disables this shortcut. Default: "Ctrl+`". */
   terminal?: string;
+  /** Opens the dashboard Files browser. Empty string disables this shortcut. Default: "Ctrl+E". */
+  openFiles?: string;
+  /** Opens the dashboard Settings view. Empty string disables this shortcut. Default: "Ctrl+,". */
+  openSettings?: string;
+  /** Opens the dashboard Command Center view. Empty string disables this shortcut. Default: "Ctrl+K". */
+  openCommandCenter?: string;
+  /** Opens the New Task modal. Empty string disables this shortcut. Default: "Ctrl+Shift+N". */
+  newTask?: string;
 }
 
 export interface GlobalSettings {

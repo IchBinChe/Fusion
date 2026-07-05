@@ -106,7 +106,6 @@ export const GLOBAL_SECTION_KEYS: Record<string, ReadonlySet<string>> = {
     "gitlabAuthTokenType",
     "language",
     "dismissModalsOnOutsideClick",
-    "dashboardKeyboardShortcuts",
     "persistAgentToolOutput",
     "persistAgentThinkingLogPermanent",
     "persistAgentThinkingLogEphemeral",
@@ -115,6 +114,11 @@ export const GLOBAL_SECTION_KEYS: Record<string, ReadonlySet<string>> = {
     "updateCheckFrequency",
     "autoReloadOnVersionChange",
   ]),
+  /*
+  FNXC:DashboardShortcuts 2026-07-04-00:00:
+  FN-7553 moves `dashboardKeyboardShortcuts` ownership out of "global-general" into its own dedicated section so the new Keyboard Shortcuts settings section (not General) owns save/reset for this key.
+  */
+  "keyboard-shortcuts": new Set(["dashboardKeyboardShortcuts"]),
   "global-mcp": new Set(["mcpServers"]),
   "global-models": new Set([
     "defaultProvider",

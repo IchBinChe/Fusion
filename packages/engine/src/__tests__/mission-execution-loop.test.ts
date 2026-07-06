@@ -6,6 +6,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { execSync, spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { TEST_MODE_RESOLVED } from "@fusion/core";
 import type {
   Mission,
@@ -471,6 +475,25 @@ function expectNoValidationBoardTaskMutation(taskStore: ReturnType<typeof create
 }
 
 // ── Tests ───────────────────────────────────────────────────────────────────
+
+// ── real-git fixtures (for the stale-workspace guard) ────────────────────────
+const hasGit = spawnSync("git", ["--version"], { stdio: "pipe" }).status === 0;
+
+function git(repo: string, command: string): string {
+  return execSync(command, { cwd: repo, encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"] }).trim();
+}
+
+/** A throwaway git repo with one initial commit; HEAD on `main`. */
+function initGitRepo(): string {
+  const repo = mkdtempSync(join(tmpdir(), "fn-stale-ws-"));
+  git(repo, "git init -b main");
+  git(repo, 'git config user.email "test@example.com"');
+  git(repo, 'git config user.name "Test User"');
+  git(repo, "git config commit.gpgsign false");
+  writeFileSync(join(repo, "foo.ts"), "line1\n");
+  git(repo, "git add foo.ts && git commit -m init");
+  return repo;
+}
 
 describe("MissionExecutionLoop", () => {
   let loop: MissionExecutionLoop;
@@ -1881,6 +1904,16 @@ describe("MissionExecutionLoop", () => {
   // ── premerge guard (fail verdict while the linked task is unmerged) ──────
 
   describe("premerge guard", () => {
+    const gitRepos: string[] = [];
+    afterEach(() => {
+      for (const dir of gitRepos.splice(0)) rmSync(dir, { recursive: true, force: true });
+    });
+    function makeGitRepo(): string {
+      const repo = initGitRepo();
+      gitRepos.push(repo);
+      return repo;
+    }
+
     function primeFailVerdict() {
       const failResponse = JSON.stringify({
         status: "fail",
@@ -2012,6 +2045,144 @@ describe("MissionExecutionLoop", () => {
         expect.objectContaining({ featureId: "F-001" }),
       );
     });
+
+    // ── stale-workspace guard (task done, but rootDir predates the merge) ────
+
+    (hasGit ? it : it.skip)(
+      "should defer a fail when the judged checkout predates the merged commit",
+      async () => {
+        primeFeature();
+        primeFailVerdict();
+
+        // rootDir HEAD is `main` @ commit1. The merged commit lives on a side
+        // branch and is NOT reachable from HEAD — exactly the stale-checkout
+        // case (merge landed on remote / another worktree, rootDir never reset).
+        const repo = makeGitRepo();
+        git(repo, "git checkout -q -b feature");
+        writeFileSync(join(repo, "foo.ts"), "line1\nmerged\n");
+        git(repo, "git add foo.ts && git commit -m merged");
+        const mergedSha = git(repo, "git rev-parse HEAD");
+        git(repo, "git checkout -q main");
+
+        // Column is `done`, so the premerge column guard passes; only the
+        // ancestry check can catch the stale workspace.
+        taskStore._setTask({ id: "FN-001", title: "Test", description: "d", log: [], column: "done", integrationSha: mergedSha } as any);
+
+        loop = new MissionExecutionLoop({
+          taskStore: taskStore as any,
+          missionStore: missionStore as any,
+          rootDir: repo,
+        });
+        const emitSpy = vi.spyOn(loop, "emit");
+        loop.start();
+
+        await loop.processTaskOutcome("FN-001");
+
+        expect(missionStore.createGeneratedFixFeature).not.toHaveBeenCalled();
+        expect(missionStore.completeValidatorRun).toHaveBeenCalledWith(
+          expect.any(String),
+          "blocked",
+          expect.stringContaining("predates the merged code"),
+        );
+        expect(emitSpy).toHaveBeenCalledWith(
+          "validation:inconclusive",
+          expect.objectContaining({
+            featureId: "F-001",
+            reason: expect.stringContaining("predates the merged code"),
+          }),
+        );
+        expect(emitSpy).not.toHaveBeenCalledWith("validation:failed", expect.anything());
+      },
+    );
+
+    (hasGit ? it : it.skip)(
+      "should run the normal fail path when the merged commit is an ancestor of HEAD",
+      async () => {
+        primeFeature();
+        primeFailVerdict();
+
+        // rootDir HEAD advanced PAST the merged commit — the workspace is fresh,
+        // so the fail is real and must mint a Fix Feature.
+        const repo = makeGitRepo();
+        const baseSha = git(repo, "git rev-parse HEAD");
+        writeFileSync(join(repo, "foo.ts"), "line1\nadvanced\n");
+        git(repo, "git add foo.ts && git commit -m advance");
+
+        taskStore._setTask({ id: "FN-001", title: "Test", description: "d", log: [], column: "done", integrationSha: baseSha } as any);
+
+        loop = new MissionExecutionLoop({
+          taskStore: taskStore as any,
+          missionStore: missionStore as any,
+          rootDir: repo,
+        });
+        const emitSpy = vi.spyOn(loop, "emit");
+        loop.start();
+
+        await loop.processTaskOutcome("FN-001");
+
+        expect(missionStore.createGeneratedFixFeature).toHaveBeenCalled();
+        expect(emitSpy).toHaveBeenCalledWith(
+          "validation:failed",
+          expect.objectContaining({ featureId: "F-001" }),
+        );
+        expect(emitSpy).not.toHaveBeenCalledWith("validation:inconclusive", expect.anything());
+      },
+    );
+
+    it("should fail open (normal fail) when the task carries no integration SHA", async () => {
+      primeFeature();
+      primeFailVerdict();
+
+      // Done, but no integrationSha/baseCommit → no evidence of staleness.
+      taskStore._setTask({ id: "FN-001", title: "Test", description: "d", log: [], column: "done" });
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+      const emitSpy = vi.spyOn(loop, "emit");
+      loop.start();
+
+      await loop.processTaskOutcome("FN-001");
+
+      expect(missionStore.createGeneratedFixFeature).toHaveBeenCalled();
+      expect(emitSpy).toHaveBeenCalledWith(
+        "validation:failed",
+        expect.objectContaining({ featureId: "F-001" }),
+      );
+      expect(emitSpy).not.toHaveBeenCalledWith("validation:inconclusive", expect.anything());
+    });
+
+    (hasGit ? it : it.skip)(
+      "should fail open (normal fail) when the integration SHA is an unknown object",
+      async () => {
+        primeFeature();
+        primeFailVerdict();
+
+        // A bogus SHA makes `git merge-base --is-ancestor` exit 128 (bad object),
+        // which is unknown → must NOT suppress the fail.
+        const repo = makeGitRepo();
+        taskStore._setTask({ id: "FN-001", title: "Test", description: "d", log: [], column: "done", integrationSha: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef" } as any);
+
+        loop = new MissionExecutionLoop({
+          taskStore: taskStore as any,
+          missionStore: missionStore as any,
+          rootDir: repo,
+        });
+        const emitSpy = vi.spyOn(loop, "emit");
+        loop.start();
+
+        await loop.processTaskOutcome("FN-001");
+
+        expect(missionStore.createGeneratedFixFeature).toHaveBeenCalled();
+        expect(emitSpy).toHaveBeenCalledWith(
+          "validation:failed",
+          expect.objectContaining({ featureId: "F-001" }),
+        );
+        expect(emitSpy).not.toHaveBeenCalledWith("validation:inconclusive", expect.anything());
+      },
+    );
   });
 
   // ── handleValidationBlocked ───────────────────────────────────────────────

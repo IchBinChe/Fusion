@@ -828,13 +828,21 @@ export default function kbExtension(pi: ExtensionAPI) {
             ? task.description.slice(0, 80) + "…"
             : task.description;
 
+        /*
+        FNXC:Workflows 2026-07-05-00:00:
+        The response text must reflect the ACTUAL resolved landing column (task.column),
+        not a hardcoded "triage" string. store.createTask already resolves intake correctly
+        (this call never overrides `column`), so a custom workflow's non-triage intake
+        column (e.g. "Inbox") must be echoed back to the caller instead of a fixed value
+        that would misreport where the card actually landed.
+        */
         return {
           content: [
             {
               type: "text",
               text:
                 `Created ${task.id}: ${label}${workflowId ? ` (workflow: ${workflowId})` : ""}\n` +
-                `Column: triage\n` +
+                `Column: ${task.column}\n` +
                 (task.dependencies.length
                   ? `Dependencies: ${task.dependencies.join(", ")}\n`
                   : "") +

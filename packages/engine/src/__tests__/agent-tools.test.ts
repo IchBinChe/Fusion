@@ -142,7 +142,6 @@ describe("createTaskCreateTool", () => {
     expect(store.createTask).toHaveBeenCalledWith({
       description: "Follow-up task",
       dependencies: ["PROJ-001"],
-      column: "triage",
       priority: undefined,
       summarize: true,
       source: undefined,

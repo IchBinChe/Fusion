@@ -1222,10 +1222,28 @@ export async function landWorkspaceTask(
     // it so a retry never re-advances the ref. This makes a re-run after a partial
     // land idempotent for the already-landed repos.
     if (await isRepoLanded(repoRootDir, integrationBranch, entry.landedSha, taskId, entry.branch)) {
-      await log(`AI merge (workspace): sub-repo ${repoRel} already landed (${short(entry.landedSha!)} ⊑ ${integrationBranch}) — skipping`);
+      /*
+      FNXC:Workspace 2026-07-07-08:35 (Phase C A1 recovery — recover landedSha for finalize proof):
+      isRepoLanded's A1 trailer-fallback can prove a sub-repo is landed even when its landedSha
+      was never persisted (the persist-after-advance window in persistRepoLandedSha threw). That
+      left the in-memory result with landedSha: undefined, so finalizeWorkspaceTask's
+      `status === "landed" && landedSha` filter dropped the recovered repo, `anyLanded` stayed
+      false, and the proven repo's retry STRANDED the task in-review with missing-merge-confirmation
+      (finalizeTask's hasDurableMergeProof needs mergeConfirmed). Recover the CURRENT integration
+      tip as landedSha — the trailer-fallback already proved the task branch is an ancestor of this
+      tip — so the finalize builds durable mergeConfirmed proof and the A1 retry completes to done.
+      */
+      let recoveredLandedSha = entry.landedSha;
+      if (!recoveredLandedSha) {
+        recoveredLandedSha = await git(
+          ["rev-parse", "--verify", `refs/heads/${integrationBranch}`],
+          repoRootDir,
+        ).catch(() => undefined);
+      }
+      await log(`AI merge (workspace): sub-repo ${repoRel} already landed (${short(recoveredLandedSha ?? "?")} ⊑ ${integrationBranch}) — skipping`);
       repos.push({
         repo: repoRel, repoRootDir, integrationBranch, branch: entry.branch,
-        status: "landed", landedSha: entry.landedSha, alreadyLanded: true,
+        status: "landed", landedSha: recoveredLandedSha, alreadyLanded: true,
       });
       continue;
     }

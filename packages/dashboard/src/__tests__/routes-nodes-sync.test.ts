@@ -71,9 +71,24 @@ vi.mock("@fusion/core", async (importOriginal) => {
 });
 
 // ── Mock AuthStorage ───────────────────────────────────────────────────
+// FNXC:ProviderAuth 2026-07-07-00:00: FN-7647 routed register-settings-sync-routes.ts and
+// register-settings-sync-inbound-routes.ts through @fusion/engine's createFusionAuthStorage()
+// instead of a raw AuthStorage.create(getFusionAuthPath()). Mock the factory (not the raw
+// pi-coding-agent AuthStorage) so mockAuthStorageSet still observes the coordinated write path,
+// and preserve every other real @fusion/engine export other routers rely on at module load time.
 
-const mockAuthStorageSet = vi.fn();
-const mockAuthStorageGetOAuthProviders = vi.fn().mockReturnValue([]);
+const { mockAuthStorageSet, mockAuthStorageGetOAuthProviders, mockCreateFusionAuthStorage } = vi.hoisted(() => {
+  const mockAuthStorageSet = vi.fn();
+  const mockAuthStorageGetOAuthProviders = vi.fn().mockReturnValue([]);
+  const mockCreateFusionAuthStorage = vi.fn(() => ({
+    set: mockAuthStorageSet,
+    get: vi.fn(),
+    getApiKey: vi.fn(),
+    getOAuthProviders: mockAuthStorageGetOAuthProviders,
+    reload: vi.fn(),
+  }));
+  return { mockAuthStorageSet, mockAuthStorageGetOAuthProviders, mockCreateFusionAuthStorage };
+});
 
 vi.mock("@earendil-works/pi-coding-agent", () => {
   return {
@@ -86,6 +101,14 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
         reload: vi.fn(),
       })),
     },
+  };
+});
+
+vi.mock("@fusion/engine", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@fusion/engine")>();
+  return {
+    ...actual,
+    createFusionAuthStorage: mockCreateFusionAuthStorage,
   };
 });
 
@@ -1072,6 +1095,11 @@ describe("Node settings sync routes", () => {
           lastSyncedAt: expect.any(String),
         }),
       );
+      // FN-7647: pull-mode credential writes go through the coordinated createFusionAuthStorage()
+      // proxy, not a raw independent AuthStorage instance. (applyAuthMaterialSnapshot resolves the
+      // default beforeEach mock here — the anthropic credential — since this test doesn't override it.)
+      expect(mockCreateFusionAuthStorage).toHaveBeenCalled();
+      expect(mockAuthStorageSet).toHaveBeenCalledWith("anthropic", { type: "api_key", key: "sk-ant-received" });
     });
 
     it("emits structured redacted diagnostics for pull-mode auth sync", async () => {
@@ -1418,6 +1446,82 @@ describe("Node settings sync routes", () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.receivedProviders).toContain("anthropic");
+    });
+
+    // ── FN-7647 Symptom Verification ─────────────────────────────────
+    // Original symptom (FN-7646 class): a raw independent AuthStorage instance can persist a
+    // stale in-memory snapshot over ~/.fusion/agent/auth.json, wiping a key another process just
+    // saved. This asserts the inbound handler writes through the coordinated
+    // createFusionAuthStorage() proxy (not a raw instance) and that per-provider writes never
+    // clobber an unrelated provider's credential already present on disk.
+    it("FN-7647: persists received credentials via the coordinated createFusionAuthStorage() proxy", async () => {
+      const localNode = createMockLocalNode();
+      mockListNodes.mockResolvedValue([localNode]);
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/settings/auth-receive",
+        JSON.stringify({
+          authMaterial: {
+            version: 1,
+            exportedAt: "2026-04-14T10:00:00.000Z",
+            checksum: "auth-checksum",
+            payload: { providerAuth: { anthropic: { type: "api_key", key: "sk-ant-received" } } },
+          },
+          sourceNodeId: "node-remote-001",
+          timestamp: "2026-04-14T10:00:00.000Z",
+        }),
+        { "content-type": "application/json", "Authorization": `Bearer ${localNode.apiKey}` },
+      );
+
+      expect(res.status).toBe(200);
+      // Proves the write path is the coordinated proxy, not a raw independent AuthStorage instance.
+      expect(mockCreateFusionAuthStorage).toHaveBeenCalled();
+      expect(mockAuthStorageSet).toHaveBeenCalledWith("anthropic", { type: "api_key", key: "sk-ant-received" });
+    });
+
+    it("FN-7647: concurrent-writer survival — an unrelated provider's saved key is never clobbered by this handler's write", async () => {
+      const localNode = createMockLocalNode();
+      mockListNodes.mockResolvedValue([localNode]);
+
+      // Simulate another Fusion instance's provider credential already persisted on disk by having
+      // the mocked coordinated proxy merge per-provider (as the real reload-before-persist proxy does)
+      // rather than overwrite the whole file. `openai` was saved by a concurrent instance and must
+      // still be observable after this handler's write — this handler only ever calls .set() for the
+      // providers it received (anthropic), never a whole-snapshot overwrite that would drop `openai`.
+      const diskState: Record<string, unknown> = {
+        openai: { type: "api_key", key: "sk-openai-from-other-instance" },
+      };
+      mockAuthStorageSet.mockImplementation(async (providerId: string, credential: unknown) => {
+        diskState[providerId] = credential;
+      });
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/settings/auth-receive",
+        JSON.stringify({
+          authMaterial: {
+            version: 1,
+            exportedAt: "2026-04-14T10:00:00.000Z",
+            checksum: "auth-checksum",
+            payload: { providerAuth: { anthropic: { type: "api_key", key: "sk-ant-received" } } },
+          },
+          sourceNodeId: "node-remote-001",
+          timestamp: "2026-04-14T10:00:00.000Z",
+        }),
+        { "content-type": "application/json", "Authorization": `Bearer ${localNode.apiKey}` },
+      );
+
+      expect(res.status).toBe(200);
+      // The unrelated provider saved by another instance before this handler ran must still be present.
+      expect(diskState.openai).toEqual({ type: "api_key", key: "sk-openai-from-other-instance" });
+      // And the received provider was merged in alongside it — no full-snapshot clobber.
+      expect(diskState.anthropic).toEqual({ type: "api_key", key: "sk-ant-received" });
+      // .set() was only invoked for the received provider — never a whole-file overwrite call.
+      expect(mockAuthStorageSet).toHaveBeenCalledTimes(1);
+      expect(mockAuthStorageSet).toHaveBeenCalledWith("anthropic", { type: "api_key", key: "sk-ant-received" });
     });
 
     it("returns 401 when auth header is missing", async () => {

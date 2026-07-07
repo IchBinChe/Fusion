@@ -62,8 +62,23 @@ vi.mock("@fusion/core", async (importOriginal) => {
   };
 });
 
-const mockAuthStorageSet = vi.fn();
-const mockAuthStorageGetOAuthProviders = vi.fn().mockReturnValue([]);
+// FNXC:ProviderAuth 2026-07-07-00:00: FN-7647 routed register-settings-sync-routes.ts and
+// register-settings-sync-inbound-routes.ts through @fusion/engine's createFusionAuthStorage()
+// instead of a raw AuthStorage.create(getFusionAuthPath()). Mock the factory (not just the raw
+// pi-coding-agent AuthStorage) so this contract matrix never falls through to the real proxy and
+// touches the developer's actual ~/.fusion/agent/auth.json during the auth-sync/auth-receive cases.
+const { mockAuthStorageSet, mockAuthStorageGetOAuthProviders, mockCreateFusionAuthStorage } = vi.hoisted(() => {
+  const mockAuthStorageSet = vi.fn();
+  const mockAuthStorageGetOAuthProviders = vi.fn().mockReturnValue([]);
+  const mockCreateFusionAuthStorage = vi.fn(() => ({
+    set: mockAuthStorageSet,
+    get: vi.fn(),
+    getApiKey: vi.fn(),
+    getOAuthProviders: mockAuthStorageGetOAuthProviders,
+    reload: vi.fn(),
+  }));
+  return { mockAuthStorageSet, mockAuthStorageGetOAuthProviders, mockCreateFusionAuthStorage };
+});
 
 vi.mock("@earendil-works/pi-coding-agent", () => {
   return {
@@ -76,6 +91,14 @@ vi.mock("@earendil-works/pi-coding-agent", () => {
         reload: vi.fn(),
       })),
     },
+  };
+});
+
+vi.mock("@fusion/engine", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@fusion/engine")>();
+  return {
+    ...actual,
+    createFusionAuthStorage: mockCreateFusionAuthStorage,
   };
 });
 

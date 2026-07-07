@@ -89,7 +89,7 @@ async function createStoreDefault(rootDir: string): Promise<TaskStoreLike> {
 async function createDashboardServerDefault(store: TaskStoreLike, rootDir: string): Promise<{ server: Server; cleanup: RuntimeCleanup }> {
   const { CentralCore } = await import("@fusion/core");
   const { createServer } = await import("@fusion/dashboard");
-  const { ProjectEngineManager, createFusionAuthStorage, createFusionModelRegistry } = await import("@fusion/engine");
+  const { ProjectEngineManager, createFusionAuthStorage, createFusionModelRegistry, seedDashboardProviders } = await import("@fusion/engine");
 
   /*
    * FNXC:DesktopRuntime 2026-06-20-23:39:
@@ -97,7 +97,9 @@ async function createDashboardServerDefault(store: TaskStoreLike, rootDir: strin
    */
   const centralCore = new CentralCore();
   const engineManager = new ProjectEngineManager(centralCore);
+  const providerSeeding: { dispose?: () => void } = {};
   const cleanup = async () => {
+    providerSeeding.dispose?.();
     await engineManager.stopAll();
     await centralCore.close?.();
   };
@@ -122,24 +124,37 @@ async function createDashboardServerDefault(store: TaskStoreLike, rootDir: strin
     strace(`createDashboardServer: primaryProject=${rootProject?.id ?? "none"}`);
     const primaryEngine = rootProject ? await engineManager.ensureEngine(rootProject.id) : undefined;
     /*
-     * FNXC:DesktopRuntime 2026-07-03-06:20:
-     * Wire an auth storage into the embedded server. Without it, GET /api/auth/status throws 500
-     * "Authentication is not configured", the dashboard's first-run onboarding hook (useAuthOnboarding
-     * -> fetchAuthStatus) hits its silent catch and NEVER opens the AI/GitHub onboarding wizard, and
-     * providers can't be authenticated at all. The CLI wires the same storage (createFusionAuthStorage);
-     * the desktop must too so operators can set up AI accounts. (API-key provider wrapping remains
-     * CLI-only for now; OAuth + CLI providers are available here.)
+     * FNXC:DesktopRuntime 2026-07-07-00:00:
+     * FN-7622: wire an auth storage into the embedded server AND run it through the same
+     * registration sequence the CLI serve/dashboard/daemon commands use — built-in Zai/API-key
+     * provider seeding (registerBuiltInZaiProvider), wrapAuthStorageWithApiKeyProviders, and
+     * registerCustomProviders(globalSettings.customProviders) — via the shared
+     * @fusion/engine seedDashboardProviders() helper. Previously this path passed the RAW
+     * authStorage/modelRegistry straight to createServer and skipped that whole sequence, so
+     * desktop's Authentication page and model picker showed a truncated provider catalog
+     * (stock API-key providers and user customProviders[] missing) versus the identical config
+     * rendered by the web build. Passing the WRAPPED authStorage returned by
+     * seedDashboardProviders (not the raw one) closes that gap; the disposer unsubscribes the
+     * settings:updated -> reregisterCustomProviders listener on shutdown.
      */
     const authStorage = createFusionAuthStorage();
     // FNXC:DesktopRuntime 2026-07-03-07:00: a ModelRegistry is required for the /api/models endpoint;
     // without it the onboarding model picker shows "no models" even with a provider connected.
     const modelRegistry = createFusionModelRegistry(authStorage);
+    strace("createDashboardServer: seedDashboardProviders");
+    const { authStorage: wrappedAuthStorage, dispose } = await seedDashboardProviders({
+      store: store as never,
+      authStorage,
+      modelRegistry,
+      log: (scope, message) => strace(`[${scope}] ${message}`),
+    });
+    providerSeeding.dispose = dispose;
     strace("createDashboardServer: createServer");
     const app = createServer(store as never, {
       ...(primaryEngine ? { engine: primaryEngine } : {}),
       engineManager,
       centralCore,
-      authStorage,
+      authStorage: wrappedAuthStorage,
       modelRegistry,
       onProjectFirstAccessed: (projectId: string) => engineManager.onProjectAccessed(projectId),
     });

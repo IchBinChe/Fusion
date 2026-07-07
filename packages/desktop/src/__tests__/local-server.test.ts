@@ -82,7 +82,28 @@ const mocks = vi.hoisted(() => {
     return engineManager;
   });
 
-  return { TaskStore, CentralCore, ProjectEngineManager, createServer, store, listen, centralCore, engineManager, engine };
+  // FN-7622: mirrors @fusion/engine's real seedDashboardProviders() shape — wraps the raw
+  // authStorage into a distinguishable WRAPPED object so tests can assert local-server.ts passes
+  // the wrapped storage (not the raw one) into createServer, and returns a disposer.
+  const seedDashboardProvidersDispose = vi.fn();
+  const seedDashboardProviders = vi.fn(async ({ authStorage }: { authStorage: unknown }) => ({
+    authStorage: { ...(authStorage as object), __wrapped: true },
+    dispose: seedDashboardProvidersDispose,
+  }));
+
+  return {
+    TaskStore,
+    CentralCore,
+    ProjectEngineManager,
+    createServer,
+    store,
+    listen,
+    centralCore,
+    engineManager,
+    engine,
+    seedDashboardProviders,
+    seedDashboardProvidersDispose,
+  };
 });
 
 vi.mock("@fusion/core", () => ({ TaskStore: mocks.TaskStore, CentralCore: mocks.CentralCore }));
@@ -90,7 +111,11 @@ vi.mock("@fusion/dashboard", () => ({ createServer: mocks.createServer }));
 vi.mock("@fusion/engine", () => ({
   ProjectEngineManager: mocks.ProjectEngineManager,
   createFusionAuthStorage: () => ({ reload: () => undefined, getOAuthProviders: () => [], hasAuth: () => false }),
-  createFusionModelRegistry: () => ({ listModels: () => [] }),
+  createFusionModelRegistry: () => ({ listModels: () => [], refresh: () => undefined }),
+  // FN-7622: seedDashboardProviders is asserted directly in provider-registration.test.ts; this
+  // desktop-side mock just proves local-server.ts calls it and wires its returned WRAPPED auth
+  // storage (not the raw one) into createServer.
+  seedDashboardProviders: mocks.seedDashboardProviders,
 }));
 
 describe("DesktopLocalServerManager", () => {
@@ -186,5 +211,38 @@ describe("DesktopLocalServerManager", () => {
 
     expect(first).toBe(second);
     expect(mocks.listen).toHaveBeenCalledTimes(1);
+  });
+
+  /*
+   * FN-7622 symptom verification: before this fix, DesktopLocalServerManager.start() passed the
+   * RAW authStorage straight to createServer and never called any provider-seeding sequence, so
+   * the desktop's Authentication page / model routes only ever saw OAuth + CLI providers (never
+   * built-in API-key providers or user customProviders[]) — the truncated-catalog symptom vs. the
+   * CLI/web build. Assert the fix: seedDashboardProviders is invoked with the store (so it can
+   * read globalSettings.customProviders) and createServer receives its returned WRAPPED auth
+   * storage, not the raw one, and the seeding disposer is invoked on stop().
+   */
+  it("seeds providers via seedDashboardProviders and passes the WRAPPED auth storage to createServer (FN-7622)", async () => {
+    const { DesktopLocalServerManager } = await import("../local-server.ts");
+    const manager = new DesktopLocalServerManager("/repo");
+
+    await manager.start();
+
+    expect(mocks.seedDashboardProviders).toHaveBeenCalledWith(
+      expect.objectContaining({
+        store: expect.objectContaining({ init: mocks.store.init, watch: mocks.store.watch }),
+        authStorage: expect.anything(),
+        modelRegistry: expect.anything(),
+      }),
+    );
+    expect(mocks.createServer).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        authStorage: expect.objectContaining({ __wrapped: true }),
+      }),
+    );
+
+    await manager.stop();
+    expect(mocks.seedDashboardProvidersDispose).toHaveBeenCalledTimes(1);
   });
 });

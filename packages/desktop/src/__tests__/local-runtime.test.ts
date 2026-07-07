@@ -41,6 +41,57 @@ class FakeServer {
   }
 }
 
+/*
+ * FN-7622 symptom-verification mocks for createDashboardServerDefault (the real default
+ * createDashboardServer implementation, exercised only when a test does NOT override
+ * `createDashboardServer` in LocalRuntimeManagerOptions). Mirrors local-server.test.ts's pattern.
+ */
+const engineMocks = vi.hoisted(() => {
+  const centralCore = {
+    init: vi.fn(async () => undefined),
+    close: vi.fn(async () => undefined),
+    listProjects: vi.fn(async () => [] as Array<{ id: string; name: string; path: string; status: string }>),
+  };
+  const engineManager = {
+    startAll: vi.fn(async () => undefined),
+    startReconciliation: vi.fn(),
+    stopAll: vi.fn(async () => undefined),
+    ensureEngine: vi.fn(async () => ({ id: "engine-1" })),
+    onProjectAccessed: vi.fn(),
+  };
+  const CentralCore = vi.fn(function () {
+    return centralCore;
+  });
+  const ProjectEngineManager = vi.fn(function () {
+    return engineManager;
+  });
+  const seedDashboardProvidersDispose = vi.fn();
+  const seedDashboardProviders = vi.fn(async ({ authStorage }: { authStorage: unknown }) => ({
+    authStorage: { ...(authStorage as object), __wrapped: true },
+    dispose: seedDashboardProvidersDispose,
+  }));
+  const createServer = vi.fn(() => ({ listen: vi.fn() }));
+
+  return {
+    centralCore,
+    engineManager,
+    CentralCore,
+    ProjectEngineManager,
+    seedDashboardProviders,
+    seedDashboardProvidersDispose,
+    createServer,
+  };
+});
+
+vi.mock("@fusion/core", () => ({ CentralCore: engineMocks.CentralCore }));
+vi.mock("@fusion/dashboard", () => ({ createServer: engineMocks.createServer }));
+vi.mock("@fusion/engine", () => ({
+  ProjectEngineManager: engineMocks.ProjectEngineManager,
+  createFusionAuthStorage: () => ({ reload: () => undefined, getOAuthProviders: () => [], hasAuth: () => false }),
+  createFusionModelRegistry: () => ({ listModels: () => [], refresh: () => undefined }),
+  seedDashboardProviders: engineMocks.seedDashboardProviders,
+}));
+
 describe("LocalRuntimeManager", () => {
   const store = {
     init: vi.fn(async () => undefined),
@@ -348,5 +399,47 @@ describe("LocalRuntimeManager", () => {
 
     expect(first).toEqual(second);
     expect(store.init).toHaveBeenCalledTimes(1);
+  });
+
+  /*
+   * FN-7622 symptom verification: before this fix, createDashboardServerDefault (the embedded
+   * in-process server path) constructed a RAW authStorage/modelRegistry and passed the raw
+   * authStorage straight to createServer, never running the built-in/API-key/custom-provider
+   * registration sequence the CLI serve/dashboard/daemon commands run — so desktop's
+   * /api/providers and /api/models exposed a truncated catalog vs. the identical web-build config.
+   * This test exercises the REAL default createDashboardServer (no createDashboardServer override)
+   * and asserts it now routes through seedDashboardProviders and hands createServer the WRAPPED
+   * auth storage, matching the CLI-equivalent catalog seedDashboardProviders produces (see
+   * packages/engine/src/__tests__/provider-registration.test.ts for the underlying catalog
+   * assertions across customProviders undefined/[]/one/multiple).
+   */
+  it("createDashboardServerDefault seeds providers and passes the WRAPPED auth storage to createServer (FN-7622)", async () => {
+    const { LocalRuntimeManager } = await import("../local-runtime.ts");
+    const server = new FakeServer(4545);
+    engineMocks.createServer.mockReturnValueOnce({
+      listen: vi.fn(() => {
+        setTimeout(() => server.emit("listening"), 0);
+        return server as unknown as Server;
+      }),
+    });
+
+    const manager = new LocalRuntimeManager({
+      rootDir: "/repo",
+      createStore: async () => store,
+      // No createDashboardServer override: exercises the real createDashboardServerDefault.
+    });
+
+    await manager.startLocal();
+
+    expect(engineMocks.seedDashboardProviders).toHaveBeenCalledWith(
+      expect.objectContaining({ authStorage: expect.anything(), modelRegistry: expect.anything() }),
+    );
+    expect(engineMocks.createServer).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ authStorage: expect.objectContaining({ __wrapped: true }) }),
+    );
+
+    await manager.stopLocal();
+    expect(engineMocks.seedDashboardProvidersDispose).toHaveBeenCalledTimes(1);
   });
 });

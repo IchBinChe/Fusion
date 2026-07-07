@@ -55,7 +55,7 @@ export class DesktopLocalServerManager {
       const { TaskStore } = await import("@fusion/core");
       const { CentralCore } = await import("@fusion/core");
       const { createServer } = await import("@fusion/dashboard");
-      const { ProjectEngineManager, createFusionAuthStorage, createFusionModelRegistry } = await import("@fusion/engine");
+      const { ProjectEngineManager, createFusionAuthStorage, createFusionModelRegistry, seedDashboardProviders } = await import("@fusion/engine");
       store = new TaskStore(this.rootDir) as TaskStoreLike;
       await store.init();
       await store.watch();
@@ -65,7 +65,9 @@ export class DesktopLocalServerManager {
        */
       const centralCore = new CentralCore();
       const engineManager = new ProjectEngineManager(centralCore);
+      const providerSeeding: { dispose?: () => void } = {};
       cleanup = async () => {
+        providerSeeding.dispose?.();
         await engineManager.stopAll();
         await centralCore.close?.();
       };
@@ -75,14 +77,27 @@ export class DesktopLocalServerManager {
       engineManager.startReconciliation();
       const rootProject = await resolveDesktopRuntimePrimaryProject(centralCore);
       const primaryEngine = rootProject ? await engineManager.ensureEngine(rootProject.id) : undefined;
-      // FNXC:DesktopRuntime 2026-07-03-06:20: wire auth storage so /api/auth/status works and first-run onboarding can open (see local-runtime.ts).
+      /*
+       * FNXC:DesktopRuntime 2026-07-07-00:00:
+       * FN-7622: this legacy path had the same truncated-provider-list gap as local-runtime.ts — wire
+       * auth storage AND run it through the shared seedDashboardProviders() sequence (built-in Zai/
+       * API-key seeding, wrapAuthStorageWithApiKeyProviders, registerCustomProviders) so this path
+       * surfaces the same provider catalog as the CLI and the embedded runtime path. Pass the WRAPPED
+       * authStorage to createServer, not the raw one.
+       */
       const authStorage = createFusionAuthStorage();
       const modelRegistry = createFusionModelRegistry(authStorage);
+      const { authStorage: wrappedAuthStorage, dispose } = await seedDashboardProviders({
+        store: store as never,
+        authStorage,
+        modelRegistry,
+      });
+      providerSeeding.dispose = dispose;
       const app = createServer(store as never, {
         ...(primaryEngine ? { engine: primaryEngine } : {}),
         engineManager,
         centralCore,
-        authStorage,
+        authStorage: wrappedAuthStorage,
         modelRegistry,
         onProjectFirstAccessed: (projectId: string) => engineManager.onProjectAccessed(projectId),
       });

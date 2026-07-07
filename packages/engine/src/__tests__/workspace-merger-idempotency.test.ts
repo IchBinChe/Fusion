@@ -373,14 +373,29 @@ describeIfGit("landWorkspaceTask — DB-failure resilience (Phase C review A1/A4
     // Status was reset off 'merging' before the throw escaped (A3).
     expect(store.task.status ?? null).toBeNull();
 
-    // Retry: isRepoLanded's trailer ancestor-fallback (A1) recognises the actually-landed
-    // repo via its Fusion-Task-Id trailer and SKIPS it — the ref must NOT advance a 2nd time.
+    /*
+    FNXC:Workspace 2026-07-07-10:30 (Phase C A1 precision regression — Greptile P1):
+    Simulate an intervening sub-repo land: advance repo-a's integration tip with an UNRELATED
+    commit AFTER the task's squash landed (tipAfterFirst) but BEFORE the lost-persist retry. The
+    recovered landedSha must be the task's OWN landing commit (tipAfterFirst), NOT the later
+    unrelated tip — otherwise finalize would attribute a wrong commit to this repo.
+    */
+    configureIdentity(fx.repoPath("repo-a"));
+    fx.git("repo-a", 'git commit --allow-empty -m "unrelated intervening land (no Fusion-Task-Id trailer)"');
+    const tipAfterIntervening = fx.git("repo-a", "git rev-parse refs/heads/main");
+    expect(tipAfterIntervening).not.toBe(tipAfterFirst);
+
+    // Retry: the A1 trailer scan recognises the actually-landed repo via its Fusion-Task-Id
+    // trailer and SKIPS it — the ref must NOT advance a 2nd time (stays at the intervening tip).
     const second = await landWorkspaceTask(store, store.task, fx.rootDir, {}, {
       mergeAgent: squashMergeAgent(BRANCH),
       reviewAgent: approveReviewAgent,
     });
-    expect(fx.git("repo-a", "git rev-parse refs/heads/main")).toBe(tipAfterFirst); // no double squash
+    expect(fx.git("repo-a", "git rev-parse refs/heads/main")).toBe(tipAfterIntervening); // no double squash
     expect(second.repos[0].alreadyLanded).toBe(true);
+    // Precision invariant: the recovered landedSha is the task's exact landing commit, not the
+    // later unrelated integration tip.
+    expect(second.repos[0].landedSha).toBe(tipAfterFirst);
     expect(second.allLanded).toBe(true);
     expect(second.finalized).toBe(true);
   });

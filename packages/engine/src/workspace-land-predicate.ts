@@ -78,29 +78,36 @@ async function gitCapture(args: string[], cwd: string): Promise<string | undefin
  * Exported (A6) so Phase D self-healing reuses THIS canonical predicate instead of
  * reimplementing the ancestor/trailer check.
  */
-export async function isRepoLanded(
+/**
+ * FNXC:Workspace 2026-07-07-10:20 (Phase C A1 recovery precision — Greptile P1):
+ * Returns the EXACT proven landed commit (not just a boolean). Callers that need to record
+ * `landedSha` after a lost persist must use this, because the integration tip may have advanced
+ * past the actual landing commit (another sub-repo landing in between). The A1 trailer scan
+ * captures the commit carrying this task's trailer in the bounded range; `git log` is
+ * reverse-chronological so the first `%H` is the task's own landing commit, not a later unrelated tip.
+ */
+export async function findProvenLandedCommit(
   repoRootDir: string,
   integrationBranch: string,
   landedSha: string | undefined,
   taskId?: string,
   branch?: string,
-): Promise<boolean> {
+): Promise<string | undefined> {
   const intRef = `refs/heads/${integrationBranch}`;
   if (!(await gitOk(["rev-parse", "--verify", intRef], repoRootDir))) {
-    return false;
+    return undefined;
   }
-  // Primary: recorded landedSha is an ancestor of (or equals) the integration tip.
-  // `merge-base --is-ancestor X Y` exits 0 iff X is an ancestor of (or equal to) Y.
+  // Primary: recorded landedSha is an ancestor of (or equals) the integration tip — that SHA
+  // IS the exact landing commit.
   if (
     landedSha &&
     (await gitOk(["merge-base", "--is-ancestor", landedSha, intRef], repoRootDir))
   ) {
-    return true;
+    return landedSha;
   }
-  // A1 fallback: even without a recorded landedSha, the repo is already landed if the
-  // integration ref carries a commit with this task's Fusion-Task-Id trailer (the squash
-  // we lost the persist for). Bound the scan to commits gained since the branch's land base
-  // so a stale historical trailer of the same id cannot false-positive.
+  // A1 fallback: the commit carrying this task's Fusion-Task-Id trailer in the bounded range
+  // is the exact proven landing commit. Bound the scan to commits gained since the branch's
+  // land base so a stale historical trailer of the same id cannot false-positive.
   if (taskId) {
     const branchRef = branch ? `refs/heads/${branch}` : undefined;
     let range = intRef;
@@ -113,7 +120,22 @@ export async function isRepoLanded(
       ["log", "--format=%H", `--grep=${trailer}`, "--fixed-strings", range],
       repoRootDir,
     );
-    if (found && found.trim().length > 0) return true;
+    if (found) {
+      const firstSha = found.trim().split("\n")[0];
+      if (firstSha) return firstSha;
+    }
   }
-  return false;
+  return undefined;
+}
+
+export async function isRepoLanded(
+  repoRootDir: string,
+  integrationBranch: string,
+  landedSha: string | undefined,
+  taskId?: string,
+  branch?: string,
+): Promise<boolean> {
+  return Boolean(
+    await findProvenLandedCommit(repoRootDir, integrationBranch, landedSha, taskId, branch),
+  );
 }

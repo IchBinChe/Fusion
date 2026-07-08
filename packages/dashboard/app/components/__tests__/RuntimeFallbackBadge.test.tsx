@@ -189,6 +189,55 @@ describe("RuntimeFallbackBadge", () => {
     expect(legacyMocks.fetchTaskRuntimeFallback).not.toHaveBeenCalled();
     expect(screen.queryByTestId("runtime-fallback-badge")).toBeNull();
   });
+
+  // ActiveAgentsPanel.tsx and AgentsView.tsx (board + list cards) each wire a
+  // real IntersectionObserver-backed isInViewport value into this exact same
+  // <RuntimeFallbackBadge isInViewport={...} /> call, mirroring TaskCard.tsx's
+  // pattern -- the shared poll-gating implementation lives here in the hook
+  // this component consumes, so a *transition* (not just a static isInViewport
+  // prop) is what actually reproduces "card scrolls off-screen mid-session"
+  // for all four call sites, not just the initial-render case above.
+  it("stops polling once isInViewport transitions to false mid-session, and resumes once it transitions back to true", async () => {
+    legacyMocks.fetchTaskRuntimeFallback.mockResolvedValue(fallbackWithHint);
+    const { rerender } = render(
+      <ToastProvider>
+        <RuntimeFallbackBadge taskId="FN-100" isInViewport={true} projectId="proj-1" />
+      </ToastProvider>,
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(legacyMocks.fetchTaskRuntimeFallback).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("runtime-fallback-badge")).toBeInTheDocument();
+
+    // Card scrolls off-screen: parent flips isInViewport to false (as a real
+    // IntersectionObserver callback would via setIsInViewport(false)).
+    rerender(
+      <ToastProvider>
+        <RuntimeFallbackBadge taskId="FN-100" isInViewport={false} projectId="proj-1" />
+      </ToastProvider>,
+    );
+    legacyMocks.fetchTaskRuntimeFallback.mockClear();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(legacyMocks.fetchTaskRuntimeFallback).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("runtime-fallback-badge")).toBeNull();
+
+    // Card scrolls back into view: polling resumes.
+    rerender(
+      <ToastProvider>
+        <RuntimeFallbackBadge taskId="FN-100" isInViewport={true} projectId="proj-1" />
+      </ToastProvider>,
+    );
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(legacyMocks.fetchTaskRuntimeFallback).toHaveBeenCalled();
+    expect(screen.getByTestId("runtime-fallback-badge")).toBeInTheDocument();
+  });
 });
 
 describe("RuntimeFallbackBadge — mobile breakpoint", () => {
@@ -232,5 +281,33 @@ describe("RuntimeFallbackBadge — mobile breakpoint", () => {
     expect(badge).toBeInTheDocument();
     expect(badge.textContent).toContain("hermes");
     expect(badge.className).toContain("card-runtime-fallback-badge");
+  });
+
+  it("stops polling once isInViewport transitions to false at mobile viewport width (agent-card list rows scroll off-screen too)", async () => {
+    mockMobileViewport();
+    legacyMocks.fetchTaskRuntimeFallback.mockResolvedValue(fallbackWithHint);
+    const { rerender } = render(
+      <ToastProvider>
+        <RuntimeFallbackBadge taskId="FN-100" isInViewport={true} projectId="proj-1" />
+      </ToastProvider>,
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(legacyMocks.fetchTaskRuntimeFallback).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <ToastProvider>
+        <RuntimeFallbackBadge taskId="FN-100" isInViewport={false} projectId="proj-1" />
+      </ToastProvider>,
+    );
+    legacyMocks.fetchTaskRuntimeFallback.mockClear();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(legacyMocks.fetchTaskRuntimeFallback).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("runtime-fallback-badge")).toBeNull();
   });
 });

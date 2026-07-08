@@ -32,7 +32,9 @@ function RuntimeFallbackBadgeComponent({ taskId, isInViewport, projectId }: Runt
     if (status.shouldToastNow && status.message) {
       addToast(status.message, "warning");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- addToast identity is stable per ToastProvider instance
+    // FNXC:RuntimeFallbackUI 2026-07-08-00:00:
+    // Intentionally omit addToast from deps — its identity is stable per ToastProvider instance, so re-toasting is keyed only on status changes.
+    // Note: repo eslint config omits react-hooks/exhaustive-deps, so a disable directive for it is itself a lint error (rule-not-found). Do not re-add one.
   }, [status.shouldToastNow, status.message]);
 
   if (!status.showBadge || !status.message) {

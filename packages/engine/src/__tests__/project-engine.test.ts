@@ -408,6 +408,14 @@ describe("ProjectEngine notification ownership wiring", () => {
     expect(mocks.oauthExpiryMonitorStart).toHaveBeenCalledTimes(1);
     expect(mocks.notifierStart).toHaveBeenCalledTimes(1);
 
+    // FNXC:ClaudeOAuth 2026-07-08-12:10: the proactive refresher must start BEFORE the
+    // refresh-blind expiry monitor's first (awaited) check, or a stale-but-refreshable
+    // access token fires a false "OAuth token expired" ntfy push on startup. Lock the order.
+    expect(mocks.oauthRefreshSchedulerStart).toHaveBeenCalledTimes(1);
+    expect(mocks.oauthRefreshSchedulerStart.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.oauthExpiryMonitorStart.mock.invocationCallOrder[0],
+    );
+
     await engine.stop();
     expect(mocks.oauthExpiryMonitorStop).toHaveBeenCalledTimes(1);
     expect(mocks.notificationServiceStop).toHaveBeenCalledTimes(1);

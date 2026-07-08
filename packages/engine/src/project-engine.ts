@@ -716,22 +716,34 @@ export class ProjectEngine {
       const oauthAlertState = new OAuthAlertStateStore({
         statePath: getFusionOAuthAlertStatePath(),
       });
+      /*
+      FNXC:ClaudeOAuth 2026-07-05-00:00:
+      FN-7574: proactively refresh OAuth access tokens ahead of expiry (widened window,
+      see OAUTH_REFRESH_BUFFER_MS in auth-storage.ts) so a healthy subscription session
+      never lapses waiting for something else to request a runtime API key. Reuses the
+      same authStorage instance as OAuthExpiryMonitor below so detection/notification and
+      proactive refresh observe a consistent, single credential source.
+
+      FNXC:ClaudeOAuth 2026-07-08-12:10:
+      Start the proactive refresher BEFORE OAuthExpiryMonitor. Both are awaited on startup
+      and share this authStorage; the monitor's OAuthExpiryMonitor.start() runs its first
+      check() synchronously, and that check is refresh-blind (it only reads the stored
+      `expires` timestamp, with no refresh token or getApiKey in its interface). If the
+      monitor ran first, a stale-but-refreshable access token (the normal state after the
+      app has been closed a while) fired a false "OAuth token expired" ntfy push even
+      though the connection was fine — the refresher would silently renew the token moments
+      later. Refreshing first means the scheduler's awaited initial tick() renews the token
+      and the monitor (which reload()s authStorage at the top of check()) sees the fresh
+      `expires`, so the alarm only fires when refresh genuinely fails.
+      */
+      this.oauthRefreshScheduler = new OAuthRefreshScheduler({ authStorage });
+      await this.oauthRefreshScheduler.start();
       this.oauthExpiryMonitor = new OAuthExpiryMonitor({
         authStorage,
         notificationService: this.notificationService,
         alertState: oauthAlertState,
       });
       await this.oauthExpiryMonitor.start();
-      /*
-      FNXC:ClaudeOAuth 2026-07-05-00:00:
-      FN-7574: proactively refresh OAuth access tokens ahead of expiry (widened window,
-      see OAUTH_REFRESH_BUFFER_MS in auth-storage.ts) so a healthy subscription session
-      never lapses waiting for something else to request a runtime API key. Reuses the
-      same authStorage instance as OAuthExpiryMonitor above so detection/notification and
-      proactive refresh observe a consistent, single credential source.
-      */
-      this.oauthRefreshScheduler = new OAuthRefreshScheduler({ authStorage });
-      await this.oauthRefreshScheduler.start();
       this.oauthValidityLogger = new OAuthValidityLogger({
         authStorage,
         alertState: oauthAlertState,

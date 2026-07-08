@@ -1620,11 +1620,11 @@
     "funnel": {
       "ariaLabel": "Tasks per workflow stage",
       "completionRate": "Completion rate",
-      "completionRateAria": "Completion rate for in-range triage entrants",
+      "completionRateAria": "Completion rate for in-range planning entrants",
       "completionRateHint": "Done ÷ entered (in range)",
       "doneInRange": "Reached done",
       "empty": "No task transitions in the selected range.",
-      "enteredInRange": "Entered triage",
+      "enteredInRange": "Entered planning",
       "rangeDays_one": "{{count}} day range",
       "rangeDays_other": "{{count}} day range",
       "stage": {
@@ -1633,7 +1633,7 @@
         "inReview": "In review",
         "other": "Other",
         "todo": "Todo",
-        "triage": "Triage"
+        "triage": "Planning"
       },
       "throughputPerDay": "Tasks done / day",
       "throughputTitle": "Throughput",

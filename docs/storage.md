@@ -33,6 +33,13 @@
 - SQLite operational-log pruning is controlled separately by `settings.operationalLogRetentionDays`. It now prunes `activityLog`, `runAuditEvents`, `agentHeartbeats`, terminal `agentRuns` rows by `endedAt`, and `agentConfigRevisions` by `createdAt`.
 - Safety invariants for operational pruning: in-flight `agentRuns` (`endedAt IS NULL`) are never deleted, and the most-recent `agentConfigRevisions` row per agent is always preserved even when older than the retention window.
 
+### Archived-column pagination (FN-7659)
+
+- The Archived board column no longer loads the full archive into memory. `ArchiveDatabase.listPage(limit, offset)` reads a bounded page ordered `archivedAt DESC, rowid DESC` via SQL `LIMIT/OFFSET`, backed by the existing `idxArchivedTasksArchivedAt` index.
+- `TaskStore.listArchivedTasks({ limit, offset, slim })` is a dedicated, archive-only read path (default page size 100) that maps paged entries through `archiveEntryToTask` and returns `{ tasks, total, hasMore }` in `archivedAt DESC` order. It intentionally does **not** run the `createdAt ASC` sort used by the merged `listTasks({ includeArchived: true })` path — that merged path (and its non-board consumers: github-tracking reconciler, signal routes, agent-token-usage, self-healing) is unchanged.
+- `GET /tasks/archived?limit=&offset=` exposes the paged read with `projectId` scoping and `limit`/`offset` validation, returning the same `{ tasks, total, hasMore }` shape.
+- The dashboard's `useTasks` hook loads page 1 on first Archived-column expand and fetches subsequent pages only via an explicit "Show more" click (`loadMoreArchivedTasks`); it never re-fetches the whole archive on SSE reconnect, tab-visibility recovery, or repeated expand calls. Fetched pages merge into the board `tasks` array de-duplicated by id, with active SQLite rows authoritative over archive snapshots.
+
 ### Activity-log no-op `task:moved` cleanup (FN-5940)
 
 - `TaskStore` now defends the invariant that `activityLog` never records a `task:moved` row when `metadata.from === metadata.to`.

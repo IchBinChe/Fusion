@@ -6163,6 +6163,38 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
   }
 
   /**
+   * FNXC:ArchivePagination 2026-07-08-00:00:
+   * Dedicated archived-only read path for the Archived board column. The
+   * merged `listTasks({includeArchived:true})` path re-sorts everything
+   * (active + archived) by `createdAt ASC`, which is correct for the merged
+   * consumers (github-tracking reconciler, signal routes, agent-token-usage,
+   * self-healing) but wrong for the Archived column (must be newest-first)
+   * and unbounded (loads the whole archive). This method reads ONLY from
+   * `archiveDb` via the bounded `listPage()` SQL LIMIT/OFFSET query and
+   * preserves `archivedAt DESC` order — it must NOT be re-sorted by
+   * createdAt. Default page size is 100 to back a chunk-of-100 "Show more"
+   * UI; do not use this method as a substitute for the merged path.
+   */
+  async listArchivedTasks(options?: {
+    limit?: number;
+    offset?: number;
+    slim?: boolean;
+  }): Promise<{ tasks: Task[]; total: number; hasMore: boolean }> {
+    const rawLimit = options?.limit ?? 100;
+    const limit = Math.min(500, Math.max(1, Math.trunc(rawLimit) || 100));
+    const rawOffset = options?.offset ?? 0;
+    const offset = Math.max(0, Math.trunc(rawOffset) || 0);
+    const slim = options?.slim ?? true;
+
+    const total = this.archiveDb.getArchivedRowCount();
+    const entries = this.archiveDb.listPage(limit, offset);
+    const tasks = entries.map((entry) => this.archiveEntryToTask(entry, slim));
+    const hasMore = offset + tasks.length < total;
+
+    return { tasks, total, hasMore };
+  }
+
+  /**
    * Residual B (U13/U9): per-branch progress snapshots for the given tasks,
    * read from the `workflow_run_branches` table. Used to populate the optional
    * additive `branchProgress` field on the board task payload so U9's parallel-

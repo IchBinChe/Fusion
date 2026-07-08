@@ -980,6 +980,38 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     }
   });
 
+  /**
+   * FNXC:ArchivePagination 2026-07-08-00:00:
+   * Dedicated paged read for the Archived board column: newest-first
+   * (`archivedAt DESC`) in chunks of 100 by default via SQL LIMIT/OFFSET,
+   * so a large archive is never loaded into memory in one pass. This is a
+   * sibling to GET /tasks (which stays byte-identical for its existing
+   * merged-listing consumers) rather than a replacement for it.
+   */
+  router.get("/tasks/archived", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const limit = typeof req.query.limit === "string" ? Number.parseInt(req.query.limit, 10) : undefined;
+      const offset = typeof req.query.offset === "string" ? Number.parseInt(req.query.offset, 10) : undefined;
+
+      if (limit !== undefined && (!Number.isFinite(limit) || limit <= 0)) {
+        throw badRequest("limit must be a positive integer");
+      }
+      if (offset !== undefined && (!Number.isFinite(offset) || offset < 0)) {
+        throw badRequest("offset must be a non-negative integer");
+      }
+
+      const { tasks, total, hasMore } = await scopedStore.listArchivedTasks({ limit, offset, slim: true });
+
+      res.json({ tasks, total, hasMore });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
   router.post("/tasks/duplicate-check", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);

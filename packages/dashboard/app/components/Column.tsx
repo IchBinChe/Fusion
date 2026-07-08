@@ -134,6 +134,12 @@ interface ColumnProps {
   onDoneSortModeChange?: (mode: DoneColumnSortMode) => void;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
+  /** FNXC:ArchivePagination 2026-07-08-00:00: FN-7659 — whether another archived page (beyond what's currently loaded) is available. Drives the archived column's server-backed "Show more" button. */
+  archivedHasMore?: boolean;
+  /** True while a "Show more" archived page fetch is in flight. */
+  archivedLoadingMore?: boolean;
+  /** Fetches the next 100-item page of archived tasks (newest-first). */
+  onLoadMoreArchived?: () => Promise<void>;
   allTasks?: Task[];
   availableModels?: ModelInfo[];
   /**
@@ -199,7 +205,7 @@ interface ColumnProps {
   getDraggingTaskId?: () => string | null;
 }
 
-function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktreeGrouping, onMoveTask, onPauseTask, onUnpauseTask, onResetTask, onDuplicateTask, onMergeTask, onOpenDetail, onOpenRefine, onOpenGroupModal, addToast, onQuickCreate, onNewTask, autoMerge, mergeStrategy = "direct", onToggleAutoMerge, planAutoApproveEnabled, onTogglePlanAutoApprove, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onRevertTask, onDeleteTask, onArchiveAllDone, doneSortMode, onDoneSortModeChange, collapsed, onToggleCollapse, allTasks, availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, isSearchActive, taskStuckTimeoutMs, onOpenMission, lastFetchTimeMs, taskCardFieldDefs, taskWorkflowBadges, blockerFanoutMap, prAuthAvailable, workflowMode, workflowId, workflowOptions, defaultWorkflowId, columnDisplayName, columnFlags, workflowContextMenuColumns, taskContextMenuColumnsByTaskId, onPromote, canDropTask, getDraggingTaskId }: ColumnProps) {
+function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktreeGrouping, onMoveTask, onPauseTask, onUnpauseTask, onResetTask, onDuplicateTask, onMergeTask, onOpenDetail, onOpenRefine, onOpenGroupModal, addToast, onQuickCreate, onNewTask, autoMerge, mergeStrategy = "direct", onToggleAutoMerge, planAutoApproveEnabled, onTogglePlanAutoApprove, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onRevertTask, onDeleteTask, onArchiveAllDone, doneSortMode, onDoneSortModeChange, collapsed, onToggleCollapse, archivedHasMore, archivedLoadingMore, onLoadMoreArchived, allTasks, availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, isSearchActive, taskStuckTimeoutMs, onOpenMission, lastFetchTimeMs, taskCardFieldDefs, taskWorkflowBadges, blockerFanoutMap, prAuthAvailable, workflowMode, workflowId, workflowOptions, defaultWorkflowId, columnDisplayName, columnFlags, workflowContextMenuColumns, taskContextMenuColumnsByTaskId, onPromote, canDropTask, getDraggingTaskId }: ColumnProps) {
   const { t } = useTranslation("app");
   // Anchor the board.rejection.* catalog keys for the i18next extractor (it
   // scopes `t` to the useTranslation binding, so the shared translateRejection
@@ -441,6 +447,24 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktree
   const handleLoadMore = useCallback(() => {
     setVisibleTaskCount((current) => Math.min(current + VISIBLE_TASKS_INCREMENT, tasks.length));
   }, [tasks.length]);
+
+  /*
+  FNXC:ArchivePagination 2026-07-08-00:00:
+  FN-7659 — the Archived column's "Show more" is server-backed (fetches the
+  next 100-item page ordered `archivedAt DESC` from the API), distinct from
+  `handleLoadMore` above which only reveals more of an already-fetched
+  client-side array for non-archived columns.
+  */
+  const [isLoadingMoreArchived, setIsLoadingMoreArchived] = useState(false);
+  const handleLoadMoreArchived = useCallback(async () => {
+    if (!onLoadMoreArchived || isLoadingMoreArchived) return;
+    setIsLoadingMoreArchived(true);
+    try {
+      await onLoadMoreArchived();
+    } finally {
+      setIsLoadingMoreArchived(false);
+    }
+  }, [onLoadMoreArchived, isLoadingMoreArchived]);
 
   const handleReplanAll = useCallback(async () => {
     setIsMenuOpen(false);
@@ -923,6 +947,28 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktree
                   onClick={handleLoadMore}
                 >
                   {t("column.loadMore", "Load {{count}} more ({{remaining}} remaining)", { count: Math.min(VISIBLE_TASKS_INCREMENT, hiddenTaskCount), remaining: hiddenTaskCount })}
+                </button>
+              )}
+              {/*
+              FNXC:ArchivePagination 2026-07-08-00:00:
+              FN-7659 — the Archived column's "Show more" only renders when the
+              server reports another page beyond what's currently loaded
+              (archivedHasMore), so an empty archive or an archive smaller than
+              one page never shows the button (no empty shell on desktop or
+              mobile). Distinct from the shouldPaginate/handleLoadMore button
+              above, which reveals more of an already-fetched client array for
+              non-archived columns.
+              */}
+              {isArchived && archivedHasMore && (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleLoadMoreArchived}
+                  disabled={archivedLoadingMore || isLoadingMoreArchived}
+                >
+                  {(archivedLoadingMore || isLoadingMoreArchived)
+                    ? t("column.loadMoreArchivedLoading", "Loading\u2026")
+                    : t("column.loadMoreArchived", "Show more")}
                 </button>
               )}
             </>

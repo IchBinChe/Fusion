@@ -135,6 +135,24 @@ export class ArchiveDatabase {
     return rows.map((row) => JSON.parse(row.taskJson) as ArchivedTaskEntry);
   }
 
+  /**
+   * FNXC:ArchivePagination 2026-07-08-00:00:
+   * The Archived board column must render newest-first (`archivedAt DESC`) and
+   * must never load the whole archive into memory in one pass — large archives
+   * (thousands of rows) made `list()` a heavy one-shot payload + render. This
+   * bounded SQL `LIMIT/OFFSET` read backs a chunk-of-100 "Show more" UI: each
+   * call fetches one page, ordered `archivedAt DESC` with a deterministic
+   * `rowid DESC` tie-break for rows sharing the same archivedAt timestamp.
+   */
+  listPage(limit: number, offset: number): ArchivedTaskEntry[] {
+    const rows = this.db.prepare(`
+      SELECT taskJson FROM archived_tasks
+      ORDER BY archivedAt DESC, rowid DESC
+      LIMIT ? OFFSET ?
+    `).all(limit, offset) as Array<{ taskJson: string }>;
+    return rows.map((row) => JSON.parse(row.taskJson) as ArchivedTaskEntry);
+  }
+
   get(id: string): ArchivedTaskEntry | undefined {
     const row = this.db.prepare("SELECT taskJson FROM archived_tasks WHERE id = ?").get(id) as
       | { taskJson: string }

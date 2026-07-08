@@ -1067,5 +1067,68 @@ describe("searchTasks", () => {
   });
 });
 
+  describe("listArchivedTasks", () => {
+    it("returns [] / total 0 / hasMore false for an empty archive", async () => {
+      const result = await store.listArchivedTasks();
+      expect(result.tasks).toEqual([]);
+      expect(result.total).toBe(0);
+      expect(result.hasMore).toBe(false);
+    });
 
+    it("returns archived tasks newest-first (archivedAt DESC), not createdAt order", async () => {
+      const first = await store.createTask({ description: "archived first (oldest createdAt)" });
+      const second = await store.createTask({ description: "archived second" });
+      const third = await store.createTask({ description: "archived third (newest archivedAt)" });
+
+      // Archive out of createdAt order so archivedAt DESC and createdAt DESC diverge.
+      // cleanup:true (the archiveTask default) is required so entries actually
+      // land in archiveDb; archiveTask(id, false) only flips the tasks-table column.
+      await store.archiveTask(third.id, true);
+      await store.archiveTask(first.id, true);
+      await store.archiveTask(second.id, true);
+
+      const result = await store.listArchivedTasks({ limit: 100, offset: 0 });
+      expect(result.total).toBe(3);
+      expect(result.hasMore).toBe(false);
+      // Most-recently-archived first: second, first, third.
+      expect(result.tasks.map((t) => t.id)).toEqual([second.id, first.id, third.id]);
+    });
+
+    it("paginates with hasMore true mid-archive and false at the boundary", async () => {
+      const ids: string[] = [];
+      for (let i = 0; i < 5; i++) {
+        const task = await store.createTask({ description: `archive-page-${i}` });
+        await store.archiveTask(task.id, true);
+        ids.push(task.id);
+      }
+
+      const page1 = await store.listArchivedTasks({ limit: 2, offset: 0 });
+      expect(page1.tasks).toHaveLength(2);
+      expect(page1.total).toBe(5);
+      expect(page1.hasMore).toBe(true);
+
+      const page2 = await store.listArchivedTasks({ limit: 2, offset: 2 });
+      expect(page2.tasks).toHaveLength(2);
+      expect(page2.hasMore).toBe(true);
+
+      const page3 = await store.listArchivedTasks({ limit: 2, offset: 4 });
+      expect(page3.tasks).toHaveLength(1);
+      expect(page3.hasMore).toBe(false);
+
+      // No dup/gap across pages.
+      const allIds = [...page1.tasks, ...page2.tasks, ...page3.tasks].map((t) => t.id);
+      expect(new Set(allIds).size).toBe(5);
+    });
+
+    it("slim defaults to true (drops log) while slim:false preserves full payload shape", async () => {
+      const task = await store.createTask({ description: "slim-shape-check" });
+      await store.archiveTask(task.id, true);
+
+      const slimResult = await store.listArchivedTasks();
+      expect(slimResult.tasks[0]!.log).toEqual([]);
+
+      const fullResult = await store.listArchivedTasks({ slim: false });
+      expect(fullResult.tasks[0]!.id).toBe(task.id);
+    });
+  });
 });

@@ -66,10 +66,12 @@ function claimToastOnce(taskId: string, eventId: string): boolean {
 
 /**
  * Test-only escape hatch: clears the shared module-level dedupe store between
- * test cases so one test's "already toasted" state cannot leak into the
- * next. Not used by production code paths.
+ * test cases so one test's "already toasted" state cannot leak into the next.
+ * Guarded to a no-op outside the test build (import.meta.env.MODE) so it can
+ * never affect production code paths.
  */
 export function __resetRuntimeFallbackToastDedupeStoreForTests(): void {
+  if (import.meta.env.MODE !== "test") return;
   toastedEventKeys.clear();
 }
 

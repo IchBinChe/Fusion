@@ -27,9 +27,12 @@ function LiveAgentCard({ agent, projectId, onSelect, onOpenTaskLogs }: LiveAgent
   const cardRef = useRef<HTMLDivElement>(null);
   const [isInViewport, setIsInViewport] = useState(false);
 
-  // Gate the RuntimeFallbackBadge's polling to visible cards only, matching
-  // TaskCard.tsx's pattern -- without this, every live agent card (including
-  // ones scrolled off-screen) polls the runtime-fallback endpoint forever.
+  /*
+  FNXC:RuntimeFallback 2026-07-08-00:00:
+  Gate the RuntimeFallbackBadge's polling to visible cards only, matching
+  TaskCard.tsx's pattern -- without this, every live agent card (including
+  ones scrolled off-screen) polls the runtime-fallback endpoint forever.
+  */
   useEffect(() => {
     if (typeof IntersectionObserver === "undefined") {
       setIsInViewport(true);

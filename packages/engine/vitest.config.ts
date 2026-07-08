@@ -60,17 +60,57 @@ export default defineConfig({
           silently narrow the module graph for engine-default/engine-reliability/engine-slow
           too. Project-level resolve.alias merges over (does not replace) the root map
           inherited via extends:true, so @fusion/test-utils/@fusion/plugin-sdk/@fusion/dashboard
-          stay on their root aliases and only @fusion/core is overridden here. @fusion/engine
-          is deliberately left on the full barrel: none of the 18 curated gate files import
-          "@fusion/engine" at all (verified by grep), so narrowing it would be zero-benefit
-          churn/risk (see task docs for the full per-file import-surface map).
+          stay on their root aliases and only @fusion/core is overridden here.
+
+          FNXC:EngineTests 2026-07-08-04:50:
+          FN-7669: the @fusion/core alias now points at a PRE-BUNDLED single ESM
+          file (packages/core/.gate-bundle/core.mjs — a SIBLING of
+          packages/core/node_modules/, deliberately NOT nested inside it; nesting
+          inside node_modules triggers Vite's SSR external-dep heuristic and
+          silently defeats vi.mock interception for imports nested inside the
+          bundle, see scripts/build-engine-core-gate-bundle.mjs for the full repro)
+          instead of directly at index.gate.ts's source. FN-7668 profiled the
+          gate's dominant wall-time cost as vitest/Vite SSR's import-phase — each
+          of the 18 pool:"forks" processes independently re-resolving+evaluating
+          the ~430-file barrel closure with zero cross-fork sharing. esbuild-
+          bundling the index.gate.ts closure (220 first-party files, the
+          @fusion/core slice of that ~430) into one file
+          (scripts/build-engine-core-gate-bundle.mjs, wired below via globalSetup
+          so it is rebuilt fresh before every gate invocation — never a hand-
+          maintained/stale artifact) collapses that to a single file load per
+          fork. See the task's docs document for the full A/B measurement,
+          coverage-parity proof, and land/no-land rationale.
+          @fusion/engine is deliberately left on the full barrel, unbundled: none
+          of the 18 curated gate files import "@fusion/engine" at all (verified by
+          grep across all 18 files), so bundling it would be zero-benefit
+          churn/risk — and it would additionally risk double-registering or
+          dead-locking the core↔engine circular-import DI
+          (`void import("@fusion/core").then(setCreateFnAgent...)` in
+          packages/engine/src/index.ts) for no measured gain.
           */
           alias: {
-            "@fusion/core": resolve(__dirname, "../core/src/index.gate.ts"),
+            "@fusion/core": resolve(__dirname, "../core/.gate-bundle/core.mjs"),
           },
         },
         test: {
           name: "engine-core",
+          /*
+          FNXC:EngineTests 2026-07-08-04:50:
+          FN-7669: prepend the gate-bundle builder to this project's globalSetup so
+          the @fusion/core bundle above is rebuilt before any of the 18 forks spawn
+          and resolve the alias. REBUILD-EVERY-RUN is the invalidation model — the
+          builder's own esbuild dependency graph (not a hand list) determines what
+          gets bundled, and because it reruns on every gate invocation there is no
+          drift surface. The original root-level vitest-teardown.ts worker-root
+          cleanup hook is preserved (both entries run; order does not matter, they
+          are independent) rather than replaced, since `extends:true` does not
+          array-merge test.globalSetup across project/root the way resolve.alias
+          object-merges.
+          */
+          globalSetup: [
+            resolve(__dirname, "../core/src/__test-utils__/vitest-teardown.ts"),
+            resolve(__dirname, "../../scripts/build-engine-core-gate-bundle.mjs"),
+          ],
           /*
           FNXC:EngineTests 2026-06-25-11:11:
           The curated engine-core merge gate hits a Node 24.15.0/macOS libuv kqueue SIGABRT when Vitest thread workers close unmanaged file descriptors. Scope fork workers to this gate so the broad default engine suite keeps its explicit worker-thread behavior.

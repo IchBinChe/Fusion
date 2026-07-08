@@ -215,10 +215,37 @@ existing mobile touch-target min-height block further down this file (the
 normalization pattern for mobile; this rule closes the gap for desktop widths
 so the invariant holds at both breakpoints (FN-5751 lesson: no mobile-only or
 desktop-only fix).
+
+FNXC:QuickAddActionRow 2026-07-08-10:15:
+FN-7683 — a bare `min-height` floor is not sufficient: it only guarantees a
+button is AT LEAST that tall, it never clamps a variant whose natural content
+box (line-height + padding + inline icon) already resolves TALLER than the
+floor. Save (`btn btn-task-create btn-sm`) renders text plus an inline
+`<Save size={12}>` icon as two separate inline boxes inside the button; that
+combination, together with the inherited (non-tokenized) body line-height at
+12px font-size, can resolve a content/line box taller than the
+`calc(--space-xl + --space-xs)` (28px) floor, so `min-height` alone left Save
+measurably taller than shorter siblings (Attach's `.btn-icon`, whose
+`line-height: 0` collapses it to its bare icon). A floor cannot shrink an
+over-tall variant back down — only a FIXED box height can. Upgrade the
+contract: pair `min-height` with an equal `max-height` (a true fixed box, not
+just a floor) and set an explicit tokenized `line-height` plus
+`align-items: center` so every control's content — text-only, icon-only, or
+text+icon — is vertically centered and clipped to the same resolved height
+regardless of its natural content box. This keeps `box-sizing: border-box`
+working as before (padding/border still absorbed into the declared height)
+while guaranteeing IDENTICAL resolved height across Save, workflow trigger,
+Attach, GitHub toggle, Fast, Priority, Deps, Subtask, and the optional-steps
+trigger — not merely all-at-least-28px. Applies at both this desktop rule and
+the mobile touch-target block below (FN-5751: never a breakpoint-only fix).
 */
 .quick-entry-actions .btn,
 .quick-entry-actions .wf-optional-steps-dropdown-trigger {
   min-height: calc(var(--space-xl) + var(--space-xs));
+  max-height: calc(var(--space-xl) + var(--space-xs));
+  line-height: var(--line-height-tight);
+  align-items: center;
+  overflow: hidden;
 }
 
 /*
@@ -633,7 +660,33 @@ FN-7682 — the tokenized-CSS test forbids raw px in the workflow-selector rules
   .quick-entry-actions .btn,
   .quick-entry-actions .wf-optional-steps-dropdown-trigger {
     /* FNXC:WorkflowOptionalSteps 2026-06-25-00:00: The optional-steps trigger is not a `.btn`, so opt it into the same mobile quick-entry touch-target contract as the surrounding action buttons without adding a wrapper that could leave an empty shell for zero-step workflows. */
+    /* FNXC:QuickAddActionRow 2026-07-08-10:15: FN-7683 — mirror the desktop upgrade: a bare min-height floor cannot equalize a variant (e.g. Save's text+icon content) that naturally resolves taller than the touch-target height. Pair min-height with an equal max-height plus centered, tokenized line-height so every control lands on the SAME resolved touch-target height at this breakpoint, not merely >= it. */
     min-height: calc(var(--space-2xl) + var(--space-xs));
+    max-height: calc(var(--space-2xl) + var(--space-xs));
+    line-height: var(--line-height-tight);
+    align-items: center;
+    overflow: hidden;
+  }
+
+  /*
+  FNXC:QuickAddActionRow 2026-07-08-11:30:
+  FN-7683 follow-up (operator feedback) — desktop/tablet parity from the fix
+  above stays untouched, and so does the shared mobile touch-target contract
+  applied to every sibling control. On real mobile browsers, Save (`btn
+  btn-task-create btn-sm`) still renders visibly taller than its shorter
+  siblings (Fast, the workflow trigger) at this breakpoint: its inline
+  `<Save size={12}>` icon plus text naturally claims more vertical space than
+  the fixed box, so the excess was only being silently clipped by the shared
+  rule's `overflow: hidden` rather than the button shrinking cleanly. Scope a
+  Save-only correction (via its existing `quick-entry-save` test id, not a new
+  wrapper) that removes the extra vertical padding and tightens line-height so
+  Save's natural content fits the SAME fixed box as its siblings without
+  relying on clipping — mobile-only; desktop/tablet Save sizing is unaffected.
+  */
+  .quick-entry-actions [data-testid="quick-entry-save"] {
+    padding-top: 0;
+    padding-bottom: 0;
+    line-height: 1;
   }
 
   .quick-entry-box .dep-dropdown {

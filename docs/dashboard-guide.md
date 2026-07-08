@@ -659,6 +659,23 @@ Features:
 
 ![Interactive terminal](./screenshots/terminal.png)
 
+### Slow first prompt / shell profile hygiene
+
+Fusion's embedded terminal spawns your shell as a **login shell** (`bash --login` / `zsh --login`) so `.bash_profile`/`.zprofile` (and, for interactive zsh, `.zlogin`) are sourced exactly as they would be in a real terminal. This is deliberate: dropping the login flag would silently break PATH entries, secrets, and tool init that many profiles rely on, so Fusion always tries `--login` first (falling back only if that specific spawn attempt fails, never as a latency optimization).
+
+If the terminal view appears almost instantly but stays blank for several seconds before the first prompt/output shows up, this is very rarely `--login` itself — measurements show the flag typically costs only single-digit milliseconds on a lean profile. The far more common cause is your own `.zprofile`/`.bash_profile` (or `.zshrc`/`.bashrc`, which a login shell also sources) eagerly running something slow, most often a version manager init script (`nvm.sh`, `rbenv init`, `pyenv init`, `direnv hook`, etc.). Because a **login** shell sources `.zprofile`/`.zlogin` in addition to `.zshrc` (a non-login shell skips them), anything slow specifically in `.zprofile`/`.bash_profile`/`.zlogin` is fully additive latency that only a login shell pays.
+
+To trim a slow first prompt:
+
+1. Move slow, one-time setup (build tool version managers, background daemons, etc.) out of `.zprofile`/`.bash_profile` and into `.zshrc`/`.bashrc`, or gate it behind an interactive-only check if it should not run for every login shell.
+2. Prefer lazy-loading over eager-sourcing for version managers — most (nvm, pyenv, rbenv) document a lazy-init pattern that defers the expensive part until the tool is first invoked.
+3. Time your own profile to confirm the source of the delay: `time zsh -i -c exit` (interactive, non-login) vs. `time zsh -li -c exit` (interactive, login) isolates whether `.zprofile`/`.zlogin` specifically is the slow part.
+4. If Fusion's server log shows a one-time `login shell took <N>ms to produce first output` hint for a session, it is pointing at this same profile-hygiene question — it is informational only and never blocks or retries the session.
+
+See `docs/solutions/developer-experience/login-shell-profile-latency.md` for the underlying measurement and the decision to keep `--login` unconditionally.
+
+## Git Manager
+
 ## Git Manager
 
 Git Manager centralizes repo operations in the dashboard. On desktop/tablet it is available as an embedded right-dock panel and can expand into a resizable modal; on mobile it opens from the compact More surfaces.

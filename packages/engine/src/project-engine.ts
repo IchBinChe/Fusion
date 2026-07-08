@@ -1415,8 +1415,17 @@ export class ProjectEngine {
       // so a human sees it; it never performs the side effect itself. The
       // dashboard confirmation UI/badge that lets a human act on this is
       // owned by FN-7515+/FN-7517.
+      // FNXC:PlannerOversight 2026-07-08-00:00:
+      // FN-7692 fix: this prefix previously read "confirmation required"
+      // unconditionally, which contradicted `request.reason` once FN-7692
+      // made that reason accurately advisory under an active auto-merge
+      // policy. "checkpoint" is neutral and consistent whether the trailing
+      // `reason` describes an advisory (auto-merge will proceed) or a
+      // genuine block (human approval required) — messaging-only, no change
+      // to the `addSteeringComment` channel/timing or `emitOverseerConfirmation`
+      // below.
       requestConfirmation: async (task, request) => {
-        const text = `[planner-oversight] confirmation required (${request.sideEffectClass}): ${request.reason}`;
+        const text = `[planner-oversight] merge checkpoint (${request.sideEffectClass}): ${request.reason}`;
         await store.addSteeringComment(task.id, text, "agent");
         this.emitOverseerInterventionSafe(() =>
           emitOverseerConfirmation({

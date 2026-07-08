@@ -1510,8 +1510,14 @@ other rule (level gate, attempt bound, exhaustion) is unchanged.
   transitions.
 
 `ProjectEngine` wires the concrete handlers in `buildPlannerRecoveryHandlers`: `requestConfirmation`
-posts a `[planner-oversight] confirmation required (...)` steering comment (reusing the same
-`addSteeringComment` channel as bounded recovery, so a human sees it). `executeMergePrAction` branches
+posts a `[planner-oversight] merge checkpoint (...)` steering comment (reusing the same
+`addSteeringComment` channel as bounded recovery, so a human sees it). FN-7692: the wrapper prefix is
+deliberately neutral ("checkpoint", not "confirmation required") because the trailing `reason` string
+accurately states whether the merge/PR will advance automatically under the active auto-merge policy
+(advisory) or genuinely awaits a human approval (blocking) — `decidePlannerRecovery`'s additive
+`autoMergeWillProceed` input, threaded from the existing `allowsAutoMergeProcessing` predicate, selects
+the accurate wording; this is messaging-only and does not change `action`/`requiresConfirmation`/
+`sideEffectClass`. `executeMergePrAction` branches
 on `request.proposedAction` (falling back to `request.watchedStage` defensively) rather than treating
 every approved `"merge_pr"` request identically: ONLY `"advance_merge"` (the `merger` stage) reuses the
 EXISTING `store.mergeTask(taskId)` merge mechanism; `"advance_pull_request"` (the `pull-request` stage)

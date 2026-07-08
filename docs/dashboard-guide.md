@@ -277,6 +277,8 @@ Use Import Tasks on desktop/tablet:
 5. Select the import action.
    Expected outcome: Fusion creates a task (or review task for a pull request) on the board and preserves GitHub provenance/tracking metadata. After a successful issue import, the issue selection clears and the view returns to the main issue list/no-selection preview so completed issue actions do not leave stale buttons active.
 
+Leaving and returning to **Import Tasks** (for example switching to Board and back) restores the prior context for the current project — provider (GitHub/GitLab), active Issues/PRs tab, label filter, selected repository/remote, GitLab project/group inputs, and the previously selected issue/PR — instead of resetting to defaults. The restored selection re-validates against the freshly reloaded list; a selection that no longer exists (e.g. the issue was closed upstream) clears gracefully rather than showing a stuck or empty preview. First-time opens with no prior state keep the existing default-remote auto-detect behavior. State is scoped per project and does not leak across projects.
+
 Use GitHub import on mobile:
 
 1. Open the compact Header actions or bottom **More** sheet and select **Import from GitHub**.

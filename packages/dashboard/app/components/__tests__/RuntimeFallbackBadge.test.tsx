@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { RuntimeFallbackBadge } from "../RuntimeFallbackBadge";
 import { ToastProvider, useToast } from "../../hooks/useToast";
+import { __resetRuntimeFallbackToastDedupeStoreForTests } from "../../hooks/useRuntimeFallbackStatus";
 import type { TaskRuntimeFallbackResponse } from "../../api/legacy";
 
 const legacyMocks = vi.hoisted(() => ({
@@ -88,6 +89,10 @@ describe("RuntimeFallbackBadge", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     legacyMocks.fetchTaskRuntimeFallback.mockReset();
+    // The toast dedupe store is module-level/shared by design (that is the
+    // fix under test) — reset it between test cases so one test's "already
+    // toasted" state does not leak into the next.
+    __resetRuntimeFallbackToastDedupeStoreForTests();
   });
 
   afterEach(() => {
@@ -238,12 +243,46 @@ describe("RuntimeFallbackBadge", () => {
     expect(legacyMocks.fetchTaskRuntimeFallback).toHaveBeenCalled();
     expect(screen.getByTestId("runtime-fallback-badge")).toBeInTheDocument();
   });
+
+  it("fires exactly one toast when the same task/event is observed by two simultaneously-mounted badge instances (e.g. ActiveAgentsPanel + AgentsView rendering the same task concurrently)", async () => {
+    legacyMocks.fetchTaskRuntimeFallback.mockResolvedValue(fallbackWithHint);
+
+    render(
+      <ToastProvider>
+        <RuntimeFallbackBadge taskId="FN-100" isInViewport={true} projectId="proj-1" />
+        <RuntimeFallbackBadge taskId="FN-100" isInViewport={true} projectId="proj-1" />
+        <ToastPeek />
+      </ToastProvider>,
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    // Both instances polled and both observed the same new eventId on their
+    // first poll, but the shared module-level dedupe store means only one of
+    // them should have won the "claim" and fired a toast.
+    expect(screen.getAllByTestId("toast-entry")).toHaveLength(1);
+    expect(screen.getAllByTestId("toast-entry")[0].textContent).toContain("hermes");
+
+    // Both badges still render independently (dedupe only affects the toast,
+    // not the per-instance badge display).
+    expect(screen.getAllByTestId("runtime-fallback-badge")).toHaveLength(2);
+
+    // Further polls with the same event on both instances must not add a
+    // second toast either.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(screen.getAllByTestId("toast-entry")).toHaveLength(1);
+  });
 });
 
 describe("RuntimeFallbackBadge — mobile breakpoint", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     legacyMocks.fetchTaskRuntimeFallback.mockReset();
+    __resetRuntimeFallbackToastDedupeStoreForTests();
   });
 
   afterEach(() => {

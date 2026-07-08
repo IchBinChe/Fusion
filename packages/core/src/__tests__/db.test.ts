@@ -3605,6 +3605,11 @@ describe("Database operational-log retention and recovery-table cleanup", () => 
     ).run(id, agentId, createdAt);
   }
 
+  function insertUsageEvent(ts: string): void {
+    // usage_events.id is INTEGER PRIMARY KEY AUTOINCREMENT — let it auto-assign.
+    db.prepare("INSERT INTO usage_events (ts, kind) VALUES (?, 'tool_call')").run(ts);
+  }
+
   it("pruneOperationalLogs deletes rows older than the retention window", () => {
     const old = new Date(Date.now() - 200 * 86_400_000).toISOString();
     const recent = new Date(Date.now() - 1 * 86_400_000).toISOString();
@@ -3675,8 +3680,27 @@ describe("Database operational-log retention and recovery-table cleanup", () => 
     expect(remaining.map((row) => row.id)).toEqual(["agent-1-recent", "agent-2-old-2"]);
   });
 
+  it("pruneOperationalLogs deletes old usage_events by their `ts` column but keeps recent ones", () => {
+    // FNXC:TelemetryRetention 2026-07-08-00:00:
+    // Regression guard for the unbounded-growth fix: usage_events must age out on
+    // the same retention cadence as the other operational logs, keyed off its `ts`
+    // column (not `timestamp`), which is why it needs its own delete path.
+    const old = new Date(Date.now() - 200 * 86_400_000).toISOString();
+    const recent = new Date(Date.now() - 1 * 86_400_000).toISOString();
+    insertUsageEvent(old);
+    insertUsageEvent(old);
+    insertUsageEvent(recent);
+
+    const result = db.pruneOperationalLogs(90 * 86_400_000);
+    expect(result.deletedByTable.usage_events).toBe(2);
+
+    const remaining = db.prepare("SELECT ts FROM usage_events").all() as Array<{ ts: string }>;
+    expect(remaining).toEqual([{ ts: recent }]);
+  });
+
   it("pruneOperationalLogs is a no-op when retention is disabled (<= 0)", () => {
     insertActivity("old-1", new Date(Date.now() - 200 * 86_400_000).toISOString());
+    insertUsageEvent(new Date(Date.now() - 200 * 86_400_000).toISOString());
     insertAgent("agent-1");
     insertAgentRun({
       id: "run-old-completed",
@@ -3694,6 +3718,7 @@ describe("Database operational-log retention and recovery-table cleanup", () => 
     const result = db.pruneOperationalLogs(0);
     expect(result.deletedTotal).toBe(0);
     expect(db.prepare("SELECT count(*) AS c FROM activityLog").get()).toMatchObject({ c: 1 });
+    expect(db.prepare("SELECT count(*) AS c FROM usage_events").get()).toMatchObject({ c: 1 });
     expect(db.prepare("SELECT count(*) AS c FROM agentRuns").get()).toMatchObject({ c: 1 });
     expect(db.prepare("SELECT count(*) AS c FROM agentConfigRevisions").get()).toMatchObject({ c: 1 });
   });

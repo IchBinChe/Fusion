@@ -2581,6 +2581,22 @@ export class Database {
       }
     }
 
+    /*
+     * FNXC:TelemetryRetention 2026-07-08-00:00:
+     * usage_events is an append-only per-tool telemetry log. Unlike the OPERATIONAL_LOG_TABLES set it originally had NO retention, so it grew unbounded and became the dominant driver of .fusion DB bloat once runAuditEvents was already 30-day capped (observed ~187k rows / ~28MB with no aged-out rows because nothing ever deleted them).
+     * Prune it on the same operationalLogRetentionDays cadence as the other operational logs. Its timestamp column is `ts` (not `timestamp`), so it cannot join the generic OPERATIONAL_LOG_TABLES loop above and gets its own delete here alongside the other column-name exceptions (agentRuns.endedAt, agentConfigRevisions.createdAt).
+     */
+    if (this.tableExists("usage_events")) {
+      try {
+        recordChanges(
+          "usage_events",
+          this.db.prepare("DELETE FROM usage_events WHERE ts < ?").run(cutoffIso),
+        );
+      } catch (error) {
+        console.warn("[fusion:db] Failed to prune operational log table usage_events", error);
+      }
+    }
+
     return { deletedByTable, deletedTotal };
   }
 

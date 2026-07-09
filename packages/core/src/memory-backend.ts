@@ -988,9 +988,19 @@ async function searchWithQmd(rootDir: string, options: MemorySearchOptions): Pro
   const command = "qmd";
   const limit = Math.max(1, Math.min(options.limit ?? 5, 20));
   try {
-    const { execFile } = await import("node:child_process");
-    const { promisify } = await import("node:util");
-    const execFileAsync = promisify(execFile);
+    // FNXC:ProjectMemory 2026-07-08-00:00:
+    // searchWithQmd used to carry its own inline `promisify(execFile)` copy — a
+    // second, un-unref'd executor separate from the hardened default below — to
+    // spawn `qmd collection add` and `qmd search`. Even though the search is
+    // awaited (unlike the fire-and-forget background refresh fixed by FN-7706), a
+    // short-lived caller (e.g. a one-shot CLI memory search) could be held open
+    // for up to the 4s awaited timeout: per the documented nextTick re-ref pitfall
+    // (see getDefaultExecFileAsync's doc comment / .fusion/memory/MEMORY.md),
+    // `promisify(execFile)`'s internal stdout/stderr buffering re-refs the pipe
+    // handles on a later tick, so even a manual `.unref()` wouldn't have stuck.
+    // Reuse the same hardened, spawn-based, synchronously-unref'd executor FN-7706
+    // established for the refresh path instead of carrying a second leaky copy.
+    const execFileAsync = await getDefaultExecFileAsync();
     await ensureQmdProjectMemoryCollection(rootDir, execFileAsync);
     scheduleQmdProjectMemoryRefresh(rootDir);
     const args = buildQmdSearchArgs(rootDir, options);

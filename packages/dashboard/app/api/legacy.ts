@@ -6254,7 +6254,7 @@ export interface AgentPromptSizePoint {
   totalChars: number;
 }
 
-function withProjectId(path: string, projectId?: string): string {
+export function withProjectId(path: string, projectId?: string): string {
   if (!projectId) return path;
   const separator = path.includes("?") ? "&" : "?";
   return `${path}${separator}projectId=${encodeURIComponent(projectId)}`;

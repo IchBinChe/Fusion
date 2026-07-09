@@ -398,6 +398,14 @@ export class ProjectEngine {
   private oauthExpiryMonitor?: OAuthExpiryMonitor;
   private oauthRefreshScheduler?: OAuthRefreshScheduler;
   private oauthValidityLogger?: OAuthValidityLogger;
+  /*
+  FNXC:ProviderAuth 2026-07-09-00:00:
+  FN-7747: hold the OAuth subsystem's raw createFusionAuthStorage() instance so createServer
+  can derive a persistence fallback (see getAuthStorage() below) instead of silently regressing
+  the "desktop provider API keys don't persist" bug (#1948) if a host wires this engine but
+  forgets to pass its own authStorage.
+  */
+  private authStorage?: ReturnType<typeof createFusionAuthStorage>;
   private gridlockDetector?: GridlockDetector;
   private cronRunner?: CronRunner;
   private automationStore?: AutomationStoreType;
@@ -713,6 +721,7 @@ export class ProjectEngine {
       });
       await this.notificationService.start();
       const authStorage = createFusionAuthStorage();
+      this.authStorage = authStorage;
       const oauthAlertState = new OAuthAlertStateStore({
         statePath: getFusionOAuthAlertStatePath(),
       });
@@ -1528,6 +1537,22 @@ export class ProjectEngine {
   /** Get the AutomationStore (if initialized). */
   getAutomationStore(): AutomationStoreType | undefined {
     return this.automationStore;
+  }
+
+  /**
+   * Get the engine's raw createFusionAuthStorage() instance (if the OAuth subsystem has
+   * started; undefined when skipNotifier suppressed it).
+   *
+   * FNXC:ProviderAuth 2026-07-09-00:00:
+   * FN-7747 / #1948: createServer() derives a fallback `authStorage` from this getter when a
+   * host wires an engine but forgets to pass its own `authStorage`, so credential persistence
+   * degrades gracefully instead of throwing "Authentication is not configured". This is the
+   * RAW storage (no API-key/custom-provider wrapping) — hosts needing the full wrapped
+   * provider catalog (e.g. desktop's seedDashboardProviders() output) must still pass their
+   * own wrapped authStorage explicitly, exactly as packages/desktop already does.
+   */
+  getAuthStorage(): ReturnType<typeof createFusionAuthStorage> | undefined {
+    return this.authStorage;
   }
 
   /**

@@ -252,7 +252,20 @@ export interface ServerOptions {
   maxConcurrent?: number;
   /** Optional GitHub token for PR operations — falls back to GITHUB_TOKEN env var */
   githubToken?: string;
-  /** Optional AuthStorage instance for auth routes — if not provided, one is created internally */
+  /**
+   * Optional AuthStorage instance for auth routes. If not provided explicitly and an `engine`
+   * is provided, one is derived from `engine.getAuthStorage()` (see the engine-derivation
+   * block below); explicit `authStorage` always overrides the engine-derived value.
+   *
+   * FNXC:ProviderAuth 2026-07-09-00:00:
+   * FN-7747 / #1948: the engine-derived instance is the RAW createFusionAuthStorage() (no
+   * API-key/custom-provider wrapping), so it restores credential *persistence* but not the
+   * full provider catalog — hosts needing the full catalog (e.g. the desktop app's
+   * seedDashboardProviders() output) must still pass their own wrapped `authStorage` here,
+   * exactly as packages/desktop already does. This fallback exists so that a host which
+   * wires an `engine` but forgets `authStorage` does not silently regress into
+   * register-auth-routes.ts's "Authentication is not configured" throw.
+   */
   authStorage?: AuthStorageLike;
   /** Optional ModelRegistry instance for the models API — if not provided, the endpoint returns an empty list */
   modelRegistry?: ModelRegistryLike;
@@ -777,6 +790,19 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
     }
     if (!options!.automationStore) {
       options = { ...options, automationStore: engine.getAutomationStore() };
+    }
+    /*
+    FNXC:ProviderAuth 2026-07-09-00:00:
+    FN-7747 / #1948: derive a fallback authStorage from the engine (mirroring the other
+    subsystem derivations here) so a host that wires an `engine` but forgets to pass its own
+    `authStorage` still gets a working, persisting credential store instead of
+    register-auth-routes.ts's "Authentication is not configured" throw. Explicit
+    options.authStorage always overrides. Optional chaining tolerates engine test doubles
+    without getAuthStorage().
+    */
+    if (!options!.authStorage) {
+      const as = engine.getAuthStorage?.();
+      if (as) options = { ...options, authStorage: as };
     }
     if (!options!.missionAutopilot) {
       const ma = engine.getRuntime().getMissionAutopilot();

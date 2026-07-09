@@ -769,6 +769,21 @@ Results now live on `task.workflowStepResults` (written by the graph executor, k
 
 Gate results are recorded on the task's **`workflowStepResults`** field (`WorkflowStepResult[]`), written by the graph executor and keyed by the optional-group node id. Each entry carries `status`, optional `verdict`, `notes`, `output`, and `phase`. The unified progress bar and the Workflow tab read this field directly.
 
+<!--
+FNXC:WorkflowStepResults 2026-07-09-01:10:
+FN-7727: a self-healing recovery re-run of a failed pre-merge review node
+(code-review, plan-review, browser-verification) re-executes the SAME
+`workflowStepId` in place. Every recorder now upserts through the shared
+`upsertWorkflowStepResult` core helper (`packages/core/src/workflow-step-results.ts`),
+which snapshots a replaced `failed`/`advisory_failure` entry into the new
+entry's `priorAttempts` (bounded, single-level, oldest-dropped) instead of
+silently overwriting it. `priorAttempts` is READ-ONLY history: self-healing
+recovery selection, `getTaskMergeBlocker`, and progress/timing all read only
+the current (latest) entry and never inspect `priorAttempts`.
+-->
+
+A step re-executed after a prior failed attempt (most commonly via self-healing's `recoverReviewTasksWithFailedPreMergeSteps` recovery sweep) preserves that prior attempt's `output`/`notes`/`verdict`/timestamps in a bounded `priorAttempts` array on the surviving entry, rather than losing them. This history is read-only — it never affects merge-blocking, recovery selection, or progress computation — and is surfaced in the task-detail Summary tab as a collapsed "previous failed attempts" disclosure when present.
+
 The persisted `status` values are `pending`, `passed`, `failed`, `advisory_failure`, and `skipped`. The verdict→status mapping is: `APPROVE` / `APPROVE_WITH_NOTES` → `passed`; an advisory `REVISE` (success outcome) → `advisory_failure` (non-blocking); a gate `REVISE` or hard failure → `failed`. The UI derives an additional **`running`** display state from a `pending` entry that has a `startedAt` and no `completedAt`. Advisory failures (`advisory_failure`) are shown as polish feedback and never block merge; only `failed` blocks.
 
 Workflow status is visible in multiple places:

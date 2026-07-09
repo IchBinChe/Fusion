@@ -36,6 +36,7 @@ import {
   applyFrontendUxCriteria,
   extractEffectiveWriteScopeFromPrompt,
   MAX_TASK_LIST_TEXT_CHARS,
+  upsertWorkflowStepResult,
   type NearDuplicateCandidate,
 } from "@fusion/core";
 
@@ -1979,12 +1980,13 @@ export class TriageProcessor {
       planLog.warn(`${task.id}: failed to load existing Plan Review workflow results; preserving in-memory result baseline: ${message}`);
       return task;
     });
-    const existing = Array.isArray(live?.workflowStepResults)
-      ? [...live.workflowStepResults]
-      : [];
-    const idx = existing.findIndex((entry) => entry.workflowStepId === PLAN_REVIEW_GROUP_ID);
-    if (idx >= 0) existing[idx] = result;
-    else existing.push(result);
+    /*
+    FNXC:WorkflowStepResults 2026-07-09-00:35:
+    FN-7727: route through the shared upsert helper (same as the executor
+    graph adapter) so a re-run of Plan Review after a failed attempt preserves
+    that prior attempt's history in `priorAttempts` instead of overwriting it.
+    */
+    const existing = upsertWorkflowStepResult(live?.workflowStepResults, result);
     await this.store.updateTask(task.id, { workflowStepResults: existing });
   }
 

@@ -2127,3 +2127,7 @@ export {
   hasSyncPassphraseConfigured,
 } from "./secrets-sync-passphrase.js";
 export { suggestTaskPrefix } from "./task-prefix.js";
+export {
+  upsertWorkflowStepResult,
+  MAX_WORKFLOW_STEP_PRIOR_ATTEMPTS,
+} from "./workflow-step-results.js";

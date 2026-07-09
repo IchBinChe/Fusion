@@ -907,6 +907,25 @@ export interface WorkflowStepResult {
   bypassedFromStatus?: WorkflowStepResult["status"];
   /** The `verdict` (if any) this result carried immediately before the bypass, preserved for audit only — never promoted to `verdict`. */
   bypassedFromVerdict?: WorkflowStepResult["verdict"];
+  /*
+   * FNXC:WorkflowStepResults 2026-07-09-00:10:
+   * FN-7727: self-healing recovery re-runs a failed pre-merge review node
+   * (`code-review`, `code-review-remediation`, `plan-review`,
+   * `browser-verification`) in place, and the recorder upsert previously
+   * REPLACED the prior `status:"failed"` entry — erasing its captured
+   * `output`/`notes`/`verdict`/timestamps forever (the diagnostic trail
+   * FN-7642 worked to capture, and the history FN-7720's bypass affordance
+   * needs to show). `priorAttempts` preserves a BOUNDED, single-level history
+   * of prior terminal-failure (`failed`/`advisory_failure`) attempts on the
+   * surviving entry — snapshots never carry their own nested `priorAttempts`,
+   * so history cannot grow unbounded. This field is READ-ONLY history: it
+   * never participates in merge-blocking (`getTaskMergeBlocker`), self-healing
+   * recovery selection (`latestFailedPreMergeStep`), or progress/timing
+   * computation — only the current (this) entry's fields do. Written by the
+   * shared `upsertWorkflowStepResult` helper (`workflow-step-results.ts`).
+   */
+  /** Bounded, single-level history of prior terminal-failure attempts this entry replaced. Read-only; never affects merge-blocking or recovery selection. */
+  priorAttempts?: WorkflowStepResult[];
 }
 
 /**

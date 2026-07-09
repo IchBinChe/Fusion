@@ -86,6 +86,7 @@ import { ModelFallbackExhaustedError, describeModel, formatModelMarkerDetails, p
 import {
   createResolvedAgentSession,
   extractRuntimeHint,
+  resolveImplicitPlanningFallbackModel,
   resolvePlanningSessionModel,
 } from "./agent-session-helpers.js";
 import { mergeEffectiveSettings } from "./effective-settings.js";
@@ -1117,6 +1118,28 @@ export class TriageProcessor {
           defaultModelId: planningModel.modelId,
         };
 
+        /*
+         * FNXC:TriageModelFallback 2026-07-09-00:00:
+         * When neither `planningFallback*` nor global `fallback*` is configured,
+         * derive an implicit fallback from the project/global default (execution)
+         * model so a retryable primary-planner failure (e.g. provider 404/429)
+         * recovers via one distinct swap instead of failing triage permanently
+         * (FN-7719: nvidia/moonshotai/kimi-k2.6 404 wrapped in a 429 stalled a
+         * whole board's triage with "no fallback configured"). Self-swap (implicit
+         * fallback === primary) and test mode are excluded so the single-swap,
+         * no-loop invariant and the mock lane stay unchanged.
+         */
+        const hasExplicitPlanningFallback = Boolean(settings.planningFallbackProvider && settings.planningFallbackModelId);
+        const hasExplicitGlobalFallback = Boolean(settings.fallbackProvider && settings.fallbackModelId);
+        const implicitPlanningFallback = (!hasExplicitPlanningFallback && !hasExplicitGlobalFallback)
+          ? resolveImplicitPlanningFallbackModel(
+            settings,
+            planningModel.provider,
+            planningModel.modelId,
+            assignedAgent?.runtimeConfig,
+          )
+          : { provider: undefined, modelId: undefined };
+
         const { session } = await createResolvedAgentSession({
           sessionPurpose: "triage",
           runtimeHint: triageRuntimeHint,
@@ -1131,12 +1154,12 @@ export class TriageProcessor {
           onToolStart: agentLogger.onToolStart,
           onToolEnd: agentLogger.onToolEnd,
           ...planningSessionModelOptions,
-          fallbackProvider: settings.planningFallbackProvider && settings.planningFallbackModelId
+          fallbackProvider: hasExplicitPlanningFallback
             ? settings.planningFallbackProvider
-            : settings.fallbackProvider,
-          fallbackModelId: settings.planningFallbackProvider && settings.planningFallbackModelId
+            : (hasExplicitGlobalFallback ? settings.fallbackProvider : implicitPlanningFallback.provider),
+          fallbackModelId: hasExplicitPlanningFallback
             ? settings.planningFallbackModelId
-            : settings.fallbackModelId,
+            : (hasExplicitGlobalFallback ? settings.fallbackModelId : implicitPlanningFallback.modelId),
           defaultThinkingLevel: settings.defaultThinkingLevel,
           runAuditor,
           settings,

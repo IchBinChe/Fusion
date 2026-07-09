@@ -4,6 +4,7 @@ import {
   extractRuntimeModel,
   resolveExecutorSessionModel,
   resolveHeartbeatSessionModels,
+  resolveImplicitPlanningFallbackModel,
   resolveMergerSessionModel,
   resolvePlanningSessionModel,
   resolveValidatorSessionModel,
@@ -626,6 +627,80 @@ describe("resolveMergerSessionModel", () => {
     ).toEqual({
       provider: "openai",
       modelId: "gpt-4.1",
+    });
+  });
+});
+
+describe("resolveImplicitPlanningFallbackModel (FN-7719)", () => {
+  it("derives a distinct implicit fallback from the project/global default model", () => {
+    expect(
+      resolveImplicitPlanningFallbackModel(
+        {
+          defaultProvider: "openai",
+          defaultModelId: "gpt-4o",
+        },
+        "9router",
+        "nvidia/moonshotai/kimi-k2.6",
+      ),
+    ).toEqual({
+      provider: "openai",
+      modelId: "gpt-4o",
+    });
+  });
+
+  it("returns undefined/undefined when the implicit fallback would equal the primary (self-swap guard)", () => {
+    expect(
+      resolveImplicitPlanningFallbackModel(
+        {
+          defaultProvider: "openai",
+          defaultModelId: "gpt-4o",
+        },
+        "openai",
+        "gpt-4o",
+      ),
+    ).toEqual({
+      provider: undefined,
+      modelId: undefined,
+    });
+  });
+
+  it("returns undefined/undefined when no project/global default model is configured", () => {
+    expect(
+      resolveImplicitPlanningFallbackModel({}, "9router", "nvidia/moonshotai/kimi-k2.6"),
+    ).toEqual({
+      provider: undefined,
+      modelId: undefined,
+    });
+  });
+
+  it("does not inject an implicit fallback in test mode", () => {
+    expect(
+      resolveImplicitPlanningFallbackModel(
+        {
+          testMode: true,
+          defaultProvider: "openai",
+          defaultModelId: "gpt-4o",
+        },
+        "9router",
+        "nvidia/moonshotai/kimi-k2.6",
+      ),
+    ).toEqual({
+      provider: undefined,
+      modelId: undefined,
+    });
+  });
+
+  it("prefers the assigned agent runtime model when no default model pair is configured", () => {
+    expect(
+      resolveImplicitPlanningFallbackModel(
+        {},
+        "9router",
+        "nvidia/moonshotai/kimi-k2.6",
+        { model: "anthropic/claude-3-5-sonnet-20241022" },
+      ),
+    ).toEqual({
+      provider: "anthropic",
+      modelId: "claude-3-5-sonnet-20241022",
     });
   });
 });

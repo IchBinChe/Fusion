@@ -212,6 +212,47 @@ export function resolvePlanningSessionModel(
   return pickSettingsThenRuntimeModel(resolvedTaskPlanningModel, assignedAgentRuntimeConfig);
 }
 
+/**
+ * FNXC:TriageModelFallback 2026-07-09-00:00:
+ * When no explicit `planningFallback*`/global `fallback*` pair is configured, the
+ * planning lane must still get a working fallback. Derive one implicitly from the
+ * resolved project/global default (execution) model — the same resolver
+ * `resolveHeartbeatSessionModels`/`resolveMergerSessionModel` use — so a retryable
+ * primary-planner failure (e.g. provider 404/429) recovers via one distinct swap
+ * instead of failing triage permanently (see FN-7719). Guard against self-swap
+ * (implicit fallback === primary planning model) and skip entirely in test mode,
+ * so the single-swap `usingFallback` ceiling in pi.ts and the terminal
+ * ModelFallbackExhaustedError path are preserved unchanged.
+ */
+export function resolveImplicitPlanningFallbackModel(
+  settings: Partial<Settings> | undefined,
+  primaryProvider: string | undefined,
+  primaryModelId: string | undefined,
+  assignedAgentRuntimeConfig?: Record<string, unknown>,
+): { provider: string | undefined; modelId: string | undefined } {
+  if (isTestModeActive(settings)) {
+    return { provider: undefined, modelId: undefined };
+  }
+
+  const defaultModel = resolveProjectDefaultModel(settings);
+  const resolvedModel = pickSettingsThenRuntimeModel(defaultModel, assignedAgentRuntimeConfig);
+
+  if (!resolvedModel.provider || !resolvedModel.modelId) {
+    return { provider: undefined, modelId: undefined };
+  }
+
+  // Self-swap guard: an implicit fallback identical to the primary planner
+  // model would produce a misleading "fallback configured" message while
+  // still hitting the terminal ModelFallbackExhaustedError path in pi.ts
+  // (hasDistinctFallback requires the models to differ). Leave both fields
+  // undefined so the existing terminal behavior is preserved cleanly.
+  if (resolvedModel.provider === primaryProvider && resolvedModel.modelId === primaryModelId) {
+    return { provider: undefined, modelId: undefined };
+  }
+
+  return resolvedModel;
+}
+
 export function resolveValidatorSessionModel(
   taskValidatorModelProvider: string | undefined,
   taskValidatorModelId: string | undefined,

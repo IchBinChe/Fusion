@@ -4263,6 +4263,243 @@ describe("taskCreate tool model inheritance", () => {
       }));
     });
 
+    describe("implicit planning fallback (FN-7719)", () => {
+      const baseSession = () => ({
+        prompt: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn(),
+        sessionManager: {
+          getLeafId: vi.fn().mockReturnValue(null),
+          navigateTree: vi.fn(),
+        },
+      });
+
+      it("recovers from the reported 404/429 planner failure via a derived implicit fallback", async () => {
+        const task = {
+          id: "FN-7719",
+          description: "Bug: 9router/Planning 404 on nvidia/moonshotai/kimi-k2.6",
+          column: "triage",
+          dependencies: [],
+          steps: [],
+          currentStep: 0,
+          log: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } as unknown as Task;
+        const onSpecifyError = vi.fn();
+        const store = createMockStore({
+          getTask: vi.fn().mockResolvedValue({ ...task, attachments: [] }),
+          getSettings: vi.fn().mockResolvedValue({
+            maxConcurrent: 2,
+            maxWorktrees: 4,
+            pollIntervalMs: 10000,
+            groupOverlappingFiles: false,
+            autoMerge: true,
+            // Primary planner lane ("9router/Planning") — distinct from the project default.
+            planningProvider: "9router",
+            planningModelId: "nvidia/moonshotai/kimi-k2.6",
+            defaultProvider: "openai",
+            defaultModelId: "gpt-4o",
+            // No planningFallback*/global fallback* configured — this is the reported gap.
+            defaultThinkingLevel: "low",
+          } as Settings),
+        });
+        mockCreateFnAgent.mockResolvedValue({ session: baseSession() });
+
+        const { promptWithFallback } = await import("../pi.js");
+        // With a distinct implicit fallback now supplied, pi.ts's real single-swap
+        // loop (covered by pi.test.ts) recovers instead of throwing
+        // ModelFallbackExhaustedError — simulate that recovered outcome here.
+        (promptWithFallback as ReturnType<typeof vi.fn>).mockResolvedValueOnce(undefined);
+
+        const processor = new TriageProcessor(store, "/test/root", {
+          pollIntervalMs: 100_000,
+          onSpecifyError,
+        });
+
+        await processor.specifyTask(task);
+
+        expect(mockCreateFnAgent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            defaultProvider: "9router",
+            defaultModelId: "nvidia/moonshotai/kimi-k2.6",
+            fallbackProvider: "openai",
+            fallbackModelId: "gpt-4o",
+          }),
+        );
+        expect(store.updateTask).not.toHaveBeenCalledWith("FN-7719", expect.objectContaining({
+          status: "failed",
+          error: expect.stringContaining("no fallback configured"),
+        }));
+      });
+
+      it("stays terminal when the implicit fallback would equal the primary planner model (self-swap guard)", async () => {
+        const task = {
+          id: "FN-7719-SELF-SWAP",
+          description: "No distinct default model available for implicit fallback",
+          column: "triage",
+          dependencies: [],
+          steps: [],
+          currentStep: 0,
+          log: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } as unknown as Task;
+        const onSpecifyError = vi.fn();
+        const store = createMockStore({
+          getTask: vi.fn().mockResolvedValue({ ...task, attachments: [] }),
+          getSettings: vi.fn().mockResolvedValue({
+            maxConcurrent: 2,
+            maxWorktrees: 4,
+            pollIntervalMs: 10000,
+            groupOverlappingFiles: false,
+            autoMerge: true,
+            // No planningProvider/planningModelId — the primary planning model
+            // resolves through to the project default itself, so the implicit
+            // fallback would equal the primary. Must NOT self-swap.
+            defaultProvider: "openai",
+            defaultModelId: "gpt-4o",
+            defaultThinkingLevel: "low",
+          } as Settings),
+        });
+        mockCreateFnAgent.mockResolvedValue({ session: baseSession() });
+
+        const { ModelFallbackExhaustedError, promptWithFallback } = await import("../pi.js");
+        (promptWithFallback as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+          new ModelFallbackExhaustedError({
+            primaryModel: "openai/gpt-4o",
+            triggerPoint: "prompt-time",
+            attempts: 1,
+            underlyingReason: "model not found: no distinct fallback available",
+          }),
+        );
+
+        const processor = new TriageProcessor(store, "/test/root", {
+          pollIntervalMs: 100_000,
+          onSpecifyError,
+        });
+
+        await processor.specifyTask(task);
+
+        expect(mockCreateFnAgent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            defaultProvider: "openai",
+            defaultModelId: "gpt-4o",
+            fallbackProvider: undefined,
+            fallbackModelId: undefined,
+          }),
+        );
+        expect(store.updateTask).toHaveBeenCalledWith("FN-7719-SELF-SWAP", expect.objectContaining({
+          status: "failed",
+          recoveryRetryCount: null,
+          nextRecoveryAt: null,
+        }));
+        expect(onSpecifyError).toHaveBeenCalledTimes(1);
+      });
+
+      it("does not override an explicitly configured planningFallback* pair", async () => {
+        const task = {
+          id: "FN-7719-EXPLICIT-PLANNING",
+          description: "Explicit planning fallback stays authoritative",
+          column: "triage",
+          dependencies: [],
+          steps: [],
+          currentStep: 0,
+          log: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } as unknown as Task;
+        const store = createMockStore({
+          getTask: vi.fn().mockResolvedValue({ ...task, attachments: [] }),
+          getSettings: vi.fn().mockResolvedValue({
+            maxConcurrent: 2,
+            maxWorktrees: 4,
+            pollIntervalMs: 10000,
+            groupOverlappingFiles: false,
+            autoMerge: true,
+            planningProvider: "9router",
+            planningModelId: "nvidia/moonshotai/kimi-k2.6",
+            defaultProvider: "openai",
+            defaultModelId: "gpt-4o",
+            planningFallbackProvider: "anthropic",
+            planningFallbackModelId: "claude-3-5-haiku-20241022",
+          } as Settings),
+        });
+        mockCreateFnAgent.mockResolvedValue({ session: baseSession() });
+
+        const { promptWithFallback } = await import("../pi.js");
+        (promptWithFallback as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+          new Error("test stop after model check"),
+        );
+
+        const processor = new TriageProcessor(store, "/test/root", { pollIntervalMs: 100_000 });
+        await processor.specifyTask(task);
+
+        expect(mockCreateFnAgent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            defaultProvider: "9router",
+            defaultModelId: "nvidia/moonshotai/kimi-k2.6",
+            fallbackProvider: "anthropic",
+            fallbackModelId: "claude-3-5-haiku-20241022",
+          }),
+        );
+      });
+
+      it("does not override an explicitly configured global fallback* pair", async () => {
+        const task = {
+          id: "FN-7719-EXPLICIT-GLOBAL",
+          description: "Explicit global fallback stays authoritative",
+          column: "triage",
+          dependencies: [],
+          steps: [],
+          currentStep: 0,
+          log: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } as unknown as Task;
+        const store = createMockStore({
+          getTask: vi.fn().mockResolvedValue({ ...task, attachments: [] }),
+          getSettings: vi.fn().mockResolvedValue({
+            maxConcurrent: 2,
+            maxWorktrees: 4,
+            pollIntervalMs: 10000,
+            groupOverlappingFiles: false,
+            autoMerge: true,
+            planningProvider: "9router",
+            planningModelId: "nvidia/moonshotai/kimi-k2.6",
+            defaultProvider: "openai",
+            defaultModelId: "gpt-4o",
+            fallbackProvider: "google",
+            fallbackModelId: "gemini-2.5-pro",
+          } as Settings),
+        });
+        mockCreateFnAgent.mockResolvedValue({ session: baseSession() });
+
+        const { promptWithFallback } = await import("../pi.js");
+        (promptWithFallback as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+          new Error("test stop after model check"),
+        );
+
+        const processor = new TriageProcessor(store, "/test/root", { pollIntervalMs: 100_000 });
+        await processor.specifyTask(task);
+
+        expect(mockCreateFnAgent).toHaveBeenCalledWith(
+          expect.objectContaining({
+            defaultProvider: "9router",
+            defaultModelId: "nvidia/moonshotai/kimi-k2.6",
+            fallbackProvider: "google",
+            fallbackModelId: "gemini-2.5-pro",
+          }),
+        );
+      });
+
+      // NOTE: test-mode exclusion (isTestModeActive -> no implicit fallback
+      // injected) is covered directly at the resolver-unit level in
+      // agent-session-helpers.test.ts ("resolveImplicitPlanningFallbackModel
+      // (FN-7719)"). The mock runtime used by createResolvedAgentSession in
+      // test mode does not route through createFnAgent, so it cannot assert
+      // fallbackProvider/fallbackModelId via mockCreateFnAgent call args here.
+    });
+
     it("escalates to error state when triage retries are exhausted via specifyTask", async () => {
       const task = {
         id: "FN-201",

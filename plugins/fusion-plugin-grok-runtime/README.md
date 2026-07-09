@@ -43,6 +43,34 @@ binary on PATH — Fusion never downloads or bundles the CLI itself.
   deduplicated. Output that happens to be JSON is tolerated defensively even
   though the CLI is not known to emit it.
 
+## CLI streaming execution path (FN-7722)
+
+In addition to model discovery/probe, this plugin's `GrokRuntimeAdapter` can
+stream a real Grok response through the CLI itself:
+
+```bash
+grok --prompt "<text>" --format json
+```
+
+- `--format json` emits newline-delimited JSON (NDJSON) — one JSON object
+  per line — with event types `step_start`, `text`, `tool_use`,
+  `step_finish`, and `error` (verified against upstream source, not just
+  docs prose; see `docs/grok-cli-contract.md`).
+- The adapter parses that stream (`src/stream-parser.ts`) and drives
+  `onText` as `text` events arrive. There is no `thinking`/`reasoning` event
+  in the verified schema, so `onThinking` is never invoked for this path.
+- **Auth implication:** because the `grok` binary resolves its own
+  credentials for this path (env var, project `.env`, `grok -k`, or
+  `~/.grok/user-settings.json`), a CLI-routed selection needs **no
+  Fusion-visible `GROK_API_KEY`** — unlike the direct xAI
+  OpenAI-compatible streaming path (`https://api.x.ai/v1`), which still
+  requires one.
+- This adapter is only reached when an agent's
+  `runtimeConfig.runtimeHint === "grok"`. Nothing in the product sets that
+  today — routing Grok execution through the CLI end-to-end (vs. the direct
+  xAI endpoint, which remains the default) is tracked as a follow-up. See
+  `docs/grok-cli-contract.md` for the full contract and decision record.
+
 ## Enable via Settings → Authentication
 
 1. Install the `grok` CLI and authenticate it by any method it supports

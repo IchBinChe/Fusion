@@ -1,3 +1,123 @@
+/*
+FNXC:GrokCli 2026-07-09-00:00:
+FN-7722: additive types for the real (non-no-op) `GrokRuntimeAdapter`
+streaming implementation. `GrokNdjsonEvent` mirrors the VERIFIED
+`HeadlessJsonEvent` union from upstream grok-cli's `src/headless/output.ts`
+(captured in docs/grok-cli-contract.md) — there is deliberately no
+thinking/reasoning event type here because upstream's JSONL emitter never
+surfaces one (confirmed absence, not an omission). `GrokSession` /
+`GrokCallbacks` / `AgentRuntime*` mirror the Droid plugin's `types.ts` shape
+so this adapter satisfies the same plugin runtime contract
+(`packages/engine/src/runtime-resolution.ts`'s `resolveRuntime`). Additive
+only — does not collide with FN-7716's `GrokBinaryStatus` fields below.
+*/
+
+export interface GrokToolCallLike {
+  id?: string;
+  type?: string;
+  function?: { name?: string; arguments?: string };
+  [key: string]: unknown;
+}
+
+export interface GrokToolResultLike {
+  success?: boolean;
+  output?: string;
+  [key: string]: unknown;
+}
+
+export interface GrokStepStartEvent {
+  type: "step_start";
+  sessionID?: string;
+  stepNumber: number;
+  timestamp: number;
+}
+
+export interface GrokTextEvent {
+  type: "text";
+  sessionID?: string;
+  stepNumber: number;
+  text: string;
+  timestamp: number;
+}
+
+export interface GrokToolUseEvent {
+  type: "tool_use";
+  sessionID?: string;
+  stepNumber: number;
+  timestamp: number;
+  toolCall: GrokToolCallLike;
+  toolResult: GrokToolResultLike;
+  timing?: { startedAt?: number; finishedAt?: number; durationMs?: number };
+}
+
+export interface GrokStepFinishEvent {
+  type: "step_finish";
+  sessionID?: string;
+  stepNumber: number;
+  timestamp: number;
+  finishReason: string;
+  usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number; costUsdTicks?: number };
+}
+
+export interface GrokErrorEvent {
+  type: "error";
+  sessionID?: string;
+  message: string;
+  timestamp: number;
+}
+
+export type GrokNdjsonEvent =
+  | GrokStepStartEvent
+  | GrokTextEvent
+  | GrokToolUseEvent
+  | GrokStepFinishEvent
+  | GrokErrorEvent;
+
+export interface GrokCallbacks {
+  onText?: (text: string) => void;
+  /**
+   * FNXC:GrokCli 2026-07-09-00:00: kept for AgentRuntime interface parity
+   * with the Droid/Cursor plugins, but never invoked by this adapter —
+   * upstream grok-cli's `--format json` stream has no thinking/reasoning
+   * event to bridge (see docs/grok-cli-contract.md).
+   */
+  onThinking?: (text: string) => void;
+}
+
+export interface GrokSession {
+  model: string;
+  systemPrompt?: string;
+  messages: unknown[];
+  sessionId?: string;
+  lastModelDescription: string;
+  callbacks: GrokCallbacks;
+}
+
+export type AgentSession = GrokSession;
+
+export interface AgentRuntimeOptions {
+  cwd?: string;
+  systemPrompt?: string;
+  defaultModelId?: string;
+  onText?: (text: string) => void;
+  onThinking?: (text: string) => void;
+  signal?: AbortSignal;
+}
+
+export interface AgentSessionResult {
+  session: AgentSession;
+  sessionFile?: string;
+}
+
+export interface AgentRuntime {
+  id: string;
+  name: string;
+  createSession(options: AgentRuntimeOptions): Promise<AgentSessionResult>;
+  promptWithFallback(session: AgentSession, prompt: string, options?: unknown): Promise<void>;
+  describeModel(session: AgentSession): string;
+  dispose?(session: AgentSession): Promise<void>;
+}
+
 export interface GrokBinaryStatus {
   available: boolean;
   /**

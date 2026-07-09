@@ -1,5 +1,27 @@
-import { describe, expect, it } from "vitest";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GrokRuntimeAdapter } from "../runtime-adapter.js";
+import type { GrokStreamProcess } from "../cli-stream.js";
+
+/*
+FNXC:GrokCli 2026-07-09-00:00:
+FN-7722: replaces FN-7715's "intentional no-op" assertion. `promptWithFallback`
+is now a real NDJSON streaming implementation; these tests inject a FAKE
+stdout stream (no live binary, no real subprocess spawn) through the
+constructor's `spawn` seam and feed verified-shape NDJSON fixture lines
+(docs/grok-cli-contract.md), asserting onText fires in order and the promise
+resolves on close/error. Uses fake timers for the lifecycle timeout paths
+per AGENTS.md "Do Not Add Slow Tests".
+*/
+
+function makeFakeProc(): { proc: GrokStreamProcess; stdout: PassThrough; kill: ReturnType<typeof vi.fn> } {
+  const stdout = new PassThrough();
+  const emitter = new EventEmitter();
+  const kill = vi.fn();
+  const proc = Object.assign(emitter, { stdout, kill }) as unknown as GrokStreamProcess;
+  return { proc, stdout, kill };
+}
 
 describe("GrokRuntimeAdapter", () => {
   it("creates a session with default model fallback", async () => {
@@ -9,22 +31,109 @@ describe("GrokRuntimeAdapter", () => {
     expect(result.session.systemPrompt).toBe("sys");
   });
 
-  // FN-7715: promptWithFallback is an INTENTIONAL no-op — Grok streaming
-  // flows through the pi/xAI OpenAI-compatible path registered by FN-7711,
-  // not through this plugin runtime adapter (which is only reached via
-  // runtimeConfig.runtimeHint === "grok", which nothing in the product
-  // sets). This module imports no process-spawning seam (compare
-  // process-manager.ts's `runGrokCommand`), so this asserts the intentional
-  // no-op contract at the only observable boundary: it resolves without
-  // throwing and returns no value, taking no action.
-  it("promptWithFallback is an intentional no-op: resolves without throwing, returns undefined", async () => {
-    const adapter = new GrokRuntimeAdapter();
+  it("streams onText for each text NDJSON event in order and resolves on close", async () => {
+    const { proc, stdout } = makeFakeProc();
+    const spawn = vi.fn().mockReturnValue(proc);
+    const adapter = new GrokRuntimeAdapter({ spawn });
 
-    await expect(adapter.promptWithFallback()).resolves.toBeUndefined();
+    const onText = vi.fn();
+    const { session } = await adapter.createSession({ onText });
+
+    const promise = adapter.promptWithFallback(session, "hello grok");
+
+    stdout.write(`${JSON.stringify({ type: "step_start", stepNumber: 1, timestamp: 1 })}\n`);
+    stdout.write(`${JSON.stringify({ type: "text", stepNumber: 1, text: "hel", timestamp: 2 })}\n`);
+    stdout.write(`${JSON.stringify({ type: "text", stepNumber: 1, text: "lo!", timestamp: 3 })}\n`);
+    stdout.write(
+      `${JSON.stringify({ type: "step_finish", stepNumber: 1, timestamp: 4, finishReason: "stop", usage: {} })}\n`,
+    );
+    proc.emit("close", 0, null);
+
+    await promise;
+
+    expect(spawn).toHaveBeenCalledWith("grok", "hello grok", expect.objectContaining({}));
+    expect(onText.mock.calls.map((c) => c[0])).toEqual(["hel", "lo!"]);
+  });
+
+  it("skips malformed/unrecognized lines without invoking onText and without throwing", async () => {
+    const { proc, stdout } = makeFakeProc();
+    const spawn = vi.fn().mockReturnValue(proc);
+    const adapter = new GrokRuntimeAdapter({ spawn });
+    const onText = vi.fn();
+    const { session } = await adapter.createSession({ onText });
+
+    const promise = adapter.promptWithFallback(session, "hi");
+
+    stdout.write("[SandboxDebug] booting\n");
+    stdout.write("{not valid json\n");
+    stdout.write(`${JSON.stringify({ type: "tool_use", stepNumber: 1, timestamp: 5, toolCall: {}, toolResult: {} })}\n`);
+    proc.emit("close", 0, null);
+
+    await expect(promise).resolves.toBeUndefined();
+    expect(onText).not.toHaveBeenCalled();
+  });
+
+  it("resolves (never rejects) when the subprocess emits an error", async () => {
+    const { proc } = makeFakeProc();
+    const spawn = vi.fn().mockReturnValue(proc);
+    const adapter = new GrokRuntimeAdapter({ spawn });
+    const { session } = await adapter.createSession({});
+
+    const promise = adapter.promptWithFallback(session, "hi");
+    proc.emit("error", new Error("ENOENT"));
+
+    await expect(promise).resolves.toBeUndefined();
+  });
+
+  it("never invokes onThinking: the verified grok-cli NDJSON schema has no thinking/reasoning event", async () => {
+    const { proc, stdout } = makeFakeProc();
+    const spawn = vi.fn().mockReturnValue(proc);
+    const adapter = new GrokRuntimeAdapter({ spawn });
+    const onThinking = vi.fn();
+    const { session } = await adapter.createSession({ onThinking });
+
+    const promise = adapter.promptWithFallback(session, "hi");
+    stdout.write(`${JSON.stringify({ type: "text", stepNumber: 1, text: "hi", timestamp: 1 })}\n`);
+    proc.emit("close", 0, null);
+
+    await promise;
+    expect(onThinking).not.toHaveBeenCalled();
+  });
+
+  describe("lifecycle timeouts (fake timers)", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("kills the subprocess and resolves if no stdout line arrives within the cold-start ceiling", async () => {
+      const { proc, kill } = makeFakeProc();
+      const spawn = vi.fn().mockReturnValue(proc);
+      const adapter = new GrokRuntimeAdapter({ spawn });
+      const { session } = await adapter.createSession({});
+
+      const promise = adapter.promptWithFallback(session, "hi");
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await promise;
+      expect(kill).toHaveBeenCalledWith("SIGKILL");
+    });
+  });
+
+  it("resolves without throwing if the injected spawn function throws synchronously", async () => {
+    const spawn = vi.fn().mockImplementation(() => {
+      throw new Error("spawn ENOENT");
+    });
+    const adapter = new GrokRuntimeAdapter({ spawn });
+    const { session } = await adapter.createSession({});
+
+    await expect(adapter.promptWithFallback(session, "hi")).resolves.toBeUndefined();
   });
 
   it("describeModel formats grok prefix", () => {
     const adapter = new GrokRuntimeAdapter();
-    expect(adapter.describeModel({ model: "grok/pro" })).toBe("grok/grok/pro");
+    expect(adapter.describeModel({ model: "grok/pro" } as never)).toBe("grok/grok/pro");
   });
 });

@@ -13,6 +13,7 @@ import { basename, dirname, isAbsolute, join } from "node:path";
 import { mkdirSync, existsSync, statSync, renameSync, rmSync } from "node:fs";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { unrefQmdChildProcess } from "./memory-backend.js";
 import { DEFAULT_PROJECT_SETTINGS } from "./types.js";
 import type { PluginOnSchemaInit } from "./plugin-types.js";
 import type { SteeringComment, TaskComment } from "./types.js";
@@ -1798,6 +1799,18 @@ export function quickCheckSqliteFile(dbPath: string): { ok: boolean; verified: b
  * would strand the background scheduler's shared entry and pin every
  * participant's `integrityCheckPending` true forever. AbortSignal.timeout's
  * internal timer is unref'd, so it never keeps the process alive on shutdown.
+ *
+ * FNXC:Database 2026-07-08-00:00:
+ * This spawn is reached fire-and-forget from `scheduleBackgroundIntegrityCheck`'s
+ * `void (async () => …)()` — nothing here is guaranteed to be awaited by a live
+ * caller. A short-lived process (e.g. a `fn` one-shot CLI command) that opens a
+ * disk-backed `Database` and exits before the 60s scheduling delay elapses must
+ * not be pinned alive by this child's stdio pipes. Unref the child (+ stdio)
+ * immediately after spawn via the shared `unrefQmdChildProcess` helper — see its
+ * doc comment in `memory-backend.ts` for why a plain `spawn()` (not
+ * `promisify(execFile)`) is required for the unref to actually stick (FN-7706).
+ * This does not affect resolve/reject semantics: long-lived callers that DO stay
+ * alive still see the promise settle normally on `close`/`error` (FN-7709).
  */
 const INTEGRITY_CHECK_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -1823,6 +1836,11 @@ export function integrityCheckSqliteFileAsync(
         // option-validation errors, e.g. an already-aborted signal.)
         signal: AbortSignal.timeout(INTEGRITY_CHECK_TIMEOUT_MS),
       });
+      // FNXC:Database 2026-07-08-00:00: unref synchronously right after spawn — a
+      // manual unref later (e.g. inside a `data`/`close` handler) would race the
+      // execFile-style nextTick stdio re-ref; see the doc comment above this
+      // function (FN-7709 / FN-7706).
+      unrefQmdChildProcess(child);
     } catch {
       resolve({ ok: true, verified: false });
       return;
@@ -5914,6 +5932,14 @@ export class Database {
           Database.sharedIntegrityChecks.delete(this.dbPath);
         });
     }, 60_000);
+    // FNXC:Database 2026-07-08-00:00: unref the 60s scheduling delay so a
+    // short-lived caller (e.g. a `fn` one-shot CLI command that opens a
+    // disk-backed Database and exits before this fires) is not pinned alive
+    // waiting for a background check it never asked to block on (FN-7709).
+    // The check itself still fires normally for any process that stays alive
+    // past the delay — unref only affects whether the handle keeps the event
+    // loop open, not whether/when the timer callback runs.
+    shared.timer.unref?.();
 
     Database.sharedIntegrityChecks.set(this.dbPath, shared);
   }

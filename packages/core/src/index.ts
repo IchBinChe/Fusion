@@ -831,6 +831,11 @@ export {
   // FNXC:CoreTests 2026-06-25-16:30: test-only migrated-DB snapshot hook so
   // cross-package suites (dashboard route tests) can amortize db.init() cost.
   setInMemoryTemplateSnapshot,
+  // FNXC:CliBoardMutation 2026-07-09-00:00: exported so the CLI-level
+  // lock-retry wrapper (packages/cli/src/lock-retry.ts, FN-7731) can classify
+  // SQLite lock errors identically to the DB layer's own runWithLockRecovery,
+  // instead of re-implementing (and risking drift in) the detection regex.
+  isSqliteLockError,
 } from "./db.js";
 export {
   ProjectIdentityConflictError,

@@ -12,8 +12,9 @@ import {
   isGhAvailable,
   runGhJsonAsync,
 } from "@fusion/core/gh-cli";
-import { resolveProject, type ProjectContext } from "../project-context.js";
+import { resolveProject, closeProjectStore, type ProjectContext } from "../project-context.js";
 import { findNodeByNameOrId } from "./node.js";
+import { retryOnLock, LockRetryExhaustedError } from "../lock-retry.js";
 
 const STEP_STATUSES: StepStatus[] = ["pending", "in-progress", "done", "skipped"];
 
@@ -173,6 +174,54 @@ async function getCommandContext(projectName?: string): Promise<CommandContext> 
 
 async function getStore(projectName?: string): Promise<TaskStore> {
   return (await getCommandContext(projectName)).store;
+}
+
+/**
+ * FNXC:CliBoardMutation 2026-07-09-00:00:
+ * Resolve the FULL `ProjectContext` (not just a bare `TaskStore`, unlike
+ * `getStore`/`getCommandContext` above) for board read/write commands
+ * (`runTaskShow`/`runTaskMove`) so they can deterministically close+evict
+ * the store they open via `closeProjectStore` on every exit path — mirroring
+ * the FN-7704 `fn agent stop/start` teardown fix. Covers all three
+ * project-resolution branches `getCommandContext` covers (explicit
+ * `--project`, default-project, and CWD-detected/unregistered fallback via
+ * `new TaskStore(process.cwd())`), reusing `asLocalProjectContext` for the
+ * fallback so `closeProjectStore` always receives a well-formed context.
+ */
+async function getBoardCommandContext(projectName?: string): Promise<ProjectContext> {
+  if (projectName) {
+    const context = await resolveProject(projectName);
+    if (!context) {
+      throw new Error(`Project ${projectName} not found`);
+    }
+    return context;
+  }
+
+  try {
+    const context = await resolveProject(undefined);
+    if (!context) {
+      throw new Error("No project context");
+    }
+    return context;
+  } catch {
+    const store = new TaskStore(process.cwd());
+    await store.init();
+    return asLocalProjectContext(store);
+  }
+}
+
+/**
+ * FNXC:CliBoardMutation 2026-07-09-00:00:
+ * Translate a `LockRetryExhaustedError` (or any other error) from a board
+ * read/write into the CLI's standard "print + exit(1)" failure shape. A
+ * lock-exhaustion error already carries an actionable message (task id,
+ * operation, and the `FUSION_CLI_LOCK_RETRY_MS` override), so it is printed
+ * as-is rather than re-wrapped.
+ */
+function failBoardCommand(error: unknown): never {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`\n  ✗ ${message}\n`);
+  process.exit(1);
 }
 
 async function getProjectContext(projectName?: string): Promise<ProjectContext | undefined> {
@@ -780,7 +829,36 @@ export async function runTaskClearNode(id: string, projectName?: string) {
 }
 
 export async function runTaskShow(id: string, projectName?: string) {
-  const store = await getStore(projectName);
+  // FNXC:CliBoardMutation 2026-07-09-00:00:
+  // Wrap the ENTIRE flow — project/store resolution (`getBoardCommandContext`,
+  // which can itself hit `database is locked` inside `TaskStore.init()` for
+  // the CWD-detected/unregistered fallback branch) AND the board read — in a
+  // single retryable unit, not just `store.getTask`. Each attempt resolves a
+  // fresh context and closes it in an inner `finally` before the next retry,
+  // so a failed attempt never leaks a store handle. Only SQLite lock errors
+  // are retried (`retryOnLock`); not-found and other errors propagate
+  // immediately without looping.
+  try {
+    await retryOnLock(
+      async () => {
+        const context = await getBoardCommandContext(projectName);
+        try {
+          await runTaskShowWithStore(id, context.store);
+        } finally {
+          await closeProjectStore(context);
+        }
+      },
+      { id, action: "read task" },
+    );
+  } catch (error) {
+    if (error instanceof LockRetryExhaustedError) {
+      failBoardCommand(error);
+    }
+    throw error;
+  }
+}
+
+async function runTaskShowWithStore(id: string, store: TaskStore) {
   const task = await store.getTask(id);
   const settings: Partial<Settings> = "getSettings" in store ? await store.getSettings() : {};
 
@@ -983,12 +1061,35 @@ export async function runTaskMove(id: string, column: string, projectName?: stri
     process.exit(1);
   }
 
-  const store = await getStore(projectName);
-  const task = await store.moveTask(id, column as Column);
-
-  console.log();
-  console.log(`  ✓ Moved ${task.id} → ${columnLabel(task.column)}`);
-  console.log();
+  // FNXC:CliBoardMutation 2026-07-09-00:00:
+  // Same rationale as runTaskShow above: wrap project/store resolution
+  // (`getBoardCommandContext`, which can itself hit `database is locked`
+  // inside `TaskStore.init()`) AND the write in one retryable unit, closing
+  // the resolved store in an inner `finally` on every attempt. Only
+  // `database is locked`/SQLITE_BUSY|LOCKED errors are retried; a genuinely
+  // invalid move (bad column, missing task) propagates immediately without
+  // looping.
+  try {
+    await retryOnLock(
+      async () => {
+        const context = await getBoardCommandContext(projectName);
+        try {
+          const task = await context.store.moveTask(id, column as Column);
+          console.log();
+          console.log(`  ✓ Moved ${task.id} → ${columnLabel(task.column)}`);
+          console.log();
+        } finally {
+          await closeProjectStore(context);
+        }
+      },
+      { id, action: "move task" },
+    );
+  } catch (error) {
+    if (error instanceof LockRetryExhaustedError) {
+      failBoardCommand(error);
+    }
+    throw error;
+  }
 }
 
 export async function runTaskDuplicate(id: string, projectName?: string) {

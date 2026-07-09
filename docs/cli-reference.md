@@ -577,6 +577,15 @@ fn task logs FN-001 --follow --limit 50 --type tool
 - unavailable-node policy value
 - source provenance line (`Source: <origin>`), including parent task / GitHub issue URL context when present
 
+`fn task show`/`fn task move` retry-on-lock (FN-7731): if the board database
+(`.fusion/fusion.db`) is momentarily locked by the engine or another agent,
+both commands retry with bounded exponential backoff instead of failing
+outright. If the lock hasn't cleared once the retry deadline (default 15s)
+is reached, the command fails fast with a clear, actionable, non-zero-exit
+error naming the task and operation rather than hanging. Override the
+deadline with `FUSION_CLI_LOCK_RETRY_MS` (milliseconds). The resolved
+`TaskStore` is always closed on exit so the CLI process exits promptly.
+
 ### Execution and status
 
 ```bash

@@ -143,6 +143,17 @@ vi.mock("../../project-context.js", () => ({
   getStore: vi.fn().mockResolvedValue({}),
   getDefaultProject: vi.fn().mockResolvedValue(undefined),
   setDefaultProject: vi.fn().mockResolvedValue(undefined),
+  // FNXC:CliBoardMutation 2026-07-09-00:00: FN-7731's runTaskShow/runTaskMove
+  // close the resolved store via closeProjectStore on every exit path; the
+  // real implementation is best-effort/tolerant of a store without a usable
+  // close(), so the mock mirrors that here rather than throwing.
+  closeProjectStore: vi.fn().mockImplementation(async (context: { store?: { close?: () => unknown } }) => {
+    try {
+      await context?.store?.close?.();
+    } catch {
+      // best-effort, matches real closeProjectStore
+    }
+  }),
 }));
 
 import { createInterface } from "node:readline/promises";

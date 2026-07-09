@@ -162,6 +162,7 @@ export const registerModelRoutes: ApiRouteRegistrar = (ctx) => {
     let useDroidCli = false;
     let useLlamaCpp = false;
     let useCursorCli = false;
+    let cursorCliBinaryPath: string | undefined;
     let resolvedPlanningProvider: string | undefined;
     let resolvedPlanningModelId: string | undefined;
     let customProviders: CustomProvider[] = [];
@@ -177,6 +178,20 @@ export const registerModelRoutes: ApiRouteRegistrar = (ctx) => {
         useDroidCli = globalSettings.useDroidCli === true;
         useLlamaCpp = globalSettings.useLlamaCpp === true;
         useCursorCli = (globalSettings as Record<string, unknown>).useCursorCli === true;
+        /*
+        FNXC:CursorCli 2026-07-08-00:20:
+        FN-7699 (follow-up to FN-7696): the machine-local `cursorCliBinaryPath`
+        operator override must apply to model-picker discovery too, not just
+        the auth/probe/status paths (register-auth-routes.ts's
+        normalizeCursorCliBinaryPath). Mirror the same trim/blank->undefined
+        normalization here so a blank/unset override preserves PATH
+        auto-detection byte-for-byte, and a set override threads through to
+        getCursorPickerModels below so discovery spawns the exact same
+        cursor-agent executable the settings card already validated.
+        */
+        const rawCursorCliBinaryPath = (globalSettings as Record<string, unknown>).cursorCliBinaryPath;
+        cursorCliBinaryPath =
+          typeof rawCursorCliBinaryPath === "string" ? rawCursorCliBinaryPath.trim() || undefined : undefined;
         customProviders = globalSettings.customProviders ?? [];
 
         const mergedSettings = await store.getSettingsFast();
@@ -299,6 +314,15 @@ export const registerModelRoutes: ApiRouteRegistrar = (ctx) => {
       the existing seenModelKeys provider/id dedup so an existing row always
       wins over a colliding Cursor row — purely additive, must never
       displace, overwrite, or filter out an existing row.
+
+      FNXC:CursorCli 2026-07-08-00:20:
+      FN-7699: thread the normalized cursorCliBinaryPath operator override
+      (see the globalSettings read block above) into getCursorPickerModels so
+      discovery spawns the exact same machine-local cursor-agent executable
+      already validated by the auth/probe/status paths. Blank/undefined
+      preserves PATH auto-detection unchanged; the cache is keyed per
+      resolved binary path so the override participates correctly in
+      TTL/single-flight caching.
       */
       if (useCursorCli) {
         // getCursorPickerModels never throws by contract (see
@@ -306,7 +330,7 @@ export const registerModelRoutes: ApiRouteRegistrar = (ctx) => {
         // a Cursor discovery failure can never reject the /models handler or
         // drop existing rows — degrade to zero Cursor rows instead.
         try {
-          const cursorModels = await getCursorPickerModels();
+          const cursorModels = await getCursorPickerModels({ binaryPath: cursorCliBinaryPath });
           for (const cursorModel of cursorModels) {
             const key = `${cursorModel.provider}/${cursorModel.id}`;
             if (seenModelKeys.has(key)) continue;

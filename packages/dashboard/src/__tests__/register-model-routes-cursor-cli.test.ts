@@ -25,7 +25,11 @@ import { registerModelRoutes } from "../routes/register-model-routes.js";
 
 const mockedGetCursorPickerModels = vi.mocked(getCursorPickerModels);
 
-function setup(useCursorCli?: boolean, registryModels?: Array<{ provider: string; id: string; name: string; reasoning: boolean; contextWindow: number }>) {
+function setup(
+  useCursorCli?: boolean,
+  registryModels?: Array<{ provider: string; id: string; name: string; reasoning: boolean; contextWindow: number }>,
+  cursorCliBinaryPath?: unknown,
+) {
   const getHandlers = new Map<string, (req: unknown, res: { json: (body: unknown) => void }) => Promise<void>>();
   const router = {
     get: vi.fn((path: string, handler: (req: unknown, res: { json: (body: unknown) => void }) => Promise<void>) => {
@@ -35,7 +39,7 @@ function setup(useCursorCli?: boolean, registryModels?: Array<{ provider: string
 
   const store = {
     getGlobalSettingsStore: () => ({
-      getSettings: vi.fn().mockResolvedValue({ useCursorCli }),
+      getSettings: vi.fn().mockResolvedValue({ useCursorCli, cursorCliBinaryPath }),
     }),
     getSettingsFast: vi.fn().mockResolvedValue({}),
   };
@@ -160,5 +164,63 @@ describe("registerModelRoutes cursor-cli merge and filter", () => {
     const response = await invoke(handler);
     const keys = response.models.map((m) => `${m.provider}/${m.id}`);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
+/*
+FNXC:CursorCli 2026-07-08-00:20:
+FN-7699: the machine-local cursorCliBinaryPath operator override (already
+honored by the auth/probe/status paths in register-auth-routes.ts) must also
+apply to model-picker discovery, so an operator whose cursor-agent is not on
+PATH still sees Cursor models in the picker. These tests assert the
+normalized override is threaded into getCursorPickerModels({ binaryPath })
+verbatim, that blank/undefined preserves binaryPath: undefined (PATH
+auto-detection), and that the toggle-off gate (FN-7696) is not regressed.
+*/
+describe("registerModelRoutes cursorCliBinaryPath threading", () => {
+  it("threads a set cursorCliBinaryPath override into getCursorPickerModels verbatim", async () => {
+    mockedGetCursorPickerModels.mockResolvedValue([
+      { provider: "cursor-cli", id: "cursor/gpt-5", name: "GPT-5", reasoning: false, contextWindow: 0 },
+    ]);
+    const handler = setup(true, undefined, "/opt/Cursor/cursor-agent");
+    const response = await invoke(handler);
+    expect(mockedGetCursorPickerModels).toHaveBeenCalledWith({ binaryPath: "/opt/Cursor/cursor-agent" });
+    expect(response.models.some((m) => m.provider === "cursor-cli" && m.id === "cursor/gpt-5")).toBe(true);
+  });
+
+  it("threads a Windows-shim-style override path verbatim, with no mangling", async () => {
+    mockedGetCursorPickerModels.mockResolvedValue([]);
+    const winPath = "C:\\Users\\A User\\AppData\\Roaming\\npm\\cursor-agent.cmd";
+    const handler = setup(true, undefined, winPath);
+    await invoke(handler);
+    expect(mockedGetCursorPickerModels).toHaveBeenCalledWith({ binaryPath: winPath });
+  });
+
+  it("passes binaryPath: undefined when cursorCliBinaryPath is absent (PATH auto-detection preserved)", async () => {
+    mockedGetCursorPickerModels.mockResolvedValue([]);
+    const handler = setup(true, undefined, undefined);
+    await invoke(handler);
+    expect(mockedGetCursorPickerModels).toHaveBeenCalledWith({ binaryPath: undefined });
+  });
+
+  it("passes binaryPath: undefined when cursorCliBinaryPath is blank/whitespace-only", async () => {
+    mockedGetCursorPickerModels.mockResolvedValue([]);
+    const handler = setup(true, undefined, "   ");
+    await invoke(handler);
+    expect(mockedGetCursorPickerModels).toHaveBeenCalledWith({ binaryPath: undefined });
+  });
+
+  it("passes binaryPath: undefined when cursorCliBinaryPath is an empty string", async () => {
+    mockedGetCursorPickerModels.mockResolvedValue([]);
+    const handler = setup(true, undefined, "");
+    await invoke(handler);
+    expect(mockedGetCursorPickerModels).toHaveBeenCalledWith({ binaryPath: undefined });
+  });
+
+  it("does not surface cursor-cli rows or call getCursorPickerModels when useCursorCli is false, regardless of cursorCliBinaryPath", async () => {
+    const handler = setup(false, undefined, "/opt/Cursor/cursor-agent");
+    const response = await invoke(handler);
+    expect(mockedGetCursorPickerModels).not.toHaveBeenCalled();
+    expect(response.models.some((m) => m.provider === "cursor-cli")).toBe(false);
   });
 });

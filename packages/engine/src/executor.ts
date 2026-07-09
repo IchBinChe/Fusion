@@ -2793,6 +2793,41 @@ export class TaskExecutor {
         })().catch((err) =>
           executorLog.error(`Failed to start ${task.id}:`, err),
         );
+      } else if (to === "archived") {
+        /*
+        FNXC:WorkflowLifecycle 2026-07-09-00:05:
+        Archived is terminal, so it must release every active-session registry entry the
+        task holds. Plan Review / other workflow-step and step-session sessions run while
+        the task is in triage/planning/todo (not in-progress), so the old
+        `from === "in-progress"`-only disposal branch below never fired for them — the
+        registry entry (activeSessions / activeStepExecutors / activeWorkflowStepSessions,
+        keyed on the shared project browse root) leaked past archive and blocked a
+        successor task from acquiring the same session path with
+        ActiveSessionPathHeldByForeignTaskError (FN-7717 / NEXT-508 -> NEXT-433). We
+        deliberately do NOT do this for to === "done" / "in-review": those columns
+        legitimately hold ai-merge / workspace-repo-land merge leases that must survive
+        the transition (FN-6736 / Phase C/D merge-lease guarantees).
+
+        This branch is checked BEFORE `from === "in-progress"` (and handles it too — a
+        task can be archived directly from in-progress via fn_task_archive, a single
+        `task:moved` event with no intermediate todo hop). Ordering the plain
+        `from === "in-progress"`-only branch first would let that direct
+        in-progress → archived transition fall into the narrower branch and skip the
+        leaked-entry sweep below, re-opening the exact class of leak this fix closes for
+        that one origin column. `awaitAbortInFlightTaskWork` here is the same call the
+        in-progress branch makes (superset of its cleanup), so no case regresses.
+        */
+        this.trackTaskDisposal(
+          task.id,
+          this.awaitAbortInFlightTaskWork(task.id, "task archived").then(() => {
+            // Belt-and-suspenders sweep: clear any registry entry that survived the
+            // abort above because its in-memory session map was already empty
+            // (a leaked entry with no live session to abort).
+            for (const path of activeSessionRegistry.pathsForTask(task.id)) {
+              activeSessionRegistry.unregisterPath(path);
+            }
+          }),
+        );
       } else if (from === "in-progress") {
         this.trackTaskDisposal(
           task.id,

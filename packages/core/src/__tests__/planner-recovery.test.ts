@@ -212,4 +212,16 @@ describe("decidePlannerRecovery", () => {
     expect(decision.exhausted).toBe(true);
     expect(decision.attemptLimit).toBe(1);
   });
+
+  // FN-7743 invariant lock: a stalled non-paused in-progress task (the FN-7732
+  // symptom) is surfaced by the overseer as `stage: "executor", signal: "stuck"`.
+  // This asserts the downstream mapping this fix depends on — executor `stuck`
+  // → `inject_guidance`, not `none` — already holds and stays locked, so a
+  // future regression here is caught even though FN-7743 itself only changes
+  // the observation INPUT, never this mapping.
+  it("FN-7743: maps an executor stuck signal to inject_guidance (the hung-executor recovery path)", () => {
+    const decision = decidePlannerRecovery({ snapshot: observation({ stage: "executor", signal: "stuck" }) });
+    expect(decision.action).toBe("inject_guidance");
+    expect(decision.requiresConfirmation).toBe(false);
+  });
 });

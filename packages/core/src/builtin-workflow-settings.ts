@@ -439,6 +439,24 @@ export const BUILTIN_REVIEW_REVISION_SETTINGS: WorkflowSettingDefinition[] = [
  * FNXC:PlannerOversight 2026-07-04-12:00:
  * FN-7518 adds `plannerOversightNotificationLevel`, a sibling workflow-native enum letting operators configure how noisy planner-overseer notifications are: Silent suppresses all, Errors only notifies on failures/escalations, Important (the default) notifies on interventions/recovery actions plus errors, and All notifies on every observation. Default is `important` (not `all`) to avoid noisy-by-default behavior. This setting stays workflow-native (out of project/global settings schemas and `MOVED_SETTINGS_KEYS`) and resolves through the generic `resolveEffectiveSettings` default path with no special-casing. This task only declares the setting — the emission gating that reads it lands downstream in FN-7519 (intervention timeline) and FN-7520 (run-audit/activity events).
  */
+/**
+ * FNXC:PlannerOversight 2026-07-09-00:00:
+ * FN-7743 requirement: an ordinary in-progress task (FN-7732) sat stuck for hours
+ * with no recovery action because the executor-stage overseer observation had no
+ * staleness detection — it always reported `signal: "progressing"` regardless of
+ * inactivity. `plannerOverseerExecutorStuckAfterMs` is the configurable inactivity
+ * threshold: once a non-paused in-progress task's last execution activity
+ * (`columnMovedAt ?? updatedAt`) is older than this, the executor stage reports
+ * `signal: "stuck"` instead, which already flows through `decidePlannerRecovery`
+ * into bounded `inject_guidance` recovery. Default 2 hours (7,200,000ms): long
+ * enough that a healthy, actively-working step (the vast majority of which finish
+ * well under 2h) is never nagged, short enough to actually recover a task that has
+ * gone dark for "hours" (the FN-7732 symptom) — mirrors the existing 2-hour
+ * convention `metaTaskStallAutoCloseMs` already uses for a comparable stall
+ * judgment call elsewhere in this codebase.
+ */
+export const DEFAULT_PLANNER_OVERSEER_EXECUTOR_STUCK_AFTER_MS = 2 * 60 * 60 * 1000;
+
 export const BUILTIN_OVERSIGHT_SETTINGS: WorkflowSettingDefinition[] = [
   {
     id: "plannerOversightLevel",
@@ -467,6 +485,14 @@ export const BUILTIN_OVERSIGHT_SETTINGS: WorkflowSettingDefinition[] = [
     ],
     description:
       "Planner overseer notification verbosity: Silent suppresses overseer notifications; Errors only notifies on failures/escalations; Important notifies on interventions/recovery actions and errors; All notifies on every observation. Notification-emission gating that reads this value is follow-up work (FN-7519/FN-7520).",
+  },
+  {
+    id: "plannerOverseerExecutorStuckAfterMs",
+    name: "Executor stall threshold (ms)",
+    type: "number",
+    default: DEFAULT_PLANNER_OVERSEER_EXECUTOR_STUCK_AFTER_MS,
+    description:
+      "Milliseconds of executor-stage inactivity (no progress since the task's last column move/update) before the planner overseer reports the in-progress task as stuck, triggering bounded autonomous recovery (Autonomous level only). Default 7200000 (2 hours). Set higher to avoid nagging long-running steps; set lower to recover hung executors faster.",
   },
 ];
 

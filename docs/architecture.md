@@ -1386,6 +1386,37 @@ call happens here, and it emits no run-audit events or dashboard UI. Steering/re
 gates, human-control safeguards, and dashboard/UI/run-audit surfaces are deferred to FN-7512 through
 FN-7520; this module is the seam those subtasks read observations from.
 
+#### Executor-stage stall detection (FN-7743)
+
+/*
+FNXC:PlannerOversight 2026-07-09-00:00:
+FN-7743 requirement: an ordinary in-progress task (FN-7732) sat stuck for hours with no recovery action
+because `deriveSignalAndSources`'s `case "executor"` had NO staleness check — a non-paused in-progress
+task always reported `signal: "progressing"` regardless of how long it had been idle, so
+`decidePlannerRecovery` always returned `action: "none"`.
+*/
+
+The executor stage now detects a stalled/idle non-paused `in-progress` task and reports `signal: "stuck"`
+instead of always `"progressing"`. `PlannerOverseerMonitor#observeTask` accepts an optional
+`{ now?: () => number; executorStuckAfterMs?: number }` (both default: `Date.now` and the declared
+`plannerOverseerExecutorStuckAfterMs` workflow-setting default) and threads them into the still-pure,
+still-never-reads-settings `deriveSignalAndSources`. The staleness input is `task.columnMovedAt ??
+task.updatedAt` (mirroring the existing "age is measured from columnMovedAt when present, otherwise
+updatedAt" convention already used by `stalePausedReviewThresholdMs`/`stalePausedTodoThresholdMs`) — the
+best available store-backed proxy for "last execution activity" at this poll seam, since the live
+in-session `StuckTaskDetector` heartbeat state (`packages/engine/src/stuck-task-detector.ts`) is
+in-memory-only and unavailable here. A missing or unparseable timestamp degrades to `"progressing"`
+(fail-safe — never fabricate a stall). The `stuck` reason buckets inactivity to whole hours so the FN-7577
+`stage|signal|reason` feed dedup stays effective (it must never embed an ever-changing millisecond value).
+
+`ProjectEngine.pollPlannerOverseer` resolves `plannerOverseerExecutorStuckAfterMs` from the task's
+already-fetched effective workflow settings (`resolveExecutorStuckAfterMs`, fail-safe default 2 hours) once
+per task per poll cycle — the same `workflowEffective` fetch already used for `plannerOversightLevel` — and
+passes it into `observeTask`. `decidePlannerRecovery` already mapped executor `stuck` → `inject_guidance`
+(no change needed there); the human-control withhold guard in `evaluateOverseerHumanControl` still runs
+BEFORE any recovery decision, so a stuck-but-user-paused/approval-blocked/autoMerge-off task is still fully
+withheld.
+
 ### Planner overseer bounded autonomous recovery (FN-7512)
 
 /*

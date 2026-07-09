@@ -41,7 +41,7 @@ import { InProcessRuntime } from "./runtimes/in-process-runtime.js";
 import type { WorktreePool } from "./worktree-pool.js";
 import type { ProjectRuntimeConfig } from "./project-runtime.js";
 import { PrMonitor } from "./pr-monitor.js";
-import { PlannerOverseerMonitor } from "./planner-overseer.js";
+import { PlannerOverseerMonitor, resolveExecutorStuckAfterMs } from "./planner-overseer.js";
 import { PlannerRecoveryController, type PlannerRecoveryHandlers } from "./planner-recovery-controller.js";
 import { evaluateOverseerHumanControl } from "./overseer-human-control-policy.js";
 import type { PrNodeGithubOps } from "./pr-nodes.js";
@@ -2371,7 +2371,14 @@ export class ProjectEngine {
           if (level === "off") {
             continue;
           }
-          await overseer.observeTask(task, level);
+          // FN-7743: resolve the executor-stall threshold from the task's
+          // effective workflow settings (same `workflowEffective` fetch used
+          // for `plannerOversightLevel` above — no extra store round-trip) and
+          // pass it into `observeTask` so a genuinely idle non-paused
+          // in-progress task reports `signal: "stuck"` instead of always
+          // `progressing` (the FN-7732 symptom).
+          const executorStuckAfterMs = resolveExecutorStuckAfterMs(workflowEffective.plannerOverseerExecutorStuckAfterMs);
+          await overseer.observeTask(task, level, { executorStuckAfterMs });
 
           // FN-7512: one guarded, autonomous-only bounded recovery tick at the
           // same passive seam FN-7511 uses for observation. Inert for every

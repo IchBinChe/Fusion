@@ -210,6 +210,7 @@ import {
   createTaskDocumentReadTool as sharedCreateTaskDocumentReadTool,
   createTaskDocumentWriteTool as sharedCreateTaskDocumentWriteTool,
   createTaskPromptWriteTool as sharedCreateTaskPromptWriteTool,
+  createTaskFileScopeAddTool as sharedCreateTaskFileScopeAddTool,
   createTaskLogTool as sharedCreateTaskLogTool,
   createWorkflowListTool as sharedCreateWorkflowListTool,
   createWorkflowGetTool as sharedCreateWorkflowGetTool,
@@ -1482,6 +1483,7 @@ Executors must not move the workflow of the task they are executing unless the u
 - Read "Context to Read First" files before starting
 - Follow the "Do NOT" section strictly — these are hard constraints, not suggestions
 - If tests, lint, build, or typecheck fail and the fix requires touching code outside the declared File Scope, fix those failures directly and keep the repo green
+- When you must edit files beyond the declared File Scope to complete this task, call \`fn_task_file_scope_add\` to add them to the File Scope as you go — keep the declared scope in sync with what you actually change so your edits are not stranded by the scope-aware squash merge
 - Use \`fn_task_create\` for genuinely separate follow-up work, not for mandatory fixes required to make this task land cleanly
 - Update documentation listed in "Must Update" and check "Check If Affected"
 - NEVER delete, remove, or gut modules, interfaces, settings, exports, or test files outside your File Scope
@@ -10308,6 +10310,8 @@ export class TaskExecutor {
         this.createSpawnAgentTool(task.id, worktreePath, settings, taskEnv),
         this.createTaskDocumentWriteTool(task.id),
         this.createTaskDocumentReadTool(task.id),
+        // FNXC:FileScope 2026-07-08-22:40: let the coding agent extend its own declared ## File Scope at runtime (fn_task_file_scope_add) so edits beyond the initial scope are not stranded by the scope-aware squash merge.
+        this.createTaskFileScopeAddTool(task.id),
         // FNXC:ArtifactRegistry 2026-06-21-07:04: Artifact list/view are read-only discovery tools and must remain available even when the task has no assigned agent identity; only registration requires an authorId for persisted attribution and best-effort inbox notification.
         this.createArtifactListTool(),
         this.createArtifactViewTool(),
@@ -12312,6 +12316,10 @@ export class TaskExecutor {
 
   private createTaskPromptWriteTool(taskId: string): ToolDefinition {
     return sharedCreateTaskPromptWriteTool(this.store, taskId, this.getRunContextFor(taskId));
+  }
+
+  private createTaskFileScopeAddTool(taskId: string): ToolDefinition {
+    return sharedCreateTaskFileScopeAddTool(this.store, taskId, this.getRunContextFor(taskId));
   }
 
   private createArtifactRegisterTool(authorId: string): ToolDefinition {

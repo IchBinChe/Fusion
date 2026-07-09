@@ -3994,6 +3994,8 @@
     "preset": "프리셋",
     "reviewerModel": "검토자 모델",
     "reviewerPlaceholder": "검토자 모델 선택…",
+    "thinkingDefault": "",
+    "thinkingModel": "",
     "title": "모델 선택",
     "useDefault": "기본값 사용",
     "usingDefault": "기본값 사용 중"

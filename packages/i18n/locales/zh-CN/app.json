@@ -3994,6 +3994,8 @@
     "preset": "预设",
     "reviewerModel": "审查模型",
     "reviewerPlaceholder": "选择审查模型…",
+    "thinkingDefault": "",
+    "thinkingModel": "",
     "title": "选择模型",
     "useDefault": "使用默认",
     "usingDefault": "使用默认"

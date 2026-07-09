@@ -3994,6 +3994,8 @@
     "preset": "預設",
     "reviewerModel": "審查模型",
     "reviewerPlaceholder": "選擇審查模型…",
+    "thinkingDefault": "",
+    "thinkingModel": "",
     "title": "選擇模型",
     "useDefault": "使用預設",
     "usingDefault": "使用預設"

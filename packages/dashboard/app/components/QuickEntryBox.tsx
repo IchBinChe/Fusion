@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 import type { ToastType } from "../hooks/useToast";
 import { DEFAULT_TASK_PRIORITY, TASK_PRIORITIES, getErrorMessage } from "@fusion/core";
-import type { Task, Settings, TaskPriority, ResolvedWorkflowOptionalStep } from "@fusion/core";
+import type { Task, Settings, TaskPriority, ResolvedWorkflowOptionalStep, ThinkingLevel } from "@fusion/core";
 import type { ModelInfo, Agent, CreateTaskInput, DuplicateMatch, BoardWorkflowDefinition, NodeInfo } from "../api";
 import { checkDuplicateTasks, fetchModels, fetchSettings, updateGlobalSettings, fetchAgents, uploadAttachment, fetchWorkflowOptionalSteps } from "../api";
 import { DuplicateWarningModal } from "./DuplicateWarningModal";
@@ -170,13 +170,15 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
   const [showPriorityPicker, setShowPriorityPicker] = useState(false);
   const [agentsLoading, setAgentsLoading] = useState(false);
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
-  const [activeModelSubmenu, setActiveModelSubmenu] = useState<"plan" | "executor" | "validator" | null>(null);
+  const [activeModelSubmenu, setActiveModelSubmenu] = useState<"plan" | "executor" | "validator" | "thinking" | null>(null);
   const [executorProvider, setExecutorProvider] = useState<string | undefined>(undefined);
   const [executorModelId, setExecutorModelId] = useState<string | undefined>(undefined);
   const [validatorProvider, setValidatorProvider] = useState<string | undefined>(undefined);
   const [validatorModelId, setValidatorModelId] = useState<string | undefined>(undefined);
   const [planningProvider, setPlanningProvider] = useState<string | undefined>(undefined);
   const [planningModelId, setPlanningModelId] = useState<string | undefined>(undefined);
+  /* FNXC:Settings-ThinkingLevel 2026-07-09-00:00: inline quick-entry bar carries the same per-task thinking-level override as the full New Task modal; "" means "use default". */
+  const [thinkingLevel, setThinkingLevel] = useState<string>("");
   const modelTriggerRef = useRef<HTMLButtonElement>(null);
   const modelMenuPortalRef = useRef<HTMLDivElement>(null);
   const agentPickerRef = useRef<HTMLDivElement>(null);
@@ -413,6 +415,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
   const hasExecutorOverride = Boolean(executorProvider && executorModelId);
   const hasValidatorOverride = Boolean(validatorProvider && validatorModelId);
   const hasPlanningOverride = Boolean(planningProvider && planningModelId);
+  const hasThinkingOverride = Boolean(thinkingLevel);
   const selectedModelCount = Number(hasExecutorOverride) + Number(hasValidatorOverride) + Number(hasPlanningOverride);
   const modelMenuLabel = selectedPresetId
     ? settings?.modelPresets?.find((p) => p.id === selectedPresetId)?.name ?? t("tasks.models", "Models")
@@ -607,6 +610,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     setValidatorModelId(undefined);
     setPlanningProvider(undefined);
     setPlanningModelId(undefined);
+    setThinkingLevel("");
     setSelectedPresetId(undefined);
     setEnabledOptionalStepIds(optionalSteps.filter((step) => step.defaultOn).map((step) => step.templateId));
     setIsFastMode(false);
@@ -731,6 +735,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
         validatorModelId: hasValidatorOverride ? validatorModelId : undefined,
         planningModelProvider: hasPlanningOverride ? planningProvider : undefined,
         planningModelId: hasPlanningOverride ? planningModelId : undefined,
+        thinkingLevel: thinkingLevel !== "" ? (thinkingLevel as ThinkingLevel) : undefined,
         /*
         FNXC:QuickAddWorkflowSteps 2026-06-29-01:31:
         Quick Add optional-step toggles are explicit task intent. When the workflow exposes optional steps and the user unchecks every one, submit an empty array instead of omitting the field so default-on Plan Review / Code Review do not reappear on the created task.
@@ -780,6 +785,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     hasPlanningOverride,
     planningProvider,
     planningModelId,
+    thinkingLevel,
     enabledOptionalStepIds,
     isFastMode,
     settings,
@@ -1495,6 +1501,10 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     const next = parseModelSelection(value);
     setValidatorProvider(next.provider);
     setValidatorModelId(next.modelId);
+  }, []);
+
+  const handleThinkingLevelChange = useCallback((value: string) => {
+    setThinkingLevel(value);
   }, []);
 
   const handleToggleFavorite = useCallback(async (provider: string) => {
@@ -2341,6 +2351,59 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
                     </span>
                     <ChevronRight size={12} style={{ marginLeft: "auto", color: "var(--text-dim)" }} />
                   </button>
+                  {/*
+                  FNXC:Settings-ThinkingLevel 2026-07-09-00:00:
+                  Quick-entry inline model menu must expose the same thinking (reasoning-effort) levels as the full task
+                  pickers (TaskForm, ModelSelectorTab, ModelSelectionModal) so a task created from this bar can carry a
+                  per-task thinking-level override just like one created from the New Task modal.
+                  */}
+                  <button
+                    type="button"
+                    className={`model-menu-item ${hasThinkingOverride ? "model-menu-item--active" : ""}`}
+                    onClick={() => setActiveModelSubmenu("thinking")}
+                    data-testid="model-menu-thinking"
+                  >
+                    <span className="model-menu-item-label">
+                      <Brain size={12} style={{ verticalAlign: "middle", marginRight: 6 }} />
+                      {t("tasks.modelThinking", "Thinking")}
+                    </span>
+                    <span className="model-menu-item-value">
+                      {hasThinkingOverride
+                        ? thinkingLevel
+                        : t("tasks.usingDefault", "Using default")}
+                    </span>
+                    <ChevronRight size={12} style={{ marginLeft: "auto", color: "var(--text-dim)" }} />
+                  </button>
+                </div>
+              ) : activeModelSubmenu === "thinking" ? (
+                // Submenu with a plain <select> for the thinking-level override (not a model list)
+                <div className="model-submenu">
+                  <button
+                    type="button"
+                    className="model-submenu-back"
+                    onClick={() => setActiveModelSubmenu(null)}
+                    data-testid="model-submenu-back"
+                  >
+                    <ChevronDown size={12} style={{ transform: "rotate(90deg)", marginRight: 4 }} />
+                    {t("common.back", "Back")}
+                  </button>
+                  <div className="model-submenu-header">
+                    {t("tasks.thinkingModel", "Thinking Level")}
+                  </div>
+                  <select
+                    id="model-thinking-select"
+                    data-testid="model-thinking-select"
+                    value={thinkingLevel}
+                    onChange={(e) => handleThinkingLevelChange(e.target.value)}
+                  >
+                    <option value="">{t("modelSelection.thinkingDefault", "Default ({{level}})", { level: settings?.defaultThinkingLevel ?? "off" })}</option>
+                    <option value="off">{t("models.options.off", "Off")}</option>
+                    <option value="minimal">{t("models.options.minimal", "Minimal")}</option>
+                    <option value="low">{t("models.options.low", "Low")}</option>
+                    <option value="medium">{t("models.options.medium", "Medium")}</option>
+                    <option value="high">{t("models.options.high", "High")}</option>
+                    <option value="xhigh">{t("models.options.xhigh", "Very High")}</option>
+                  </select>
                 </div>
               ) : (
                 // Submenu with CustomModelDropdown for the selected target

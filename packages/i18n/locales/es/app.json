@@ -3994,6 +3994,8 @@
     "preset": "Predefinido",
     "reviewerModel": "Modelo revisor",
     "reviewerPlaceholder": "Seleccionar modelo revisor…",
+    "thinkingDefault": "",
+    "thinkingModel": "",
     "title": "Seleccionar modelos",
     "useDefault": "Usar predeterminado",
     "usingDefault": "Usando predeterminado"

@@ -2587,6 +2587,39 @@ describe("QuickEntryBox", () => {
       expect(screen.getByTestId("model-menu-validator")).toBeTruthy();
     });
 
+    /*
+    FNXC:Settings-ThinkingLevel 2026-07-09-00:00:
+    The inline quick-entry model menu must expose a Thinking entry with parity to the full task pickers
+    (TaskForm, ModelSelectorTab, ModelSelectionModal), including a plain <select> submenu with all six
+    levels plus a named Default option.
+    */
+    it("shows a Thinking option in the model menu", () => {
+      renderQuickEntryBox({});
+      expandQuickEntry();
+      const textarea = screen.getByTestId("quick-entry-input");
+
+      fireEvent.change(textarea, { target: { value: "Task with models" } });
+      openModelMenu();
+
+      expect(screen.getByTestId("model-menu-thinking")).toBeTruthy();
+    });
+
+    it("clicking Thinking opens a submenu with a level <select>", () => {
+      renderQuickEntryBox({});
+      expandQuickEntry();
+      const textarea = screen.getByTestId("quick-entry-input");
+
+      fireEvent.change(textarea, { target: { value: "Task with models" } });
+      openModelMenu();
+      fireEvent.click(screen.getByTestId("model-menu-thinking"));
+
+      const select = screen.getByTestId("model-thinking-select") as HTMLSelectElement;
+      expect(select).toBeTruthy();
+      const options = Array.from(select.options).map((o) => o.value);
+      expect(options).toEqual(["", "off", "minimal", "low", "medium", "high", "xhigh"]);
+      expect(screen.getByTestId("model-submenu-back")).toBeTruthy();
+    });
+
     it("clicking Executor opens submenu with CustomModelDropdown", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
@@ -2967,6 +3000,48 @@ describe("QuickEntryBox", () => {
       expect(screen.queryByTestId("plan-button")).not.toBeInTheDocument();
       expect(screen.queryByTitle("Open planning mode with current description")).not.toBeInTheDocument();
       expect(addToast).not.toHaveBeenCalled();
+    });
+
+    it("forwards a non-default thinkingLevel selection in the submit payload", async () => {
+      const { props } = renderQuickEntryBox({});
+      expandQuickEntry();
+      const textarea = screen.getByTestId("quick-entry-input");
+
+      fireEvent.change(textarea, { target: { value: "Task with thinking level override" } });
+      openModelMenu();
+      fireEvent.click(screen.getByTestId("model-menu-thinking"));
+      fireEvent.change(screen.getByTestId("model-thinking-select"), { target: { value: "xhigh" } });
+      fireEvent.click(screen.getByTestId("model-submenu-back"));
+
+      fireEvent.keyDown(textarea, { key: "Escape" });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(props.onCreate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            description: "Task with thinking level override",
+            thinkingLevel: "xhigh",
+          }),
+        );
+      });
+    });
+
+    it("omits thinkingLevel from submit payload when left at default", async () => {
+      const { props } = renderQuickEntryBox({});
+      expandQuickEntry();
+      const textarea = screen.getByTestId("quick-entry-input");
+
+      fireEvent.change(textarea, { target: { value: "Task without thinking override" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(props.onCreate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            description: "Task without thinking override",
+            thinkingLevel: undefined,
+          }),
+        );
+      });
     });
 
     it("includes all three selected model pairs in submit payload", async () => {

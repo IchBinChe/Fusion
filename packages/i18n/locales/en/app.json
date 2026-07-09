@@ -4004,6 +4004,8 @@
     "preset": "Preset",
     "reviewerModel": "Reviewer Model",
     "reviewerPlaceholder": "Select reviewer model…",
+    "thinkingDefault": "Default ({{level}})",
+    "thinkingModel": "Thinking",
     "title": "Select Models",
     "useDefault": "Use default",
     "usingDefault": "Using default"

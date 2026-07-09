@@ -277,6 +277,75 @@ describe("ModelSelectionModal", () => {
     );
   });
 
+  describe("Thinking level selection", () => {
+    it("does not render the thinking-level selector when onThinkingLevelChange is omitted", () => {
+      renderModelSelectionModal();
+      expect(screen.queryByTestId("model-selection-thinking")).toBeNull();
+      expect(screen.queryByTestId("thinking-badge")).toBeNull();
+    });
+
+    it("renders the thinking-level selector with all six levels plus Default when onThinkingLevelChange is provided", () => {
+      renderModelSelectionModal({ onThinkingLevelChange: vi.fn() });
+
+      const select = screen.getByTestId("model-selection-thinking") as HTMLSelectElement;
+      expect(select).toBeTruthy();
+
+      const options = Array.from(select.options).map((o) => o.value);
+      expect(options).toEqual(["", "off", "minimal", "low", "medium", "high", "xhigh"]);
+    });
+
+    it("still omits the thinking-level selector while models are empty, even when onThinkingLevelChange is provided", () => {
+      renderModelSelectionModal({ models: [], onThinkingLevelChange: vi.fn() });
+      expect(screen.queryByTestId("model-selection-thinking")).toBeNull();
+    });
+
+    it("still omits the thinking-level selector while models are loading", () => {
+      renderModelSelectionModal({ modelsLoading: true, onThinkingLevelChange: vi.fn() });
+      expect(screen.queryByTestId("model-selection-thinking")).toBeNull();
+    });
+
+    it("still omits the thinking-level selector when models fail to load", () => {
+      renderModelSelectionModal({ modelsError: "Failed to fetch", onThinkingLevelChange: vi.fn() });
+      expect(screen.queryByTestId("model-selection-thinking")).toBeNull();
+    });
+
+    it("calls onThinkingLevelChange with the selected level", () => {
+      const onThinkingLevelChange = vi.fn();
+      renderModelSelectionModal({ onThinkingLevelChange });
+
+      const select = screen.getByTestId("model-selection-thinking");
+      fireEvent.change(select, { target: { value: "high" } });
+
+      expect(onThinkingLevelChange).toHaveBeenCalledWith("high");
+    });
+
+    it("calls onThinkingLevelChange with '' when selecting the Default option", () => {
+      const onThinkingLevelChange = vi.fn();
+      renderModelSelectionModal({ onThinkingLevelChange, thinkingLevel: "high" });
+
+      const select = screen.getByTestId("model-selection-thinking");
+      fireEvent.change(select, { target: { value: "" } });
+
+      expect(onThinkingLevelChange).toHaveBeenCalledWith("");
+    });
+
+    it("displays the thinking badge as 'Using default' when thinkingLevel is empty", () => {
+      renderModelSelectionModal({ onThinkingLevelChange: vi.fn(), thinkingLevel: "" });
+
+      const badge = screen.getByTestId("thinking-badge");
+      expect(badge.textContent).toBe("Using default");
+      expect(badge.classList.contains("model-badge-default")).toBe(true);
+    });
+
+    it("displays the thinking badge with the selected level when overridden", () => {
+      renderModelSelectionModal({ onThinkingLevelChange: vi.fn(), thinkingLevel: "xhigh" });
+
+      const badge = screen.getByTestId("thinking-badge");
+      expect(badge.textContent).toBe("xhigh");
+      expect(badge.classList.contains("model-badge-custom")).toBe(true);
+    });
+  });
+
   describe("Preset selection", () => {
     it("does not show preset selector when presets prop is omitted", () => {
       renderModelSelectionModal();

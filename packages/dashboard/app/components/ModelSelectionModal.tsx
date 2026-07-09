@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import type { ModelPreset } from "@fusion/core";
+import type { ModelPreset, ThinkingLevel } from "@fusion/core";
 import type { ModelInfo } from "../api";
 import { applyPresetToSelection } from "../utils/modelPresets";
 import { CustomModelDropdown } from "./CustomModelDropdown";
@@ -20,6 +20,18 @@ interface ModelSelectionModalProps {
   onExecutorChange: (value: string) => void;
   onValidatorChange: (value: string) => void;
   onPlanningChange?: (value: string) => void;
+  /** Current thinking-level override, or "" for the effective default. Optional so pre-existing callers keep compiling unchanged. */
+  thinkingLevel?: string;
+  /**
+   * FNXC:Settings-ThinkingLevel 2026-07-09-00:00:
+   * The quick-create "Select Models" dialog must expose the same thinking (reasoning-effort) levels — including `xhigh` —
+   * as the full task pickers (TaskForm, ModelSelectorTab), so a task created from the board carries the same override
+   * surface as one created from the New Task modal. The selector is rendered only when this handler is provided,
+   * mirroring the existing optional `onPlanningChange` pattern.
+   */
+  onThinkingLevelChange?: (value: string) => void;
+  /** Effective default thinking level shown in the Default option, e.g. project/global `defaultThinkingLevel` (falls back to "off"). */
+  defaultThinkingLevel?: ThinkingLevel;
   modelsLoading: boolean;
   modelsError: string | null;
   onRetry: () => void;
@@ -55,6 +67,9 @@ export function ModelSelectionModal({
   onExecutorChange,
   onValidatorChange,
   onPlanningChange,
+  thinkingLevel = "",
+  onThinkingLevelChange,
+  defaultThinkingLevel,
   modelsLoading,
   modelsError,
   onRetry,
@@ -310,6 +325,36 @@ export function ModelSelectionModal({
                       />
                     </div>
                   </div>
+
+                  {onThinkingLevelChange && (
+                    <div className="task-detail-section">
+                      <div className="inline-create-model-row">
+                        <label htmlFor="model-selection-thinking" className="inline-create-model-label">
+                          {t("modelSelection.thinkingModel", "Thinking")}
+                        </label>
+                        <span
+                          className={`model-badge ${thinkingLevel ? "model-badge-custom" : "model-badge-default"}`}
+                          data-testid="thinking-badge"
+                        >
+                          {thinkingLevel || t("modelSelection.usingDefault", "Using default")}
+                        </span>
+                        <select
+                          id="model-selection-thinking"
+                          data-testid="model-selection-thinking"
+                          value={thinkingLevel}
+                          onChange={(e) => onThinkingLevelChange(e.target.value)}
+                        >
+                          <option value="">{t("modelSelection.thinkingDefault", "Default ({{level}})", { level: defaultThinkingLevel ?? "off" })}</option>
+                          <option value="off">{t("models.options.off", "Off")}</option>
+                          <option value="minimal">{t("models.options.minimal", "Minimal")}</option>
+                          <option value="low">{t("models.options.low", "Low")}</option>
+                          <option value="medium">{t("models.options.medium", "Medium")}</option>
+                          <option value="high">{t("models.options.high", "High")}</option>
+                          <option value="xhigh">{t("models.options.xhigh", "Very High")}</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

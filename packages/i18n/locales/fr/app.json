@@ -3994,6 +3994,8 @@
     "preset": "Préréglage",
     "reviewerModel": "Modèle réviseur",
     "reviewerPlaceholder": "Sélectionner le modèle réviseur…",
+    "thinkingDefault": "",
+    "thinkingModel": "",
     "title": "Sélectionner les modèles",
     "useDefault": "Utiliser par défaut",
     "usingDefault": "Par défaut"

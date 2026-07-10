@@ -63,6 +63,9 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
     unarchiveTask: vi.fn(),
     getSettings: vi.fn().mockResolvedValue({}),
     updateSettings: vi.fn(),
+    getGlobalSettingsStore: vi.fn().mockReturnValue({
+      getSettings: vi.fn().mockResolvedValue({ updateCheckEnabled: true, updateCheckFrequency: "daily" }),
+    }),
     logEntry: vi.fn().mockResolvedValue(undefined),
     getAgentLogs: vi.fn().mockResolvedValue([]),
     addSteeringComment: vi.fn(),
@@ -110,6 +113,74 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
+});
+
+
+describe("GET /api/update-check", () => {
+  it("announces a newly published release through the dashboard route", async () => {
+    /*
+     * FNXC:UpdateNotifications 2026-07-09-00:00:
+     * The dashboard banner consumes /update-check, so this route must pass a fresh npm-release result through unchanged instead of hiding it behind settings, cache, or route shaping.
+     */
+    updateCheckMocks.performUpdateCheck.mockResolvedValueOnce({
+      currentVersion: CLI_PACKAGE_VERSION,
+      latestVersion: "99.0.0",
+      updateAvailable: true,
+      lastChecked: 123,
+    });
+
+    const app = createServer(createMockStore());
+    const response = await performGet(app, "/api/update-check");
+
+    expect(response.status).toBe(200);
+    expect(updateCheckMocks.performUpdateCheck).toHaveBeenCalledWith(expect.any(String), CLI_PACKAGE_VERSION, {
+      frequency: "daily",
+    });
+    expect(response.body).toEqual({
+      currentVersion: CLI_PACKAGE_VERSION,
+      latestVersion: "99.0.0",
+      updateAvailable: true,
+      lastChecked: 123,
+    });
+  });
+
+  it("does not announce updates when update checks are disabled", async () => {
+    const store = createMockStore({
+      getGlobalSettingsStore: vi.fn().mockReturnValue({
+        getSettings: vi.fn().mockResolvedValue({ updateCheckEnabled: false }),
+      }),
+    } as Partial<TaskStore>);
+
+    const app = createServer(store);
+    const response = await performGet(app, "/api/update-check");
+
+    expect(response.status).toBe(200);
+    expect(updateCheckMocks.performUpdateCheck).not.toHaveBeenCalled();
+    expect(response.body).toMatchObject({
+      currentVersion: CLI_PACKAGE_VERSION,
+      latestVersion: null,
+      updateAvailable: false,
+      disabled: true,
+    });
+  });
+
+  it("forces refresh so manual cadence can still check for a new release", async () => {
+    updateCheckMocks.performUpdateCheck.mockResolvedValueOnce({
+      currentVersion: CLI_PACKAGE_VERSION,
+      latestVersion: "99.0.0",
+      updateAvailable: true,
+      lastChecked: 456,
+    });
+
+    const app = createServer(createMockStore());
+    const response = await performRequest(app, "POST", "/api/update-check/refresh");
+
+    expect(response.status).toBe(200);
+    expect(updateCheckMocks.performUpdateCheck).toHaveBeenCalledWith(expect.any(String), CLI_PACKAGE_VERSION, {
+      force: true,
+    });
+    expect(response.body.updateAvailable).toBe(true);
+  });
 });
 
 describe("POST /api/update-check/install", () => {

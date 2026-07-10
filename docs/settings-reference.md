@@ -64,6 +64,7 @@ Defaults from `DEFAULT_GLOBAL_SETTINGS`; key scope from `GLOBAL_SETTINGS_KEYS`.
 | `modelPricingSource` | `string` | `undefined` | Source label/URL for the current pricing override set, currently the LiteLLM model pricing JSON when fetched through the dashboard. |
 | `fallbackProvider` | `string` | `undefined` | Fallback provider when the selected/default model hits transient provider failures or model-compatibility/auth-tier rejections. Dashboard chat also offers this fallback for explicit user-selected models, but the engine only swaps for retryable provider/model-selection failures. |
 | `fallbackModelId` | `string` | `undefined` | Fallback model ID (must pair with `fallbackProvider`). |
+| `fallbackThinkingLevel` | `ThinkingLevel` | `undefined` | Optional global fallback-lane thinking override for the `fallbackProvider`/`fallbackModelId` pair. Inherits `defaultThinkingLevel` when unset. |
 | `defaultThinkingLevel` | `"off" \| "minimal" \| "low" \| "medium" \| "high" \| "xhigh"` | `undefined` | Default reasoning effort for AI sessions. `xhigh` requests maximum reasoning effort; Claude CLI adapters map it to `high` for non-Opus models and `max` for Opus models. If a provider/runtime rejects simultaneous `thinking` and `reasoning_effort` parameters, Fusion retries without the explicit thinking override instead of failing the run. |
 | `ntfyEnabled` | `boolean` | `false` | Enable ntfy push notifications. |
 | `failureNotificationMode` | `"sticky-only" \| "terminal-only" \| "all"` | `"sticky-only"` | Failure notification behavior. `sticky-only` defers failed-task notifications by `failureNotificationDelayMs` and suppresses transient self-recoveries. `terminal-only` suppresses while auto-retry is still active and only dispatches when `paused === true` or `column === "in-review"` with `status === "failed"`. `all` restores legacy immediate failure notifications. |
@@ -529,6 +530,7 @@ Default notes:
 | `planningModelId` | `string` | `undefined` | Model ID for planning agents. |
 | `planningFallbackProvider` | `string` | `undefined` | Fallback provider for planning. |
 | `planningFallbackModelId` | `string` | `undefined` | Fallback model ID for planning. |
+| `planningFallbackThinkingLevel` | `ThinkingLevel` | `undefined` | Optional workflow planning-fallback thinking override. Inherits the planning/default thinking level when unset. |
 | `defaultProviderOverride` | `string` | `undefined` | Project-level override for global default provider baseline. |
 | `defaultModelIdOverride` | `string` | `undefined` | Project-level override for global default model baseline. |
 | `defaultThinkingLevelOverride` | `ThinkingLevel` | `undefined` | Optional project default-lane thinking override used when a task does not set `thinkingLevel`; inherits `defaultThinkingLevel` when unset. |
@@ -538,6 +540,7 @@ Default notes:
 | `validatorModelId` | `string` | `undefined` | Model ID for plan/code reviewers. |
 | `validatorFallbackProvider` | `string` | `undefined` | Fallback provider for reviewers; also used by reviewer UNAVAILABLE/error recovery retry before returning terminal UNAVAILABLE. |
 | `validatorFallbackModelId` | `string` | `undefined` | Fallback model ID for reviewers; paired with `validatorFallbackProvider` for reviewer recovery retry. |
+| `validatorFallbackThinkingLevel` | `ThinkingLevel` | `undefined` | Optional workflow reviewer-fallback thinking override. Inherits the validator/default thinking level when unset. |
 | `workflowStepTimeoutMs` | `number` | `900000` | Maximum time in milliseconds a single workflow step may run before it is timed out. |
 | `modelPresets` | `ModelPreset[]` | `[]` | Reusable executor/reviewer model presets. |
 | `autoSelectModelPreset` | `boolean` | `false` | Auto-select presets by task size. |
@@ -651,6 +654,7 @@ GitLab configuration examples: leave both URL fields blank for GitLab.com (`http
 | `titleSummarizerThinkingLevel` | `ThinkingLevel` | `undefined` | Optional project summarization-lane thinking override. Inherits `titleSummarizerGlobalThinkingLevel` or `defaultThinkingLevel` when unset. |
 | `titleSummarizerFallbackProvider` | `string` | `undefined` | Fallback provider for title summarization. |
 | `titleSummarizerFallbackModelId` | `string` | `undefined` | Fallback model ID for title summarization. |
+| `titleSummarizerFallbackThinkingLevel` | `ThinkingLevel` | `undefined` | Optional project title-summarizer fallback thinking override. Inherits the title-summarizer/global/default thinking level when unset. |
 | `prTitlePromptInstructions` | `string` | `undefined` | Optional project guidance appended to the Create PR dialog's AI metadata system prompt for the generated PR title. Blank or whitespace-only values are treated as unset and keep the default prompt behavior. |
 | `prDescriptionPromptInstructions` | `string` | `undefined` | Optional project guidance appended to the Create PR dialog's AI metadata system prompt for generated PR body fields (`summary`, `changes`, `testing`). Blank or whitespace-only values are treated as unset and keep the default prompt behavior. |
 | `scripts` | `Record<string, string>` | `undefined` | Named script map used by script-mode workflow steps and setup hooks. |

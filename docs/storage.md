@@ -296,6 +296,7 @@ API endpoints reviewed:
 | `defaultModelId` | Global | `GET/PUT /api/settings/global` | Default model id |
 | `fallbackProvider` | Global | `GET/PUT /api/settings/global` | Fallback model provider |
 | `fallbackModelId` | Global | `GET/PUT /api/settings/global` | Fallback model id |
+| `fallbackThinkingLevel` | Global | `GET/PUT /api/settings/global` | Fallback model reasoning effort; unset inherits |
 | `defaultThinkingLevel` | Global | `GET/PUT /api/settings/global` | Default reasoning effort |
 | `ntfyEnabled` | Global | `GET/PUT /api/settings/global` | Notifications enabled |
 | `ntfyTopic` | Global | `GET/PUT /api/settings/global` | Ntfy topic |
@@ -347,12 +348,14 @@ API endpoints reviewed:
 | `executionModelId` | Project | `GET/PUT /api/settings` | AI model ID for task execution |
 | `planningProvider` | Project | `GET/PUT /api/settings` | Planning model provider |
 | `planningModelId` | Project | `GET/PUT /api/settings` | Planning model id |
-| `planningFallbackProvider` | Project | `GET/PUT /api/settings` | Planning fallback provider |
-| `planningFallbackModelId` | Project | `GET/PUT /api/settings` | Planning fallback model id |
+| `planningFallbackProvider` | Workflow | `fn_workflow_settings` / workflow settings API | Planning fallback provider |
+| `planningFallbackModelId` | Workflow | `fn_workflow_settings` / workflow settings API | Planning fallback model id |
+| `planningFallbackThinkingLevel` | Workflow | `fn_workflow_settings` / workflow settings API | Planning fallback reasoning effort; unset inherits |
 | `validatorProvider` | Project | `GET/PUT /api/settings` | Validator model provider |
 | `validatorModelId` | Project | `GET/PUT /api/settings` | Validator model id |
-| `validatorFallbackProvider` | Project | `GET/PUT /api/settings` | Validator fallback provider |
-| `validatorFallbackModelId` | Project | `GET/PUT /api/settings` | Validator fallback model id |
+| `validatorFallbackProvider` | Workflow | `fn_workflow_settings` / workflow settings API | Validator fallback provider |
+| `validatorFallbackModelId` | Workflow | `fn_workflow_settings` / workflow settings API | Validator fallback model id |
+| `validatorFallbackThinkingLevel` | Workflow | `fn_workflow_settings` / workflow settings API | Validator fallback reasoning effort; unset inherits |
 | `modelPresets` | Project | `GET/PUT /api/settings` | Reusable model presets |
 | `autoSelectModelPreset` | Project | `GET/PUT /api/settings` | Auto-preset by task size |
 | `defaultPresetBySize` | Project | `GET/PUT /api/settings` | Size→preset mapping |
@@ -381,6 +384,7 @@ API endpoints reviewed:
 | `titleSummarizerModelId` | Project | `GET/PUT /api/settings` | Title model id |
 | `titleSummarizerFallbackProvider` | Project | `GET/PUT /api/settings` | Title fallback provider |
 | `titleSummarizerFallbackModelId` | Project | `GET/PUT /api/settings` | Title fallback model id |
+| `titleSummarizerFallbackThinkingLevel` | Project | `GET/PUT /api/settings` | Title fallback reasoning effort; unset inherits |
 | `scripts` | Project | `GET/PUT /api/settings` | Named script map |
 | `setupScript` | Project | `GET/PUT /api/settings` | Named setup script reference |
 | `insightExtractionEnabled` | Project | `GET/PUT /api/settings` | Insight extraction toggle |

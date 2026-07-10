@@ -323,6 +323,9 @@ Workflows define how a task moves through planning, execution, review, workflow 
 <!-- FNXC:NewTaskWorkflowDropdown 2026-06-30-18:52: The full New Task dialog workflow picker now matches the icon-rich workflow identity used in Board/List selectors while preserving create-time workflowId semantics. -->
 When creating a task from the full **New Task** dialog, the **Workflow** advanced control opens a styled dropdown instead of a native select. Built-in workflows show the Fusion mark, custom workflows show their configured compact icon when present, **No workflow** remains the explicit opt-out, and leaving the picker untouched still inherits the project/default workflow.
 
+<!-- FNXC:WorkflowOptionalSteps 2026-07-10-08:00: Operators can now toggle optional workflow steps from the task Edit form as well as the Workflow tab. Edit mode must load the task's resolved workflow catalog without re-seeding from defaultOn, preserving the task's persisted enabledWorkflowSteps until the operator explicitly toggles a step. -->
+Optional workflow steps can be toggled from the task **Edit** form's **More options → Workflow Steps** control or from the task's **Workflow** tab. The edit form uses the task's resolved workflow and preserves the task's current stored selection when it opens; workflow-authored `defaultOn` values remain a create-time/runtime default, not an edit-form re-seed.
+
 The workflow editor opens as a full-screen modal editor for inspecting built-ins and authoring custom workflows.
 
 Navigation:
@@ -1235,7 +1238,7 @@ Inspect task definition, logs, review feedback, comments, artifacts, workflow ou
 - GitLab stale state means Fusion is displaying the last persisted GitLab metadata after a sync/import refresh could not confirm a newer state; no GitLab token or secret is stored on the task.
 - GitLab comment and close/reopen actions use the configured GitLab REST API base URL for GitLab.com or self-managed instances. Group-imported issues are updated only when Fusion has the concrete project identity plus IID, and merge requests are closed/reopened only for GitLab-supported states; Fusion never auto-merges a GitLab merge request.
 - Backstop reconciliation runs every 15 minutes to close tracked GitHub issues for soft-deleted and archived tasks even after restart; the sweep is paginated so large archive backlogs are eventually drained.
-- In shared task edit/create forms, GitHub Tracking appears at the bottom of **More options**, after **Workflow Steps**.
+- In shared task edit/create forms, GitHub Tracking appears at the bottom of **More options**, after **Workflow Steps**. In task edit mode, **Workflow Steps** appears only when the task's resolved workflow exposes optional steps, so workflows without optional steps do not leave an empty button shell.
 - From this section you can explicitly enable/disable tracking and manage a per-task repo override (`owner/repo`). Clearing the override saves `null` and falls back to project/global defaults.
 - The **Plan** tab shows the stored **Original prompt** above the generated `PROMPT.md` content, so the exact task prompt remains visible after planning. It is collapsed by default behind a chevron toggle; expanding it renders the prompt as Markdown (the same renderer used for the generated plan body). It stays read-only — editing or requesting AI revision still applies only to the generated plan.
 - In `in-review`, pull-request controls/status (including stall badges) are in a dedicated **Pull Request** tab instead of the Definition tab.

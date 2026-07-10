@@ -107,6 +107,7 @@ export interface GrokSession {
   model: string;
   systemPrompt?: string;
   messages: unknown[];
+  state: { errorMessage?: string; messages: unknown[] };
   sessionId?: string;
   lastModelDescription: string;
   callbacks: GrokCallbacks;

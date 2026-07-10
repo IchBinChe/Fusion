@@ -15,12 +15,13 @@ resolves on close/error. Uses fake timers for the lifecycle timeout paths
 per AGENTS.md "Do Not Add Slow Tests".
 */
 
-function makeFakeProc(): { proc: GrokStreamProcess; stdout: PassThrough; kill: ReturnType<typeof vi.fn> } {
+function makeFakeProc(): { proc: GrokStreamProcess; stdout: PassThrough; stderr: PassThrough; kill: ReturnType<typeof vi.fn> } {
   const stdout = new PassThrough();
+  const stderr = new PassThrough();
   const emitter = new EventEmitter();
   const kill = vi.fn();
-  const proc = Object.assign(emitter, { stdout, kill }) as unknown as GrokStreamProcess;
-  return { proc, stdout, kill };
+  const proc = Object.assign(emitter, { stdout, stderr, kill }) as unknown as GrokStreamProcess;
+  return { proc, stdout, stderr, kill };
 }
 
 describe("GrokRuntimeAdapter", () => {
@@ -101,7 +102,7 @@ describe("GrokRuntimeAdapter", () => {
     expect(onText).not.toHaveBeenCalled();
   });
 
-  it("resolves (never rejects) when the subprocess emits an error", async () => {
+  it("resolves (never rejects) when the subprocess emits an error and records the diagnostic", async () => {
     const { proc } = makeFakeProc();
     const spawn = vi.fn().mockReturnValue(proc);
     const adapter = new GrokRuntimeAdapter({ spawn });
@@ -111,6 +112,92 @@ describe("GrokRuntimeAdapter", () => {
     proc.emit("error", new Error("ENOENT"));
 
     await expect(promise).resolves.toBeUndefined();
+    expect(session.state.errorMessage).toBe("Grok CLI process error: ENOENT");
+  });
+
+  it("waits for child close after stdout ends so fatal stderr becomes the chat diagnostic", async () => {
+    const { proc, stdout, stderr } = makeFakeProc();
+    const spawn = vi.fn().mockReturnValue(proc);
+    const adapter = new GrokRuntimeAdapter({ spawn });
+    const { session } = await adapter.createSession({});
+
+    const promise = adapter.promptWithFallback(session, "hi");
+    let resolved = false;
+    void promise.then(() => {
+      resolved = true;
+    });
+
+    stdout.end();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    stderr.write("Error: API key required. Set GROK_API_KEY env var\n");
+    proc.emit("close", 1, null);
+    await promise;
+
+    expect(session.state.errorMessage).toBe(
+      "Grok CLI failed (code 1): Error: API key required. Set GROK_API_KEY env var",
+    );
+  });
+
+  it("records a concrete diagnostic for non-zero exits with no stderr", async () => {
+    const { proc, stdout } = makeFakeProc();
+    const spawn = vi.fn().mockReturnValue(proc);
+    const adapter = new GrokRuntimeAdapter({ spawn });
+    const { session } = await adapter.createSession({});
+
+    const promise = adapter.promptWithFallback(session, "hi");
+    stdout.end();
+    proc.emit("close", 2, null);
+    await promise;
+
+    expect(session.state.errorMessage).toBe("Grok CLI failed with code 2 and no stderr output.");
+  });
+
+  it("keeps a clean content-less zero exit silent", async () => {
+    const { proc, stdout } = makeFakeProc();
+    const spawn = vi.fn().mockReturnValue(proc);
+    const adapter = new GrokRuntimeAdapter({ spawn });
+    const { session } = await adapter.createSession({});
+
+    const promise = adapter.promptWithFallback(session, "hi");
+    stdout.end();
+    proc.emit("close", 0, null);
+    await promise;
+
+    expect(session.state.errorMessage).toBeUndefined();
+  });
+
+  it("records well-formed NDJSON error events as diagnostics without rejecting", async () => {
+    const { proc, stdout } = makeFakeProc();
+    const spawn = vi.fn().mockReturnValue(proc);
+    const adapter = new GrokRuntimeAdapter({ spawn });
+    const { session } = await adapter.createSession({});
+
+    const promise = adapter.promptWithFallback(session, "hi");
+    stdout.write(`${JSON.stringify({ type: "error", message: "invalid model: grok-unknown", timestamp: 1 })}\n`);
+    proc.emit("close", 0, null);
+    await promise;
+
+    expect(session.state.errorMessage).toBe("Grok CLI error: invalid model: grok-unknown");
+  });
+
+  it("does not turn a successful text response into an error when stderr is noisy", async () => {
+    const { proc, stdout, stderr } = makeFakeProc();
+    const spawn = vi.fn().mockReturnValue(proc);
+    const adapter = new GrokRuntimeAdapter({ spawn });
+    const onText = vi.fn();
+    const { session } = await adapter.createSession({ onText });
+
+    const promise = adapter.promptWithFallback(session, "hi");
+    stdout.write(`${JSON.stringify({ type: "text", stepNumber: 1, text: "answer", timestamp: 1 })}\n`);
+    stderr.write("debug noise\n");
+    proc.emit("close", 1, null);
+    await promise;
+
+    expect(onText).toHaveBeenCalledWith("answer");
+    expect(session.state.errorMessage).toBeUndefined();
   });
 
   // FNXC:GrokCli 2026-07-09-00:10: FN-7724 — tool_use bridging coverage.
@@ -270,7 +357,7 @@ describe("GrokRuntimeAdapter", () => {
     });
   });
 
-  it("resolves without throwing if the injected spawn function throws synchronously", async () => {
+  it("resolves without throwing if the injected spawn function throws synchronously and records the diagnostic", async () => {
     const spawn = vi.fn().mockImplementation(() => {
       throw new Error("spawn ENOENT");
     });
@@ -278,6 +365,7 @@ describe("GrokRuntimeAdapter", () => {
     const { session } = await adapter.createSession({});
 
     await expect(adapter.promptWithFallback(session, "hi")).resolves.toBeUndefined();
+    expect(session.state.errorMessage).toBe("Grok CLI spawn failed: spawn ENOENT");
   });
 
   it("describeModel formats grok prefix", () => {

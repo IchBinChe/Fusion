@@ -8,6 +8,7 @@ import {
 } from "../workflow-settings.js";
 import type { WorkflowSettingDefinition, WorkflowIrV2 } from "../workflow-ir-types.js";
 import { BUILTIN_WORKFLOW_SETTINGS } from "../builtin-workflow-settings.js";
+import { THINKING_LEVELS } from "../types.js";
 import { createSharedTaskStoreTestHarness } from "./store-test-helpers.js";
 
 const BUILTIN_CODING = "builtin:coding";
@@ -306,6 +307,46 @@ describe("TaskStore.updateWorkflowSettingValues", () => {
     expect(effective.requirePrApproval).toBe(true);
     // Untouched built-in keys resolve to their declaration defaults.
     expect(effective.workflowStepTimeoutMs).toBe(900_000);
+  });
+});
+
+describe("workflow model-lane thinking settings", () => {
+  const harness = createSharedTaskStoreTestHarness();
+
+  beforeAll(harness.beforeAll);
+  afterAll(harness.afterAll);
+  beforeEach(harness.beforeEach);
+  afterEach(harness.afterEach);
+
+  it("round-trips primary lane thinking levels and clears them with null-as-delete", async () => {
+    const store = harness.store();
+    await store.updateWorkflowSettingValues(BUILTIN_CODING, PROJECT, {
+      executionThinkingLevel: "low",
+      planningThinkingLevel: "high",
+      validatorThinkingLevel: "minimal",
+    });
+
+    expect(store.getWorkflowSettingValues(BUILTIN_CODING, PROJECT)).toMatchObject({
+      executionThinkingLevel: "low",
+      planningThinkingLevel: "high",
+      validatorThinkingLevel: "minimal",
+    });
+
+    await store.updateWorkflowSettingValues(BUILTIN_CODING, PROJECT, { executionThinkingLevel: null });
+    expect(store.getWorkflowSettingValues(BUILTIN_CODING, PROJECT)).not.toHaveProperty("executionThinkingLevel");
+  });
+
+  it("declares thinking companions as THINKING_LEVELS enum settings and rejects invalid values", async () => {
+    const ids = ["executionThinkingLevel", "planningThinkingLevel", "validatorThinkingLevel"];
+    for (const id of ids) {
+      const decl = BUILTIN_WORKFLOW_SETTINGS.find((setting) => setting.id === id);
+      expect(decl?.type).toBe("enum");
+      expect(decl?.options?.map((option) => option.value)).toEqual([...THINKING_LEVELS]);
+    }
+
+    const store = harness.store();
+    await expect(store.updateWorkflowSettingValues(BUILTIN_CODING, PROJECT, { executionThinkingLevel: "turbo" })).rejects.toBeInstanceOf(WorkflowSettingRejectionError);
+    expect(store.getWorkflowSettingValues(BUILTIN_CODING, PROJECT)).not.toHaveProperty("executionThinkingLevel");
   });
 });
 

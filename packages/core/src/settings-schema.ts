@@ -42,12 +42,15 @@ type MovedProjectSettingsKey =
   | "reflectionEnabled"
   | "executionProvider"
   | "executionModelId"
+  | "executionThinkingLevel"
   | "planningProvider"
   | "planningModelId"
+  | "planningThinkingLevel"
   | "planningFallbackProvider"
   | "planningFallbackModelId"
   | "validatorProvider"
   | "validatorModelId"
+  | "validatorThinkingLevel"
   | "validatorFallbackProvider"
   | "validatorFallbackModelId";
 

@@ -546,7 +546,7 @@ Plugin palette templates (above) can be dropped in as a starting point instead o
 
 <!--
 FNXC:WorkflowModelBinding 2026-07-10-00:00:
-FN-7771 lets workflow authors bind reasoning effort per session-running node, independently from provider/model. Node-level thinking is strongest so a custom workflow can pin a high-effort review or low-effort execution seam without changing task-wide or project/workflow lane defaults.
+FN-7771 lets workflow authors bind reasoning effort per session-running node, independently from provider/model. FN-7772 adds workflow-declared primary lane thinking companions, but node-level thinking remains strongest so a custom workflow can pin a high-effort review or low-effort execution seam without changing task-wide or lane defaults.
 -->
 
 A prompt-mode gate node can set its own model with:
@@ -555,7 +555,7 @@ A prompt-mode gate node can set its own model with:
 - `modelId`
 - `thinkingLevel` (`"off" | "minimal" | "low" | "medium" | "high" | "xhigh"`)
 
-If both model fields are set, node execution uses that provider/model pair; otherwise it falls back to default model selection. `thinkingLevel` is stored as `config.thinkingLevel` and can be set or cleared independently from the model pair. Runtime reasoning-effort precedence is **node/step `thinkingLevel` → task `thinkingLevel` → workflow/project lane thinking override → global `defaultThinkingLevel`**. This applies to prompt/gate custom nodes, the `execute` and `step-execute` seams, and `step-review` reviewer sessions. Dashboard node summaries show unpinned provider/model state as **Default model**; the inspector's inline thinking selector shows the resolved project default (e.g. "Default (off)") when no node-level thinking value is pinned.
+If both model fields are set, node execution uses that provider/model pair; otherwise it falls back to default model selection. `thinkingLevel` is stored as `config.thinkingLevel` and can be set or cleared independently from the model pair. Runtime reasoning-effort precedence is **node/step `thinkingLevel` → task `thinkingLevel` → workflow lane thinking override (`executionThinkingLevel`, `planningThinkingLevel`, or `validatorThinkingLevel`) → global lane thinking override → project default thinking override → global `defaultThinkingLevel`**. The lane settings accept `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`; unset means inherit. This applies to prompt/gate custom nodes, the `execute` and `step-execute` seams, triage/planning, and `step-review` reviewer sessions. Dashboard node summaries show unpinned provider/model state as **Default model**; the inspector's inline thinking selector shows the resolved project default (e.g. "Default (off)") when no node-level thinking value is pinned.
 
 ## Default-On Behavior for New Tasks
 

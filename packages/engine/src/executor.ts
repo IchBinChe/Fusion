@@ -6688,9 +6688,9 @@ export class TaskExecutor {
               fallbackModelId: settings.fallbackModelId,
               /*
                * FNXC:Settings-ThinkingLevel 2026-07-10-00:00:
-               * Step-review model sessions honor per-node `config.thinkingLevel` before task and settings defaults.
+               * Step-review model sessions honor per-node `config.thinkingLevel` before task, validator workflow lane, global lane, and default thinking settings.
                */
-              defaultThinkingLevel: resolveExecutorThinkingLevel(
+              defaultThinkingLevel: resolveValidatorThinkingLevel(
                 typeof config.thinkingLevel === "string" && WORKFLOW_THINKING_LEVEL_SET.has(config.thinkingLevel)
                   ? (config.thinkingLevel as ThinkingLevel)
                   : detail.thinkingLevel,

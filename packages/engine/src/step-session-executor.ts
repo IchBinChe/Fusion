@@ -1274,7 +1274,7 @@ export class StepSessionExecutor {
 
         /*
          * FNXC:Settings-ThinkingLevel 2026-07-10-00:00:
-         * Reusable primary step sessions resolve reasoning effort as workflow node/step override first, then parsed step metadata, then task and settings defaults.
+         * Reusable primary step sessions resolve reasoning effort as workflow node/step override first, then parsed step metadata, task thinking, workflow execution lane, global lane, and default thinking settings.
          */
         const stepThinkingLevel = this.options.workflowStepThinkingLevel
           ?? (taskDetail.steps[stepIndex] as { thinkingLevel?: string } | undefined)?.thinkingLevel;

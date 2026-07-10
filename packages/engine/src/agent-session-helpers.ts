@@ -16,6 +16,7 @@ import {
   isGrokApiKeyFusionVisible,
   isTestModeActive,
   resolveExecutionSettingsModel,
+  resolvePhaseThinkingLevel,
   resolveProjectDefaultModel,
   resolveTaskExecutionModel,
   resolveTaskPlanningModel,
@@ -161,29 +162,27 @@ function firstThinkingLevel(...levels: Array<ThinkingLevel | string | undefined 
 
 /**
  * FNXC:Settings-ThinkingLevel 2026-07-10-00:00:
- * Model-lane thinking overrides must resolve through the same session option (`defaultThinkingLevel`) pi.ts already guards with the thinking/reasoning conflict fallback. Keep task-level thinking first, then the lane override, then the global default.
+ * Model-lane thinking overrides must resolve through the same session option (`defaultThinkingLevel`) pi.ts already guards with the thinking/reasoning conflict fallback. Keep node/step thinking first when supplied by callers, then task, workflow lane, global lane, project default thinking override, and global default.
  */
 export function resolveExecutorThinkingLevel(
   taskThinkingLevel: ThinkingLevel | string | undefined,
   settings: Partial<Settings> | undefined,
 ): string | undefined {
-  return firstThinkingLevel(
-    taskThinkingLevel,
-    settings?.executionGlobalThinkingLevel,
-    settings?.defaultThinkingLevelOverride,
-    settings?.defaultThinkingLevel,
-  );
+  return resolvePhaseThinkingLevel("execution", settings, taskThinkingLevel);
 }
 
-export function resolvePlanningThinkingLevel(settings: Partial<Settings> | undefined): string | undefined {
-  return firstThinkingLevel(settings?.planningGlobalThinkingLevel, settings?.defaultThinkingLevelOverride, settings?.defaultThinkingLevel);
+export function resolvePlanningThinkingLevel(
+  settings: Partial<Settings> | undefined,
+  taskThinkingLevel?: ThinkingLevel | string,
+): string | undefined {
+  return resolvePhaseThinkingLevel("planning", settings, taskThinkingLevel);
 }
 
 export function resolveValidatorThinkingLevel(
   taskThinkingLevel: ThinkingLevel | string | undefined,
   settings: Partial<Settings> | undefined,
 ): string | undefined {
-  return firstThinkingLevel(taskThinkingLevel, settings?.validatorGlobalThinkingLevel, settings?.defaultThinkingLevelOverride, settings?.defaultThinkingLevel);
+  return resolvePhaseThinkingLevel("validation", settings, taskThinkingLevel);
 }
 
 export function resolveTitleSummarizerThinkingLevel(settings: Partial<Settings> | undefined): string | undefined {

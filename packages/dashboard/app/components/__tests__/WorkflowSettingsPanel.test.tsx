@@ -193,6 +193,7 @@ describe("WorkflowSettingsPanel — Values tab", () => {
         initial={[
           { id: "planningProvider", name: "Planning provider", type: "string" },
           { id: "planningModelId", name: "Planning model", type: "string" },
+          { id: "planningThinkingLevel", name: "Planning thinking level", type: "enum", options: [{ value: "high", label: "High" }] },
           { id: "validatorProvider", name: "Validator provider", type: "string" },
           { id: "requirePlanApproval", name: "Require plan approval", type: "boolean" },
           { id: "planReviewMaxRevisions", name: "Plan Review revision cap", type: "number" },
@@ -583,10 +584,13 @@ describe("WorkflowSettingsPanel — Values tab", () => {
   const modelDecls: WorkflowSettingDefinition[] = [
     { id: "planningProvider", name: "Planning provider", type: "string" },
     { id: "planningModelId", name: "Planning model", type: "string" },
+    { id: "planningThinkingLevel", name: "Planning thinking level", type: "enum", options: [{ value: "high", label: "High" }] },
     { id: "executionProvider", name: "Execution provider", type: "string" },
     { id: "executionModelId", name: "Execution model", type: "string" },
+    { id: "executionThinkingLevel", name: "Execution thinking level", type: "enum", options: [{ value: "low", label: "Low" }] },
     { id: "validatorProvider", name: "Validator provider", type: "string" },
     { id: "validatorModelId", name: "Validator model", type: "string" },
+    { id: "validatorThinkingLevel", name: "Validator thinking level", type: "enum", options: [{ value: "minimal", label: "Minimal" }] },
     { id: "planningFallbackProvider", name: "Planning fallback provider", type: "string" },
     { id: "planningFallbackModelId", name: "Planning fallback model", type: "string" },
     { id: "customModelProvider", name: "Custom model provider", type: "string" },
@@ -660,6 +664,33 @@ describe("WorkflowSettingsPanel — Values tab", () => {
       { planningProvider: "anthropic", planningModelId: "claude-sonnet" },
       "proj-1",
     );
+  });
+
+  it("edits workflow lane thinking inline and reset clears the companion setting", async () => {
+    mockFetchValues.mockResolvedValue(
+      payload({
+        stored: { planningThinkingLevel: "high" },
+        effective: { planningThinkingLevel: "high" },
+      }),
+    );
+    render(<Host initial={modelDecls} readOnly />);
+    await waitFor(() => expect(mockFetchModels).toHaveBeenCalled());
+
+    await openPlanningDropdown();
+    fireEvent.change(screen.getByTestId("custom-model-dropdown-thinking"), { target: { value: "" } });
+    fireEvent.click(screen.getByTestId("wf-settings-save-values"));
+
+    await waitFor(() => expect(mockUpdateValues).toHaveBeenCalledTimes(1));
+    expect(mockUpdateValues).toHaveBeenCalledWith("wf-1", { planningThinkingLevel: null }, "proj-1");
+  });
+
+  it("does not render a thinking control when a lane lacks its companion declaration", async () => {
+    const withoutThinking = modelDecls.filter((setting) => setting.id !== "planningThinkingLevel");
+    render(<Host initial={withoutThinking} readOnly />);
+    await waitFor(() => expect(mockFetchModels).toHaveBeenCalled());
+
+    expect(screen.queryByLabelText("Plan/Triage Model")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Planning Fallback Model")).toBeInTheDocument();
   });
 
   it("clearing a workflow model dropdown writes paired null values", async () => {

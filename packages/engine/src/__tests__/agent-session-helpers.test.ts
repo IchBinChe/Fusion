@@ -28,23 +28,26 @@ vi.mock("../runtime-resolution.js", async () => {
 
 
 describe("resolve model-lane thinking levels", () => {
-  it("applies task > execution lane > project default lane > global default precedence", () => {
+  it("applies node/task > workflow execution lane > global lane > project default lane > global default precedence", () => {
     const settings = {
       defaultThinkingLevel: "low",
       defaultThinkingLevelOverride: "medium",
       executionGlobalThinkingLevel: "high",
+      executionThinkingLevel: "minimal",
     } as const;
 
     expect(resolveExecutorThinkingLevel("xhigh", settings)).toBe("xhigh");
-    expect(resolveExecutorThinkingLevel(undefined, settings)).toBe("high");
+    expect(resolveExecutorThinkingLevel(undefined, settings)).toBe("minimal");
+    expect(resolveExecutorThinkingLevel(undefined, { executionGlobalThinkingLevel: "high", defaultThinkingLevel: "low" })).toBe("high");
     expect(resolveExecutorThinkingLevel(undefined, { defaultThinkingLevelOverride: "medium", defaultThinkingLevel: "low" })).toBe("medium");
     expect(resolveExecutorThinkingLevel(undefined, { defaultThinkingLevel: "low" })).toBe("low");
   });
 
   it("resolves planning, reviewer, and summarization lane overrides before the global default", () => {
-    expect(resolvePlanningThinkingLevel({ planningGlobalThinkingLevel: "minimal", defaultThinkingLevel: "high" })).toBe("minimal");
-    expect(resolveValidatorThinkingLevel(undefined, { validatorGlobalThinkingLevel: "medium", defaultThinkingLevel: "low" })).toBe("medium");
-    expect(resolveValidatorThinkingLevel("xhigh", { validatorGlobalThinkingLevel: "medium", defaultThinkingLevel: "low" })).toBe("xhigh");
+    expect(resolvePlanningThinkingLevel({ planningThinkingLevel: "low", planningGlobalThinkingLevel: "minimal", defaultThinkingLevel: "high" })).toBe("low");
+    expect(resolvePlanningThinkingLevel({ planningThinkingLevel: "low", defaultThinkingLevel: "high" }, "xhigh")).toBe("xhigh");
+    expect(resolveValidatorThinkingLevel(undefined, { validatorThinkingLevel: "minimal", validatorGlobalThinkingLevel: "medium", defaultThinkingLevel: "low" })).toBe("minimal");
+    expect(resolveValidatorThinkingLevel("xhigh", { validatorThinkingLevel: "minimal", validatorGlobalThinkingLevel: "medium", defaultThinkingLevel: "low" })).toBe("xhigh");
     expect(resolveTitleSummarizerThinkingLevel({
       titleSummarizerThinkingLevel: "high",
       titleSummarizerGlobalThinkingLevel: "medium",

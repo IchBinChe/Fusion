@@ -1357,8 +1357,10 @@ export {
   applyTestModeOverrides,
   isTestModeActive,
   resolveExecutionSettingsModel,
+  resolvePhaseThinkingLevel,
   resolvePlanningSettingsModel,
   resolveProjectDefaultModel,
+  resolveSettingsLaneThinkingLevel,
   resolveTaskExecutionModel,
   resolveTaskPlanningModel,
   resolveTaskValidatorModel,
@@ -1369,7 +1371,7 @@ export {
   routeTaskPlanningModel,
   routeTaskValidatorModel,
 } from "./model-resolution.js";
-export type { ResolvedModelSelection, RouterLaneOptions } from "./model-resolution.js";
+export type { ModelThinkingPhase, ResolvedModelSelection, RouterLaneOptions } from "./model-resolution.js";
 export {
   routeModel,
   routeModelAndEmit,

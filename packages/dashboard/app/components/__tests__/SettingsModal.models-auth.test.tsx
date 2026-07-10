@@ -354,14 +354,17 @@ describe("SettingsModal", () => {
       }
     });
 
-    const declaredWorkflowModelSettings = (ids: string[]) => ids.map((id) => ({ id, name: id, type: "string" as const }));
+    const declaredWorkflowModelSettings = (ids: string[]) => ids.map((id) => ({ id, name: id, type: id.endsWith("ThinkingLevel") ? "enum" as const : "string" as const, options: id.endsWith("ThinkingLevel") ? [{ value: "high", label: "High" }] : undefined }));
     const primaryWorkflowModelSettingIds = [
       "planningProvider",
       "planningModelId",
+      "planningThinkingLevel",
       "executionProvider",
       "executionModelId",
+      "executionThinkingLevel",
       "validatorProvider",
       "validatorModelId",
+      "validatorThinkingLevel",
     ];
     const fallbackWorkflowModelSettingIds = [
       "planningFallbackProvider",
@@ -573,7 +576,7 @@ describe("SettingsModal", () => {
       await waitFor(() => {
         expect(mockUpdateWorkflowSettingValues).toHaveBeenCalledWith(
           "workflow-custom",
-          { executionProvider: null, executionModelId: null },
+          { executionProvider: null, executionModelId: null, executionThinkingLevel: null },
           "proj-1",
         );
       });

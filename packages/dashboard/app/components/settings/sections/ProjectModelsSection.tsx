@@ -13,6 +13,7 @@ type WorkflowModelPair = {
     id: "planning" | "execution" | "validator" | "planning-fallback" | "validator-fallback" | "title-summarizer-fallback";
     providerId: string;
     modelId: string;
+    thinkingId?: string;
     label: string;
     help: string;
 };
@@ -20,12 +21,16 @@ const DEFAULT_WORKFLOW_ID = "builtin:coding";
 /*
 FNXC:SettingsModels 2026-06-16-19:58:
 Fallback model lanes must be configurable in all Settings surfaces: General uses the global Fallback Model, Workflow Values uses declared workflow settings, and Project Models exposes only fallback pairs declared by the active default workflow so saves never PATCH undeclared keys.
+
+FNXC:Settings-ThinkingLevel 2026-07-10-00:00:
+Primary workflow model lanes may expose an inline thinking selector only when the active workflow declares the matching companion setting. Reset must clear both the model pair and the thinking companion; fallback/title-summarizer rows intentionally render no orphan thinking shell.
 */
 const WORKFLOW_MODEL_PAIRS: WorkflowModelPair[] = [
     {
         id: "planning",
         providerId: "planningProvider",
         modelId: "planningModelId",
+        thinkingId: "planningThinkingLevel",
         label: "Plan/Triage Model",
         help: "Provider and model used when planning or triaging tasks. Leave unset to inherit from the workflow default.",
     },
@@ -33,6 +38,7 @@ const WORKFLOW_MODEL_PAIRS: WorkflowModelPair[] = [
         id: "execution",
         providerId: "executionProvider",
         modelId: "executionModelId",
+        thinkingId: "executionThinkingLevel",
         label: "Executor Model",
         help: "Provider and model used while executing workflow steps. Leave unset to inherit from the workflow default.",
     },
@@ -40,6 +46,7 @@ const WORKFLOW_MODEL_PAIRS: WorkflowModelPair[] = [
         id: "validator",
         providerId: "validatorProvider",
         modelId: "validatorModelId",
+        thinkingId: "validatorThinkingLevel",
         label: "Reviewer Model",
         help: "Provider and model used for workflow review or validation lanes. Leave unset to inherit from the workflow default.",
     },
@@ -70,7 +77,8 @@ function declaredWorkflowModelPairs(settings?: WorkflowSettingDefinition[]): Wor
     return WORKFLOW_MODEL_PAIRS.filter((pair) => {
         const provider = settingsById.get(pair.providerId);
         const model = settingsById.get(pair.modelId);
-        return provider?.type === "string" && model?.type === "string";
+        const thinking = pair.thinkingId ? settingsById.get(pair.thinkingId) : undefined;
+        return provider?.type === "string" && model?.type === "string" && (!pair.thinkingId || thinking?.type === "enum" || thinking?.type === "string");
     });
 }
 function modelPairValue(values: Record<string, unknown>, pair: WorkflowModelPair): string {
@@ -213,9 +221,22 @@ export function ProjectModelsSection({ scopeBanner, form, setForm, models, proje
             };
         });
     }, []);
+    const setWorkflowThinkingValue = useCallback((pair: WorkflowModelPair, value: string) => {
+        if (!pair.thinkingId)
+            return;
+        setWorkflowRejections((current) => {
+            if (!pair.thinkingId || !current[pair.thinkingId])
+                return current;
+            const next = { ...current };
+            delete next[pair.thinkingId];
+            return next;
+        });
+        setWorkflowPending((current) => ({ ...current, [pair.thinkingId as string]: value || null }));
+    }, []);
     const resetWorkflowPairValue = useCallback((pair: WorkflowModelPair) => {
         setWorkflowPairValue(pair, "");
-    }, [setWorkflowPairValue]);
+        setWorkflowThinkingValue(pair, "");
+    }, [setWorkflowPairValue, setWorkflowThinkingValue]);
     const saveWorkflowLanes = useCallback(async () => {
         if (!projectId || !workflowDirty)
             return;
@@ -329,11 +350,19 @@ export function ProjectModelsSection({ scopeBanner, form, setForm, models, proje
       {!projectId ? (<div className="settings-empty-state settings-muted">{t("settings.projectModels.openAProjectToEditWorkflowModelLanes", "Open a project to edit workflow model lanes.")}</div>) : workflowLoading ? (<div className="settings-empty-state"><LoadingSpinner label={t("settings.projectModels.loadingWorkflowModelLanes", "Loading workflow model lanes\u2026")} /></div>) : availableModels.length === 0 ? (<div className="settings-empty-state settings-muted">{t("settings.projectModels.noModelsAvailableConfigureAuthenticationBeforeSelectingWorkflow", " No models available. Configure authentication before selecting workflow model lanes. ")}</div>) : (<>
           {workflowModelPairs.map((pair) => {
                 const value = modelPairValue(effectiveWorkflowValues, pair);
-                const customized = Object.prototype.hasOwnProperty.call(workflowPending, pair.providerId)
+                const rawThinkingValue = pair.thinkingId ? effectiveWorkflowValues[pair.thinkingId] : undefined;
+                const thinkingValue: string = typeof rawThinkingValue === "string" ? rawThinkingValue : "";
+                const modelCustomized = Object.prototype.hasOwnProperty.call(workflowPending, pair.providerId)
                     ? workflowPending[pair.providerId] !== null
                     : Boolean(workflowPayload?.stored && (Object.prototype.hasOwnProperty.call(workflowPayload.stored, pair.providerId)
                         || Object.prototype.hasOwnProperty.call(workflowPayload.stored, pair.modelId)));
-                const error = workflowRejections[pair.providerId]?.message ?? workflowRejections[pair.modelId]?.message;
+                const thinkingCustomized = pair.thinkingId
+                    ? (Object.prototype.hasOwnProperty.call(workflowPending, pair.thinkingId)
+                        ? workflowPending[pair.thinkingId] !== null
+                        : Boolean(workflowPayload?.stored && Object.prototype.hasOwnProperty.call(workflowPayload.stored, pair.thinkingId)))
+                    : false;
+                const customized = modelCustomized || thinkingCustomized;
+                const error = workflowRejections[pair.providerId]?.message ?? workflowRejections[pair.modelId]?.message ?? (pair.thinkingId ? workflowRejections[pair.thinkingId]?.message : undefined);
                 return (<div className="form-group" key={pair.id} data-testid={`workflow-model-lane-${pair.id}`}>
                 <div className="settings-model-lane-label-row">
                   <label htmlFor={`workflow-${pair.id}-model`}>{pair.label}</label>
@@ -343,7 +372,7 @@ export function ProjectModelsSection({ scopeBanner, form, setForm, models, proje
                 </div>
                 <div className="settings-model-lane-control-row">
                   <div className="settings-model-lane-control-main">
-                    <CustomModelDropdown id={`workflow-${pair.id}-model`} label={pair.label} models={availableModels} value={value} onChange={(next) => setWorkflowPairValue(pair, next)} placeholder={t("settings.projectModels.useWorkflowDefault", "Use workflow default")} defaultOptionLabel="Use workflow default" favoriteProviders={favoriteProviders} onToggleFavorite={onToggleFavorite} favoriteModels={favoriteModels} onToggleModelFavorite={onToggleModelFavorite} menuWidth="readable"/>
+                    <CustomModelDropdown id={`workflow-${pair.id}-model`} label={pair.label} models={availableModels} value={value} onChange={(next) => setWorkflowPairValue(pair, next)} placeholder={t("settings.projectModels.useWorkflowDefault", "Use workflow default")} defaultOptionLabel="Use workflow default" favoriteProviders={favoriteProviders} onToggleFavorite={onToggleFavorite} favoriteModels={favoriteModels} onToggleModelFavorite={onToggleModelFavorite} menuWidth="readable" showThinkingLevel={Boolean(pair.thinkingId)} thinkingLevel={thinkingValue} onThinkingLevelChange={pair.thinkingId ? (level) => setWorkflowThinkingValue(pair, level) : undefined} defaultThinkingLevel={typeof form.defaultThinkingLevel === "string" ? form.defaultThinkingLevel : "off"}/>
                   </div>
                   {customized && (<button type="button" className="btn btn-ghost btn-sm" title={t("settings.projectModels.resetToInheritFromWorkflow", "Reset to inherit from workflow")} onClick={() => resetWorkflowPairValue(pair)} style={{ whiteSpace: "nowrap" }}>{t("settings.projectModels.reset", " Reset ")}</button>)}
                 </div>

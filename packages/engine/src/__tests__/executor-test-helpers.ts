@@ -85,6 +85,7 @@ vi.mock("../agent-session-helpers.js", async () => {
     },
     resolveExecutorThinkingLevel: (taskThinkingLevel: string | undefined, settings: Record<string, unknown> | undefined) =>
       taskThinkingLevel
+      ?? (typeof settings?.executionThinkingLevel === "string" ? settings.executionThinkingLevel : undefined)
       ?? (typeof settings?.executionGlobalThinkingLevel === "string" ? settings.executionGlobalThinkingLevel : undefined)
       ?? (typeof settings?.defaultThinkingLevelOverride === "string" ? settings.defaultThinkingLevelOverride : undefined)
       ?? (typeof settings?.defaultThinkingLevel === "string" ? settings.defaultThinkingLevel : undefined),

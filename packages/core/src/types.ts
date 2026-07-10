@@ -4105,6 +4105,10 @@ export interface ProjectSettings {
   /** Project-level AI model ID for task execution.
    *  Must be set together with `executionProvider`. */
   executionModelId?: string;
+  /** Workflow-declared execution-lane thinking override. Inherits through task/default thinking when unset. */
+  executionThinkingLevel?: ThinkingLevel;
+  /** Workflow-declared planning-lane thinking override. Inherits through task/default thinking when unset. */
+  planningThinkingLevel?: ThinkingLevel;
   /** AI model provider for validator/reviewer agent.
    *  Must be set together with `validatorModelId`. When both are undefined,
    *  falls back to `defaultProvider`/`defaultModelId`. */
@@ -4120,6 +4124,8 @@ export interface ProjectSettings {
   /** Fallback model ID for validator/reviewer. When unset, falls back to the
    *  global fallback model. Must be set together with `validatorFallbackProvider`. */
   validatorFallbackModelId?: string;
+  /** Workflow-declared validator-lane thinking override. Inherits through task/default thinking when unset. */
+  validatorThinkingLevel?: ThinkingLevel;
   /** Reusable model configuration presets for task creation. */
   modelPresets?: ModelPreset[];
   /** When true, task creation UIs automatically recommend/apply a preset based on task size. */

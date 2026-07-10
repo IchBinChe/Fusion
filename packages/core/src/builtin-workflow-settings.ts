@@ -1,4 +1,4 @@
-import type { Settings } from "./types.js";
+import { THINKING_LEVELS, type Settings } from "./types.js";
 import type { WorkflowSettingDefinition } from "./workflow-ir-types.js";
 
 /**
@@ -203,6 +203,10 @@ export const BUILTIN_MOVED_WORKFLOW_SETTINGS: WorkflowSettingDefinition[] = [
   // ── Per-phase model lanes ──────────────────────────────────────────────
   // Legacy defaults are all `undefined`; `default` is omitted so resolution
   // falls through to the global lane / project default (KTD-7).
+  /*
+   * FNXC:Settings-ThinkingLevel 2026-07-10-00:00:
+   * Workflow-declared primary model lanes may pin a thinking effort per (workflow, project). Empty values inherit through the lane/global/default chain, enum options are validated against THINKING_LEVELS, and fallback/title-summarizer lanes intentionally reuse their primary lane thinking level instead of adding separate companion settings.
+   */
   {
     id: "executionProvider",
     name: "Execution provider",
@@ -216,6 +220,13 @@ export const BUILTIN_MOVED_WORKFLOW_SETTINGS: WorkflowSettingDefinition[] = [
     description: "Model id for the execution phase. Empty falls through to the global lane.",
   },
   {
+    id: "executionThinkingLevel",
+    name: "Execution thinking level",
+    type: "enum",
+    options: THINKING_LEVELS.map((level) => ({ value: level, label: level })),
+    description: "Thinking effort for the execution phase. Empty inherits from the task or default thinking level.",
+  },
+  {
     id: "planningProvider",
     name: "Planning provider",
     type: "string",
@@ -226,6 +237,13 @@ export const BUILTIN_MOVED_WORKFLOW_SETTINGS: WorkflowSettingDefinition[] = [
     name: "Planning model",
     type: "string",
     description: "Model id for the planning phase. Empty falls through to the global lane.",
+  },
+  {
+    id: "planningThinkingLevel",
+    name: "Planning thinking level",
+    type: "enum",
+    options: THINKING_LEVELS.map((level) => ({ value: level, label: level })),
+    description: "Thinking effort for the planning phase. Empty inherits from the task or default thinking level.",
   },
   {
     id: "planningFallbackProvider",
@@ -250,6 +268,13 @@ export const BUILTIN_MOVED_WORKFLOW_SETTINGS: WorkflowSettingDefinition[] = [
     name: "Validator model",
     type: "string",
     description: "Model id for the validation phase. Empty falls through to the global lane.",
+  },
+  {
+    id: "validatorThinkingLevel",
+    name: "Validator thinking level",
+    type: "enum",
+    options: THINKING_LEVELS.map((level) => ({ value: level, label: level })),
+    description: "Thinking effort for the validation/review phase. Empty inherits from the task or default thinking level.",
   },
   {
     id: "validatorFallbackProvider",

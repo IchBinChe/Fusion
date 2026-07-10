@@ -55,9 +55,10 @@ describe("CustomModelDropdown", () => {
       resolve(__dirname, "../CustomModelDropdown.css"),
       "utf-8",
     );
-    const rule = css.match(/\.model-combobox\s+\.thinking-level-select\s*\{[^}]*\}/)?.[0] ?? "";
-    const optionRule = css.match(/\.model-combobox\s+\.thinking-level-select\s+option\s*\{[^}]*\}/)?.[0] ?? "";
+    const rule = css.match(/\.model-combobox-dropdown\s+\.thinking-level-select\s*\{[^}]*\}/)?.[0] ?? "";
+    const optionRule = css.match(/\.model-combobox-dropdown\s+\.thinking-level-select\s+option\s*\{[^}]*\}/)?.[0] ?? "";
 
+    expect(css).not.toMatch(/\.model-combobox\s+\.thinking-level-select/);
     expect(rule).toContain("background: var(--surface);");
     expect(rule).toContain("border: var(--btn-border-width) solid var(--border);");
     expect(rule).toContain("color: var(--text);");
@@ -88,6 +89,7 @@ describe("CustomModelDropdown", () => {
 
     const thinkingSelect = await screen.findByTestId("custom-model-dropdown-thinking");
     expect(thinkingSelect).toHaveAccessibleName("Thinking Level");
+    expect(thinkingSelect.closest(".model-combobox-dropdown")).not.toBeNull();
     expect(within(thinkingSelect).getByRole("option", { name: "Default (off)" })).toBeTruthy();
     for (const optionName of ["Off", "Minimal", "Low", "Medium", "High", "Very High"]) {
       expect(within(thinkingSelect).getByRole("option", { name: optionName })).toBeTruthy();

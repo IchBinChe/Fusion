@@ -967,10 +967,15 @@ export function SettingsModal({
   const [activePluginsSubsection, setActivePluginsSubsection] = useState<PluginsSubsectionId>(() =>
     initialSection === "pi-extensions" ? "pi-extensions" : "fusion-plugins",
   );
+  /*
+  FNXC:Settings 2026-07-09-00:00:
+  Mobile Settings navigation is controlled by both the viewport hook and the CSS media query because tests and embedded shells can mock one surface independently. Treat either mobile signal as sufficient so the compact picker/search-toggle path stays available whenever Settings is in mobile mode.
+  */
   const [showMobileSectionPicker, setShowMobileSectionPicker] = useState(() =>
-    typeof window !== "undefined" && typeof window.matchMedia === "function"
+    viewportMode === "mobile" ||
+    (typeof window !== "undefined" && typeof window.matchMedia === "function"
       ? window.matchMedia(MOBILE_SETTINGS_MEDIA_QUERY)?.matches === true
-      : false,
+      : false),
   );
   const [settingsSearchQuery, setSettingsSearchQuery] = useState("");
   /*
@@ -1210,13 +1215,13 @@ export function SettingsModal({
       return;
     }
     const updateMobilePicker = (event?: MediaQueryListEvent) => {
-      setShowMobileSectionPicker(event ? event.matches : mediaQuery.matches);
+      setShowMobileSectionPicker(viewportMode === "mobile" || (event ? event.matches : mediaQuery.matches));
     };
 
     updateMobilePicker();
     mediaQuery.addEventListener("change", updateMobilePicker);
     return () => mediaQuery.removeEventListener("change", updateMobilePicker);
-  }, []);
+  }, [viewportMode]);
 
   /*
   FNXC:SettingsReset 2026-07-04-00:15:
@@ -3653,11 +3658,15 @@ export function SettingsModal({
             <aside className="settings-navigation" aria-label={t("settings.search.navigationLabel", "Settings navigation")}> 
               {showMobileSectionPicker && (
                 <div className="settings-mobile-section-picker">
-                  <label htmlFor="settings-mobile-section">{t("settings.mobileNav.label", "Settings Section")}</label>
+                  {/**
+                   * FNXC:Settings 2026-07-09-00:00:
+                   * FN-7752 removes the visible mobile section-picker label to reclaim vertical space on narrow Settings screens. The select keeps "Settings Section" as its aria-label so screen readers and getByLabelText tests keep the same accessible name without an empty label shell.
+                   */}
                   <div className="settings-mobile-section-picker-control-row">
                     {hasSettingsSearchResults ? (
                       <select
                         id="settings-mobile-section"
+                        aria-label={t("settings.mobileNav.label", "Settings Section")}
                         className="select touch-target"
                         value={activeSection}
                         onChange={(event) => setActiveSection(event.target.value as SectionId)}

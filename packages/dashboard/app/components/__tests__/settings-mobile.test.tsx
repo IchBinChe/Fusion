@@ -272,6 +272,18 @@ describe("SettingsModal mobile adaptations", () => {
     expect(await findByText("Updated to v2.0.0 — restart Fusion to apply")).toBeTruthy();
   });
 
+  it("preserves the mobile section picker accessible name without rendering a visible label", async () => {
+    mockSettingsViewport(true);
+    const { container, getByLabelText, queryByText } = render(<SettingsModal onClose={vi.fn()} addToast={vi.fn()} />);
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+    const picker = getByLabelText("Settings Section") as HTMLSelectElement;
+    expect(picker.id).toBe("settings-mobile-section");
+    expect(picker.getAttribute("aria-label")).toBe("Settings Section");
+    expect(container.querySelector('label[for="settings-mobile-section"]')).toBeNull();
+    expect(queryByText("Settings Section", { selector: "label" })).toBeNull();
+  });
+
   it("excludes research sections from mobile picker when researchView is disabled", async () => {
     mockSettingsViewport(true);
     const user = userEvent.setup();
@@ -505,6 +517,7 @@ describe("SettingsModal mobile adaptations", () => {
 
     expectMobileRule(css, ".settings-layout", "flex-direction: column;");
     expectMobileRule(css, ".settings-mobile-section-picker", "display: flex;");
+    expectMobileRule(css, ".settings-mobile-section-picker", "padding: var(--space-sm) var(--space-md) var(--space-md);");
     expectMobileRule(css, ".settings-mobile-section-picker-control-row", "display: flex;");
     expectMobileRule(css, ".settings-mobile-section-picker-control-row", "align-items: center;");
     expectMobileRule(css, ".settings-mobile-section-picker select", "flex: 1 1 auto;");
@@ -517,16 +530,21 @@ describe("SettingsModal mobile adaptations", () => {
     expectMobileRule(css, ".settings-nav-item", "justify-content: center;");
     expectMobileRule(css, ".settings-nav-item", "gap: 4px;");
     expectMobileRule(css, ".settings-content textarea", "font-size: 16px;");
-    expectMobileRule(css, ".settings-section-heading", "padding: var(--space-lg) 0 var(--space-md);");
-    expectMobileRule(css, ".settings-section-heading", "margin: 0;");
+    expectMobileRule(css, ".settings-section-heading", "padding: var(--space-lg) var(--space-md) var(--space-md);");
+    expectMobileRule(css, ".settings-section-heading", "margin: 0 0 var(--space-md);");
     expectMobileRule(css, ".settings-scope-icon", "margin-right: 0;");
-    expectMobileRule(css, ".settings-scope-banner", "padding: var(--space-sm) var(--space-lg);");
+    expectMobileRule(css, ".settings-scope-banner", "padding: var(--space-sm) var(--space-md);");
     expectMobileRule(css, ".settings-empty-state", "padding: 12px 14px;");
-    expectMobileRule(css, ".settings-description", "padding: 0 var(--space-lg);");
+    expectMobileRule(css, ".settings-description", "padding: 0 var(--space-md);");
     expectMobileRule(css, ".theme-selector", "padding: 0 14px 14px;");
     expectMobileRule(css, ".settings-preset-item", "flex-direction: column;");
     expectMobileRule(css, ".settings-preset-item-actions", "justify-content: flex-start;");
     expectMobileRule(css, ".settings-preset-size-grid", "grid-template-columns: 1fr;");
+    expectMobileRule(css, ".settings-modal .modal-actions", "flex-wrap: nowrap;");
+    expectMobileRule(css, ".settings-modal .modal-actions", "overflow-x: auto;");
+    expectMobileRule(css, ".settings-update-check", "flex-wrap: nowrap;");
+    expect(css).toContain(".settings-modal .modal-header,\n  .settings-modal .modal-actions");
+    expect(css).toContain("padding-block: var(--space-sm);");
     expectMobileRule(css, ".auth-provider-header > div:not(.auth-provider-info):not(.auth-apikey-section)", "margin-left: auto;");
     expectMobileRule(css, ".auth-apikey-section", "align-items: flex-end;");
     expectMobileRule(css, ".auth-apikey-input-row", "justify-content: flex-end;");

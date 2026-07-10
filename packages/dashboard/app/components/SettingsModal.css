@@ -243,6 +243,20 @@ The embedded title reads like other embedded-view titles (Planning modal-header-
     edge, after the Star/Discord actions, without displacing them. Desktop/tablet embedded and the standalone modal
     presentation are untouched by this rule (scoped to .settings-modal--embedded .modal-header--embedded).
   */
+  /*
+  FNXC:Settings 2026-07-09-00:00:
+  FN-7752 makes the mobile Settings header and footer shorter at ≤768px only. Keep the FN-4375 one-line header invariant while trimming vertical padding in both standalone modal and embedded SettingsView presentations.
+  */
+  .settings-modal .modal-header,
+  .settings-modal .modal-actions {
+    padding-block: var(--space-sm);
+    padding-inline: var(--space-md);
+  }
+
+  .settings-modal--embedded .modal-header--embedded {
+    min-height: 0;
+  }
+
   .settings-modal--embedded .modal-header--embedded .settings-embedded-mobile-close {
     --settings-embedded-mobile-close-touch-target: calc(var(--space-lg) + var(--space-lg) + var(--space-xs));
 
@@ -287,21 +301,41 @@ The embedded title reads like other embedded-view titles (Planning modal-header-
 }
 
 @media (max-width: 768px) {
+  /*
+  FNXC:Settings 2026-07-09-00:00:
+  FN-7752 requires the mobile Settings footer to remain a single horizontal row in both standalone and embedded presentations. Keep Version/Help, Export/Import/Reset, and Cancel/Save on one nowrap rail that can scroll horizontally instead of stacking into multiple rows.
+  */
+  .settings-modal .modal-actions {
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: var(--space-xs);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .settings-modal .modal-actions-left,
+  .settings-modal .modal-actions-right {
+    flex-shrink: 0;
+    gap: var(--space-xs);
+  }
+
   .settings-modal-footer-version {
-    flex: 1 1 100%;
+    flex: 0 1 auto;
     margin-right: 0;
   }
 
   .settings-update-check {
-    flex-wrap: wrap;
-    row-gap: var(--space-xs);
+    flex-wrap: nowrap;
+    row-gap: 0;
   }
 
   .settings-update-result {
-    flex: 1 1 100%;
+    flex: 0 1 auto;
+    white-space: nowrap;
   }
 
-  .settings-footer-help-btn {
+  .settings-footer-help-btn,
+  .settings-version-check-btn {
     flex-shrink: 0;
   }
 }
@@ -2214,19 +2248,17 @@ The header row wraps so the badge drops below the heading on narrow widths inste
     font-size: 16px;
   }
 
+  /*
+  FNXC:Settings 2026-07-09-00:00:
+  FN-7752 trims mobile-only Settings section chrome: after removing the visible picker label, use smaller horizontal padding for the picker and internal section text so narrow viewports devote more width to controls without changing desktop/tablet rules.
+  */
   .settings-mobile-section-picker {
     display: flex;
     flex-direction: column;
     gap: var(--space-xs);
-    padding: var(--space-sm) var(--space-lg) var(--space-md);
+    padding: var(--space-sm) var(--space-md) var(--space-md);
     border-bottom: none;
     background: var(--surface);
-  }
-
-  .settings-mobile-section-picker label {
-    color: var(--text-muted);
-    font-weight: 600;
-    text-transform: uppercase;
   }
 
   .settings-mobile-section-picker-control-row {
@@ -2320,7 +2352,7 @@ The header row wraps so the badge drops below the heading on narrow widths inste
   }
 
   .settings-section-heading {
-    padding: var(--space-lg) var(--space-lg) var(--space-md);
+    padding: var(--space-lg) var(--space-md) var(--space-md);
     margin: 0 0 var(--space-md);
   }
 
@@ -2345,7 +2377,7 @@ The header row wraps so the badge drops below the heading on narrow widths inste
   }
 
   .settings-scope-banner {
-    padding: var(--space-sm) var(--space-lg);
+    padding: var(--space-sm) var(--space-md);
   }
 
   .memory-editor-frame {
@@ -2371,7 +2403,7 @@ The header row wraps so the badge drops below the heading on narrow widths inste
   }
 
   .settings-description {
-    padding: 0 var(--space-lg);
+    padding: 0 var(--space-md);
   }
 
   .settings-model-lane-actions {

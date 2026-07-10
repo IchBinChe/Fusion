@@ -1,48 +1,21 @@
 import { createInterface } from "node:readline";
 import { forceKillGrokStream, spawnGrokStream, type GrokStreamProcess, type SpawnGrokStreamOptions } from "./cli-stream.js";
 import { parseLine } from "./stream-parser.js";
-import type { AgentRuntime, AgentRuntimeOptions, AgentSession, AgentSessionResult, GrokErrorEvent, GrokSession } from "./types.js";
+import type { AgentRuntime, AgentRuntimeOptions, AgentSession, AgentSessionResult, GrokSession } from "./types.js";
 
 /*
-FNXC:GrokCli 2026-07-09-00:00:
-FN-7722: replaces the FN-7715 intentional no-op. Upstream grok-cli DOES
-document and implement a non-interactive `grok --prompt <text> --format
-json` NDJSON event stream (verified against primary source, not just docs
-prose: src/index.ts's CLI parsing + src/headless/output.ts's
-`createHeadlessJsonlEmitter` + its fixture tests). Contract captured in
-docs/grok-cli-contract.md. This adapter spawns that command via the
-`cli-stream` seam, parses NDJSON via `stream-parser.parseLine`, and drives
-`onText` as `text` events arrive.
+FNXC:GrokCli 2026-07-10-10:54:
+FN-7790: the production binary is xAI's Grok Build TUI, whose non-interactive prompt path is `grok -p <text> --output-format streaming-json` and whose NDJSON union is `thought`/`text`/`end` with payloads in `data`. Bridge `text.data` to `onText`, `thought.data` to `onThinking`, and record `end.sessionId` without resolving before subprocess close, because close still carries stderr/exit diagnostics. The obsolete `step_*`/`tool_use`/`error` handling targeted a different `grok` product and is intentionally removed so tests cannot pass on the wrong schema again.
 
-FNXC:GrokCli 2026-07-09-00:10:
-FN-7724: extends the above with `tool_use` (and terminal `step_finish`/
-`error`) bridging, per docs/grok-cli-contract.md's verified NDJSON schema.
-`onToolStart`/`onToolEnd` fire from each `tool_use` event's
-`toolCall`/`toolResult`, mirroring the Droid plugin's `DroidCallbacks`
-shape. No Grok→pi tool-name/arg mapping is applied: the verified contract
-does not pin grok-cli's specific tool-name vocabulary (unlike Droid's
-Claude-shaped names), so `toolCall.function.name`/parsed `.arguments` pass
-through unchanged (decision recorded in the FN-7724 `research` task
-document). `onThinking` is still never invoked — the verified schema has no
-thinking/reasoning event (confirmed absence, not a gap). The terminal
-lifecycle is UNCHANGED from FN-7722: the doc states `step_finish` is a
-per-step boundary (multiple can occur per run for multi-round tool use), so
-it does NOT finalize the promise here; only subprocess `close`/`error`
-does, same `streamEnded`-guarded (via the existing `settled` flag)
-resolve-never-reject lifecycle as before. This adapter is only reached when
-an agent's `runtimeConfig.runtimeHint === "grok"` (wired end-to-end by
-FN-7725).
-
-FNXC:GrokCliRouting 2026-07-09-00:00:
-FN-7753: auto-derived `grok` runtime routing from a `grok-cli/*` model selection must preserve the concrete model. Normalize provider-qualified ids (`grok-cli/<id>` or `grok/<id>`) at session creation/prompt time and pass only the concrete id to `grok --model`; the no-model Runtime-mode path keeps the historical `grok/default` session fallback and omits `--model`.
+FNXC:GrokCliRouting 2026-07-10-10:54:
+FN-7753's auto-derived `grok` runtime routing from a `grok-cli/*` model selection still preserves the concrete model. Normalize provider-qualified ids (`grok-cli/<id>` or `grok/<id>`) at session creation/prompt time and pass only the concrete id to `grok -m`; the no-model Runtime-mode path keeps the historical `grok/default` session fallback and omits `-m`.
 */
 
 /**
- * Cold-start ceiling: if `grok --prompt --format json` produces no stdout
- * line within this window, treat it as a hung/failed subprocess and resolve
- * (never reject — mirrors the Droid adapter's resolve-on-error lifecycle so
- * pi always gets a well-formed, if empty, result instead of an unhandled
- * rejection).
+ * Cold-start ceiling: if `grok -p --output-format streaming-json` produces no
+ * stdout line within this window, treat it as a hung/failed subprocess and
+ * resolve (never reject — mirrors the Droid adapter's resolve-on-error lifecycle
+ * so pi always gets a well-formed, if empty, result instead of an unhandled rejection).
  */
 const FIRST_LINE_TIMEOUT_MS = 60_000;
 
@@ -54,25 +27,6 @@ const FIRST_LINE_TIMEOUT_MS = 60_000;
  * last-resort guard for a catastrophically hung `grok` process.
  */
 const INACTIVITY_TIMEOUT_MS = 30 * 60_000;
-
-/**
- * FNXC:GrokCli 2026-07-09-00:10:
- * FN-7724: `toolCall.function.arguments` is a JSON-encoded string per the
- * verified `ToolCall` shape (docs/grok-cli-contract.md / types.ts's
- * `GrokToolCallLike`). Parse it defensively — malformed/missing arguments
- * must never throw inside the NDJSON read loop; fall back to the raw string
- * (or undefined) so callers still see something rather than losing the
- * event, mirroring the Droid event-bridge's empty-args guard.
- */
-function parseToolArguments(raw: string | undefined): unknown {
-  if (raw === undefined) return undefined;
-  if (raw === "") return {};
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return raw;
-  }
-}
 
 function normalizeGrokCliModel(model: string | undefined): string | undefined {
   const normalized = model?.trim();
@@ -101,17 +55,12 @@ function formatCloseDiagnostic(code: number | null, signal: NodeJS.Signals | nul
   return detail ? `Grok CLI failed (${exitDetail}): ${detail}` : `Grok CLI failed with ${exitDetail} and no stderr output.`;
 }
 
-function formatErrorEventDiagnostic(event: GrokErrorEvent): string {
-  const detail = compactDiagnostic(event.message);
-  return detail ? `Grok CLI error: ${detail}` : "Grok CLI emitted an error event without a message.";
-}
-
 function formatNoNdjsonDiagnostic(firstStdoutLine: string | undefined): string {
   const firstLine = firstStdoutLine ? compactDiagnostic(firstStdoutLine) : "";
   if (firstLine) {
     return `Grok CLI produced stdout but no NDJSON events for a headless prompt; first line: ${firstLine}`;
   }
-  return "Grok CLI produced no NDJSON output for a headless prompt; this usually means the binary on PATH is not the supported grok-cli headless implementation, did not recognize --prompt/--format json, or exited interactive mode immediately after stdin EOF.";
+  return "Grok CLI produced no NDJSON output for a headless prompt; this usually means the binary on PATH is not xAI's supported Grok Build TUI headless implementation, did not recognize -p/--output-format streaming-json, or exited interactive mode immediately after stdin EOF.";
 }
 
 function appendMessage(session: GrokSession, role: "user" | "assistant", content: string): void {
@@ -217,8 +166,8 @@ export class GrokRuntimeAdapter implements AgentRuntime {
       FNXC:GrokCli 2026-07-10-00:00:
       A failing headless `grok` run can close stdout before the child `close` event reports its non-zero exit and stderr. Resolving on readline close made dashboard Chat persist an empty assistant message before the diagnostic existed. Finalize only from subprocess close/error or lifecycle timeouts, and store concrete stderr/NDJSON error details on session.state.errorMessage so shared chat/executor seams can surface the reason without breaking the resolve-never-reject runtime contract.
 
-      FNXC:GrokCli 2026-07-10-09:55:
-      FN-7788 root-caused the remaining immediate "no message" symptom to a code-0 prompt run that emitted no parsed NDJSON at all, commonly caused by an unsupported/wrong `grok` binary falling into interactive mode and immediately reading EOF from ignored stdin. Upstream guarantees a valid `grok --prompt <text> --format json` run emits at least `step_start`, so a zero-NDJSON close is now a diagnosable failure surfaced through both `onText` and `session.state.errorMessage`; only a real NDJSON run with empty assistant text stays silent.
+      FNXC:GrokCli 2026-07-10-10:56:
+      FN-7790 keeps FN-7788's zero-output diagnostic but updates the invariant for xAI Grok Build TUI: a valid `grok -p <text> --output-format streaming-json` run emits at least an `end` event, with optional `thought`/`text` events. A code-0 close with zero parsed NDJSON is a wrong-binary/interactive-EOF failure surfaced through both `onText` and `session.state.errorMessage`; a real `end` event with empty assistant text remains a legitimate silent response.
       */
       const finish = () => {
         if (settled) return;
@@ -268,31 +217,19 @@ export class GrokRuntimeAdapter implements AgentRuntime {
         receivedNdjsonEvent = true;
 
         if (event.type === "text") {
-          if (event.text.length > 0) {
+          if (event.data.length > 0) {
             receivedText = true;
-            assistantText += event.text;
+            assistantText += event.data;
           }
-          grokSession.callbacks.onText?.(event.text);
-        } else if (event.type === "tool_use") {
-          // FNXC:GrokCli 2026-07-09-00:10: FN-7724 — bridge the verified
-          // tool_use event. toolCall.function.name/arguments and
-          // toolResult.success/output are the verified fields
-          // (docs/grok-cli-contract.md); pass-through, no name/arg mapping
-          // (see FN-7724 research task document for the decision).
-          const toolName = event.toolCall?.function?.name ?? event.toolCall?.type ?? "unknown";
-          const args = parseToolArguments(event.toolCall?.function?.arguments);
-          grokSession.callbacks.onToolStart?.(toolName, args);
-          const isError = event.toolResult?.success === false;
-          grokSession.callbacks.onToolEnd?.(toolName, isError, event.toolResult);
-        } else if (event.type === "error") {
-          setErrorMessage(formatErrorEventDiagnostic(event));
+          grokSession.callbacks.onText?.(event.data);
+        } else if (event.type === "thought") {
+          grokSession.callbacks.onThinking?.(event.data);
+        } else if (event.type === "end") {
+          grokSession.sessionId = event.sessionId ?? grokSession.sessionId;
         }
-        // step_start / step_finish: step_finish is a per-step boundary (not
-        // run-terminal, per docs/grok-cli-contract.md — a run can have
-        // multiple step_start/step_finish pairs for multi-round tool use), so
-        // it is intentionally NOT bridged into a callback or treated as the
-        // finalize signal; only subprocess close/error finalizes (see finish()
-        // below).
+        // `end` is the real xAI stream's terminal marker, but subprocess close
+        // remains authoritative for resolving because close carries non-zero
+        // exit/stderr diagnostics for failed runs.
       });
 
       proc.stderr?.on("data", (chunk: Buffer | string) => {

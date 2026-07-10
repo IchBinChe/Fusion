@@ -1,18 +1,12 @@
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GrokRuntimeAdapter } from "../runtime-adapter.js";
 import type { GrokStreamProcess } from "../cli-stream.js";
+import { GrokRuntimeAdapter } from "../runtime-adapter.js";
 
 /*
-FNXC:GrokCli 2026-07-09-00:00:
-FN-7722: replaces FN-7715's "intentional no-op" assertion. `promptWithFallback`
-is now a real NDJSON streaming implementation; these tests inject a FAKE
-stdout stream (no live binary, no real subprocess spawn) through the
-constructor's `spawn` seam and feed verified-shape NDJSON fixture lines
-(docs/grok-cli-contract.md), asserting onText fires in order and the promise
-resolves on close/error. Uses fake timers for the lifecycle timeout paths
-per AGENTS.md "Do Not Add Slow Tests".
+FNXC:GrokCli 2026-07-10-11:05:
+FN-7790: adapter tests are pinned to the operator-verified xAI Grok Build TUI stream (`thought`/`text`/`end` with `data`). They intentionally avoid a live binary in CI but exercise the same spawn seam and lifecycle diagnostics that previously hid the wrong `--prompt`/`--format json` contract behind fake superagent-ai fixtures.
 */
 
 function makeFakeProc(): { proc: GrokStreamProcess; stdout: PassThrough; stderr: PassThrough; kill: ReturnType<typeof vi.fn> } {
@@ -22,6 +16,10 @@ function makeFakeProc(): { proc: GrokStreamProcess; stdout: PassThrough; stderr:
   const kill = vi.fn();
   const proc = Object.assign(emitter, { stdout, stderr, kill }) as unknown as GrokStreamProcess;
   return { proc, stdout, stderr, kill };
+}
+
+function closeProc(proc: GrokStreamProcess, code = 0, signal: NodeJS.Signals | null = null): void {
+  proc.emit("close", code, signal);
 }
 
 describe("GrokRuntimeAdapter", () => {
@@ -39,68 +37,87 @@ describe("GrokRuntimeAdapter", () => {
     const { session } = await adapter.createSession({ defaultModelId: "grok-cli/grok-4.5" });
 
     const promise = adapter.promptWithFallback(session, "hello grok");
-    proc.emit("close", 0, null);
+    closeProc(proc);
     await promise;
 
     expect(session.model).toBe("grok-4.5");
     expect(spawn).toHaveBeenCalledWith("grok", "hello grok", expect.objectContaining({ model: "grok-4.5" }));
   });
 
-  it("omits --model for the no-model grok/default fallback", async () => {
+  it("omits -m for the no-model grok/default fallback", async () => {
     const { proc } = makeFakeProc();
     const spawn = vi.fn().mockReturnValue(proc);
     const adapter = new GrokRuntimeAdapter({ spawn });
     const { session } = await adapter.createSession({});
 
     const promise = adapter.promptWithFallback(session, "hello grok");
-    proc.emit("close", 0, null);
+    closeProc(proc);
     await promise;
 
     expect(session.model).toBe("grok/default");
     expect(spawn).toHaveBeenCalledWith("grok", "hello grok", expect.objectContaining({ model: undefined }));
   });
 
-  it("streams onText for each text NDJSON event in order and resolves on close", async () => {
+  it("bridges real xAI thought/text/end events and persists assistant content", async () => {
     const { proc, stdout } = makeFakeProc();
     const spawn = vi.fn().mockReturnValue(proc);
     const adapter = new GrokRuntimeAdapter({ spawn });
-
     const onText = vi.fn();
-    const { session } = await adapter.createSession({ onText });
+    const onThinking = vi.fn();
+    const { session } = await adapter.createSession({ onText, onThinking });
 
     const promise = adapter.promptWithFallback(session, "hello grok");
-
-    stdout.write(`${JSON.stringify({ type: "step_start", stepNumber: 1, timestamp: 1 })}\n`);
-    stdout.write(`${JSON.stringify({ type: "text", stepNumber: 1, text: "hel", timestamp: 2 })}\n`);
-    stdout.write(`${JSON.stringify({ type: "text", stepNumber: 1, text: "lo!", timestamp: 3 })}\n`);
-    stdout.write(
-      `${JSON.stringify({ type: "step_finish", stepNumber: 1, timestamp: 4, finishReason: "stop", usage: {} })}\n`,
-    );
-    proc.emit("close", 0, null);
-
+    stdout.write(`${JSON.stringify({ type: "thought", data: "Thinking" })}\n`);
+    stdout.write(`${JSON.stringify({ type: "text", data: "Hel" })}\n`);
+    stdout.write(`${JSON.stringify({ type: "text", data: "lo" })}\n`);
+    stdout.write(`${JSON.stringify({ type: "end", stopReason: "EndTurn", sessionId: "session-1", requestId: "request-1" })}\n`);
+    closeProc(proc);
     await promise;
 
-    expect(spawn).toHaveBeenCalledWith("grok", "hello grok", expect.objectContaining({}));
-    expect(onText.mock.calls.map((c) => c[0])).toEqual(["hel", "lo!"]);
-    expect(session.state.messages).toContainEqual({ role: "assistant", content: "hello!" });
+    expect(onThinking.mock.calls.map((c) => c[0])).toEqual(["Thinking"]);
+    expect(onText.mock.calls.map((c) => c[0])).toEqual(["Hel", "lo"]);
+    expect(session.sessionId).toBe("session-1");
+    expect(session.state.messages).toContainEqual({ role: "assistant", content: "Hello" });
   });
 
-  it("skips malformed/unrecognized lines without invoking onText and without throwing", async () => {
+  it("bridges a single text event without thought events", async () => {
     const { proc, stdout } = makeFakeProc();
     const spawn = vi.fn().mockReturnValue(proc);
     const adapter = new GrokRuntimeAdapter({ spawn });
     const onText = vi.fn();
     const { session } = await adapter.createSession({ onText });
 
-    const promise = adapter.promptWithFallback(session, "hi");
+    const promise = adapter.promptWithFallback(session, "one word");
+    stdout.write(`${JSON.stringify({ type: "text", data: "Hello" })}\n`);
+    stdout.write(`${JSON.stringify({ type: "end", stopReason: "EndTurn" })}\n`);
+    closeProc(proc);
+    await promise;
 
+    expect(onText).toHaveBeenCalledWith("Hello");
+    expect(session.state.messages).toContainEqual({ role: "assistant", content: "Hello" });
+  });
+
+  it("skips malformed, non-JSON, and legacy wrong-product lines without callbacks", async () => {
+    const { proc, stdout } = makeFakeProc();
+    const spawn = vi.fn().mockReturnValue(proc);
+    const adapter = new GrokRuntimeAdapter({ spawn });
+    const onText = vi.fn();
+    const onThinking = vi.fn();
+    const onToolStart = vi.fn();
+    const { session } = await adapter.createSession({ onText, onThinking, onToolStart });
+
+    const promise = adapter.promptWithFallback(session, "hi");
     stdout.write("[SandboxDebug] booting\n");
     stdout.write("{not valid json\n");
-    stdout.write(`${JSON.stringify({ type: "tool_use", stepNumber: 1, timestamp: 5, toolCall: {}, toolResult: {} })}\n`);
-    proc.emit("close", 0, null);
+    stdout.write(`${JSON.stringify({ type: "tool_use", toolCall: {}, toolResult: {} })}\n`);
+    stdout.write(`${JSON.stringify({ type: "end", stopReason: "EndTurn" })}\n`);
+    closeProc(proc);
+    await promise;
 
-    await expect(promise).resolves.toBeUndefined();
     expect(onText).not.toHaveBeenCalled();
+    expect(onThinking).not.toHaveBeenCalled();
+    expect(onToolStart).not.toHaveBeenCalled();
+    expect(session.state.errorMessage).toBeUndefined();
   });
 
   it("resolves (never rejects) when the subprocess emits an error and records the diagnostic", async () => {
@@ -133,13 +150,11 @@ describe("GrokRuntimeAdapter", () => {
     await Promise.resolve();
     expect(resolved).toBe(false);
 
-    stderr.write("Error: API key required. Set GROK_API_KEY env var\n");
-    proc.emit("close", 1, null);
+    stderr.write("error: invalid model 'grok-unknown'\n");
+    closeProc(proc, 1);
     await promise;
 
-    expect(session.state.errorMessage).toBe(
-      "Grok CLI failed (code 1): Error: API key required. Set GROK_API_KEY env var",
-    );
+    expect(session.state.errorMessage).toBe("Grok CLI failed (code 1): error: invalid model 'grok-unknown'");
   });
 
   it("records a concrete diagnostic for non-zero exits with no stderr", async () => {
@@ -150,7 +165,7 @@ describe("GrokRuntimeAdapter", () => {
 
     const promise = adapter.promptWithFallback(session, "hi");
     stdout.end();
-    proc.emit("close", 2, null);
+    closeProc(proc, 2);
     await promise;
 
     expect(session.state.errorMessage).toBe("Grok CLI failed with code 2 and no stderr output.");
@@ -165,11 +180,11 @@ describe("GrokRuntimeAdapter", () => {
 
     const promise = adapter.promptWithFallback(session, "hi");
     stdout.end();
-    proc.emit("close", 0, null);
+    closeProc(proc, 0);
     await promise;
 
     expect(session.state.errorMessage).toBe(
-      "Grok CLI produced no NDJSON output for a headless prompt; this usually means the binary on PATH is not the supported grok-cli headless implementation, did not recognize --prompt/--format json, or exited interactive mode immediately after stdin EOF.",
+      "Grok CLI produced no NDJSON output for a headless prompt; this usually means the binary on PATH is not xAI's supported Grok Build TUI headless implementation, did not recognize -p/--output-format streaming-json, or exited interactive mode immediately after stdin EOF.",
     );
     expect(onText).toHaveBeenCalledWith(session.state.errorMessage);
     expect(session.state.messages).toContainEqual({ role: "assistant", content: session.state.errorMessage });
@@ -185,7 +200,7 @@ describe("GrokRuntimeAdapter", () => {
     const promise = adapter.promptWithFallback(session, "hi");
     stdout.write("Welcome to grok interactive mode\n");
     stdout.end();
-    proc.emit("close", 0, null);
+    closeProc(proc, 0);
     await promise;
 
     expect(session.state.errorMessage).toBe(
@@ -194,35 +209,23 @@ describe("GrokRuntimeAdapter", () => {
     expect(onText).toHaveBeenCalledWith(session.state.errorMessage);
   });
 
-  it("keeps a clean NDJSON run with no assistant text silent", async () => {
+  it("keeps a clean end event with no assistant text silent", async () => {
     const { proc, stdout } = makeFakeProc();
     const spawn = vi.fn().mockReturnValue(proc);
     const adapter = new GrokRuntimeAdapter({ spawn });
-    const { session } = await adapter.createSession({});
+    const onText = vi.fn();
+    const { session } = await adapter.createSession({ onText });
 
     const promise = adapter.promptWithFallback(session, "hi");
-    stdout.write(`${JSON.stringify({ type: "step_start", stepNumber: 1, timestamp: 1 })}\n`);
-    stdout.write(
-      `${JSON.stringify({ type: "step_finish", stepNumber: 1, timestamp: 2, finishReason: "stop", usage: {} })}\n`,
-    );
-    proc.emit("close", 0, null);
+    stdout.write(`${JSON.stringify({ type: "thought", data: "No answer needed" })}\n`);
+    stdout.write(`${JSON.stringify({ type: "end", stopReason: "EndTurn", sessionId: "session-empty" })}\n`);
+    closeProc(proc, 0);
     await promise;
 
+    expect(onText).not.toHaveBeenCalled();
     expect(session.state.errorMessage).toBeUndefined();
-  });
-
-  it("records well-formed NDJSON error events as diagnostics without rejecting", async () => {
-    const { proc, stdout } = makeFakeProc();
-    const spawn = vi.fn().mockReturnValue(proc);
-    const adapter = new GrokRuntimeAdapter({ spawn });
-    const { session } = await adapter.createSession({});
-
-    const promise = adapter.promptWithFallback(session, "hi");
-    stdout.write(`${JSON.stringify({ type: "error", message: "invalid model: grok-unknown", timestamp: 1 })}\n`);
-    proc.emit("close", 0, null);
-    await promise;
-
-    expect(session.state.errorMessage).toBe("Grok CLI error: invalid model: grok-unknown");
+    expect(session.state.messages).not.toContainEqual(expect.objectContaining({ role: "assistant" }));
+    expect(session.sessionId).toBe("session-empty");
   });
 
   it("does not turn a successful text response into an error when stderr is noisy", async () => {
@@ -233,148 +236,35 @@ describe("GrokRuntimeAdapter", () => {
     const { session } = await adapter.createSession({ onText });
 
     const promise = adapter.promptWithFallback(session, "hi");
-    stdout.write(`${JSON.stringify({ type: "text", stepNumber: 1, text: "answer", timestamp: 1 })}\n`);
+    stdout.write(`${JSON.stringify({ type: "text", data: "answer" })}\n`);
     stderr.write("debug noise\n");
-    proc.emit("close", 1, null);
+    closeProc(proc, 1);
     await promise;
 
     expect(onText).toHaveBeenCalledWith("answer");
     expect(session.state.errorMessage).toBeUndefined();
   });
 
-  // FNXC:GrokCli 2026-07-09-00:10: FN-7724 — tool_use bridging coverage.
-  it("bridges tool_use events into onToolStart/onToolEnd in order with translated args", async () => {
+  it("resolves on subprocess close rather than the end event alone", async () => {
     const { proc, stdout } = makeFakeProc();
     const spawn = vi.fn().mockReturnValue(proc);
     const adapter = new GrokRuntimeAdapter({ spawn });
-
-    const onToolStart = vi.fn();
-    const onToolEnd = vi.fn();
-    const { session } = await adapter.createSession({ onToolStart, onToolEnd });
-
-    const promise = adapter.promptWithFallback(session, "list files");
-
-    stdout.write(`${JSON.stringify({ type: "step_start", stepNumber: 1, timestamp: 1 })}\n`);
-    stdout.write(
-      `${JSON.stringify({
-        type: "tool_use",
-        stepNumber: 1,
-        timestamp: 2,
-        toolCall: { id: "tc-1", type: "function", function: { name: "bash", arguments: '{"command":"ls"}' } },
-        toolResult: { success: true, output: "a.ts\nb.ts" },
-        timing: { startedAt: 1, finishedAt: 2, durationMs: 1 },
-      })}\n`,
-    );
-    stdout.write(
-      `${JSON.stringify({
-        type: "step_finish",
-        stepNumber: 1,
-        timestamp: 3,
-        finishReason: "tool_calls",
-        usage: {},
-      })}\n`,
-    );
-    proc.emit("close", 0, null);
-
-    await promise;
-
-    expect(onToolStart).toHaveBeenCalledTimes(1);
-    expect(onToolStart).toHaveBeenCalledWith("bash", { command: "ls" });
-    expect(onToolEnd).toHaveBeenCalledTimes(1);
-    expect(onToolEnd).toHaveBeenCalledWith("bash", false, { success: true, output: "a.ts\nb.ts" });
-    // onToolStart must fire before onToolEnd for the same tool call.
-    expect(onToolStart.mock.invocationCallOrder[0]).toBeLessThan(onToolEnd.mock.invocationCallOrder[0]);
-  });
-
-  it("marks onToolEnd as an error when toolResult.success is false", async () => {
-    const { proc, stdout } = makeFakeProc();
-    const spawn = vi.fn().mockReturnValue(proc);
-    const adapter = new GrokRuntimeAdapter({ spawn });
-    const onToolStart = vi.fn();
-    const onToolEnd = vi.fn();
-    const { session } = await adapter.createSession({ onToolStart, onToolEnd });
-
-    const promise = adapter.promptWithFallback(session, "read missing file");
-    stdout.write(
-      `${JSON.stringify({
-        type: "tool_use",
-        stepNumber: 1,
-        timestamp: 2,
-        toolCall: { id: "tc-2", type: "function", function: { name: "read_file", arguments: '{"path":"x"}' } },
-        toolResult: { success: false, output: "ENOENT" },
-      })}\n`,
-    );
-    proc.emit("close", 0, null);
-
-    await promise;
-
-    expect(onToolEnd).toHaveBeenCalledWith("read_file", true, { success: false, output: "ENOENT" });
-  });
-
-  it("handles malformed tool_use arguments without throwing, passing the raw string through", async () => {
-    const { proc, stdout } = makeFakeProc();
-    const spawn = vi.fn().mockReturnValue(proc);
-    const adapter = new GrokRuntimeAdapter({ spawn });
-    const onToolStart = vi.fn();
-    const { session } = await adapter.createSession({ onToolStart });
+    const { session } = await adapter.createSession({});
 
     const promise = adapter.promptWithFallback(session, "hi");
-    stdout.write(
-      `${JSON.stringify({
-        type: "tool_use",
-        stepNumber: 1,
-        timestamp: 2,
-        toolCall: { id: "tc-3", type: "function", function: { name: "bash", arguments: "not-json" } },
-        toolResult: { success: true },
-      })}\n`,
-    );
-    proc.emit("close", 0, null);
-
-    await expect(promise).resolves.toBeUndefined();
-    expect(onToolStart).toHaveBeenCalledWith("bash", "not-json");
-  });
-
-  it("does not finalize on step_finish alone (per-step, not run-terminal); only close/error finalizes", async () => {
-    const { proc, stdout } = makeFakeProc();
-    const spawn = vi.fn().mockReturnValue(proc);
-    const adapter = new GrokRuntimeAdapter({ spawn });
-    const onText = vi.fn();
-    const { session } = await adapter.createSession({ onText });
-
-    const promise = adapter.promptWithFallback(session, "multi-round");
     let resolved = false;
     void promise.then(() => {
       resolved = true;
     });
 
-    stdout.write(
-      `${JSON.stringify({ type: "step_finish", stepNumber: 1, timestamp: 1, finishReason: "tool_calls", usage: {} })}\n`,
-    );
+    stdout.write(`${JSON.stringify({ type: "end", stopReason: "EndTurn" })}\n`);
     await Promise.resolve();
     await Promise.resolve();
     expect(resolved).toBe(false);
 
-    stdout.write(`${JSON.stringify({ type: "text", stepNumber: 2, text: "done", timestamp: 2 })}\n`);
-    proc.emit("close", 0, null);
+    closeProc(proc, 0);
     await promise;
-
     expect(resolved).toBe(true);
-    expect(onText).toHaveBeenCalledWith("done");
-  });
-
-  it("never invokes onThinking: the verified grok-cli NDJSON schema has no thinking/reasoning event", async () => {
-    const { proc, stdout } = makeFakeProc();
-    const spawn = vi.fn().mockReturnValue(proc);
-    const adapter = new GrokRuntimeAdapter({ spawn });
-    const onThinking = vi.fn();
-    const { session } = await adapter.createSession({ onThinking });
-
-    const promise = adapter.promptWithFallback(session, "hi");
-    stdout.write(`${JSON.stringify({ type: "text", stepNumber: 1, text: "hi", timestamp: 1 })}\n`);
-    proc.emit("close", 0, null);
-
-    await promise;
-    expect(onThinking).not.toHaveBeenCalled();
   });
 
   describe("lifecycle timeouts (fake timers)", () => {

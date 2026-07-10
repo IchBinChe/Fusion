@@ -1,105 +1,35 @@
 /*
-FNXC:GrokCli 2026-07-09-00:00:
-FN-7722: additive types for the real (non-no-op) `GrokRuntimeAdapter`
-streaming implementation. `GrokNdjsonEvent` mirrors the VERIFIED
-`HeadlessJsonEvent` union from upstream grok-cli's `src/headless/output.ts`
-(captured in docs/grok-cli-contract.md) — there is deliberately no
-thinking/reasoning event type here because upstream's JSONL emitter never
-surfaces one (confirmed absence, not an omission). `GrokSession` /
-`GrokCallbacks` / `AgentRuntime*` mirror the Droid plugin's `types.ts` shape
-so this adapter satisfies the same plugin runtime contract
-(`packages/engine/src/runtime-resolution.ts`'s `resolveRuntime`). Additive
-only — does not collide with FN-7716's `GrokBinaryStatus` fields below.
+FNXC:GrokCli 2026-07-10-10:48:
+FN-7790: operators run xAI's official Grok Build TUI (`grok 0.2.93`), not the previously assumed `superagent-ai/grok-cli` product. The real headless stream is `grok -p <prompt> --output-format streaming-json` and emits `thought`/`text`/`end` objects with `data`, so these types intentionally retire the old `step_*`/`tool_use`/`error` union that made fake tests pass while the real binary returned no assistant text.
 */
 
-export interface GrokToolCallLike {
-  id?: string;
-  type?: string;
-  function?: { name?: string; arguments?: string };
-  [key: string]: unknown;
-}
-
-export interface GrokToolResultLike {
-  success?: boolean;
-  output?: string;
-  [key: string]: unknown;
-}
-
-export interface GrokStepStartEvent {
-  type: "step_start";
-  sessionID?: string;
-  stepNumber: number;
-  timestamp: number;
+export interface GrokThoughtEvent {
+  type: "thought";
+  data: string;
 }
 
 export interface GrokTextEvent {
   type: "text";
-  sessionID?: string;
-  stepNumber: number;
-  text: string;
-  timestamp: number;
+  data: string;
 }
 
-export interface GrokToolUseEvent {
-  type: "tool_use";
-  sessionID?: string;
-  stepNumber: number;
-  timestamp: number;
-  toolCall: GrokToolCallLike;
-  toolResult: GrokToolResultLike;
-  timing?: { startedAt?: number; finishedAt?: number; durationMs?: number };
+export interface GrokEndEvent {
+  type: "end";
+  stopReason?: string;
+  sessionId?: string;
+  requestId?: string;
 }
 
-export interface GrokStepFinishEvent {
-  type: "step_finish";
-  sessionID?: string;
-  stepNumber: number;
-  timestamp: number;
-  finishReason: string;
-  usage: { inputTokens?: number; outputTokens?: number; totalTokens?: number; costUsdTicks?: number };
-}
-
-export interface GrokErrorEvent {
-  type: "error";
-  sessionID?: string;
-  message: string;
-  timestamp: number;
-}
-
-export type GrokNdjsonEvent =
-  | GrokStepStartEvent
-  | GrokTextEvent
-  | GrokToolUseEvent
-  | GrokStepFinishEvent
-  | GrokErrorEvent;
+export type GrokNdjsonEvent = GrokThoughtEvent | GrokTextEvent | GrokEndEvent;
 
 export interface GrokCallbacks {
+  /** Streams real assistant text from xAI Grok Build TUI `text.data` events. */
   onText?: (text: string) => void;
-  /**
-   * FNXC:GrokCli 2026-07-09-00:00: kept for AgentRuntime interface parity
-   * with the Droid/Cursor plugins, but never invoked by this adapter —
-   * upstream grok-cli's `--format json` stream has no thinking/reasoning
-   * event to bridge (see docs/grok-cli-contract.md).
-   */
+  /** Streams reasoning/thinking text from xAI Grok Build TUI `thought.data` events. */
   onThinking?: (text: string) => void;
-  /**
-   * FNXC:GrokCli 2026-07-09-00:10:
-   * FN-7724: bridged from the verified `tool_use` NDJSON event's
-   * `toolCall.function.name` / parsed `toolCall.function.arguments`.
-   * Mirrors the Droid plugin's `DroidCallbacks.onToolStart` signature. No
-   * Grok→pi tool-name mapping is applied — the verified contract
-   * (docs/grok-cli-contract.md) does not pin grok-cli's specific tool-name
-   * vocabulary, so names/args pass through unchanged (see FN-7724 research
-   * task document for the decision).
-   */
+  /** Kept for AgentRuntime interface parity; xAI `streaming-json` has no observed tool-use event. */
   onToolStart?: (toolName: string, args?: unknown) => void;
-  /**
-   * FNXC:GrokCli 2026-07-09-00:10:
-   * FN-7724: bridged from the same `tool_use` event's `toolResult` field —
-   * `isError` derives from the verified `toolResult.success === false`,
-   * `result` is the full `toolResult` object (includes `output` plus any
-   * other verified/unverified passthrough fields).
-   */
+  /** Kept for AgentRuntime interface parity; xAI `streaming-json` has no observed tool-use event. */
   onToolEnd?: (toolName: string, isError: boolean, result?: unknown) => void;
 }
 
@@ -121,9 +51,7 @@ export interface AgentRuntimeOptions {
   defaultModelId?: string;
   onText?: (text: string) => void;
   onThinking?: (text: string) => void;
-  /** FNXC:GrokCli 2026-07-09-00:10: FN-7724 — additive, mirrors GrokCallbacks.onToolStart. */
   onToolStart?: (toolName: string, args?: unknown) => void;
-  /** FNXC:GrokCli 2026-07-09-00:10: FN-7724 — additive, mirrors GrokCallbacks.onToolEnd. */
   onToolEnd?: (toolName: string, isError: boolean, result?: unknown) => void;
   signal?: AbortSignal;
 }

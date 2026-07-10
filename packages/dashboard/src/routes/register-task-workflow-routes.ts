@@ -109,8 +109,15 @@ function resolveArtifactMediaPath(scopedStore: TaskStore, artifact: { taskId?: s
 
   const anchorDir = artifact.taskId ? scopedStore.getTaskDir(artifact.taskId) : scopedStore.getFusionDir();
   const expectedArtifactsDir = resolve(anchorDir, "artifacts");
+  const expectedAttachmentsDir = artifact.taskId ? resolve(anchorDir, "attachments") : null;
   const mediaPath = resolve(anchorDir, artifact.uri);
-  if (mediaPath !== expectedArtifactsDir && !mediaPath.startsWith(`${expectedArtifactsDir}${sep}`)) {
+  const underArtifacts = mediaPath === expectedArtifactsDir || mediaPath.startsWith(`${expectedArtifactsDir}${sep}`);
+  const underAttachments = expectedAttachmentsDir !== null && (mediaPath === expectedAttachmentsDir || mediaPath.startsWith(`${expectedAttachmentsDir}${sep}`));
+  /*
+   * FNXC:ArtifactRegistry 2026-07-10-00:00:
+   * Attachment-sourced image artifacts intentionally store `attachments/<file>` URIs so /media streams the original task attachment bytes without a second artifact copy. Keep the resolver anchored to task-owned artifact/attachment directories only; task-less artifacts still resolve exclusively under `.fusion/artifacts/`.
+   */
+  if (!underArtifacts && !underAttachments) {
     throw badRequest("Invalid artifact media path");
   }
   return mediaPath;

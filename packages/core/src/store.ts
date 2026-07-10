@@ -13094,7 +13094,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       );
     }
 
-    return this.withTaskLock(id, async () => {
+    const attachment = await this.withTaskLock(id, async () => {
       const dir = this.taskDir(id);
       const attachDir = join(dir, "attachments");
       await mkdir(attachDir, { recursive: true });
@@ -13123,6 +13123,60 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
 
       return attachment;
     });
+
+    if (mimeType.startsWith("image/")) {
+      /*
+       * FNXC:ArtifactRegistry 2026-07-10-00:00:
+       * FN-7791 requires image task attachments created by agents, dashboard uploads, and route callers to surface as normal image artifacts. Register a URI-only artifact that points at the already-written attachment file so the proven artifact listing/SSE/media pipeline is reused without duplicating bytes or re-entering addAttachment.
+       *
+       * FNXC:ArtifactRegistry 2026-07-10-00:00:
+       * registerArtifact() enforces the artifact-registry active/non-archived task rule (see registerArtifact's ACTIVE_TASKS_WHERE check), but addAttachment has never enforced that rule for attachments themselves — attachments may be added to archived or soft-deleted tasks. Without this guard, attaching an image to an archived/soft-deleted task would throw here AFTER the attachment file and task.json were already written, so the caller would see addAttachment fail even though the attachment actually succeeded. Bridging into the artifact registry is best-effort: swallow the expected archived/not-found rejection so addAttachment keeps its existing always-succeeds-for-a-valid-image contract, and only the artifact-gallery bridge is skipped.
+       */
+      try {
+        await this.registerArtifact({
+          type: "image",
+          title: attachment.originalName,
+          description: "Image task attachment",
+          mimeType,
+          sizeBytes: attachment.size,
+          uri: `attachments/${attachment.filename}`,
+          authorId: "attachment",
+          authorType: "system",
+          taskId: id,
+          metadata: {
+            source: "attachment",
+            attachmentFilename: attachment.filename,
+            originalName: attachment.originalName,
+          },
+        });
+      } catch (err) {
+        console.warn(
+          `[fusion:store] Skipping artifact bridge for attachment ${attachment.filename} on task ${id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+
+    return attachment;
+  }
+
+  private async deleteAttachmentArtifactRows(taskId: string, filename: string): Promise<void> {
+    const rows = this.db
+      .prepare("SELECT * FROM artifacts WHERE taskId = ?")
+      .all(taskId) as unknown as ArtifactRow[];
+    const linkedArtifactIds = rows
+      .map((row) => this.rowToArtifact(row))
+      .filter((artifact) => artifact.metadata?.source === "attachment" && artifact.metadata.attachmentFilename === filename)
+      .map((artifact) => artifact.id);
+
+    if (linkedArtifactIds.length === 0) {
+      return;
+    }
+
+    const deleteArtifact = this.db.prepare("DELETE FROM artifacts WHERE id = ?");
+    for (const artifactId of linkedArtifactIds) {
+      deleteArtifact.run(artifactId);
+    }
+    this.db.bumpLastModified();
   }
 
   async getAttachment(
@@ -13157,6 +13211,8 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         err.code = "ENOENT";
         throw err;
       }
+
+      await this.deleteAttachmentArtifactRows(id, filename);
 
       // Remove file from disk
       const filePath = join(dir, "attachments", filename);

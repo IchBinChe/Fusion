@@ -61,6 +61,7 @@ import {
   createAiUndoTask,
   prepareRevertPrBranch,
   prepareWorkspaceRevertPrBranches,
+  isInReviewMissingWorktreeSessionStartFailure,
   type AiUndoTaskResult,
   type PrepareRevertPrBranchResult,
   type PrepareWorkspaceRevertPrBranchesResult,
@@ -2310,7 +2311,12 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
           task.status === "stuck-killed" ||
           isInReviewExecutionStall ||
           isInReviewMergeRetryStall);
-      if (task.status !== "failed" && task.status !== "stuck-killed" && !retrySpecification && !isInReviewRetry) {
+      /*
+      FNXC:MissingWorktreeRetry 2026-07-10-18:32:
+      Dashboard retry must support the upstream #1992 signature where the task is stranded in a merge-active status but the durable failure is an unusable worktree session-start assertion. Only that classifier bypasses the merge-active status gate.
+      */
+      const isMissingWorktreeSessionRetry = isInReviewMissingWorktreeSessionStartFailure(task);
+      if (task.status !== "failed" && task.status !== "stuck-killed" && !retrySpecification && !isInReviewRetry && !isMissingWorktreeSessionRetry) {
         throw badRequest(`Task is not in a retryable state (current status: ${task.status || 'none'})`);
       }
 
@@ -2323,6 +2329,23 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       const autoPauseClearPatch = buildAutoPauseClearPatch(task);
       const clearedDeadlockAutoPause = Object.keys(autoPauseClearPatch).length > 0;
       const retryLogSuffix = clearedDeadlockAutoPause ? ", cleared deadlock auto-pause" : "";
+
+      if (isMissingWorktreeSessionRetry) {
+        clearRebuiltSpecWorkflowPins(scopedStore, req.params.id);
+        await scopedStore.updateTask(req.params.id, {
+          status: null,
+          error: null,
+          worktree: null,
+          branch: null,
+          sessionFile: null,
+          ...autoPauseClearPatch,
+          ...buildManualRetryResetPatch({ resetMergeRetries: true }),
+        });
+        await scopedStore.logEntry(req.params.id, `Retry requested from dashboard (unusable worktree session-start recovery → todo, preserving progress${retryLogSuffix})`);
+        const updated = await scopedStore.moveTask(req.params.id, "todo", { preserveProgress: true });
+        res.json(updated);
+        return;
+      }
 
       // In-review retry: distinguish between execution failures (incomplete steps)
       // and merge failures (all steps done).

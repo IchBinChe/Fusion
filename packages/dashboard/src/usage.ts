@@ -1808,12 +1808,18 @@ async function fetchGitHubCopilotUsage(): Promise<ProviderUsage> {
         return usage;
       }
 
-      usage.status = "error";
       if (res.status === 404) {
+        /*
+        FNXC:UsageProviders 2026-07-10-00:00:
+        Usage surfaces must only show providers the user configured with meterable data. A GitHub credential without Copilot entitlement is a no-entitlement path, so demote it to `no-auth` for the aggregate filter while keeping diagnostics on the provider result.
+        */
+        usage.status = "no-auth";
         usage.error = "No Copilot subscription found";
       } else if (res.status === 401 || res.status === 403) {
+        usage.status = "error";
         usage.error = "Auth expired — re-login from Fusion Settings → Authentication";
       } else {
+        usage.status = "error";
         usage.error = `HTTP ${res.status}: ${res.body.slice(0, 200)}`;
       }
       return usage;
@@ -1841,7 +1847,11 @@ async function fetchGitHubCopilotUsage(): Promise<ProviderUsage> {
   } catch (e: unknown) {
     const errMsg = e instanceof Error ? e.message : "Failed to fetch";
     if (errMsg.includes("404") || errMsg.includes("Not Found")) {
-      usage.status = "error";
+      /*
+      FNXC:UsageProviders 2026-07-10-00:00:
+      An authenticated `gh` CLI can exist for ordinary git without Fusion Copilot setup or a Copilot subscription. Treat the 404 no-subscription response as not configured/no meterable entitlement so it is omitted, while 401/403 and transient failures remain visible errors.
+      */
+      usage.status = "no-auth";
       usage.error = "No Copilot subscription found";
     } else if (errMsg.includes("401") || errMsg.includes("403")) {
       usage.status = "error";
@@ -1936,7 +1946,10 @@ export async function fetchAllProviderUsage(authStorage?: AuthStorageLike): Prom
     }
   }
 
-  // Only return providers that have valid auth configured.
+  /*
+  FNXC:UsageProviders 2026-07-10-00:00:
+  This is the single enforcement point for the usage-list invariant: show only providers that are both configured and expose meterable data. Fetchers demote missing credentials and no-entitlement/nothing-to-meter outcomes to `no-auth`; configured providers with actionable failures stay `error` and remain visible.
+  */
   const authenticatedProviders = providers.filter((provider) => provider.status !== "no-auth");
 
   // Update cache

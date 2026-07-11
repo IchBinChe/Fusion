@@ -256,6 +256,28 @@ describe("usage", () => {
       expect(copilot).toBeUndefined();
     });
 
+    it("omits Fusion-sourced Copilot credentials when GitHub reports no subscription", async () => {
+      coreInteropMocks.readStoredCredentialsFromAuthFile.mockReturnValue({
+        "github-copilot": { type: "oauth", access: "fusion-gho", refresh: "r", expires: Date.now() + 60_000 },
+      });
+      mockRequest.mockImplementation((_options: any, callback: any) => {
+        const mockRes = {
+          statusCode: 404,
+          headers: {},
+          on: vi.fn((event: string, handler: any) => {
+            if (event === "data") handler(Buffer.from('{"message":"No Copilot subscription found"}'));
+            if (event === "end") handler();
+          }),
+        };
+        callback(mockRes);
+        return mockReq;
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const copilot = providers.find((p) => p.name === "GitHub Copilot");
+      expect(copilot).toBeUndefined();
+    });
+
     it("surfaces Fusion re-login guidance when Fusion-sourced token gets 401", async () => {
       coreInteropMocks.readStoredCredentialsFromAuthFile.mockReturnValue({
         "github-copilot": { type: "oauth", access: "fusion-gho", refresh: "r", expires: Date.now() + 60_000 },
@@ -279,6 +301,29 @@ describe("usage", () => {
       expect(copilot?.error).toContain("re-login from Fusion Settings");
     });
 
+    it("surfaces Fusion HTTP failures when a configured Copilot provider fails transiently", async () => {
+      coreInteropMocks.readStoredCredentialsFromAuthFile.mockReturnValue({
+        "github-copilot": { type: "oauth", access: "fusion-gho", refresh: "r", expires: Date.now() + 60_000 },
+      });
+      mockRequest.mockImplementation((_options: any, callback: any) => {
+        const mockRes = {
+          statusCode: 500,
+          headers: {},
+          on: vi.fn((event: string, handler: any) => {
+            if (event === "data") handler(Buffer.from('{"message":"server unavailable"}'));
+            if (event === "end") handler();
+          }),
+        };
+        callback(mockRes);
+        return mockReq;
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const copilot = providers.find((p) => p.name === "GitHub Copilot");
+      expect(copilot?.status).toBe("error");
+      expect(copilot?.error).toContain("HTTP 500");
+    });
+
     it("falls back to gh CLI when no Fusion credential is present", async () => {
       coreInteropMocks.readStoredCredentialsFromAuthFile.mockReturnValue({});
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
@@ -299,8 +344,9 @@ describe("usage", () => {
       expect(copilot!.windows.some((window) => window.label === "Chat (Monthly)")).toBe(true);
     });
 
-    it("returns error when Copilot subscription not found (404)", async () => {
+    it("omits gh CLI Copilot when GitHub reports no subscription", async () => {
       mockReadFile.mockRejectedValue(new Error("File not found"));
+      coreInteropMocks.readStoredCredentialsFromAuthFile.mockReturnValue({});
       mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
         if (cmd === "gh" && args[0] === "auth") {
           return "";
@@ -313,9 +359,26 @@ describe("usage", () => {
 
       const providers = await fetchAllProviderUsage();
       const copilot = providers.find((p) => p.name === "GitHub Copilot");
-      expect(copilot).toBeDefined();
-      expect(copilot!.status).toBe("error");
-      expect(copilot!.error).toContain("No Copilot subscription");
+      expect(copilot).toBeUndefined();
+    });
+
+    it("surfaces gh CLI auth-expired errors as configured but failing", async () => {
+      mockReadFile.mockRejectedValue(new Error("File not found"));
+      coreInteropMocks.readStoredCredentialsFromAuthFile.mockReturnValue({});
+      mockExecFileSync.mockImplementation((cmd: string, args: string[]) => {
+        if (cmd === "gh" && args[0] === "auth") {
+          return "";
+        }
+        if (cmd === "gh" && args[0] === "api") {
+          throw new Error("HTTP 401: Bad credentials");
+        }
+        throw new Error("File not found");
+      });
+
+      const providers = await fetchAllProviderUsage();
+      const copilot = providers.find((p) => p.name === "GitHub Copilot");
+      expect(copilot?.status).toBe("error");
+      expect(copilot?.error).toContain("GitHub auth expired");
     });
   });
 

@@ -1,7 +1,7 @@
 import "./DocumentsView.css";
 import { useState, useMemo, useCallback, useEffect, useRef, type ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, FileText, ChevronDown, ChevronUp, ChevronRight, RefreshCw, Search, X, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, FileText, RefreshCw, Search, X, Eye, EyeOff } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ColumnId, TaskDocumentWithTask, TaskDetail } from "@fusion/core";
@@ -27,22 +27,6 @@ export interface DocumentsViewProps {
   onOpenDetail: (task: TaskDetail) => void;
   onOpenArtifactTaskDetail?: (task: TaskDetail) => void;
   onSendSelectionToTask?: (description: string) => void;
-}
-
-interface DocumentCardProps {
-  document: TaskDocumentWithTask;
-  renderMarkdown: boolean;
-  onToggleMarkdown: () => void;
-}
-
-interface TaskGroupProps {
-  taskId: string;
-  taskTitle?: string;
-  documents: TaskDocumentWithTask[];
-  taskColumn?: string;
-  onOpenTask: (taskId: string) => void;
-  renderMarkdownStates: Map<string, boolean>;
-  onToggleMarkdown: (docId: string) => void;
 }
 
 function formatTimestamp(iso?: string): string {
@@ -74,137 +58,14 @@ function getTaskColumnStatusDotClass(taskColumn: string): string {
   return "status-dot status-dot--connecting";
 }
 
-function DocumentCard({ document, renderMarkdown, onToggleMarkdown }: DocumentCardProps) {
-  const { t } = useTranslation("app");
-  const [expanded, setExpanded] = useState(false);
-
-  const preview = getContentPreview(document.content);
-  const showExpand = document.content.length > 200;
-
-  return (
-    <div className="document-card">
-      <div className="document-card-header">
-        <div className="document-card-key">
-          <FileText size={14} />
-          <span className="document-card-key-text">{document.key}</span>
-          <span className="document-card-revision-badge">v{document.revision}</span>
-        </div>
-        <div className="document-card-actions">
-          <button
-            className="btn btn-sm document-card-expand-btn"
-            onClick={() => setExpanded((current) => !current)}
-            title={expanded ? t("documents.collapse", "Collapse") : t("documents.expand", "Expand")}
-            aria-label={expanded ? t("documents.collapseContent", "Collapse content") : t("documents.expandContent", "Expand content")}
-          >
-            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          </button>
-        </div>
-      </div>
-
-      <div className="document-card-meta">
-        <span className="document-card-author">{document.author}</span>
-        <span className="document-card-separator">·</span>
-        <span className="document-card-date">{formatTimestamp(document.updatedAt)}</span>
-      </div>
-
-      <div className={`document-card-content${expanded ? " document-card-content--expanded" : ""}`}>
-        {expanded ? (
-          <>
-            <div className="document-card-content-header">
-              <button
-                className="btn btn-sm document-mode-toggle"
-                onClick={onToggleMarkdown}
-                aria-label={renderMarkdown ? t("documents.switchToPlainText", "Switch to plain text") : t("documents.switchToMarkdown", "Switch to markdown")}
-                aria-pressed={renderMarkdown}
-                title={renderMarkdown ? t("documents.switchToPlainText", "Switch to plain text") : t("documents.switchToMarkdown", "Switch to markdown")}
-              >
-                {renderMarkdown ? t("documents.markdown", "Markdown") : t("documents.plain", "Plain")}
-              </button>
-            </div>
-            {renderMarkdown ? (
-              <div className="document-card-content-markdown">
-                <div className="markdown-body">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{document.content}</ReactMarkdown>
-                </div>
-              </div>
-            ) : (
-              <pre className="document-card-content-text">{document.content}</pre>
-            )}
-          </>
-        ) : (
-          <p className="document-card-preview">{preview}</p>
-        )}
-        {showExpand && !expanded && (
-          <p className="document-card-preview-truncated">…</p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function TaskGroup({ taskId, taskTitle, documents, taskColumn, onOpenTask, renderMarkdownStates, onToggleMarkdown }: TaskGroupProps) {
-  const { t } = useTranslation("app");
-  const columnLabel = useColumnLabel();
-  const [expanded, setExpanded] = useState(false);
-  const taskStatusLabel = taskColumn ? columnLabel(taskColumn as ColumnId) : null;
-  const taskStatusDotClass = taskColumn ? getTaskColumnStatusDotClass(taskColumn) : "status-dot";
-
-  return (
-    <div className="documents-group">
-      <div className="documents-group-header">
-        <button
-          className="documents-group-toggle-btn"
-          onClick={() => setExpanded((current) => !current)}
-          aria-expanded={expanded}
-          aria-label={`${expanded ? t("documents.collapse", "Collapse") : t("documents.expand", "Expand")} documents for task ${taskId}`}
-        >
-          <span className="documents-group-toggle" aria-hidden="true">
-            {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-          </span>
-          <span className="documents-group-task-id">{taskId}</span>
-          <span className="documents-group-task-title">{taskTitle || t("documents.untitled", "Untitled")}</span>
-        </button>
-
-        {taskStatusLabel ? (
-          <span className="documents-group-status badge" aria-label={t("documents.taskStatusAria", "Task status: {{status}}", { status: taskStatusLabel })}>
-            <span className={taskStatusDotClass} aria-hidden="true" />
-            <span>{taskStatusLabel}</span>
-          </span>
-        ) : null}
-
-        <span className="documents-group-count">{t("documents.docCount", "{{count}} doc{{plural}}", { count: documents.length, plural: documents.length !== 1 ? "s" : "" })}</span>
-
-        <button
-          className="documents-group-task-link"
-          onClick={() => onOpenTask(taskId)}
-          aria-label={t("documents.openTaskAria", "Open task {{taskId}}: {{title}}", { taskId, title: taskTitle || t("documents.untitled", "Untitled") })}
-        >
-          {t("documents.openTask", "Open task")}
-        </button>
-      </div>
-
-      {expanded && (
-        <div className="documents-group-content">
-          {documents.map((doc) => (
-            <DocumentCard
-              key={doc.id}
-              document={doc}
-              renderMarkdown={renderMarkdownStates.get(doc.id) ?? false}
-              onToggleMarkdown={() => onToggleMarkdown(doc.id)}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 export function DocumentsView({ projectId, addToast, onOpenDetail, onOpenArtifactTaskDetail, onSendSelectionToTask }: DocumentsViewProps) {
   const { t } = useTranslation("app");
   // FNXC:ArtifactsView 2026-07-11-11:30: Artifacts is the first tab and the landing tab — the view is the artifact gallery first, with project files and task documents as secondary tabs.
   const [activeTab, setActiveTab] = useState<DocumentsTab>("artifacts");
+  const columnLabel = useColumnLabel();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedFile, setSelectedFile] = useState<MarkdownFileEntry | null>(null);
+  const [selectedTaskDocumentId, setSelectedTaskDocumentId] = useState<string | null>(null);
   const [showHiddenProjectFiles, setShowHiddenProjectFiles] = useState(false);
   const [fileContent, setFileContent] = useState<string | null>(null);
   const [fileLoading, setFileLoading] = useState(false);
@@ -269,6 +130,7 @@ export function DocumentsView({ projectId, addToast, onOpenDetail, onOpenArtifac
   useEffect(() => {
     setActiveTab("artifacts");
     setSelectedFile(null);
+    setSelectedTaskDocumentId(null);
     setShowHiddenProjectFiles(false);
     setFileContent(null);
     setFileError(null);
@@ -302,6 +164,25 @@ export function DocumentsView({ projectId, addToast, onOpenDetail, onOpenArtifac
       })
       .sort((a, b) => b.latestUpdated.localeCompare(a.latestUpdated));
   }, [documents]);
+
+
+  /*
+  FNXC:DocumentsView 2026-07-10-17:30:
+  Task Documents now mirrors the Project Files sidebar/right-pane contract: the task-document selection is deliberately separate from selectedFile so tab switching cannot leak project file content into the Task Documents pane. Select-to-comment remains Project-Files-only for FN-7811 and is tracked as follow-up scope; Task Documents preserves only its existing Plain/Markdown render toggle.
+  */
+  const selectedTaskDocument = useMemo(() => {
+    if (!selectedTaskDocumentId) {
+      return null;
+    }
+
+    return documents.find((doc) => doc.id === selectedTaskDocumentId) ?? null;
+  }, [documents, selectedTaskDocumentId]);
+
+  useEffect(() => {
+    if (selectedTaskDocumentId && !selectedTaskDocument) {
+      setSelectedTaskDocumentId(null);
+    }
+  }, [selectedTaskDocument, selectedTaskDocumentId]);
 
   const filteredProjectFiles = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -340,6 +221,9 @@ export function DocumentsView({ projectId, addToast, onOpenDetail, onOpenArtifac
 
   const handleTabChange = useCallback((tab: DocumentsTab) => {
     setActiveTab(tab);
+    if (tab !== "tasks") {
+      setSelectedTaskDocumentId(null);
+    }
   }, []);
 
   const handleOpenTask = useCallback(async (taskId: string) => {
@@ -402,6 +286,14 @@ export function DocumentsView({ projectId, addToast, onOpenDetail, onOpenArtifac
     setFileContent(null);
     setFileError(null);
     setFileLoading(false);
+  }, []);
+
+  const handleSelectTaskDocument = useCallback((docId: string) => {
+    setSelectedTaskDocumentId(docId);
+  }, []);
+
+  const handleBackToTaskDocumentList = useCallback(() => {
+    setSelectedTaskDocumentId(null);
   }, []);
 
   const handleToggleTaskDocMarkdown = useCallback((docId: string) => {
@@ -702,21 +594,123 @@ export function DocumentsView({ projectId, addToast, onOpenDetail, onOpenArtifac
             )}
           </div>
         ) : (
-          <div className="documents-task-list-wrap">
-            <div className="documents-view-list">
-              {groupedDocuments.map(({ taskId, taskTitle, taskColumn, documents: taskDocs }) => (
-                <TaskGroup
-                  key={taskId}
-                  taskId={taskId}
-                  taskTitle={taskTitle}
-                  taskColumn={taskColumn}
-                  documents={taskDocs}
-                  onOpenTask={handleOpenTask}
-                  renderMarkdownStates={taskDocMarkdownStates}
-                  onToggleMarkdown={handleToggleTaskDocMarkdown}
-                />
-              ))}
-            </div>
+          /*
+          FNXC:DocumentsView 2026-07-10-17:30:
+          FN-7811 requires Task Documents to use the same desktop two-pane and mobile list→detail→back gating as Project Files: show the grouped sidebar when desktop or no document is selected, and show the right-pane viewer when desktop or a document is selected.
+          */
+          <div className={`documents-project-layout documents-task-documents-layout${isMobile ? " documents-project-layout--mobile" : ""}`}>
+            {(!isMobile || !selectedTaskDocument) && (
+              <aside className="documents-view-sidebar documents-task-documents-sidebar" aria-label={t("documents.taskDocumentsListLabel", "Task documents")}>
+                {groupedDocuments.map(({ taskId, taskTitle, taskColumn, documents: taskDocs }) => {
+                  const taskStatusLabel = taskColumn ? columnLabel(taskColumn as ColumnId) : null;
+                  const taskStatusDotClass = taskColumn ? getTaskColumnStatusDotClass(taskColumn) : "status-dot";
+
+                  return (
+                    <section key={taskId} className="documents-task-sidebar-group" aria-labelledby={`documents-task-group-${taskId}`}>
+                      <div className="documents-task-sidebar-group-header">
+                        <div className="documents-task-sidebar-title-wrap">
+                          <h3 id={`documents-task-group-${taskId}`} className="documents-task-sidebar-title">
+                            <span className="documents-group-task-id">{taskId}</span>
+                            <span className="documents-group-task-title">{taskTitle || t("documents.untitled", "Untitled")}</span>
+                          </h3>
+                          {taskStatusLabel ? (
+                            <span className="documents-group-status badge" aria-label={t("documents.taskStatusAria", "Task status: {{status}}", { status: taskStatusLabel })}>
+                              <span className={taskStatusDotClass} aria-hidden="true" />
+                              <span>{taskStatusLabel}</span>
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="documents-task-sidebar-actions">
+                          <span className="documents-group-count">{t("documents.docCount", "{{count}} doc{{plural}}", { count: taskDocs.length, plural: taskDocs.length !== 1 ? "s" : "" })}</span>
+                          <button
+                            className="documents-group-task-link"
+                            onClick={() => void handleOpenTask(taskId)}
+                            aria-label={t("documents.openTaskAria", "Open task {{taskId}}: {{title}}", { taskId, title: taskTitle || t("documents.untitled", "Untitled") })}
+                          >
+                            {t("documents.openTask", "Open task")}
+                          </button>
+                        </div>
+                      </div>
+                      <ul className="markdown-file-list documents-task-document-list">
+                        {taskDocs.map((doc) => {
+                          const isSelected = selectedTaskDocument?.id === doc.id;
+                          return (
+                            <li key={doc.id} className="markdown-file-list-item">
+                              <button
+                                className={`markdown-file-item documents-task-document-item${isSelected ? " markdown-file-item--selected" : ""}`}
+                                onClick={() => handleSelectTaskDocument(doc.id)}
+                                aria-label={t("documents.openTaskDocument", "Open {{taskId}} {{key}}", { taskId: doc.taskId, key: doc.key })}
+                                aria-current={isSelected ? "true" : undefined}
+                              >
+                                <span className="markdown-file-item-name">{doc.key}</span>
+                                <span className="markdown-file-item-path">{doc.taskId} · {doc.taskTitle || t("documents.untitled", "Untitled")}</span>
+                                <span className="markdown-file-item-meta">
+                                  {t("documents.revisionShort", "v{{revision}}", { revision: doc.revision })} · {doc.author} · {formatTimestamp(doc.updatedAt)}
+                                </span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </section>
+                  );
+                })}
+              </aside>
+            )}
+
+            {(!isMobile || selectedTaskDocument) && (
+              <section className="documents-view-main" aria-label={t("documents.taskDocumentPreviewLabel", "Task document content preview")}>
+                {isMobile && selectedTaskDocument && (
+                  <button
+                    className="btn btn-sm documents-mobile-back"
+                    onClick={handleBackToTaskDocumentList}
+                    aria-label={t("documents.backToTaskDocumentsList", "Back to task documents list")}
+                  >
+                    <ArrowLeft size={14} />
+                    {t("documents.backToTaskDocuments", "Back to documents")}
+                  </button>
+                )}
+
+                {!selectedTaskDocument ? (
+                  <div className="documents-view-empty">
+                    <p>{t("documents.selectTaskDocument", "Select a task document to view its content.")}</p>
+                  </div>
+                ) : (
+                  <div className="documents-content-viewer documents-task-document-viewer">
+                    <div className="documents-content-header documents-task-document-header">
+                      <div className="documents-task-document-title-block">
+                        <p className="documents-file-path-header">{selectedTaskDocument.taskId} / {selectedTaskDocument.key}</p>
+                        <div className="document-card-meta documents-task-document-meta">
+                          <span className="document-card-author">{selectedTaskDocument.author}</span>
+                          <span className="document-card-separator">·</span>
+                          <span>{t("documents.revisionShort", "v{{revision}}", { revision: selectedTaskDocument.revision })}</span>
+                          <span className="document-card-separator">·</span>
+                          <span className="document-card-date">{formatTimestamp(selectedTaskDocument.updatedAt)}</span>
+                        </div>
+                      </div>
+                      <button
+                        className="btn btn-sm document-mode-toggle"
+                        onClick={() => handleToggleTaskDocMarkdown(selectedTaskDocument.id)}
+                        aria-label={(taskDocMarkdownStates.get(selectedTaskDocument.id) ?? false) ? t("documents.switchToPlainText", "Switch to plain text") : t("documents.switchToMarkdown", "Switch to markdown")}
+                        aria-pressed={taskDocMarkdownStates.get(selectedTaskDocument.id) ?? false}
+                        title={(taskDocMarkdownStates.get(selectedTaskDocument.id) ?? false) ? t("documents.switchToPlainText", "Switch to plain text") : t("documents.switchToMarkdown", "Switch to markdown")}
+                      >
+                        {(taskDocMarkdownStates.get(selectedTaskDocument.id) ?? false) ? t("documents.markdown", "Markdown") : t("documents.plain", "Plain")}
+                      </button>
+                    </div>
+                    {(taskDocMarkdownStates.get(selectedTaskDocument.id) ?? false) ? (
+                      <div className="documents-content-markdown">
+                        <div className="markdown-body">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedTaskDocument.content}</ReactMarkdown>
+                        </div>
+                      </div>
+                    ) : (
+                      <pre className="document-card-content-text documents-content-viewer-text">{selectedTaskDocument.content}</pre>
+                    )}
+                  </div>
+                )}
+              </section>
+            )}
           </div>
         )}
       </div>

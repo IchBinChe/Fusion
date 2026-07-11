@@ -372,7 +372,49 @@ describe("DocumentsView", () => {
     expect(screen.queryByRole("button", { name: "Open README.md" })).not.toBeInTheDocument();
   });
 
-  it("shows collapsed task group status badges for done non-done archived custom and legacy documents", async () => {
+  it("renders task documents desktop sidebar and empty right pane", () => {
+    render(<DocumentsView addToast={addToast} onOpenDetail={onOpenDetail} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: /show task documents/i }));
+
+    expect(screen.getByLabelText("Task documents")).toBeInTheDocument();
+    expect(screen.getByLabelText("Task document content preview")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open KB-001 plan" })).toBeInTheDocument();
+    expect(screen.getByText("Select a task document to view its content.")).toBeInTheDocument();
+    expect(screen.queryByText("Alpha document content")).not.toBeInTheDocument();
+  });
+
+  it("selecting a task document loads content and marks the sidebar entry current", () => {
+    render(<DocumentsView addToast={addToast} onOpenDetail={onOpenDetail} />);
+
+    fireEvent.click(screen.getByRole("tab", { name: /show task documents/i }));
+    const planEntry = screen.getByRole("button", { name: "Open KB-001 plan" });
+    fireEvent.click(planEntry);
+
+    expect(screen.getByText("Alpha document content")).toBeInTheDocument();
+    expect(planEntry).toHaveAttribute("aria-current", "true");
+    expect(screen.getByText("KB-001 / plan")).toBeInTheDocument();
+  });
+
+  it("keeps project file and task document selections isolated across tab switches", async () => {
+    render(<DocumentsView addToast={addToast} onOpenDetail={onOpenDetail} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open README.md" }));
+    expect(await screen.findByText(/Hello docs/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: /show task documents/i }));
+
+    expect(screen.getByText("Select a task document to view its content.")).toBeInTheDocument();
+    expect(screen.queryByText(/Hello docs/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Open KB-001 plan" }));
+    expect(screen.getByText("Alpha document content")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: /show project markdown files/i }));
+    expect(screen.getByText(/Hello docs/)).toBeInTheDocument();
+    expect(screen.queryByText("Alpha document content")).not.toBeInTheDocument();
+  });
+
+  it("renders task document sidebar status badges for done non-done archived custom and legacy documents", async () => {
     mockUseProjectMarkdownFiles.mockReturnValue({
       files: [],
       loading: false,
@@ -392,11 +434,11 @@ describe("DocumentsView", () => {
     fireEvent.click(screen.getByRole("tab", { name: /show task documents/i }));
     expect(screen.getByRole("tab", { name: /show task documents/i })).toHaveAttribute("aria-selected", "true");
 
-    const doneGroup = screen.getByRole("button", { name: /expand documents for task KB-DONE/i }).closest(".documents-group");
-    const todoGroup = screen.getByRole("button", { name: /expand documents for task KB-TODO/i }).closest(".documents-group");
-    const archivedGroup = screen.getByRole("button", { name: /expand documents for task KB-ARCHIVED/i }).closest(".documents-group");
-    const customGroup = screen.getByRole("button", { name: /expand documents for task KB-CUSTOM/i }).closest(".documents-group");
-    const missingGroup = screen.getByRole("button", { name: /expand documents for task KB-MISSING/i }).closest(".documents-group");
+    const doneGroup = screen.getByRole("heading", { name: /KB-DONE.*Done task/i }).closest(".documents-task-sidebar-group");
+    const todoGroup = screen.getByRole("heading", { name: /KB-TODO.*Todo task/i }).closest(".documents-task-sidebar-group");
+    const archivedGroup = screen.getByRole("heading", { name: /KB-ARCHIVED.*Archived task/i }).closest(".documents-task-sidebar-group");
+    const customGroup = screen.getByRole("heading", { name: /KB-CUSTOM.*Custom task/i }).closest(".documents-task-sidebar-group");
+    const missingGroup = screen.getByRole("heading", { name: /KB-MISSING.*Legacy task/i }).closest(".documents-task-sidebar-group");
 
     expect(doneGroup).not.toBeNull();
     expect(todoGroup).not.toBeNull();
@@ -414,7 +456,7 @@ describe("DocumentsView", () => {
     expect(screen.queryByText("Done document content")).not.toBeInTheDocument();
   });
 
-  it("keeps task group status badges as non-interactive header metadata on mobile", async () => {
+  it("keeps task document status badges as non-interactive sidebar metadata on mobile", async () => {
     window.innerWidth = 600;
     mockUseProjectMarkdownFiles.mockReturnValue({
       files: [],
@@ -435,11 +477,11 @@ describe("DocumentsView", () => {
     fireEvent.click(screen.getByRole("tab", { name: /show task documents/i }));
     expect(screen.getByRole("tab", { name: /show task documents/i })).toHaveAttribute("aria-selected", "true");
 
-    const doneGroup = screen.getByRole("button", { name: /expand documents for task KB-DONE/i }).closest(".documents-group") as HTMLElement;
+    const doneGroup = screen.getByRole("heading", { name: /KB-DONE.*Done task/i }).closest(".documents-task-sidebar-group") as HTMLElement;
     const status = within(doneGroup).getByLabelText("Task status: Done");
 
     expect(status).toHaveClass("documents-group-status");
-    expect(status.closest(".documents-group-header")).toBeInTheDocument();
+    expect(status.closest(".documents-task-sidebar-group-header")).toBeInTheDocument();
     expect(status.closest("button")).toBeNull();
     expect(within(doneGroup).getByRole("button", { name: /open task KB-DONE/i })).toBeInTheDocument();
   });
@@ -792,7 +834,7 @@ describe("DocumentsView", () => {
     expect(onSendSelectionToTask).toHaveBeenCalledWith(expect.stringContaining("Review this rendered content."));
   });
 
-  it("search filters task documents", async () => {
+  it("search filters task documents and clears filtered-out selection", async () => {
     mockUseProjectMarkdownFiles.mockReturnValue({
       files: [],
       loading: false,
@@ -822,13 +864,18 @@ describe("DocumentsView", () => {
     fireEvent.click(screen.getByRole("tab", { name: /show task documents/i }));
     expect(screen.getByRole("tab", { name: /show task documents/i })).toHaveAttribute("aria-selected", "true");
 
+    fireEvent.click(screen.getByRole("button", { name: "Open KB-001 plan" }));
+    expect(screen.getByText("Alpha document content")).toBeInTheDocument();
+
     fireEvent.change(screen.getByRole("textbox", { name: /search task documents/i }), {
-      target: { value: "alpha" },
+      target: { value: "beta" },
     });
 
     await waitFor(() => {
-      expect(screen.getByText("KB-001")).toBeInTheDocument();
-      expect(screen.queryByText("KB-002")).not.toBeInTheDocument();
+      expect(screen.getByText("KB-002")).toBeInTheDocument();
+      expect(screen.queryByText("KB-001")).not.toBeInTheDocument();
+      expect(screen.queryByText("Alpha document content")).not.toBeInTheDocument();
+      expect(screen.getByText("Select a task document to view its content.")).toBeInTheDocument();
     });
   });
 
@@ -905,6 +952,33 @@ describe("DocumentsView", () => {
     fireEvent.click(screen.getByRole("button", { name: /back to project files list/i }));
 
     expect(screen.getByRole("button", { name: "Open README.md" })).toBeInTheDocument();
+  });
+
+  it("supports mobile list/detail navigation for task documents", async () => {
+    window.innerWidth = 600;
+    mockUseProjectMarkdownFiles.mockReturnValue({
+      files: [],
+      loading: false,
+      error: null,
+      refresh: vi.fn().mockResolvedValue(undefined),
+    });
+
+    render(<DocumentsView addToast={addToast} onOpenDetail={onOpenDetail} />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: /show task documents/i })).toHaveAttribute("aria-selected", "true");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Open KB-001 plan" }));
+
+    expect(screen.getByRole("button", { name: /back to task documents list/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open KB-001 plan" })).not.toBeInTheDocument();
+    expect(screen.getByText("Alpha document content")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /back to task documents list/i }));
+
+    expect(screen.getByRole("button", { name: "Open KB-001 plan" })).toBeInTheDocument();
+    expect(screen.queryByText("Alpha document content")).not.toBeInTheDocument();
   });
 
   it("opens task details from task document groups", async () => {
@@ -1021,12 +1095,7 @@ describe("DocumentsView", () => {
       expect(screen.getByText("KB-001")).toBeInTheDocument();
     });
 
-    // Expand a task group
-    fireEvent.click(screen.getByRole("button", { name: /expand documents for task KB-001/i }));
-
-    // Expand the document card
-    const expandBtn = screen.getByRole("button", { name: /expand content/i });
-    fireEvent.click(expandBtn);
+    fireEvent.click(screen.getByRole("button", { name: "Open KB-001 plan" }));
 
     // Task document toggle should default to raw (not influenced by project toggle)
     const taskToggle = screen.getByRole("button", { name: /switch to markdown/i });
@@ -1041,7 +1110,7 @@ describe("DocumentsView", () => {
     expect(screen.getByRole("button", { name: /switch to plain text/i })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("task document cards support markdown toggle when expanded", async () => {
+  it("task document viewer supports markdown toggle", async () => {
     mockUseProjectMarkdownFiles.mockReturnValue({
       files: [],
       loading: false,
@@ -1054,12 +1123,7 @@ describe("DocumentsView", () => {
     fireEvent.click(screen.getByRole("tab", { name: /show task documents/i }));
     expect(screen.getByRole("tab", { name: /show task documents/i })).toHaveAttribute("aria-selected", "true");
 
-    // Expand task group
-    fireEvent.click(screen.getByRole("button", { name: /expand documents for task KB-001/i }));
-
-    // Expand the document card
-    const expandBtn = screen.getByRole("button", { name: /expand content/i });
-    fireEvent.click(expandBtn);
+    fireEvent.click(screen.getByRole("button", { name: "Open KB-001 plan" }));
 
     // Should show raw text by default
     expect(screen.getByText("Alpha document content")).toBeInTheDocument();

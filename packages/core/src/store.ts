@@ -143,7 +143,7 @@ import { validateLocale } from "./settings-validation.js";
 import { normalizeTaskPriority } from "./task-priority.js";
 import { validateBranchGroupBranchName, filterTasksByBranchGroup } from "./branch-assignment.js";
 import { allowsAutoMergeProcessing } from "./task-merge.js";
-import { canAgentTakeImplementationTaskForExplicitRouting } from "./agent-role-policy.js";
+import { evaluateImplementationTaskBind } from "./agent-role-policy.js";
 import { GlobalSettingsStore, resolveGlobalDir } from "./global-settings.js";
 import { Database, SCHEMA_VERSION, toJson, toJsonNullable, fromJson } from "./db.js";
 import { ArchiveDatabase } from "./archive-db.js";
@@ -7205,7 +7205,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
 
   async selectNextTaskForAgent(
     agentId: string,
-    agent?: Pick<Agent, "id" | "role">,
+    agent?: Pick<Agent, "id" | "role"> & Partial<Pick<Agent, "runtimeConfig">>,
   ): Promise<InboxTask | null> {
     const hasExecutorRoleOverride = (task: Task): boolean => task.sourceMetadata?.executorRoleOverride === true;
     const tasks = await this.listTasks({ slim: true });
@@ -7222,9 +7222,26 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       return aSortAt.localeCompare(bSortAt);
     };
 
+    /*
+    FNXC:AgentRouting 2026-07-12-12:05:
+    FN-7851 / issue #2015: the in-progress branch used to return unconditionally, so a task mis-bound to a
+    role-incompatible or policy-excluded agent was re-selected on every heartbeat forever (the NEXT-871 liaison
+    loop). Route BOTH branches through the shared bind evaluator. executorRoleOverride still bypasses the role
+    check but never assignmentPolicy "none" — that is the hard liaison guarantee.
+    */
+    const isBindCompatible = (task: Task): boolean => {
+      if (!agent) return true;
+      return evaluateImplementationTaskBind(agent, task, {
+        explicitRouting: true,
+        executorRoleOverride: hasExecutorRoleOverride(task),
+      }).allowed;
+    };
+
     const assignedTasks = tasks.filter((task) => task.assignedAgentId === agentId);
 
-    const inProgress = assignedTasks.filter((task) => task.column === "in-progress").sort(sortByOldestColumnMove);
+    const inProgress = assignedTasks
+      .filter((task) => task.column === "in-progress" && isBindCompatible(task))
+      .sort(sortByOldestColumnMove);
     if (inProgress.length > 0) {
       return {
         task: inProgress[0],
@@ -7233,14 +7250,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       };
     }
 
-    const roleCompatibleAssignedTasks = agent
-      ? assignedTasks.filter((task) => {
-          if (task.column === "in-progress" || hasExecutorRoleOverride(task)) {
-            return true;
-          }
-          return canAgentTakeImplementationTaskForExplicitRouting(agent, task);
-        })
-      : assignedTasks;
+    const roleCompatibleAssignedTasks = assignedTasks.filter(isBindCompatible);
 
     const todoCandidates = roleCompatibleAssignedTasks.filter((task) => task.column === "todo" && task.paused !== true);
 

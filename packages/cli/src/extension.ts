@@ -24,8 +24,6 @@ import {
   isResearchExperimentalEnabled,
   isEphemeralAgent,
   resolveResearchSettings,
-  canAgentTakeImplementationTaskForExplicitRouting,
-  formatRoleMismatchReason,
   getTaskDuplicateLineage,
   resolveAgentProvisioningPolicy,
   TASK_PRIORITIES,
@@ -229,7 +227,7 @@ async function validateAssignableAgentId(
   task?: Pick<Task, "id" | "column"> | null,
   override = false,
 ): Promise<string | null> {
-  const { AgentStore, isEphemeralAgent } = await import("@fusion/core");
+  const { AgentStore, isEphemeralAgent, evaluateImplementationTaskBind } = await import("@fusion/core");
   const agentStore = new AgentStore({ rootDir: getFusionDir(cwd) });
   await agentStore.init();
   const agent = await agentStore.getAgent(agentId);
@@ -239,8 +237,15 @@ async function validateAssignableAgentId(
   if (isEphemeralAgent(agent)) {
     return `Cannot assign task to ephemeral/runtime agent ${agentId}`;
   }
-  if (task && !override && !canAgentTakeImplementationTaskForExplicitRouting(agent, task)) {
-    return formatRoleMismatchReason(agent, task);
+  if (task) {
+    // FNXC:AgentRouting 2026-07-12-12:30: issue #2015 — shared bind evaluator; override bypasses role only, never assignmentPolicy "none".
+    const verdict = evaluateImplementationTaskBind(agent, task, {
+      explicitRouting: true,
+      executorRoleOverride: override,
+    });
+    if (!verdict.allowed) {
+      return verdict.reason;
+    }
   }
   return null;
 }

@@ -4105,6 +4105,35 @@ describe("PATCH /tasks/:id/assign and GET /agents/:id/tasks", () => {
     expect(store.updateTask).toHaveBeenCalledWith("FN-200", { assignedAgentId: reviewerAgentId });
   }, 20000);
 
+  /*
+  FNXC:AgentRouting 2026-07-12-13:35:
+  Issue #2015: the /assign route must honor per-agent assignmentPolicy — "none" (liaison guarantee) is
+  refused even with override=true.
+  */
+  it("returns 409 when assigning to a policy-'none' executor, even with override", async () => {
+    const { AgentStore } = await import("@fusion/core");
+    const agentStore = new AgentStore({ rootDir: fusionDir });
+    await agentStore.init();
+    const liaison = await agentStore.createAgent({
+      name: "Platform Liaison",
+      role: "executor",
+      runtimeConfig: { assignmentPolicy: "none" },
+    });
+
+    for (const override of [undefined, true]) {
+      const res = await REQUEST(
+        buildApp(),
+        "PATCH",
+        "/api/tasks/FN-200/assign",
+        JSON.stringify({ agentId: liaison.id, ...(override ? { override } : {}) }),
+        { "Content-Type": "application/json" },
+      );
+      expect(res.status).toBe(409);
+      expect(res.body.error).toContain("assignmentPolicy \"none\"");
+    }
+    expect(store.updateTask).not.toHaveBeenCalled();
+  }, 30_000);
+
   it("returns 404 when assigning to a non-existent agent", async () => {
     const res = await REQUEST(
       buildApp(),
@@ -4260,7 +4289,8 @@ describe("PATCH /tasks/:id/assign and GET /agents/:id/tasks", () => {
     const res = await REQUEST(buildApp(), "POST", `/api/agents/${agentId}/inbox`);
 
     expect(res.status).toBe(200);
-    expect(store.selectNextTaskForAgent).toHaveBeenCalledWith(agentId);
+    // FNXC:AgentRouting 2026-07-12-14:20: issue #2015 — the inbox preview now passes the agent so role/assignmentPolicy filtering applies.
+    expect(store.selectNextTaskForAgent).toHaveBeenCalledWith(agentId, expect.objectContaining({ id: agentId, role: "executor" }));
     expect(res.body).toEqual({
       task: expect.objectContaining({ id: "FN-500" }),
       priority: "todo",
@@ -4274,7 +4304,8 @@ describe("PATCH /tasks/:id/assign and GET /agents/:id/tasks", () => {
     const res = await REQUEST(buildApp(), "POST", `/api/agents/${agentId}/inbox`);
 
     expect(res.status).toBe(200);
-    expect(store.selectNextTaskForAgent).toHaveBeenCalledWith(agentId);
+    // FNXC:AgentRouting 2026-07-12-14:20: issue #2015 — the inbox preview now passes the agent so role/assignmentPolicy filtering applies.
+    expect(store.selectNextTaskForAgent).toHaveBeenCalledWith(agentId, expect.objectContaining({ id: agentId, role: "executor" }));
     expect(res.body).toEqual({ task: null });
   }, 30_000);
 
@@ -4377,6 +4408,53 @@ describe("Task checkout routes", () => {
     expect(res.status).toBe(200);
     expect(res.body.checkedOutBy).toBe(agentAId);
     expect(res.body.checkedOutAt).toBeTruthy();
+  }, 20_000);
+
+  /*
+  FNXC:AgentRouting 2026-07-12-13:40:
+  Issue #2015: POST /tasks/:id/checkout was an UNGUARDED binding surface — role-incompatible or
+  policy-excluded agents could acquire the lease. The guard now lives in AgentStore.checkoutTask and must
+  surface here as 409.
+  */
+  it("POST /tasks/:id/checkout — returns 409 for a role-incompatible agent", async () => {
+    const { AgentStore } = await import("@fusion/core");
+    const agentStore = new AgentStore({ rootDir: fusionDir });
+    await agentStore.init();
+    const liaison = await agentStore.createAgent({ name: "Custom Liaison", role: "custom" });
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      `/api/tasks/${taskState.id}/checkout`,
+      JSON.stringify({ agentId: liaison.id }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(409);
+    expect(taskState.checkedOutBy).toBeUndefined();
+  }, 20_000);
+
+  it("POST /tasks/:id/checkout — returns 409 for an executor with assignmentPolicy 'none'", async () => {
+    const { AgentStore } = await import("@fusion/core");
+    const agentStore = new AgentStore({ rootDir: fusionDir });
+    await agentStore.init();
+    const liaison = await agentStore.createAgent({
+      name: "Platform Liaison",
+      role: "executor",
+      runtimeConfig: { assignmentPolicy: "none" },
+    });
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      `/api/tasks/${taskState.id}/checkout`,
+      JSON.stringify({ agentId: liaison.id }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain("assignmentPolicy \"none\"");
+    expect(taskState.checkedOutBy).toBeUndefined();
   }, 20_000);
 
   it("POST /tasks/:id/checkout — returns 409 on conflict", async () => {

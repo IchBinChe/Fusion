@@ -662,11 +662,16 @@ NARROW container (right dock): collapse the side-by-side split into a single-pan
     gap: 0;
   }
 
-  /* Single panel at a time: full-width, owns its vertical scroll. */
-  .todo-view-sidebar,
-  .todo-view-main {
+  /*
+  FNXC:TodosStyling 2026-07-11-21:29:
+  Phone-width Todo uses a single-panel stack, so the visible LISTS or items panel must fill the full view instead of inheriting the later tablet sidebar cap. Keep this selector more specific than the viewport media rule so max-height stays uncapped while the tablet two-panel stack still reserves room for the items pane.
+  */
+  .todo-view-layout .todo-view-sidebar,
+  .todo-view-layout .todo-view-main {
     width: 100%;
     min-width: 0;
+    height: 100%;
+    max-height: none;
     flex: 1 1 auto;
     border-right: none;
     padding-right: 0;

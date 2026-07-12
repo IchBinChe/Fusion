@@ -1,6 +1,34 @@
 import { describe, expect, it } from "vitest";
 import { loadAllAppCss, loadAllAppCssBaseOnly } from "../../test/cssFixture";
 
+describe("TodoView mobile stack height CSS contract", () => {
+  it("uncaps both visible panels in the narrow single-panel stack", () => {
+    const css = loadAllAppCss();
+    const containerStart = css.indexOf("@container todo-view (max-width: 520px)");
+    const mediaStart = css.indexOf("@media (max-width: 768px)", containerStart);
+
+    expect(containerStart).toBeGreaterThanOrEqual(0);
+    expect(mediaStart).toBeGreaterThan(containerStart);
+
+    const narrowStackCss = css.slice(containerStart, mediaStart);
+
+    expect(narrowStackCss).toMatch(
+      /\.todo-view-layout \.todo-view-sidebar,\s*\.todo-view-layout \.todo-view-main\s*\{[^}]*height:\s*100%;[^}]*max-height:\s*none;[^}]*flex:\s*1 1 auto;[^}]*overflow-y:\s*auto;/,
+    );
+    expect(narrowStackCss).toMatch(/\.todo-view-layout\[data-mobile-stack-view="list"\] \.todo-view-main\s*\{[^}]*display:\s*none;/);
+    expect(narrowStackCss).toMatch(/\.todo-view-layout\[data-mobile-stack-view="detail"\] \.todo-view-sidebar\s*\{[^}]*display:\s*none;/);
+    expect(narrowStackCss).not.toMatch(/max-height:\s*calc\(var\(--space-2xl\) \* 6 \+ var\(--space-sm\)\)/);
+  });
+
+  it("retains the tablet two-panel sidebar height cap", () => {
+    const css = loadAllAppCss();
+
+    expect(css).toMatch(
+      /@media \(max-width:\s*768px\)[\s\S]*\.todo-view-sidebar\s*\{[^}]*max-height:\s*calc\(var\(--space-2xl\) \* 6 \+ var\(--space-sm\)\);/,
+    );
+  });
+});
+
 describe("TodoView action row CSS contract", () => {
   it("keeps todo item actions visible by default on desktop", () => {
     const baseCss = loadAllAppCssBaseOnly();

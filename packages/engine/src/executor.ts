@@ -343,6 +343,11 @@ export function augmentSessionSkillsForBrowserStep(
   };
 }
 
+function mergeAdditionalSkillPaths(...pathGroups: Array<string[] | undefined>): string[] | undefined {
+  const merged = Array.from(new Set(pathGroups.flatMap((paths) => paths ?? [])));
+  return merged.length > 0 ? merged : undefined;
+}
+
 export function formatAgentBrowserAvailabilityLog(result: AgentBrowserAvailabilityProbeResult): string {
   if (result.available) {
     return `[browser-verification] agent-browser available — version ${result.version ?? "unknown"}`;
@@ -10017,8 +10022,9 @@ export class TaskExecutor {
           // FNXC:McpConfig 2026-06-25-23:03: Per-step workflow sessions are an executor lane, so they inherit the task's resolved MCP set from the effective step identity agent and never re-read or log plaintext secret values.
           mcpServers: await this.resolveMcpServers(stepIdentityAgent?.id),
           workflowStepThinkingLevel: this.graphSeamThinkingLevel.get(task.id),
-          // Pass skill selection context from the main executor session
+          // FNXC:PluginSkills 2026-07-12-00:00: Step sessions must forward plugin skill body dirs alongside requested names; otherwise plugin-provided SKILL.md bodies are invisible to the inner createFnAgent loader.
           skillSelection: skillContext.skillSelectionContext,
+          additionalSkillPaths: skillContext.additionalSkillPaths,
           // Pass agentStore and messageStore for delegation and messaging tools
           agentStore: this.options.agentStore,
           messageStore: this.options.messageStore,
@@ -10836,8 +10842,9 @@ export class TaskExecutor {
             sessionManager,
             taskEnv,
             mcpServers: await this.resolveMcpServers(identityAgent?.id),
-            // Skill selection: use assigned agent skills if available, otherwise role fallback
+            // FNXC:PluginSkills 2026-07-12-00:00: Plugin skill session delivery requires forwarding both requested names and body directories so the pi loader can discover plugin-package SKILL.md files.
             ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
+            ...(skillContext.additionalSkillPaths.length > 0 ? { additionalSkillPaths: skillContext.additionalSkillPaths } : {}),
             // Column-agent principal alignment (plan U5, R5): action gating is
             // computed for the agent ACTUALLY RUNNING. When the governing execute
             // seam's column binds an agent that supersedes the assigned agent,
@@ -11264,8 +11271,9 @@ export class TaskExecutor {
                   sessionManager: SessionManager.create(worktreePath),
                   taskEnv,
                   mcpServers: await this.resolveMcpServers(identityAgent?.id),
-                  // Skill selection: use assigned agent skills if available, otherwise role fallback
+                  // FNXC:PluginSkills 2026-07-12-00:00: Retry executor sessions must keep the same plugin skill body discovery paths as the primary attempt so requested plugin skill names resolve to real bodies.
                   ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
+                  ...(skillContext.additionalSkillPaths.length > 0 ? { additionalSkillPaths: skillContext.additionalSkillPaths } : {}),
                   // U5 (R5): retry session re-keys gating to the effective principal,
                   // mirroring the primary execute-seam session above.
                   actionGateContext: this.buildActionGateContext(task.id, identityAgent, settings.defaultAgentPermissionPolicy),
@@ -14224,7 +14232,9 @@ Do not refactor, rename broadly, or make opportunistic improvements.
         // #1675: propagate task id so verification-fix requests carry the same
         // X-Session-Id/X-Session-Affinity as the primary session.
         taskId: task.id,
+        // FNXC:PluginSkills 2026-07-12-00:00: Verification-fix sessions share task skill selection; include plugin skill body dirs so fixes can use plugin-authored guidance.
         ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
+        ...(skillContext && skillContext.additionalSkillPaths.length > 0 ? { additionalSkillPaths: skillContext.additionalSkillPaths } : {}),
       });
 
       await this.store.logEntry(
@@ -15241,7 +15251,7 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
           `[skill-load] Workflow step '${workflowStep.name}' requests skill '${workflowStep.skillName}' but FUSION_CE_SKILLS_DIR is unset — the skill cannot be discovered; the step runs with role-fallback skills only.`,
         );
       }
-      const additionalSkillPaths = ceSkillsDir ? [ceSkillsDir] : undefined;
+      const additionalSkillPaths = mergeAdditionalSkillPaths(skillContext.additionalSkillPaths, ceSkillsDir ? [ceSkillsDir] : undefined);
       const logBrowserVerificationActivity = async (message: string) => {
         await this.store.logEntry(task.id, message);
         await this.store.appendAgentLog(task.id, message, "text", undefined, "reviewer");
@@ -15328,8 +15338,8 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
         // #1675: propagate task id so workflow-step requests carry the same
         // X-Session-Id/X-Session-Affinity as the primary session.
         taskId: task.id,
-        // Skill selection: assigned-agent / role-fallback skills, plus the step's
-        // own named skill (U1) made discoverable via additionalSkillPaths.
+        // FNXC:PluginSkills 2026-07-12-00:00: Workflow-step sessions union plugin skill body dirs with CE's FUSION_CE_SKILLS_DIR so neither plugin-package nor compound-engineering skills are overwritten.
+        // Skill selection: assigned-agent / role-fallback skills, plus the step's own named skill (U1) made discoverable via additionalSkillPaths.
         ...(effectiveSkillSelection ? { skillSelection: effectiveSkillSelection } : {}),
         ...(additionalSkillPaths ? { additionalSkillPaths } : {}),
         ...(readonlyCustomTools.allowed.length > 0 ? { customTools: readonlyCustomTools.allowed } : {}),
@@ -18204,8 +18214,9 @@ Child agent: ${agent.id} (${name})`;
             // #1675: propagate task id so child-agent requests carry the same
             // X-Session-Id/X-Session-Affinity as the parent task session.
             taskId,
-            // Skill selection: use assigned agent skills if available, otherwise role fallback
+            // FNXC:PluginSkills 2026-07-12-00:00: Child-agent sessions inherit plugin skill body directories from the task skill context so delegated work can load plugin skill guidance.
             ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
+            ...(skillContext.additionalSkillPaths.length > 0 ? { additionalSkillPaths: skillContext.additionalSkillPaths } : {}),
           });
 
           // Store tracking state

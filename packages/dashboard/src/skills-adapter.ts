@@ -668,27 +668,10 @@ export function createSkillsAdapter(options: {
         throw new Error(`Skill not found: ${skillId}`);
       }
 
-      // Plugin-contributed skills have no on-disk representation in this
-      // catalog: the engine materializes them for executor sessions at runtime,
-      // so `path` is a virtual relative path with no filesystem backing. Reading
-      // it would silently return a blank panel, so surface what we know (name +
-      // description) and explain where the definition lives instead.
-      if (skill.metadata.source.startsWith("plugin:")) {
-        const pluginId = skill.metadata.source.slice("plugin:".length);
-        const lines = [`# ${skill.name}`, ""];
-        if (skill.description) {
-          lines.push(skill.description, "");
-        }
-        lines.push(
-          `_Contributed by the \`${pluginId}\` plugin. Its definition is materialized at runtime and has no editable file in this project._`,
-        );
-        return {
-          name: skill.name,
-          skillMd: lines.join("\n"),
-          files: [],
-        };
-      }
-
+      /*
+      FNXC:PluginSkills 2026-07-12-00:00:
+      GitHub #2017 requires plugin skills to be inspectable from the same on-disk SKILL.md/reference files that sessions load. FN-7860 makes plugin skill.path an absolute package path, so plugin entries now use the regular traversal-guarded disk reader instead of a runtime placeholder.
+      */
       let skillDir = skill.path;
       try {
         const skillPathStat = await stat(skill.path);
@@ -739,10 +722,10 @@ export function createSkillsAdapter(options: {
       if (!skill) {
         throw new Error(`Skill not found: ${skillId}`);
       }
-      if (skill.metadata.source.startsWith("plugin:")) {
-        throw new Error(`Skill file not found: ${relativePath}`);
-      }
-
+      /*
+      FNXC:PluginSkills 2026-07-12-00:00:
+      Plugin skill reference files are read from the resolved plugin skill directory with the same traversal guard as native skills, so dashboard inspection matches the body delivered to sessions.
+      */
       let skillDir = skill.path;
       try {
         const skillPathStat = await stat(skill.path);

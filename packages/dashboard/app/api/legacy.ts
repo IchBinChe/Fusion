@@ -3462,6 +3462,11 @@ export function fetchRemoteCommits(remote: string, ref?: string, limit?: number,
   return api<GitCommit[]>(withRepoPath(withProjectId(`/git/remotes/${encodeURIComponent(remote)}/commits${query}`, projectId), repoPath));
 }
 
+/** Fetch branch names known on a specific remote (from local remote-tracking refs). */
+export function fetchGitRemoteBranches(remote: string, projectId?: string, repoPath?: string): Promise<string[]> {
+  return api<string[]>(withRepoPath(withProjectId(`/git/remotes/${encodeURIComponent(remote)}/branches`, projectId), repoPath));
+}
+
 /** Fetch all local branches */
 export function fetchGitBranches(projectId?: string, repoPath?: string): Promise<GitBranch[]> {
   return api<GitBranch[]>(withRepoPath(withProjectId("/git/branches", projectId), repoPath));

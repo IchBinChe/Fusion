@@ -6228,7 +6228,11 @@
       "gitLabPersonalAccessToken": "Personal access token (default)",
       "gitLabAuthTokenHint": "Read-only GitLab operations need read_api or api. Future write actions such as comments and auto-close need api. Project and group tokens are limited to their associated resource and role membership. No default — unset.",
       "includeTaskIdInCommitDefault": "). Default: enabled.",
-      "trailerEmail": " trailer. Default: noreply@runfusion.ai."
+      "trailerEmail": " trailer. Default: noreply@runfusion.ai.",
+      "gitRemoteThatMergedResultsArePushedTo": "Git remote that merged results are pushed to. Default: \"origin\".",
+      "pushTargetBranch": "Push target branch",
+      "sameAsIntegrationBranchDefault": "(same as integration branch — default)",
+      "pushTargetBranchHelp": "Branch on the remote that merged results are pushed to. Leave on the default to push the integration branch to its same-named remote branch; pick a listed remote branch or choose Custom… to type one that doesn't exist on the remote yet (the push creates it)."
     },
     "mergeManually": "Merge Manually",
     "mobileNav": {

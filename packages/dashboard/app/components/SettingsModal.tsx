@@ -1800,6 +1800,15 @@ export function SettingsModal({
   // free-text entry. Best-effort — falls back to empty list (custom-only).
   useEffect(() => {
     if (activeSection !== "merge") return;
+    /*
+    FNXC:MergePush 2026-07-11-22:50:
+    The push-after-merge target is now picked from dropdowns (remote + branch on that
+    remote) instead of a free-text field, so the merge section also needs the remote
+    list. Best-effort — an empty list makes MergeSection fall back to free-text entry.
+    */
+    fetchGitRemotesDetailed(projectId)
+      .then((remotes) => setGitRemotes(remotes))
+      .catch(() => setGitRemotes([]));
     fetchGitBranches(projectId)
       .then((branches) => {
         const names = branches
@@ -3583,6 +3592,8 @@ export function SettingsModal({
             integrationBranchCustomMode={integrationBranchCustomMode}
             setIntegrationBranchCustomMode={setIntegrationBranchCustomMode}
             onOpenWorkflowSettings={onOpenWorkflowSettings}
+            gitRemoteOptions={gitRemotes.map((r) => r.name)}
+            projectId={projectId}
           />
         );
       case "agent-permissions":

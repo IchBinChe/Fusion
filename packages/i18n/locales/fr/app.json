@@ -6208,7 +6208,11 @@
       "gitLabPersonalAccessToken": "",
       "gitLabAuthTokenHint": "",
       "includeTaskIdInCommitDefault": "",
-      "trailerEmail": ""
+      "trailerEmail": "",
+      "gitRemoteThatMergedResultsArePushedTo": "",
+      "pushTargetBranch": "",
+      "sameAsIntegrationBranchDefault": "",
+      "pushTargetBranchHelp": ""
     },
     "mergeManually": "Fusionner manuellement",
     "mobileNav": {

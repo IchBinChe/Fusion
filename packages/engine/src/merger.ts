@@ -180,7 +180,13 @@ async function resolveMergerMcpServers(store?: TaskStore, agentId?: string | nul
  * Best-effort: any per-worktree failure is recorded as an audit event and the
  * loop continues — the merge has already landed and the auto-sync is convenience.
  */
-async function runMergeAdvanceAutoSync(input: {
+/*
+FNXC:MergePush 2026-07-11-22:10:
+Exported for the unified AI merge path: after a push-time divergence rebase CAS-advances
+refs/heads/<integrationBranch>, the same other-worktree catch-up (stash-and-ff / ff-only)
+must run so the user's checkout doesn't show the rebased commits inverted as staged changes.
+*/
+export async function runMergeAdvanceAutoSync(input: {
   store: TaskStore;
   audit: RunAuditor;
   taskId: string;
@@ -6981,7 +6987,13 @@ function getCommandErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function isNonFastForwardPushError(message: string): boolean {
+/*
+FNXC:MergePush 2026-07-11-22:10:
+Exported for the unified AI merge path (merger-ai.ts pushAfterMergeToRemote): the production
+runAiMerge pipeline needs the same rejected-push classification the legacy step-8b path used,
+so divergence (remote moved) can be distinguished from hard failures (auth, missing remote).
+*/
+export function isNonFastForwardPushError(message: string): boolean {
   const normalized = message.toLowerCase();
   return normalized.includes("non-fast-forward")
     || normalized.includes("[rejected]")
@@ -7001,7 +7013,13 @@ function isRebaseInProgress(rootDir: string): boolean {
   }
 }
 
-function parsePushRemoteTarget(rootDir: string, pushRemote?: string, fallbackBranch?: string): { remote: string; branch: string } {
+/*
+FNXC:MergePush 2026-07-11-22:10:
+Exported for the unified AI merge path (merger-ai.ts pushAfterMergeToRemote) so the
+`pushRemote` setting keeps one parser: "origin" (target branch defaults to the integration
+branch) or "origin main" (explicit remote + target branch).
+*/
+export function parsePushRemoteTarget(rootDir: string, pushRemote?: string, fallbackBranch?: string): { remote: string; branch: string } {
   const rawTarget = pushRemote?.trim() || "origin";
   const [remoteToken, ...branchTokens] = rawTarget.split(/\s+/).filter(Boolean);
   const remote = remoteToken || "origin";
@@ -7306,6 +7324,15 @@ export async function pushToRemoteAfterMerge(
     assignedAgentRuntimeConfig?: Record<string, unknown>;
     onSession?: (session: { dispose: () => void }) => void;
     integrationBranch?: string;
+    /*
+    FNXC:MergePush 2026-07-11-22:10:
+    When true, push `HEAD:refs/heads/<branch>` instead of the local branch ref. The unified
+    AI merge path calls this from a DETACHED clean-room worktree (never the user's checkout),
+    where `git pull --rebase` rewrites the detached HEAD — the local refs/heads/<branch> is
+    only advanced afterwards via compare-and-swap by the caller. Without this, the push would
+    resend the stale local ref after a divergence rebase and reject non-fast-forward forever.
+    */
+    pushHeadRefspec?: boolean;
   },
 ): Promise<{ pushed: boolean; error?: string }> {
   let target: { remote: string; branch: string };
@@ -7333,7 +7360,9 @@ export async function pushToRemoteAfterMerge(
     return { pushed: false, error: message };
   }
 
-  const pushCommand = `git push ${quoteArg(remote)} ${quoteArg(branch)}`;
+  const pushCommand = options?.pushHeadRefspec
+    ? `git push ${quoteArg(remote)} ${quoteArg(`HEAD:refs/heads/${branch}`)}`
+    : `git push ${quoteArg(remote)} ${quoteArg(branch)}`;
 
   try {
     throwIfAborted(options?.signal, taskId);

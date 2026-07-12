@@ -5800,8 +5800,7 @@
       "version": "Versión {{version}}",
       "versionShort": "",
       "checkUpdates": "",
-      "helpDiscussions": "",
-      "versionShort": ""
+      "helpDiscussions": ""
     },
     "general": {
       "25": "",
@@ -6209,7 +6208,11 @@
       "gitLabPersonalAccessToken": "",
       "gitLabAuthTokenHint": "",
       "includeTaskIdInCommitDefault": "",
-      "trailerEmail": ""
+      "trailerEmail": "",
+      "gitRemoteThatMergedResultsArePushedTo": "",
+      "pushTargetBranch": "",
+      "sameAsIntegrationBranchDefault": "",
+      "pushTargetBranchHelp": ""
     },
     "mergeManually": "Fusionar manualmente",
     "mobileNav": {

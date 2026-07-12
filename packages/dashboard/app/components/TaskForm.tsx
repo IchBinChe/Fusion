@@ -10,7 +10,7 @@ import { NodeHealthDot } from "./NodeHealthDot";
 import { LoadingSpinner } from "./LoadingSpinner";
 import { Sparkles, ChevronUp, ChevronDown, Maximize2, Minimize2, Paperclip, Zap, Brain, Server } from "lucide-react";
 import { REPO_OVERRIDE_RE, resolveEffectiveGithubRepoDefault } from "./githubTracking";
-import { getPriorityIcon, getPriorityLabel } from "../utils/priorityIndicator";
+import { getPriorityColorVar, getPriorityIcon, getPriorityLabel } from "../utils/priorityIndicator";
 import { ProviderIcon } from "./ProviderIcon";
 import { WorkflowIcon } from "./WorkflowIcon";
 
@@ -1146,7 +1146,8 @@ export function TaskForm({
             </button>
           )}
 
-          {/* FNXC:NewTask 2026-06-23-00:10: Priority — cycles TASK_PRIORITIES via onPriorityChange (shared icon-only glyph language, same accessible label shape as QuickEntryBox). */}
+          {/* FNXC:NewTask 2026-06-23-00:10: Priority — cycles TASK_PRIORITIES via onPriorityChange (shared icon-only glyph language, same accessible label shape as QuickEntryBox).
+          FNXC:PriorityColorCoding 2026-07-11-00:00: Tint the inline priority glyph from priorityIndicator so the New Task row shares quick-add/card urgency colors without changing button semantics. */}
           {onPriorityChange && (
             <button
               type="button"
@@ -1161,7 +1162,7 @@ export function TaskForm({
               data-testid="task-form-inline-priority"
               title={inlinePriorityButtonLabel}
             >
-              <InlinePriorityIcon size={12} className="task-form-action-icon" aria-hidden="true" />
+              <InlinePriorityIcon size={12} className="task-form-action-icon" aria-hidden="true" style={{ color: getPriorityColorVar(inlinePriority) }} />
             </button>
           )}
         </div>

@@ -54,6 +54,7 @@ import { WorkspaceWorktreesSummary, isWorkspaceTask } from "./WorkspaceWorktrees
 import { WorkflowIcon } from "./WorkflowIcon";
 import { TaskContextMenu, buildTaskActionMenuModel, getTaskPrAutomationLabel, type TaskContextMenuColumnFlags, type TaskContextMenuColumnMetadata, type TaskMenuActionDescriptor } from "./TaskContextMenu";
 import { formatCost, hasTaskCost, taskTotalCost } from "../utils/taskTokenCost";
+import { getPriorityColorVar, getPriorityIcon } from "../utils/priorityIndicator";
 
 /** Per-branch progress snapshot (U13). Surfaced as an optional additive field
  *  on the task payload for the parallel-window badge (U9). */
@@ -1284,6 +1285,7 @@ function TaskCardComponent({
   const pausedByAgent = Boolean(!isDoneColumn && task.paused && task.pausedByAgentId);
   const normalizedPriority = normalizeTaskPriorityValue(task.priority);
   const showPriorityBadge = normalizedPriority !== DEFAULT_TASK_PRIORITY;
+  const PriorityBadgeIcon = getPriorityIcon(normalizedPriority);
   const isStuck = isTaskStuck(task, taskStuckTimeoutMs, lastFetchTimeMs);
   const stalledReview = getStalledReviewSignal(task);
   const showStalledReview = Boolean(stalledReview && task.column === "in-review" && !isPaused);
@@ -3085,7 +3087,9 @@ function TaskCardComponent({
           <div className="card-meta-badges" data-testid="card-meta-badges">
             {showPriorityBadge && (
               <span className={`card-priority-badge card-priority-badge--${normalizedPriority}`}>
-                {normalizedPriority}
+                {/* FNXC:PriorityColorCoding 2026-07-11-00:00: Cards render the shared priority glyph with the priorityIndicator urgency color while preserving the existing badge text and non-normal visibility gate. */}
+                <PriorityBadgeIcon size={10} aria-hidden="true" style={{ color: getPriorityColorVar(normalizedPriority) }} />
+                <span>{normalizedPriority}</span>
               </span>
             )}
             {task.executionMode === "fast" && (

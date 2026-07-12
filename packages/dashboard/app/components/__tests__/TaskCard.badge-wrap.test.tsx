@@ -1,3 +1,4 @@
+import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { TaskCard } from "../TaskCard";
@@ -22,6 +23,10 @@ vi.mock("lucide-react", () => ({
   RotateCw: () => null,
   Zap: () => null,
   AlertTriangle: () => null,
+  ArrowDown: ({ style }: { style?: React.CSSProperties }) => <svg className="lucide-arrow-down" style={style} />,
+  Flag: ({ style }: { style?: React.CSSProperties }) => <svg className="lucide-flag" style={style} />,
+  ArrowUp: ({ style }: { style?: React.CSSProperties }) => <svg className="lucide-arrow-up" style={style} />,
+  TriangleAlert: ({ style }: { style?: React.CSSProperties }) => <svg className="lucide-triangle-alert" style={style} />,
   Eye: () => null,
   MoreHorizontal: () => null,
 }));

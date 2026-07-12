@@ -20,7 +20,8 @@ vi.mock("../../hooks/useToast", () => ({
 import { NavigationHistoryProvider, useNavigationHistory } from "../../hooks/useNavigationHistory";
 import { useOverlayDismiss } from "../../hooks/useOverlayDismiss";
 import type { ConfirmOptions } from "../../hooks/useConfirm";
-import type { Task } from "@fusion/core";
+import { TASK_PRIORITIES, type Task, type TaskPriority } from "@fusion/core";
+import { getPriorityColorVar } from "../../utils/priorityIndicator";
 
 // Mock lucide-react to avoid SVG rendering issues in test env
 vi.mock("lucide-react", () => ({
@@ -41,6 +42,10 @@ vi.mock("lucide-react", () => ({
   RotateCw: () => null,
   Zap: () => <svg data-testid="icon-zap" />,
   AlertTriangle: () => null,
+  ArrowDown: ({ style }: { style?: React.CSSProperties }) => <svg data-testid="priority-icon-low" className="lucide-arrow-down" style={style} />,
+  Flag: ({ style }: { style?: React.CSSProperties }) => <svg data-testid="priority-icon-normal" className="lucide-flag" style={style} />,
+  ArrowUp: ({ style }: { style?: React.CSSProperties }) => <svg data-testid="priority-icon-high" className="lucide-arrow-up" style={style} />,
+  TriangleAlert: ({ style }: { style?: React.CSSProperties }) => <svg data-testid="priority-icon-urgent" className="lucide-triangle-alert" style={style} />,
   ArrowUpRight: () => null,
   // FN-7592: the overseer badge now renders an icon child instead of a text label,
   // so tests must see a real SVG (like Zap) rather than a no-op render.
@@ -2783,6 +2788,32 @@ describe("TaskCard", () => {
       "card-priority-badge card-priority-badge--high",
       "card-execution-mode-badge card-execution-mode-badge--fast",
     ]);
+  });
+
+  it("renders shared urgency-colored glyphs for visible priority badges while normal stays hidden", () => {
+    for (const priority of TASK_PRIORITIES) {
+      const { container, unmount } = render(
+        <TaskCard
+          task={makeTask({ priority: priority as TaskPriority })}
+          onOpenDetail={noop}
+          addToast={noop}
+        />,
+      );
+
+      const badge = container.querySelector(".card-priority-badge");
+      if (priority === "normal") {
+        expect(badge).toBeNull();
+        unmount();
+        continue;
+      }
+
+      expect(badge).not.toBeNull();
+      expect(badge).toHaveTextContent(priority);
+      const icon = badge?.querySelector("svg");
+      expect(icon).not.toBeNull();
+      expect(icon?.getAttribute("style")).toContain(`color: ${getPriorityColorVar(priority)}`);
+      unmount();
+    }
   });
 
   it("renders partial card meta groups without empty wrappers when time is absent", () => {

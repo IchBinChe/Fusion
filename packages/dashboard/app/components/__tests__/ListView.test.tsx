@@ -1865,6 +1865,84 @@ describe("ListView", () => {
     }
   });
 
+  it("shows the Reviewing badge in the desktop table status cell while Plan Review runs", () => {
+    const tasks = [
+      createMockTask({
+        id: "FN-7831",
+        status: "planning",
+        enabledWorkflowSteps: ["plan-review"],
+        workflowStepResults: [
+          {
+            workflowStepId: "plan-review",
+            workflowStepName: "Plan Review",
+            status: "pending",
+            startedAt: "2026-07-11T12:00:00.000Z",
+          },
+        ],
+      } as Partial<Task>),
+    ];
+
+    renderListView({ tasks });
+
+    const row = screen.getByText("FN-7831").closest("tr");
+    expect(row).not.toBeNull();
+    expect(within(row as HTMLElement).getByText("Reviewing")).toBeInTheDocument();
+    expect(within(row as HTMLElement).getByText("planning")).toBeInTheDocument();
+  });
+
+  it("shows the Reviewing badge in grouped mobile cards while Plan Review runs", () => {
+    const matchMediaSpy = mockMobileViewport();
+    try {
+      const tasks = [
+        createMockTask({
+          id: "FN-7831",
+          status: "planning",
+          enabledWorkflowSteps: ["plan-review"],
+          workflowStepResults: [
+            {
+              workflowStepId: "plan-review",
+              workflowStepName: "Plan Review",
+              status: "pending",
+              startedAt: "2026-07-11T12:00:00.000Z",
+            },
+          ],
+        } as Partial<Task>),
+      ];
+
+      renderListView({ tasks });
+
+      const card = screen.getByText("FN-7831").closest(".list-card");
+      expect(card).not.toBeNull();
+      expect(within(card as HTMLElement).getByText("Reviewing")).toBeInTheDocument();
+      expect(within(card as HTMLElement).getByText("planning")).toBeInTheDocument();
+    } finally {
+      matchMediaSpy.mockRestore();
+    }
+  });
+
+  it("does not show the Reviewing badge after Plan Review completes", () => {
+    const tasks = [
+      createMockTask({
+        id: "FN-7831",
+        status: "planning",
+        enabledWorkflowSteps: ["plan-review"],
+        workflowStepResults: [
+          {
+            workflowStepId: "plan-review",
+            workflowStepName: "Plan Review",
+            status: "passed",
+            startedAt: "2026-07-11T12:00:00.000Z",
+            completedAt: "2026-07-11T12:01:00.000Z",
+          },
+        ],
+      } as Partial<Task>),
+    ];
+
+    renderListView({ tasks });
+
+    expect(screen.queryByText("Reviewing")).not.toBeInTheDocument();
+  });
+
   it("renders paused tasks with dimmed styling", () => {
     const tasks = [createMockTask({ id: "FN-001", paused: true })];
 

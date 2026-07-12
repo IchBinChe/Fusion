@@ -1986,6 +1986,37 @@ describe("TaskCard", () => {
     }
   });
 
+  it.each([
+    { name: "undefined results", workflowStepResults: undefined, shouldRender: false },
+    { name: "pending but not started", workflowStepResults: [{ workflowStepId: "plan-review", workflowStepName: "Plan Review", status: "pending" }], shouldRender: false },
+    { name: "running", workflowStepResults: [{ workflowStepId: "plan-review", workflowStepName: "Plan Review", status: "pending", startedAt: "2026-07-11T12:00:00.000Z" }], shouldRender: true },
+    { name: "passed", workflowStepResults: [{ workflowStepId: "plan-review", workflowStepName: "Plan Review", status: "passed", startedAt: "2026-07-11T12:00:00.000Z", completedAt: "2026-07-11T12:01:00.000Z" }], shouldRender: false },
+    { name: "failed", workflowStepResults: [{ workflowStepId: "plan-review", workflowStepName: "Plan Review", status: "failed", startedAt: "2026-07-11T12:00:00.000Z", completedAt: "2026-07-11T12:01:00.000Z" }], shouldRender: false },
+    { name: "skipped", workflowStepResults: [{ workflowStepId: "plan-review", workflowStepName: "Plan Review", status: "skipped", startedAt: "2026-07-11T12:00:00.000Z", completedAt: "2026-07-11T12:01:00.000Z" }], shouldRender: false },
+    { name: "advisory failure", workflowStepResults: [{ workflowStepId: "plan-review", workflowStepName: "Plan Review", status: "advisory_failure", startedAt: "2026-07-11T12:00:00.000Z", completedAt: "2026-07-11T12:01:00.000Z" }], shouldRender: false },
+  ])("renders the Reviewing badge only while Plan Review is actively running: $name", ({ workflowStepResults, shouldRender }) => {
+    const { container } = render(
+      <TaskCard
+        task={makeTask({
+          id: "FN-7831",
+          column: "triage",
+          status: "planning",
+          enabledWorkflowSteps: ["plan-review"],
+          workflowStepResults: workflowStepResults as Task["workflowStepResults"],
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    const badge = container.querySelector('[data-testid="card-reviewing-FN-7831"]');
+    expect(Boolean(badge)).toBe(shouldRender);
+    if (shouldRender) {
+      expect(badge).toHaveTextContent("Reviewing");
+      expect(screen.getByText("planning")).toBeDefined();
+    }
+  });
+
   it("renders the status badge after the card ID in DOM order", () => {
     const { container } = render(
       <TaskCard

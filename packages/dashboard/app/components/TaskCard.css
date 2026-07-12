@@ -292,6 +292,16 @@ FN-7780 anchors the created-by-agent badge in its own bottom-left row before wor
   color: var(--color-error);
 }
 
+/*
+FNXC:TaskCardPlanReviewBadge 2026-07-11-12:15:
+The Plan Review "Reviewing" badge must read as an active review state without adding custom sizing. Reuse the in-review semantic token and existing status badge geometry so desktop and mobile header wrapping keep the same invariants.
+*/
+.card-status-badge--reviewing {
+  background: color-mix(in srgb, var(--in-review) 18%, transparent);
+  color: var(--in-review);
+  border-color: color-mix(in srgb, var(--in-review) 35%, transparent);
+}
+
 .card-status-badge.stalled-review {
   background: color-mix(in srgb, var(--color-warning) 18%, transparent);
   color: var(--color-warning);

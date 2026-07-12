@@ -21,7 +21,7 @@ import type { ToastType } from "../hooks/useToast";
 import { useViewportMode } from "../hooks/useViewportMode";
 import { getScopedItem, removeScopedItem, setScopedItem } from "../utils/projectStorage";
 import { ALL_WORKFLOWS_BOARD_VIEW_ID } from "../utils/boardWorkflowSelection";
-import { getUnifiedTaskProgress } from "../utils/taskProgress";
+import { getUnifiedTaskProgress, isPlanReviewRunning } from "../utils/taskProgress";
 import { useConfirm } from "../hooks/useConfirm";
 import { extractDependencyDeleteConflict, extractLineageDeleteConflict } from "../utils/taskDelete";
 import { WorkflowSwitcher } from "./WorkflowSwitcher";
@@ -2596,6 +2596,7 @@ export function ListView({
                             !isStuckState &&
                             (task.column === "in-progress" || ACTIVE_STATUSES.has(visualStatus as string));
                           const hasStatus = typeof visualStatus === "string" && visualStatus.trim().length > 0;
+                          const planReviewRunning = isPlanReviewRunning(task);
                           const hasDependencies = Boolean(task.dependencies && task.dependencies.length > 0);
                           const taskProgress = getTaskProgress(task);
                           const hasProgress = taskProgress.hasProgress;
@@ -2654,6 +2655,15 @@ export function ListView({
                                     {getTaskStatusLabel(visualStatus ?? "", t)}
                                   </span>
                                 ) : null}
+                                {planReviewRunning && (
+                                  /*
+                                  FNXC:TaskCardPlanReviewBadge 2026-07-11-12:10:
+                                  Grouped ListView cards must show the same active Plan Review "Reviewing" badge as TaskCard so board and list surfaces remain visually equivalent while the `plan-review` workflow step is running.
+                                  */
+                                  <span className="list-status-badge list-status-badge--reviewing pulsing">
+                                    {t("listView.reviewing", "Reviewing")}
+                                  </span>
+                                )}
                               </div>
 
                               <div className="list-card-row">
@@ -2796,6 +2806,7 @@ export function ListView({
                               !isPaused &&
                               !isStuckState &&
                               (task.column === "in-progress" || ACTIVE_STATUSES.has(visualStatus as string));
+                            const planReviewRunning = isPlanReviewRunning(task);
                             const isDragging = draggingTaskId === task.id;
 
                             return (
@@ -2869,6 +2880,15 @@ export function ListView({
                                       </span>
                                     ) : (
                                       <span className="list-status-badge">-</span>
+                                    )}
+                                    {planReviewRunning && (
+                                      /*
+                                      FNXC:TaskCardPlanReviewBadge 2026-07-11-12:11:
+                                      Ungrouped ListView table rows must render the same Reviewing badge from the shared predicate; this second status render path is easy to miss and must stay in parity with grouped rows.
+                                      */
+                                      <span className="list-status-badge list-status-badge--reviewing pulsing">
+                                        {t("listView.reviewing", "Reviewing")}
+                                      </span>
                                     )}
                                   </td>
                                 )}

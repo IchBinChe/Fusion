@@ -39,7 +39,7 @@ import { getStalledReviewSignal } from "../utils/taskStalledReview";
 import { getInReviewStallCopy, shouldShowInReviewStallBadge } from "../utils/inReviewStallCopy";
 import { getStalePausedReviewCopy, shouldShowStalePausedReviewBadge } from "../utils/stalePausedReviewCopy";
 import { getTaskAgeStalenessCopy, shouldShowTaskAgeStalenessBadge } from "../utils/taskAgeStalenessCopy";
-import { getUnifiedTaskProgress } from "../utils/taskProgress";
+import { getUnifiedTaskProgress, isPlanReviewRunning } from "../utils/taskProgress";
 import { getPrBadgeModifierClass } from "../utils/prBadgeClass";
 import { getActiveRuntimeMs, getEndToEndDurationMs, getTimedDurationMs, getWorkflowRuntimeMs, parseTimestampToMs } from "../utils/taskTiming";
 import { canStartPrFeedbackAddressing, getTaskPrimaryPrInfo } from "../utils/prFeedback";
@@ -1274,6 +1274,14 @@ function TaskCardComponent({
   const stalledReview = getStalledReviewSignal(task);
   const showStalledReview = Boolean(stalledReview && task.column === "in-review" && !isPaused);
   const hasInReviewStall = shouldShowInReviewStallBadge(task);
+  /*
+  FNXC:TaskCardPlanReviewBadge 2026-07-11-12:05:
+  FN-7831 requires the card header to show a distinct "Reviewing" badge while the optional `plan-review` workflow step is actively running, even while the card remains in Planning/`triage`. Use the shared predicate so TaskCard stays in sync with ListView.
+  */
+  const planReviewRunning = useMemo(
+    () => isPlanReviewRunning(task),
+    [task.steps, task.enabledWorkflowSteps, task.workflowStepResults],
+  );
   // CLI agent session badges (U11) — distinct from staleness/stall badges.
   const cliWaitingOnInput = cliSessionState?.agentState === "waitingOnInput";
   const cliNeedsAttention = cliSessionState?.agentState === "needsAttention";
@@ -1389,7 +1397,7 @@ function TaskCardComponent({
   );
   /*
   FNXC:TaskCardWorkflowProgress 2026-07-08-hh:mm:
-  FN-7676 — cards in the Planning/`triage` column must not surface the steps breakdown (progress bar, active badge, step-count toggle, expandable list); enumerated implementation steps are premature planning artifacts, not execution progress. The affordance now appears only after the task leaves Planning (`in-progress` / `executing`), matching `ListView.shouldShowTaskProgress`. A running Plan Review while still in `triage` intentionally no longer surfaces the card progress indicator — the header `planning` status badge remains the only in-flight signal.
+  FN-7676 — cards in the Planning/`triage` column must not surface the steps breakdown (progress bar, active badge, step-count toggle, expandable list); enumerated implementation steps are premature planning artifacts, not execution progress. The affordance now appears only after the task leaves Planning (`in-progress` / `executing`), matching `ListView.shouldShowTaskProgress`. FN-7831 adds a separate header "Reviewing" badge for a running Plan Review, but the progress breakdown itself remains hidden in Planning.
   */
   const showProgressSection =
     unifiedProgress.total > 0 && (task.status === "executing" || task.column === "in-progress");
@@ -2838,6 +2846,19 @@ function TaskCardComponent({
             className={`card-status-badge card-status-badge--${task.column}${isAwaitingApproval ? " awaiting-approval" : ""}${isAwaitingInput ? " awaiting-input" : ""}${ACTIVE_STATUSES.has(visualStatus) ? " pulsing" : ""}${isFailed ? " failed" : ""}${isStuck ? " stuck" : ""}`}
           >
             {isStuck ? t("tasks.stuck", "Stuck") : isAwaitingApproval ? t("tasks.awaitingApproval", "Awaiting Approval") : isAwaitingInput ? t("tasks.needsInput", "Needs input") : visualStatus === "merging-fix" ? t("tasks.statusMergingFix", "Merging fixes…") : getTaskStatusLabel(visualStatus, t)}
+          </span>
+        )}
+        {planReviewRunning && (
+          /*
+          FNXC:TaskCardPlanReviewBadge 2026-07-11-12:06:
+          The Reviewing badge is additive to the normal header status badge so operators can distinguish "planning" from active Plan Review without hiding paused/stuck/status affordances.
+          */
+          <span
+            className="card-status-badge card-status-badge--reviewing pulsing"
+            data-testid={`card-reviewing-${task.id}`}
+            title={t("tasks.planReviewingTitle", "Plan Review in progress")}
+          >
+            {t("tasks.reviewing", "Reviewing")}
           </span>
         )}
         {/*

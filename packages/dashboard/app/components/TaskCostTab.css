@@ -1,6 +1,6 @@
 /*
 FNXC:TaskDetailCost 2026-07-11-12:05:
-The always-available Cost tab reuses the Summary token-table visual system so desktop, right-dock, and mobile task-detail surfaces inherit the same responsive stacked-table behavior without a second cost-table design.
+The always-available Cost tab reuses the Summary token-table visual system so desktop, right-dock, and mobile task-detail surfaces share one bounded horizontal-scroll table pattern without a second cost-table design.
 */
 .task-cost-tab {
   display: flex;

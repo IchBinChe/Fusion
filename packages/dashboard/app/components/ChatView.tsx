@@ -24,7 +24,7 @@ import { RoomMessageDeliveredButReplyFailedError, useChatRooms } from "../hooks/
 import { useChatUnread } from "../hooks/useChatUnread";
 import { useViewportMode } from "./Header";
 import { fetchSettings, updateGlobalSettings, type DiscoveredSkill } from "../api";
-import type { Agent, Settings } from "@fusion/core";
+import { THINKING_LEVELS, type Agent, type Settings, type ThinkingLevel } from "@fusion/core";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { ChatThinkingLevelControl } from "./ChatThinkingLevelControl";
 import { AgentMentionPopup } from "./AgentMentionPopup";
@@ -3496,6 +3496,33 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
                       ))}
                     </div>
                   )}
+                </div>
+                <div className="chat-room-thinking-level-field">
+                  {/* FNXC:Chat-ThinkingLevel 2026-07-12-00:00: Room thinking effort is a header-level room setting, not a composer control, because it acts as the default reasoning effort for every responder in the conversation. */}
+                  <label className="sr-only" htmlFor="chat-room-thinking-level">
+                    {t("chat.roomThinkingLevel", "Room thinking effort")}
+                  </label>
+                  <select
+                    id="chat-room-thinking-level"
+                    className="input chat-room-thinking-level-select"
+                    data-testid="chat-room-thinking-level"
+                    aria-label={t("chat.roomThinkingLevel", "Room thinking effort")}
+                    value={rooms.activeRoom.thinkingLevel ?? ""}
+                    onChange={(event) => {
+                      const selectedLevel = event.target.value;
+                      const thinkingLevel = THINKING_LEVELS.includes(selectedLevel as ThinkingLevel) ? selectedLevel : null;
+                      void rooms.updateRoomSettings(rooms.activeRoom!.id, { thinkingLevel }).catch(() => {
+                        addToast(t("chat.failedToUpdateRoomThinkingLevel", "Failed to update room thinking effort"), "error");
+                      });
+                    }}
+                  >
+                    <option value="">{t("models.useDefault", "Use default")}</option>
+                    {THINKING_LEVELS.map((level) => (
+                      <option key={level} value={level}>
+                        {t(`models.options.${level}`, level === "xhigh" ? "Very High" : level.charAt(0).toUpperCase() + level.slice(1))}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div className="chat-room-thread-members">
                   {rooms.activeRoomMembers.map((member) => (

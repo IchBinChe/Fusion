@@ -250,6 +250,17 @@ When the movable chat popup is resized narrow, collapse Direct/Rooms labels to i
   border-bottom: 1px solid var(--border);
 }
 
+.chat-room-thinking-level-field {
+  display: flex;
+  align-items: center;
+  flex: 0 1 calc(var(--space-2xl) * 6);
+  min-width: min-content;
+}
+
+.chat-room-thinking-level-select {
+  width: 100%;
+}
+
 .chat-room-thread-members {
   margin-left: auto;
   display: flex;
@@ -2587,6 +2598,11 @@ Queued-message banners stack above the composer input with a capped scroll area,
 
   .chat-room-thread-header {
     padding: var(--space-sm) var(--space-md);
+  }
+
+  .chat-room-thinking-level-field {
+    min-width: 0;
+    flex: 1 1 auto;
   }
 
   .chat-room-thread-header .btn-icon {

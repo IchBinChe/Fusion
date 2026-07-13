@@ -1132,6 +1132,27 @@ describe("ChatStore", () => {
       expect(members.find((m) => m.agentId === "agent-owner")?.role).toBe("owner");
     });
 
+    it("round-trips room thinkingLevel through accessors and update clears", () => {
+      const inheritedRoom = store.createRoom({ name: "inherit defaults", projectId: "proj-1" });
+      expect(inheritedRoom.thinkingLevel).toBeNull();
+      expect(store.getRoom(inheritedRoom.id)?.thinkingLevel).toBeNull();
+
+      const explicitRoom = store.createRoom({
+        name: "deep thinking",
+        projectId: "proj-1",
+        memberAgentIds: ["agent-1"],
+        thinkingLevel: "high",
+      });
+
+      expect(store.getRoom(explicitRoom.id)?.thinkingLevel).toBe("high");
+      expect(store.getRoomBySlug("proj-1", explicitRoom.slug)?.thinkingLevel).toBe("high");
+      expect(store.listRooms({ projectId: "proj-1" }).find((room) => room.id === explicitRoom.id)?.thinkingLevel).toBe("high");
+      expect(store.listRoomsForAgent("agent-1", { projectId: "proj-1" }).find((room) => room.id === explicitRoom.id)?.thinkingLevel).toBe("high");
+
+      expect(store.updateRoom(explicitRoom.id, { thinkingLevel: "minimal" })?.thinkingLevel).toBe("minimal");
+      expect(store.updateRoom(explicitRoom.id, { thinkingLevel: null })?.thinkingLevel).toBeNull();
+    });
+
     it("rejects slug collision in same project and allows across projects", () => {
       store.createRoom({ name: "engineering", projectId: "proj-1" });
       expect(() => store.createRoom({ name: "#Engineering", projectId: "proj-1" })).toThrow(

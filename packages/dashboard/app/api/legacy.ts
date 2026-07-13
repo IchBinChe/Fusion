@@ -10399,7 +10399,7 @@ export function fetchChatRoom(id: string, projectId?: string): Promise<ChatRoomR
 }
 
 export function createChatRoom(
-  input: { name: string; description?: string | null; createdBy?: string | null; memberAgentIds?: string[] },
+  input: { name: string; description?: string | null; createdBy?: string | null; memberAgentIds?: string[]; thinkingLevel?: string | null },
   projectId?: string,
 ): Promise<ChatRoomResponse> {
   const body = { ...input, ...(projectId ? { projectId } : {}) };
@@ -10411,7 +10411,7 @@ export function createChatRoom(
 
 export function updateChatRoom(
   id: string,
-  updates: { name?: string; description?: string | null; status?: "active" | "archived" },
+  updates: { name?: string; description?: string | null; status?: "active" | "archived"; thinkingLevel?: string | null },
   projectId?: string,
 ): Promise<{ room: ChatRoom }> {
   return api<{ room: ChatRoom }>(withProjectId(`/chat/rooms/${encodeURIComponent(id)}`, projectId), {

@@ -184,7 +184,7 @@ export function isFts5CorruptionError(error: unknown): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 142;
+const SCHEMA_VERSION = 144;
 
 const TASKS_FTS_AUTOMERGE = 8;
 const TASKS_FTS_CRISISMERGE = 16;
@@ -1681,6 +1681,7 @@ export const MIGRATION_ONLY_TABLE_SCHEMAS: Record<string, Record<string, string>
     projectId: "TEXT",
     createdBy: "TEXT",
     status: "TEXT NOT NULL DEFAULT 'active'",
+    thinkingLevel: "TEXT",
     createdAt: "TEXT NOT NULL",
     updatedAt: "TEXT NOT NULL",
   },
@@ -4314,6 +4315,7 @@ export class Database {
             projectId TEXT,
             createdBy TEXT,
             status TEXT NOT NULL DEFAULT 'active',
+            thinkingLevel TEXT,
             createdAt TEXT NOT NULL,
             updatedAt TEXT NOT NULL
           )
@@ -5685,6 +5687,30 @@ export class Database {
       this.applyMigration(142, () => {
         this.addColumnIfMissing("tasks", "executeRequeueLoopCount", "INTEGER DEFAULT 0");
         this.addColumnIfMissing("tasks", "executeRequeueLoopSignature", "TEXT");
+      });
+    }
+
+    if (version < 143) {
+      /*
+       * FNXC:Chat-ThinkingLevel 2026-07-12-00:00:
+       * Chat Rooms persist an optional room-level reasoning-effort default for all responders; NULL keeps existing project/global default inheritance semantics and avoids modeling per-member overrides.
+       */
+      this.applyMigration(143, () => {
+        if (this.hasTable("chat_rooms")) {
+          this.addColumnIfMissing("chat_rooms", "thinkingLevel", "TEXT");
+        }
+      });
+    }
+
+    if (version < 144) {
+      /*
+       * FNXC:Chat-ThinkingLevelRepair 2026-07-12-00:00:
+       * Re-run the additive chat_rooms.thinkingLevel migration under a fresh schema version so any database that advanced past the initial add without the column converges safely.
+       */
+      this.applyMigration(144, () => {
+        if (this.hasTable("chat_rooms")) {
+          this.addColumnIfMissing("chat_rooms", "thinkingLevel", "TEXT");
+        }
       });
     }
 

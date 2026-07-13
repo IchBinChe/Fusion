@@ -90,7 +90,7 @@ import {
   reconcileHooksRemaining,
 } from "./transition-pending.js";
 import { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
-import type { WorkflowIr, WorkflowIrColumn, WorkflowFieldDefinition, WorkflowSettingDefinition } from "./workflow-ir-types.js";
+import type { WorkflowIr, WorkflowIrColumn, WorkflowIrV2, WorkflowFieldDefinition, WorkflowSettingDefinition } from "./workflow-ir-types.js";
 import { getWorkflowExtensionRegistry } from "./workflow-extension-registry.js";
 import type { WorkflowMovePolicyInput } from "./workflow-extension-types.js";
 import {
@@ -211,6 +211,7 @@ import {
 } from "./task-id-integrity.js";
 import {
   buildBootstrapPrompt,
+  buildRefinementSeedPrompt,
   replicationCollisionError,
   taskMatchesReplicatedCreate,
 } from "./mesh-task-replication.js";
@@ -2085,24 +2086,28 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       });
     }
 
-    // U12: workflow-columns integrity pass. When the flag is ON, audit + re-home
-    // any task whose stored column is no longer valid in its resolved workflow
-    // (KTD-1 guarantees zero rewrites for healthy legacy rows, so this is a
-    // no-op for the common case). Idempotent; non-fatal — never blocks startup.
+    // U12: workflow-columns integrity pass. Audit + re-home any task whose
+    // stored column is no longer valid in its resolved workflow (KTD-1
+    // guarantees zero rewrites for healthy legacy rows, so this is a no-op for
+    // the common case). Idempotent; non-fatal — never blocks startup.
+    /*
+    FNXC:WorkflowColumns 2026-07-12-22:40:
+    Workflow columns graduated to always-on at runtime (isWorkflowColumnsEnabled), so init must
+    ALWAYS run the workflow-aware integrity pass and must NEVER run the #1409 flag-OFF
+    evacuation. The retired experimental flag is absent (reads false) for virtually every
+    install, so the old flag-keyed branch ran evacuateCustomColumnsToLegacy("flag-off-init")
+    on EVERY store open: it declared healthy custom intake columns (e.g. Coding (Ideas)'s
+    "ideas") invalid and dumped their cards into "triage", where the triage service
+    auto-planned and executed work the operator had deliberately parked. The integrity pass
+    validates each card against its OWN resolved workflow, so custom-column cards are left
+    put. The evacuation now runs only on an explicit ON→OFF settings toggle.
+    */
     try {
-      const settings = await this.getSettingsFast();
-      if (isWorkflowColumnsCompatibilityFlagEnabled(settings)) {
-        await this.runWorkflowColumnsIntegrityPass();
-        // #1401: recover any transitionPending markers stranded by a crash
-        // between the in-txn write and the post-commit clear (they otherwise
-        // permanently inflate capacity counts for their target column).
-        await this.recoverStaleTransitionPending();
-      } else {
-        // #1409: flag-OFF init — evacuate any card stuck in a non-legacy column
-        // (e.g. the flag was toggled OFF out-of-process while a card sat in a
-        // custom column) so the board stays listable and moves work.
-        await this.evacuateCustomColumnsToLegacy("flag-off-init");
-      }
+      await this.runWorkflowColumnsIntegrityPass();
+      // #1401: recover any transitionPending markers stranded by a crash
+      // between the in-txn write and the post-commit clear (they otherwise
+      // permanently inflate capacity counts for their target column).
+      await this.recoverStaleTransitionPending();
     } catch (err) {
       storeLog.warn("workflowColumns integrity pass failed during init", {
         phase: "init:workflow-columns-integrity",
@@ -5484,7 +5489,9 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         Refinements keep the source task's explicit workflow selection, reseeded from the current workflow definition, so returning from a non-default workflow does not hide the new refinement on the default board. The task row and workflow-selection row are written in one SQLite transaction so creation cannot strand a refinement without its intended board lane.
         */
         await this.atomicCreateTaskJson(newDir, newTask, "refineTask", reservationCommit, inheritedWorkflowSelection);
-        const prompt = `# ${newTask.title}\n\n${newTask.description}\n`;
+        // Shared builder: isUnplannedSeedPrompt detects this exact shape so promoted
+        // refinements are planned instead of executing the feedback text as a spec.
+        const prompt = buildRefinementSeedPrompt(newTask.title ?? newId, newTask.description);
         const sanitizedPrompt = sanitizeFileScopeInPromptContent(prompt);
         await mkdir(newDir, { recursive: true });
         await writeFile(join(newDir, "PROMPT.md"), sanitizedPrompt.sanitized);
@@ -7825,7 +7832,21 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         options?.recoveryRehome === true &&
         sourceIsLegacy &&
         (COLUMNS as readonly string[]).includes(toColumn);
-      if (!isEvacuation && !isLegacyRecoveryRehome) {
+      /*
+      FNXC:WorkflowColumns 2026-07-13-11:50:
+      Third recoveryRehome carve-out: a recovery move INTO a custom column the task's OWN
+      workflow declares (e.g. the integrity pass re-homing a workflow-edit orphan to a custom
+      entry column). The two carve-outs above only cover legacy targets, so on flag-absent
+      installs (this branch is the default path) every custom-target repair threw the legacy
+      "Invalid transition" Error, which rehomeOccupant swallowed as moved:false — the repair
+      silently no-oped on every store open. Recovery-only, so normal flag-OFF moves keep the
+      characterization contract byte-identical.
+      */
+      const isWorkflowDeclaredRecoveryRehome =
+        options?.recoveryRehome === true &&
+        !(COLUMNS as readonly string[]).includes(toColumn) &&
+        workflowHasColumn(this.resolveTaskWorkflowIrSync(id), toColumn);
+      if (!isEvacuation && !isLegacyRecoveryRehome && !isWorkflowDeclaredRecoveryRehome) {
         /*
         FNXC:WorkflowColumns 2026-07-05-19:30:
         Workflow columns graduated to always-on (no experimental flag emitted), so this "flag-OFF"
@@ -16403,18 +16424,63 @@ ${stepsSection}`;
     let rehomed = 0;
     let skippedTerminal = 0;
 
+    /*
+    FNXC:WorkflowColumns 2026-07-13-11:40:
+    This pass runs at EVERY store open (workflow columns are graduated/always-on), so it must
+    stay cheap on healthy DBs: select only id+column (the pass reads nothing else per row —
+    the old per-task full-row hydrate paid N JSON parses for a two-column need) and memoize
+    the resolved IR per selection workflow id (a board has a handful of workflows; the old
+    per-task resolveTaskWorkflowIrSync re-parsed/rebuilt the same IR N times).
+    */
     const rows = this.db
-      .prepare(`SELECT id FROM tasks WHERE "deletedAt" IS NULL`)
-      .all() as Array<{ id: string }>;
+      .prepare(`SELECT id, "column" AS col FROM tasks WHERE "deletedAt" IS NULL`)
+      .all() as Array<{ id: string; col: string }>;
 
     const registry = getTraitRegistry();
 
-    for (const { id } of rows) {
+    const irCache = new Map<string, WorkflowIr>();
+    const resolveIrCached = (workflowId: string | undefined): WorkflowIr => {
+      const key = workflowId ?? "__default__";
+      let ir = irCache.get(key);
+      if (!ir) {
+        ir = this.resolveWorkflowIrByIdSync(workflowId);
+        irCache.set(key, ir);
+      }
+      return ir;
+    };
+
+    // Lazily built union of every column id declared by a known workflow
+    // (built-in catalog + custom definitions) — only needed for the rare
+    // invalid-column rows, never on the healthy fast path.
+    let knownColumnIds: Set<string> | null = null;
+    const knownWorkflowColumnIds = (): Set<string> => {
+      if (knownColumnIds) return knownColumnIds;
+      knownColumnIds = new Set<string>();
+      const collect = (ir: WorkflowIr | string | undefined): void => {
+        if (!ir) return;
+        try {
+          const parsed = typeof ir === "string" ? parseWorkflowIr(ir) : ir;
+          if (parsed.version === "v2") {
+            for (const column of (parsed as WorkflowIrV2).columns) knownColumnIds!.add(column.id);
+          }
+        } catch {
+          // A corrupt definition contributes no columns; the guard stays conservative.
+        }
+      };
+      for (const builtin of BUILTIN_WORKFLOWS) collect(builtin.ir);
+      try {
+        const definitionRows = this.db.prepare("SELECT ir FROM workflows").all() as Array<{ ir: string }>;
+        for (const definitionRow of definitionRows) collect(definitionRow.ir);
+      } catch {
+        // Missing table (older DBs) — builtins alone still cover the common case.
+      }
+      return knownColumnIds;
+    };
+
+    for (const { id, col: currentColumn } of rows) {
       scanned += 1;
-      const task = this.readTaskFromDb(id, { includeDeleted: false });
-      if (!task) continue;
-      const ir = this.resolveTaskWorkflowIrSync(id);
-      const currentColumn = task.column;
+      const selection = this.getTaskWorkflowSelection(id);
+      const ir = resolveIrCached(selection?.workflowId);
 
       // Already valid in its resolved workflow — nothing to do (the common case;
       // this is why the pass is idempotent and a no-op for healthy DBs).
@@ -16435,6 +16501,41 @@ ${stepsSection}`;
         currentColumn === "archived";
       if (isTerminal) {
         skippedTerminal += 1;
+        continue;
+      }
+
+      /*
+      FNXC:WorkflowColumns 2026-07-13-11:45:
+      Mis-mapping guard: when the task resolved to the DEFAULT workflow only because its
+      selection row is missing or points at an unknown/deleted workflow, and the stored column
+      IS declared by some known workflow, the row is mis-mapped — not column-orphaned.
+      Physically re-homing it would drop a deliberately parked card (e.g. Coding (Ideas)
+      "ideas") into the default intake "triage", where the triage service auto-plans and
+      executes it. Leave the card put and audit the no-action decision; the dashboard's
+      suspect-mapping refetch and operators repair the selection instead.
+      */
+      const selectionResolves = selection
+        ? (isBuiltinWorkflowId(selection.workflowId)
+          ? Boolean(getBuiltinWorkflow(selection.workflowId))
+          : Boolean(this.db.prepare("SELECT 1 FROM workflows WHERE id = ?").get(selection.workflowId)))
+        : false;
+      if (!selectionResolves && knownWorkflowColumnIds().has(currentColumn)) {
+        this.recordRunAuditEvent({
+          taskId: id,
+          agentId: "system",
+          runId: `workflow-reconcile-integrity-${id}-${Date.now()}`,
+          domain: "database",
+          mutationType: "task:workflow-reconcile",
+          target: id,
+          metadata: {
+            integrityPass: true,
+            invalidColumn: currentColumn,
+            misMappedSelection: true,
+            reason: "workflow-edit-rehome",
+            fromColumn: currentColumn,
+            moved: false,
+          },
+        });
         continue;
       }
 
@@ -16862,8 +16963,10 @@ ${stepsSection}`;
   }
 
   private resolveTaskWorkflowIrSync(taskId: string): WorkflowIr {
-    const selection = this.getTaskWorkflowSelection(taskId);
-    const workflowId = selection?.workflowId;
+    return this.resolveWorkflowIrByIdSync(this.getTaskWorkflowSelection(taskId)?.workflowId);
+  }
+
+  private resolveWorkflowIrByIdSync(workflowId: string | undefined): WorkflowIr {
     /*
      * FNXC:WorkflowBuiltins 2026-06-29-02:18:
      * The built-in id `builtin:coding` now points at the stepwise final-review workflow. No-selection tasks must resolve through the built-in catalog, otherwise dashboard/operator defaults say "Coding" while the engine silently executes legacy coding.

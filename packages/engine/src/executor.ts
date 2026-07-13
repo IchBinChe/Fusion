@@ -16,6 +16,7 @@ import { getUnmetSchedulingDependencies } from "./scheduler.js";
 import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker, allowsAutoMergeProcessing, resolveEffectiveAutoMerge, isLiveSharedBranchGroupMemberIntegration, resolveMaxAutoMergeRetries, resolveOptionalStepRevisionBudget, resolveOptionalReviewRevisionBudget, COMPLETION_SUMMARY_NODE_ID, upsertWorkflowStepResult, AWAITING_APPROVAL_PAUSE_REASON, THINKING_LEVELS, AgentStore } from "@fusion/core";
 import { finalizeProvenAutoMergeTask } from "./auto-merge-finalization.js";
 import { mergeEffectiveSettings } from "./effective-settings.js";
+import { moveTaskToReplanColumn, resolveReplanTargetColumn } from "./replan-target.js";
 import type { TaskStep, WorkflowIr, WorkflowFieldDefinition, WorkflowColumnAgent, EffectiveAgentInput, WorkflowWorkEngineDispatchResult } from "@fusion/core";
 import {
   buildWorkflowObservationFromTask,
@@ -4486,15 +4487,20 @@ export class TaskExecutor {
         `Plan Review requested a planning revision before execution.\n\nStatus: ${info.status}\nFeedback:\n${feedback}`,
         this.getRunContextFor(taskId),
       );
+      /*
+      FNXC:PlanReviewReplan 2026-07-12-23:20:
+      The replan rebound is workflow-aware: workflows without a "triage" column (Coding
+      (Ideas)) replan in place in their planner column ("todo") instead of being orphaned
+      in an undeclared "triage" column, which the board rendered back in the intake lane.
+      */
+      const replanColumn = await resolveReplanTargetColumn(this.store, taskId);
       await this.store.logEntry(
         taskId,
-        `Plan Review failed — moved to triage for automatic replan (attempt ${nextCount}/${budgetLabel})`,
+        `Plan Review failed — moved to ${replanColumn} for automatic replan (attempt ${nextCount}/${budgetLabel})`,
         optionalStepRevisionLogOutcome(feedback, revisionKey),
         this.getRunContextFor(taskId),
       );
-      if (liveTask.column !== "triage") {
-        await this.store.moveTask(taskId, "triage");
-      }
+      await moveTaskToReplanColumn(this.store, { id: taskId, column: liveTask.column }, replanColumn);
       await this.store.updateTask(taskId, {
         status: "needs-replan",
         error: null,
@@ -9629,8 +9635,9 @@ export class TaskExecutor {
       const staleness = await evaluateSpecStaleness({ settings, promptPath, task });
       if (staleness.isStale) {
         executorLog.warn(`Task ${task.id} specification is stale — ${staleness.reason}`);
-        // Move to triage first, then set status so the task enters triage with needs-replan
-        await this.store.moveTask(task.id, "triage");
+        // Move to the workflow-aware replan column first, then set status so the task
+        // enters it with needs-replan (workflows without "triage" replan in place in todo).
+        await moveTaskToReplanColumn(this.store, task);
         await this.store.updateTask(task.id, { status: "needs-replan" });
         await this.store.logEntry(task.id, staleness.reason, undefined, this.getRunContextFor(task.id));
         return;

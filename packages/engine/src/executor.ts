@@ -192,7 +192,7 @@ import {
   isMissingWorktreeSessionStartFailure,
 } from "./restart-recovery-coordinator.js";
 import { BranchWorktreeAutoRecoveryHandler } from "./auto-recovery-handlers/branch-worktree.js";
-import { autoRecoverWorktreeSessionStartFailure, MAX_WORKTREE_SESSION_RETRIES, PAUSE_ABORT_PARK_ERROR_MARKER, PAUSE_ABORT_PARK_OPERATOR_MARKER } from "./self-healing.js";
+import { autoRecoverWorktreeSessionStartFailure, COMPLETED_BLOCKED_PAUSE_REASON, MAX_WORKTREE_SESSION_RETRIES, PAUSE_ABORT_PARK_ERROR_MARKER, PAUSE_ABORT_PARK_OPERATOR_MARKER } from "./self-healing.js";
 import { ContaminationAutoRecoveryHandler } from "./auto-recovery-handlers/contamination.js";
 import { createFileScopeAutoRecoveryHandler } from "./auto-recovery-handlers/file-scope.js";
 import { ReadonlyViolationError, filterCustomToolsForReadonly } from "./workflow-step-tool-policy.js";
@@ -3960,15 +3960,70 @@ export class TaskExecutor {
     this.workflowRerunWatchdogs.set(taskId, watchdog);
   }
 
-  private async shouldFinalizeCompletedTask(taskId: string, taskDone: boolean): Promise<boolean> {
+  private async parkCompletedBlockedTask(task: Task, completionBlocker: string, source: string, workComplete = this.isTaskWorkComplete(task)): Promise<boolean> {
+    if (task.paused === true || task.userPaused === true) return false;
+    if (task.column === "done" || task.column === "archived") return false;
+    if (!workComplete) return false;
+
+    const message = `Completed work held — ${completionBlocker}; will advance to review when blocker clears`;
+    /*
+    FNXC:WorkflowLifecycle 2026-07-12-23:13:
+    FN-7926: completed work with a persistent `getTaskCompletionBlocker` result must not self-requeue through the execute node. Re-running implementation cannot clear dependency/blockedBy state, so it only feeds FN-7863's generic no-progress backstop and misclassifies good work as `EXECUTION_DISPATCH_LOOP_EXHAUSTED`. Park in a scheduler-skipped todo state, preserve worktree/branch/steps, and reset the FN-7863 signature so the backstop remains reserved for genuinely incomplete no-progress loops.
+    */
+    if (task.column !== "todo") {
+      await this.store.moveTask(task.id, "todo", {
+        preserveProgress: true,
+        preserveResumeState: true,
+        preserveWorktree: true,
+        moveSource: "engine",
+        recoveryRehome: true,
+      });
+    }
+    await this.store.updateTask(task.id, {
+      paused: true,
+      pausedReason: COMPLETED_BLOCKED_PAUSE_REASON,
+      status: "queued",
+      error: null,
+      executeRequeueLoopCount: null,
+      executeRequeueLoopSignature: null,
+    }, this.getRunContextFor(task.id));
+    executorLog.log(`${task.id}: ${message}`);
+    await this.store.logEntry(task.id, message, undefined, this.getRunContextFor(task.id));
+    await this.store.recordRunAuditEvent?.({
+      taskId: task.id,
+      agentId: "executor",
+      runId: generateSyntheticRunId("completed-blocked-park", task.id),
+      domain: "database",
+      mutationType: "task:completed-blocked-parked",
+      target: task.id,
+      metadata: {
+        taskId: task.id,
+        blocker: completionBlocker,
+        source,
+        priorColumn: task.column,
+        priorStatus: task.status ?? null,
+      },
+    });
+    return true;
+  }
+
+  private async getCompletedTaskFinalizationDecision(taskId: string, taskDone: boolean): Promise<"finalize" | "blocked" | "incomplete"> {
     const task = await this.store.getTask(taskId);
     const completionBlocker = await this.getTaskCompletionBlocker(task);
+    const workComplete = taskDone || this.isTaskWorkComplete(task);
     if (completionBlocker) {
       executorLog.log(`${taskId} completion blocked — ${completionBlocker}`);
-      return false;
+      if (workComplete && await this.parkCompletedBlockedTask(task, completionBlocker, "finalization", workComplete)) {
+        return "blocked";
+      }
+      return "incomplete";
     }
-    if (taskDone) return true;
-    return this.isTaskWorkComplete(task);
+    if (workComplete) return "finalize";
+    return "incomplete";
+  }
+
+  private async shouldFinalizeCompletedTask(taskId: string, taskDone: boolean): Promise<boolean> {
+    return await this.getCompletedTaskFinalizationDecision(taskId, taskDone) === "finalize";
   }
 
   private isTaskAlreadyCompleteForNonContinuableSession(task: Task, taskDone: boolean): boolean {
@@ -9044,7 +9099,15 @@ export class TaskExecutor {
 
         FNXC:WorkflowLifecycle 2026-07-12-00:00:
         FN-7863: the scheduler's wall-clock dispatchStormCount guard only increments when re-dispatches happen inside its short window; slow execute→pause-abort→todo loops reset that counter every cycle. Count this funnel by execution-progress signature instead, warn early for board-visible monitoring, and terminalize only non-paused live tasks after the bounded no-progress cap while preserving worktree/branch/step progress.
+
+        FNXC:WorkflowLifecycle 2026-07-12-23:14:
+        FN-7926 diverts completed-but-blocked rows before the FN-7863 counter increments. A stable all-done step signature plus unresolved dependency/blockedBy is a waiting state, not an implementation no-progress loop; park it with the specific blocker and let self-healing advance it when `getTaskCompletionBlocker` clears.
         */
+        const completionBlocker = await this.getTaskCompletionBlocker(live);
+        if (completionBlocker && await this.parkCompletedBlockedTask(live, completionBlocker, "execute-requeue")) {
+          await this.persistTokenUsage(task.id);
+          return;
+        }
         const signature = buildExecuteRequeueLoopSignature(live);
         const nextCount = live.executeRequeueLoopSignature === signature
           ? (live.executeRequeueLoopCount ?? 0) + 1
@@ -11148,7 +11211,8 @@ export class TaskExecutor {
             }
             this.clearPausedAborted(task.id);
             wasPaused = true;
-            if (await this.shouldFinalizeCompletedTask(task.id, taskDone)) {
+            const finalizationDecision = await this.getCompletedTaskFinalizationDecision(task.id, taskDone);
+            if (finalizationDecision === "finalize") {
               if (await this.shouldDeferCompletionForGlobalPause(task.id, "paused after completion")) {
                 return;
               }
@@ -11166,6 +11230,9 @@ export class TaskExecutor {
               await this.handoffTaskToReview(task, "paused-after-completion");
               this.clearCompletedTaskWatchdog(task.id);
               this.signalTaskComplete(task);
+            } else if (finalizationDecision === "blocked") {
+              await this.persistTokenUsage(task.id);
+              return;
             } else {
               executorLog.log(`${task.id} paused (graceful session exit) — moving to todo`);
               await this.store.logEntry(task.id, "Execution paused — session preserved for resume, moved to todo");
@@ -11701,7 +11768,8 @@ export class TaskExecutor {
           );
           return;
         }
-        if (await this.shouldFinalizeCompletedTask(task.id, taskDone)) {
+        const finalizationDecision = await this.getCompletedTaskFinalizationDecision(task.id, taskDone);
+        if (finalizationDecision === "finalize") {
           if (await this.shouldDeferCompletionForGlobalPause(task.id, "paused after completion")) {
             return;
           }
@@ -11718,6 +11786,9 @@ export class TaskExecutor {
           this.markCompletionFinalized(task.id);
           await this.handoffTaskToReview(task, "paused-after-completion");
           this.signalTaskComplete(task);
+        } else if (finalizationDecision === "blocked") {
+          await this.persistTokenUsage(task.id);
+          return;
         } else {
           executorLog.log(`${task.id} paused — moving to todo`);
           if (worktreePath && existsSync(worktreePath)) {

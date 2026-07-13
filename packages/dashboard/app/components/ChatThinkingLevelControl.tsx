@@ -79,7 +79,15 @@ export function ChatThinkingLevelControl({
   useEffect(() => {
     if (!open) return;
     const handlePointerDown = (event: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      /*
+      FNXC:Chat-ModelSwitch 2026-07-12-22:35:
+      FN-7916: CustomModelDropdown renders its option list in a document.body portal outside rootRef. Treat that portaled menu as inside this popup so tablet/touch pointerdown does not dismiss the brain popup before the option onClick can persist the model selection.
+      */
+      const clickedInsideRoot = rootRef.current?.contains(target);
+      const clickedInsidePortaledModelMenu = target instanceof Element && Boolean(target.closest(".model-combobox-dropdown--portal"));
+      if (!clickedInsideRoot && !clickedInsidePortaledModelMenu) {
         setOpen(false);
       }
     };

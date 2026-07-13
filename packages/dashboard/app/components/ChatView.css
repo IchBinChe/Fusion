@@ -2003,6 +2003,8 @@ FN-7908 keeps model/agent retargeting inside the same brain popup. The widened p
   left: 0;
   bottom: calc(100% + var(--space-xs));
   width: min(calc(var(--space-xl) * 15), calc(100vw - (var(--space-lg) * 2)));
+  max-width: calc(100vw - (var(--space-lg) * 2));
+  max-inline-size: calc(100vw - (var(--space-lg) * 2));
   max-height: min(calc(var(--space-xl) * 24), calc(100vh - (var(--space-xl) * 4)));
   overflow-y: auto;
   background: var(--surface);
@@ -2530,9 +2532,20 @@ Queued-message banners stack above the composer input with a capped scroll area,
     min-height: calc(var(--space-lg) * 2.25);
   }
 
+  /*
+  FNXC:Chat-ModelSwitch 2026-07-12-22:38:
+  FN-7916: mobile applies a global max-width clamp to every element, so a popover positioned from the small Brain-button wrapper collapsed into an unreadable strip. Let the chat input area own the mobile containing block and inset the panel with tokenized viewport gutters so the model picker, agent list, and thinking levels stay reachable.
+  */
+  .chat-thinking-level-root {
+    position: static;
+  }
+
   .chat-thinking-popover {
-    left: 0;
-    width: calc(100vw - (var(--space-md) * 2));
+    left: var(--space-md);
+    right: var(--space-md);
+    width: auto;
+    max-width: none;
+    max-inline-size: none;
     max-height: min(calc(var(--space-xl) * 20), calc(100vh - (var(--space-xl) * 5)));
   }
 

@@ -28,8 +28,24 @@ vi.mock("../SessionTerminal", () => ({
 vi.mock("../../hooks/useChat");
 vi.mock("../../hooks/useChatRooms");
 vi.mock("../CustomModelDropdown", () => ({
-  CustomModelDropdown: ({ defaultThinkingLevel }: { defaultThinkingLevel?: string }) => (
-    <div data-testid="custom-model-dropdown" data-default-thinking={defaultThinkingLevel ?? ""} />
+  CustomModelDropdown: ({
+    value,
+    onChange,
+    defaultThinkingLevel,
+  }: {
+    value?: string;
+    onChange?: (value: string) => void;
+    defaultThinkingLevel?: string;
+  }) => (
+    <button
+      type="button"
+      data-testid="custom-model-dropdown"
+      data-value={value ?? ""}
+      data-default-thinking={defaultThinkingLevel ?? ""}
+      onClick={() => onChange?.("openai/gpt-4o")}
+    >
+      model dropdown
+    </button>
   ),
 }));
 vi.mock("../../hooks/useNavigationHistory", async (importOriginal) => {
@@ -91,6 +107,7 @@ function chatState(overrides: Partial<UseChatReturn> = {}): UseChatReturn {
     createSession: vi.fn(),
     archiveSession: vi.fn(),
     renameSession: vi.fn(),
+    setSessionModel: vi.fn(),
     setSessionThinkingLevel: vi.fn(),
     deleteSession: vi.fn(),
     sendMessage: vi.fn(),
@@ -198,6 +215,37 @@ describe("ChatView thinking-level control (FN-7898)", () => {
     expect(setSessionThinkingLevel).toHaveBeenCalledWith("sess-a", "high");
   });
 
+  it("selecting a model in the popup calls setSessionModel(session.id, provider/model)", async () => {
+    const setSessionModel = vi.fn();
+    const session = makeSession({ id: "sess-model", cliExecutorAdapterId: null, agentId: useChatModule.FN_AGENT_ID, modelProvider: "anthropic", modelId: "claude-sonnet-4-5" });
+    mockUseChat.mockReturnValue(chatState({ activeSession: session, sessions: [session], setSessionModel }));
+
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    fireEvent.click(screen.getByTestId("chat-thinking-btn"));
+    fireEvent.click(screen.getByTestId("custom-model-dropdown"));
+
+    expect(setSessionModel).toHaveBeenCalledWith("sess-model", { modelProvider: "openai", modelId: "gpt-4o" });
+  });
+
+  it("selecting an agent in the popup calls setSessionModel(session.id, agentId)", async () => {
+    const setSessionModel = vi.fn();
+    const session = makeSession({ id: "sess-agent", cliExecutorAdapterId: null, agentId: useChatModule.FN_AGENT_ID, modelProvider: "openai", modelId: "gpt-4o" });
+    const agentsMap = new Map([
+      ["agent-001", { id: "agent-001", name: "Alpha", role: "executor" }],
+      ["agent-002", { id: "agent-002", name: "Beta", role: "reviewer" }],
+    ] as const);
+    mockUseChat.mockReturnValue(chatState({ activeSession: session, sessions: [session], setSessionModel, agentsMap }));
+
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    fireEvent.click(screen.getByTestId("chat-thinking-btn"));
+    fireEvent.click(screen.getByTestId("chat-thinking-mode-agent"));
+    fireEvent.click(screen.getByTestId("chat-thinking-agent-agent-002"));
+
+    expect(setSessionModel).toHaveBeenCalledWith("sess-agent", { agentId: "agent-002" });
+  });
+
   it("(b) does NOT render when the active session is CLI-backed", async () => {
     const session = makeSession({ id: "sess-cli", cliExecutorAdapterId: "claude-code", cliSessionFile: "cli-native-1" });
     mockUseChat.mockReturnValue(chatState({ activeSession: session, sessions: [session] }));
@@ -231,8 +279,8 @@ describe("ChatView thinking-level control (FN-7898)", () => {
     expect(screen.queryByTestId("chat-thinking-btn")).toBeNull();
   });
 
-  it("(e) updates the control's active-state class when switching from a session with a concrete thinkingLevel to one without", async () => {
-    const sessionWithLevel = makeSession({ id: "sess-with-level", cliExecutorAdapterId: null, thinkingLevel: "high" });
+  it("(e) updates the control selection and closes the popup when switching active sessions", async () => {
+    const sessionWithLevel = makeSession({ id: "sess-with-level", cliExecutorAdapterId: null, agentId: useChatModule.FN_AGENT_ID, modelProvider: "openai", modelId: "gpt-4o", thinkingLevel: "high" });
     mockUseChat.mockReturnValue(chatState({ activeSession: sessionWithLevel, sessions: [sessionWithLevel] }));
 
     const { rerender } = await (async () => {
@@ -244,15 +292,20 @@ describe("ChatView thinking-level control (FN-7898)", () => {
     })();
 
     expect(screen.getByTestId("chat-thinking-btn").className).toContain("chat-thinking-btn--active");
+    fireEvent.click(screen.getByTestId("chat-thinking-btn"));
+    expect(screen.getByTestId("custom-model-dropdown")).toHaveAttribute("data-value", "openai/gpt-4o");
 
-    const sessionWithoutLevel = makeSession({ id: "sess-without-level", cliExecutorAdapterId: null, thinkingLevel: null });
-    mockUseChat.mockReturnValue(chatState({ activeSession: sessionWithoutLevel, sessions: [sessionWithoutLevel] }));
+    const sessionWithoutLevel = makeSession({ id: "sess-without-level", cliExecutorAdapterId: null, agentId: "agent-001", thinkingLevel: null });
+    const agentsMap = new Map([["agent-001", { id: "agent-001", name: "Alpha", role: "executor" }]] as const);
+    mockUseChat.mockReturnValue(chatState({ activeSession: sessionWithoutLevel, sessions: [sessionWithoutLevel], agentsMap }));
 
     await act(async () => {
       rerender(<ChatView projectId="proj-123" addToast={vi.fn()} />);
     });
 
-    expect(screen.getByTestId("chat-thinking-btn").className).not.toContain("chat-thinking-btn--active");
+    expect(screen.queryByTestId("chat-thinking-popover")).toBeNull();
+    fireEvent.click(screen.getByTestId("chat-thinking-btn"));
+    expect(screen.getByTestId("chat-thinking-agent-agent-001").className).toContain("chat-thinking-agent-item--selected");
   });
 
   it("(f) renders the trigger without a layout/overflow regression at a mobile viewport", async () => {

@@ -19,7 +19,7 @@ import {
   X,
   Hash,
 } from "lucide-react";
-import { useChat, type ChatMessageInfo } from "../hooks/useChat";
+import { FN_AGENT_ID, useChat, type ChatMessageInfo } from "../hooks/useChat";
 import { RoomMessageDeliveredButReplyFailedError, useChatRooms } from "../hooks/useChatRooms";
 import { useChatUnread } from "../hooks/useChatUnread";
 import { useViewportMode } from "./Header";
@@ -136,12 +136,6 @@ function formatRelativeTime(dateStr: string, t: TFunction<"app">): string {
   return date.toLocaleDateString();
 }
 
-/**
- * Constant agent ID for the built-in fn agent.
- * The chat system always uses createFnAgent with CHAT_SYSTEM_PROMPT regardless
- * of the agentId stored on the session. This ID serves as metadata only.
- */
-const FN_AGENT_ID = "__fn_agent__";
 const CHAT_SIDEBAR_DEFAULT_WIDTH = 280;
 const CHAT_SIDEBAR_MIN_WIDTH = 180;
 const CHAT_SIDEBAR_MAX_WIDTH = 500;
@@ -586,6 +580,7 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
     createSession,
     archiveSession,
     renameSession,
+    setSessionModel,
     setSessionThinkingLevel,
     deleteSession,
     sendMessage,
@@ -637,7 +632,7 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
   const [createRoomOpen, setCreateRoomOpen] = useState(false);
   const { agentsMap: cachedAgentsMap } = useAgentsMapCache(projectId);
   const agentsMap = useMemo(() => (chatAgentsMap.size > 0 ? chatAgentsMap : cachedAgentsMap), [cachedAgentsMap, chatAgentsMap]);
-  const { models, defaultProvider, defaultModelId } = useModelsCache();
+  const { models, favoriteProviders, favoriteModels, defaultProvider, defaultModelId } = useModelsCache();
   const defaultModel = useMemo<DefaultModelSelection>(() => ({ provider: defaultProvider, modelId: defaultModelId }), [defaultModelId, defaultProvider]);
   const dialogDefaultModel = useMemo<DefaultModelSelection>(() => {
     if (chatDefaultTarget?.kind === "model") {
@@ -2775,9 +2770,21 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
           <ChatThinkingLevelControl
             level={activeSession?.thinkingLevel}
             defaultThinkingLevel={resolvedDefaultThinkingLevel}
+            models={models}
+            favoriteProviders={favoriteProviders}
+            favoriteModels={favoriteModels}
+            agents={Array.from(agentsMap.values())}
+            agentId={activeSession?.agentId}
+            modelProvider={activeSession?.modelProvider}
+            modelId={activeSession?.modelId}
             onChange={(level) => {
               if (activeSession) {
                 void setSessionThinkingLevel(activeSession.id, level);
+              }
+            }}
+            onChangeModel={(selection) => {
+              if (activeSession) {
+                void setSessionModel(activeSession.id, selection);
               }
             }}
             disabled={!activeSession}

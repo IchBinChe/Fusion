@@ -5,7 +5,7 @@
 
 import { act, fireEvent, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useChat } from "../useChat";
+import { FN_AGENT_ID, useChat } from "../useChat";
 import * as apiModule from "../../api";
 import { getChatPendingMessageKey } from "../chatPendingMessageStorage";
 import * as swrCacheModule from "../../utils/swrCache";
@@ -1020,6 +1020,170 @@ describe("useChat", () => {
     expect(result.current.sessions[0]?.title).toBe("Keep me");
     expect(result.current.activeSession?.title).toBe("Keep me");
     expect(addToast).toHaveBeenCalledWith("Failed to rename conversation", "error");
+  });
+
+  describe("setSessionModel", () => {
+    it("switches an active session to a model optimistically and reconciles with the server", async () => {
+      const session = makeSession({ id: "session-001", agentId: "agent-001", modelProvider: null, modelId: null });
+      const updatedSession = makeSession({
+        id: "session-001",
+        agentId: FN_AGENT_ID,
+        modelProvider: "openai",
+        modelId: "gpt-4o",
+        updatedAt: "2026-04-09T00:00:00.000Z",
+      });
+      const deferred = createDeferredPromise<{ session: ChatSession }>();
+      mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
+      mockFetchChatMessages.mockResolvedValue({ messages: [] });
+      mockUpdateChatSession.mockReturnValueOnce(deferred.promise);
+
+      const { result } = renderHook(() => useChat("proj-123"));
+
+      await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+
+      act(() => {
+        result.current.selectSession("session-001", session);
+      });
+
+      await waitFor(() => expect(result.current.activeSession?.id).toBe("session-001"));
+
+      await act(async () => {
+        void result.current.setSessionModel("session-001", { modelProvider: "openai", modelId: "gpt-4o" });
+      });
+
+      expect(mockUpdateChatSession).toHaveBeenCalledWith(
+        "session-001",
+        { agentId: FN_AGENT_ID, modelProvider: "openai", modelId: "gpt-4o" },
+        "proj-123",
+      );
+      expect(result.current.sessions[0]).toMatchObject({ agentId: FN_AGENT_ID, modelProvider: "openai", modelId: "gpt-4o" });
+      expect(result.current.activeSession).toMatchObject({ agentId: FN_AGENT_ID, modelProvider: "openai", modelId: "gpt-4o" });
+
+      await act(async () => {
+        deferred.resolve({ session: updatedSession });
+        await deferred.promise;
+      });
+
+      expect(result.current.sessions[0]).toMatchObject({
+        agentId: FN_AGENT_ID,
+        modelProvider: "openai",
+        modelId: "gpt-4o",
+        updatedAt: "2026-04-09T00:00:00.000Z",
+      });
+      expect(result.current.activeSession).toMatchObject({
+        agentId: FN_AGENT_ID,
+        modelProvider: "openai",
+        modelId: "gpt-4o",
+        updatedAt: "2026-04-09T00:00:00.000Z",
+      });
+    });
+
+    it("switches an active session to an agent optimistically and clears the model pair", async () => {
+      const session = makeSession({ id: "session-001", agentId: FN_AGENT_ID, modelProvider: "anthropic", modelId: "claude-sonnet-4-5" });
+      const updatedSession = makeSession({ id: "session-001", agentId: "agent-specialist", modelProvider: null, modelId: null });
+      const deferred = createDeferredPromise<{ session: ChatSession }>();
+      mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
+      mockFetchChatMessages.mockResolvedValue({ messages: [] });
+      mockUpdateChatSession.mockReturnValueOnce(deferred.promise);
+
+      const { result } = renderHook(() => useChat("proj-123"));
+
+      await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+
+      act(() => {
+        result.current.selectSession("session-001", session);
+      });
+
+      await waitFor(() => expect(result.current.activeSession?.id).toBe("session-001"));
+
+      await act(async () => {
+        void result.current.setSessionModel("session-001", { agentId: "agent-specialist" });
+      });
+
+      expect(mockUpdateChatSession).toHaveBeenCalledWith(
+        "session-001",
+        { agentId: "agent-specialist", modelProvider: null, modelId: null },
+        "proj-123",
+      );
+      expect(result.current.sessions[0]).toMatchObject({ agentId: "agent-specialist", modelProvider: null, modelId: null });
+      expect(result.current.activeSession).toMatchObject({ agentId: "agent-specialist", modelProvider: null, modelId: null });
+
+      await act(async () => {
+        deferred.resolve({ session: updatedSession });
+        await deferred.promise;
+      });
+    });
+
+    it("rolls back sessions/activeSession and surfaces an error toast on failure", async () => {
+      const addToast = vi.fn();
+      const session = makeSession({ id: "session-001", agentId: FN_AGENT_ID, modelProvider: "anthropic", modelId: "claude-sonnet-4-5" });
+      mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
+      mockFetchChatMessages.mockResolvedValue({ messages: [] });
+      mockUpdateChatSession.mockRejectedValueOnce(new Error("model failed"));
+
+      const { result } = renderHook(() => useChat("proj-123", addToast));
+
+      await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+
+      act(() => {
+        result.current.selectSession("session-001", session);
+      });
+
+      await waitFor(() => expect(result.current.activeSession?.modelId).toBe("claude-sonnet-4-5"));
+
+      await act(async () => {
+        await expect(result.current.setSessionModel("session-001", { agentId: "agent-specialist" })).rejects.toThrow("model failed");
+      });
+
+      expect(mockUpdateChatSession).toHaveBeenCalledWith(
+        "session-001",
+        { agentId: "agent-specialist", modelProvider: null, modelId: null },
+        "proj-123",
+      );
+      expect(result.current.sessions[0]).toMatchObject({ agentId: FN_AGENT_ID, modelProvider: "anthropic", modelId: "claude-sonnet-4-5" });
+      expect(result.current.activeSession).toMatchObject({ agentId: FN_AGENT_ID, modelProvider: "anthropic", modelId: "claude-sonnet-4-5" });
+      expect(addToast).toHaveBeenCalledWith("Failed to update chat model", "error");
+    });
+
+    it("updates only the matching sessions entry when the session is not active", async () => {
+      const activeSessionSeed = makeSession({ id: "session-active", agentId: "agent-001" });
+      const otherSession = makeSession({ id: "session-other", agentId: "agent-002", modelProvider: null, modelId: null });
+      const deferred = createDeferredPromise<{ session: ChatSession }>();
+      mockFetchChatSessions.mockResolvedValueOnce({ sessions: [activeSessionSeed, otherSession] });
+      mockFetchChatMessages.mockResolvedValue({ messages: [] });
+      mockUpdateChatSession.mockReturnValueOnce(deferred.promise);
+
+      const { result } = renderHook(() => useChat("proj-123"));
+
+      await waitFor(() => expect(result.current.sessions).toHaveLength(2));
+
+      act(() => {
+        result.current.selectSession("session-active", activeSessionSeed);
+      });
+
+      await waitFor(() => expect(result.current.activeSession?.id).toBe("session-active"));
+
+      await act(async () => {
+        void result.current.setSessionModel("session-other", { modelProvider: "openai", modelId: "gpt-4o-mini" });
+      });
+
+      expect(mockUpdateChatSession).toHaveBeenCalledWith(
+        "session-other",
+        { agentId: FN_AGENT_ID, modelProvider: "openai", modelId: "gpt-4o-mini" },
+        "proj-123",
+      );
+      expect(result.current.sessions.find((s) => s.id === "session-other")).toMatchObject({
+        agentId: FN_AGENT_ID,
+        modelProvider: "openai",
+        modelId: "gpt-4o-mini",
+      });
+      expect(result.current.activeSession).toMatchObject({ id: "session-active", agentId: "agent-001" });
+
+      await act(async () => {
+        deferred.resolve({ session: makeSession({ ...otherSession, agentId: FN_AGENT_ID, modelProvider: "openai", modelId: "gpt-4o-mini" }) });
+        await deferred.promise;
+      });
+    });
   });
 
   // FN-7898: setSessionThinkingLevel lets an existing session's reasoning-effort level be

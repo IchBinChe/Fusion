@@ -473,6 +473,14 @@ export class ChatStore extends EventEmitter<ChatStoreEvents> {
       setClauses.push("modelId = ?");
       params.push(input.modelId);
     }
+    /*
+     * FNXC:Chat-ModelSwitch 2026-07-12-00:00:
+     * Existing direct chats must be able to retarget to a real agent without recreating the conversation. Keep this independent from modelProvider/modelId so omitted model keys remain untouched.
+     */
+    if (input.agentId !== undefined) {
+      setClauses.push("agentId = ?");
+      params.push(input.agentId);
+    }
     if (input.thinkingLevel !== undefined) {
       setClauses.push("thinkingLevel = ?");
       params.push(input.thinkingLevel);

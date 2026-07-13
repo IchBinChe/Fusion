@@ -1968,6 +1968,9 @@ FN-7898 adds a Brain-icon trigger next to the attach button so an active model-l
 thinking (reasoning-effort) level can be changed mid-conversation. The root wrapper needs
 position: relative so the popover (mirroring .chat-skill-menu's positioning/z-index) anchors to
 the trigger instead of the whole .chat-input-row.
+
+FNXC:Chat-ModelSwitch 2026-07-12-00:00:
+FN-7908 keeps model/agent retargeting inside the same brain popup. The widened panel uses token-based widths and bounded scroll regions so the CustomModelDropdown trigger and agent list remain usable on desktop and mobile without adding a second composer affordance.
 */
 .chat-thinking-level-root {
   position: relative;
@@ -1988,8 +1991,9 @@ the trigger instead of the whole .chat-input-row.
   position: absolute;
   left: 0;
   bottom: calc(100% + var(--space-xs));
-  min-width: calc((var(--space-xl) * 6) + var(--space-2xl));
-  max-width: calc(100vw - (var(--space-lg) * 2));
+  width: min(calc(var(--space-xl) * 15), calc(100vw - (var(--space-lg) * 2)));
+  max-height: min(calc(var(--space-xl) * 24), calc(100vh - (var(--space-xl) * 4)));
+  overflow-y: auto;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -1997,11 +2001,123 @@ the trigger instead of the whole .chat-input-row.
   z-index: 50;
 }
 
+.chat-thinking-target-section,
+.chat-thinking-level-section {
+  padding: var(--space-sm);
+}
+
+.chat-thinking-target-section {
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-thinking-section-title {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: 0.04em;
+  margin-bottom: var(--space-xs);
+  text-transform: uppercase;
+}
+
+.chat-thinking-mode-toggle {
+  display: flex;
+  gap: var(--space-xs);
+  margin-bottom: var(--space-sm);
+  padding: var(--space-2xs);
+  background: var(--surface-secondary);
+  border-radius: var(--radius-md);
+}
+
+.chat-thinking-mode-btn {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 0.8125rem;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+
+.chat-thinking-mode-btn--active,
+.chat-thinking-mode-btn:hover {
+  background: var(--surface);
+  color: var(--text-primary);
+}
+
+.chat-thinking-mode-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.chat-thinking-model-picker .custom-model-dropdown {
+  width: 100%;
+}
+
+.chat-thinking-agent-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  max-height: calc(var(--space-xl) * 8);
+  overflow-y: auto;
+}
+
+.chat-thinking-agent-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: var(--space-sm);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.chat-thinking-agent-item:hover,
+.chat-thinking-agent-item--selected {
+  background: var(--card-hover);
+  border-color: var(--accent);
+}
+
+.chat-thinking-agent-item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.chat-thinking-agent-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-thinking-agent-role,
+.chat-thinking-current-target,
+.chat-thinking-empty {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+}
+
+.chat-thinking-agent-role {
+  flex: none;
+  text-transform: capitalize;
+}
+
+.chat-thinking-current-target,
+.chat-thinking-empty {
+  margin-top: var(--space-xs);
+}
+
 .chat-thinking-popover-list {
   display: flex;
   flex-direction: column;
-  padding: var(--space-xs);
-  max-height: calc(var(--space-xl) * 10);
+  max-height: calc(var(--space-xl) * 8);
   overflow-y: auto;
 }
 
@@ -2401,6 +2517,17 @@ Queued-message banners stack above the composer input with a capped scroll area,
   .chat-thinking-btn {
     min-width: calc(var(--space-lg) * 2.25);
     min-height: calc(var(--space-lg) * 2.25);
+  }
+
+  .chat-thinking-popover {
+    left: 0;
+    width: calc(100vw - (var(--space-md) * 2));
+    max-height: min(calc(var(--space-xl) * 20), calc(100vh - (var(--space-xl) * 5)));
+  }
+
+  .chat-thinking-agent-list,
+  .chat-thinking-popover-list {
+    max-height: calc(var(--space-xl) * 7);
   }
 
   .chat-input-send,

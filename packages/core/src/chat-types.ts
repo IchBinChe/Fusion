@@ -233,6 +233,8 @@ export interface ChatSessionUpdateInput {
   modelProvider?: string | null;
   /** Model ID override */
   modelId?: string | null;
+  /** New agent target — switches the session from a model to an agent */
+  agentId?: string;
   /** Thinking/reasoning-effort override */
   thinkingLevel?: string | null;
 }

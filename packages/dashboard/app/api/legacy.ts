@@ -10303,10 +10303,17 @@ export function ensureTaskPlannerChatSession(
   );
 }
 
-/** Update a chat session (title, status, thinkingLevel) */
+/** Update a chat session (title, status, thinkingLevel, model, or agent target) */
 export function updateChatSession(
   id: string,
-  updates: { title?: string | null; status?: string; thinkingLevel?: string | null },
+  updates: {
+    title?: string | null;
+    status?: string;
+    modelProvider?: string | null;
+    modelId?: string | null;
+    agentId?: string;
+    thinkingLevel?: string | null;
+  },
   projectId?: string,
 ): Promise<ChatSessionResponse> {
   return api<ChatSessionResponse>(withProjectId(`/chat/sessions/${encodeURIComponent(id)}`, projectId), {

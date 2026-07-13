@@ -411,6 +411,27 @@ describe("ChatStore", () => {
         expect(store.getSession(session.id)?.thinkingLevel).toBe("off");
       });
 
+      it("updates agentId without clobbering omitted model fields", () => {
+        const session = createTestSession(store, {
+          agentId: "__fn_agent__",
+          modelProvider: "anthropic",
+          modelId: "claude-sonnet-4-5",
+          thinkingLevel: "high",
+        });
+
+        const updated = store.updateSession(session.id, { agentId: "agent-specialist" });
+
+        expect(updated!.agentId).toBe("agent-specialist");
+        expect(updated!.modelProvider).toBe("anthropic");
+        expect(updated!.modelId).toBe("claude-sonnet-4-5");
+        expect(updated!.thinkingLevel).toBe("high");
+        expect(store.getSession(session.id)).toMatchObject({
+          agentId: "agent-specialist",
+          modelProvider: "anthropic",
+          modelId: "claude-sonnet-4-5",
+        });
+      });
+
       it("returns undefined for non-existent session", () => {
         const result = store.updateSession("chat-nonexistent", { title: "Test" });
         expect(result).toBeUndefined();

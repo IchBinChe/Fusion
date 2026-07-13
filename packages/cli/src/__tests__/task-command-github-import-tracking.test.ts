@@ -42,7 +42,7 @@ vi.mock("../project-context.js", () => ({
 
 vi.mock("@fusion/dashboard", () => ({
   registerGithubTrackingHook: vi.fn(),
-  // FNXC:CliTests 2026-07-13-09:40: Missing dashboard barrel exports added for mock completeness (scripts/check-cli-dashboard-mock-completeness.mjs gate).
+  // FNXC:CliTests 2026-07-13-09:40: Missing dashboard barrel exports added for mock completeness (scripts/check-mock-completeness.mjs gate).
   GitLabClient: vi.fn(),
   resolveGitlabAuth: vi.fn(() => ({})),
   buildGitLabTaskProvenance: vi.fn(() => ({})),
@@ -54,6 +54,8 @@ vi.mock("@fusion/engine", () => ({
   createFnAgent: vi.fn(),
   runAiMerge: vi.fn(),
   landWorkspaceTask: vi.fn(),
+  // FNXC:TestInfrastructure 2026-07-13-10:25: extension.ts named-imports this from @fusion/engine.
+  isInReviewMissingWorktreeSessionStartFailure: vi.fn(),
 }));
 
 vi.mock("@fusion/dashboard/planning", () => ({

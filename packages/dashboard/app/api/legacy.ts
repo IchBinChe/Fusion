@@ -3950,6 +3950,7 @@ export interface AgentOnboardingSummary {
 }
 
 export type OnboardingMode = "create" | "edit";
+export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 
 export interface ExistingAgentOnboardingConfig {
   name?: string;
@@ -3961,7 +3962,7 @@ export interface ExistingAgentOnboardingConfig {
   reportsTo?: string;
   skills?: string[];
   model?: string;
-  thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  thinkingLevel?: ThinkingLevel;
   maxTurns?: number;
   runtimeHint?: string;
   heartbeatIntervalMs?: number;
@@ -3996,7 +3997,7 @@ export function startPlanning(
 export function createPlanningDraft(
   initialPlan: string,
   projectId?: string,
-  modelOverride?: { planningModelProvider?: string; planningModelId?: string },
+  modelOverride?: { planningModelProvider?: string; planningModelId?: string; thinkingLevel?: ThinkingLevel },
 ): Promise<{ sessionId: string; title: string }> {
   return api<{ sessionId: string; title: string }>(withProjectId("/planning/create-draft", projectId), {
     method: "POST",
@@ -4004,6 +4005,7 @@ export function createPlanningDraft(
       initialPlan,
       planningModelProvider: modelOverride?.planningModelProvider,
       planningModelId: modelOverride?.planningModelId,
+      thinkingLevel: modelOverride?.thinkingLevel,
     }),
   });
 }
@@ -4012,7 +4014,7 @@ export function createPlanningDraft(
 export function startPlanningStreaming(
   initialPlan: string,
   projectId?: string,
-  modelOverride?: { planningModelProvider?: string; planningModelId?: string },
+  modelOverride?: { planningModelProvider?: string; planningModelId?: string; thinkingLevel?: ThinkingLevel },
   planningOptions?: { planningDepth?: "small" | "medium" | "large"; customQuestionCount?: number },
   existingSessionId?: string,
 ): Promise<{ sessionId: string }> {
@@ -4022,6 +4024,7 @@ export function startPlanningStreaming(
       initialPlan,
       planningModelProvider: modelOverride?.planningModelProvider,
       planningModelId: modelOverride?.planningModelId,
+      thinkingLevel: modelOverride?.thinkingLevel,
       planningDepth: planningOptions?.planningDepth,
       customQuestionCount: planningOptions?.customQuestionCount,
       ...(existingSessionId ? { existingSessionId } : {}),
@@ -8728,7 +8731,7 @@ export type MissionInterviewResponse =
 export function startMissionInterview(
   missionTitle: string,
   projectId?: string,
-  modelOverride?: { modelProvider?: string; modelId?: string },
+  modelOverride?: { modelProvider?: string; modelId?: string; thinkingLevel?: ThinkingLevel },
 ): Promise<{ sessionId: string }> {
   return api<{ sessionId: string }>(withProjectId("/missions/interview/start", projectId), {
     method: "POST",
@@ -8736,6 +8739,7 @@ export function startMissionInterview(
       missionTitle,
       modelProvider: modelOverride?.modelProvider,
       modelId: modelOverride?.modelId,
+      thinkingLevel: modelOverride?.thinkingLevel,
     }),
   });
 }
@@ -9538,7 +9542,7 @@ export function pingSession(sessionId: string, projectId?: string): Promise<{ ok
 
 export function updatePlanningSessionDraft(
   sessionId: string,
-  draft: { initialPlan: string; modelProvider?: string; modelId?: string },
+  draft: { initialPlan: string; modelProvider?: string; modelId?: string; thinkingLevel?: ThinkingLevel },
   projectId?: string,
 ): Promise<{ ok: boolean }> {
   return api<{ ok: boolean }>(withProjectId(`/ai-sessions/${encodeURIComponent(sessionId)}/draft`, projectId), {

@@ -13,7 +13,7 @@ import * as nodeFs from "node:fs";
 import os from "node:os";
 import v8 from "node:v8";
 
-import type { AnthropicProviderRegistration, TaskStore, ScheduleType, ActivityEventType, ModelPreset, RoutineTriggerType, McpServerDefinition } from "@fusion/core";
+import type { AnthropicProviderRegistration, TaskStore, ScheduleType, ActivityEventType, ModelPreset, RoutineTriggerType, McpServerDefinition, ThinkingLevel } from "@fusion/core";
 import {
   type Task,
   type PiExtensionEntry,
@@ -4305,7 +4305,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   /**
    * PATCH /api/ai-sessions/:id/draft
    * Keep planning draft title/text synchronized while editing.
-   * Body: { title: string, initialPlan: string }
+   * Body: { title: string, initialPlan: string, thinkingLevel?: ThinkingLevel }
    */
   router.patch("/ai-sessions/:id/draft", (req, res) => {
     if (!aiSessionStore) {
@@ -4337,7 +4337,12 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     const modelProvider = rawProvider && rawModelId ? rawProvider : undefined;
     const modelId = rawProvider && rawModelId ? rawModelId : undefined;
 
-    const updated = aiSessionStore.updateDraft(id, { initialPlan, modelProvider, modelId });
+    const thinkingLevel = req.body?.thinkingLevel;
+    if (thinkingLevel !== undefined && !THINKING_LEVELS.includes(thinkingLevel as ThinkingLevel)) {
+      throw badRequest("thinkingLevel must be one of: " + THINKING_LEVELS.join(", "));
+    }
+
+    const updated = aiSessionStore.updateDraft(id, { initialPlan, modelProvider, modelId, thinkingLevel });
     if (!updated) {
       throw notFound("Session not found");
     }

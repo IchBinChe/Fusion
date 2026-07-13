@@ -1555,6 +1555,7 @@ short-landscape variant (FN-5751 lesson: never a desktop-only or portrait-only f
     opacity: 1;
     width: 28px;
     height: 28px;
+    line-height: 1;
     border-radius: var(--radius-md);
   }
 
@@ -1822,9 +1823,19 @@ FN-7928 requires the Send-back/Actions trigger, ⋯ menu button, and size badge 
     min-height: var(--card-chip-height-mobile);
   }
 
+  /*
+  FNXC:TaskCardLayout 2026-07-13-00:00:
+  FN-7933 follows FN-7928 by keeping the Send-back/Actions trigger, ⋯ menu button, and size badge on one optical vertical center inside the header actions at the mobile breakpoint. Preserve FN-7889's cluster↔id nudge, FN-7862's flex-start header anchor, FN-7837's badge-wrap/size-chip grouping, FN-7928's desktop centering, and FN-4351's no-min-height mobile rule for the send-back/menu buttons.
+  */
   .card-header-actions {
+    align-items: center;
     gap: calc(var(--space-xs) / 2);
     flex-shrink: 0;
+  }
+
+  .card-menu-btn,
+  .card-size-badge {
+    line-height: 1;
   }
 
   /* FN-4351/FN-3965: keep secondary actions visible on touch, but compact per WCAG 2.5.8 because the card tap surface is the primary target for opening task detail. */
@@ -1836,6 +1847,7 @@ FN-7928 requires the Send-back/Actions trigger, ⋯ menu button, and size badge 
 
   .card-send-back-btn {
     opacity: 1;
+    line-height: 1;
   }
 
   .card-promote-action.card-send-back-btn {
@@ -1898,6 +1910,10 @@ FN-7928 requires the Send-back/Actions trigger, ⋯ menu button, and size badge 
   .card-oversight-badge {
     font-size: 0.5625rem;
     padding: calc(var(--space-xs) / 4) calc((var(--space-xs) * 3) / 2);
+  }
+
+  .card-size-badge {
+    padding-block: calc((var(--space-xs) / 4) + var(--btn-border-width));
   }
 
   .card-stalled-review-reason {

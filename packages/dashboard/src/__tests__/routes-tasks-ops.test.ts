@@ -878,6 +878,47 @@ describe("POST /tasks/:id/retry", () => {
     expect(engine.clearTaskPauseAbortState).not.toHaveBeenCalled();
   });
 
+  /*
+  FNXC:ManualRetry 2026-07-13-12:25:
+  Plan-in-place workflows (Coding (Ideas): no "triage" column) keep needs-replan cards in
+  "todo"; the Retry button the cards already show must map to the planning retry there
+  instead of a 400. Default-workflow todo cards keep the generic-retry semantics.
+  */
+  it("offers the planning retry for a needs-replan todo card in a workflow without a triage column", async () => {
+    const replanTask = { ...FAKE_TASK_DETAIL, column: "todo", status: "needs-replan" };
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(replanTask);
+    (store as unknown as Record<string, unknown>).getTaskWorkflowSelection = vi.fn().mockReturnValue({ workflowId: "builtin:coding-ideas", stepIds: [] });
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(replanTask);
+
+    const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/retry", JSON.stringify({}), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    // Planning-retry semantics: status reset to needs-replan, no column move.
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", expect.objectContaining({ status: "needs-replan" }));
+    expect(store.moveTask).not.toHaveBeenCalled();
+    expect(store.logEntry).toHaveBeenCalledWith("KB-001", "Retry requested from dashboard (planning retry budget reset)");
+  });
+
+  it("keeps generic retry semantics for a needs-replan todo card in the default workflow", async () => {
+    const replanTask = { ...FAKE_TASK_DETAIL, column: "todo", status: "needs-replan" };
+    const movedTask = { ...FAKE_TASK_DETAIL, column: "todo", status: undefined };
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(replanTask);
+    (store as unknown as Record<string, unknown>).getTaskWorkflowSelection = vi.fn().mockReturnValue(undefined);
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(replanTask);
+    (store.moveTask as ReturnType<typeof vi.fn>).mockResolvedValue(movedTask);
+
+    const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/retry", JSON.stringify({}), {
+      "Content-Type": "application/json",
+    });
+
+    // Default workflow declares "triage": a needs-replan todo card is not a planning
+    // retry there — and needs-replan alone is not a generic-retryable status.
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("not in a retryable state");
+  });
+
   it("retries a failed task in any column (not just in-progress)", async () => {
     const failedTaskInTodo = { ...FAKE_TASK_DETAIL, column: "todo", status: "failed" };
     const movedTask = { ...FAKE_TASK_DETAIL, column: "todo", status: undefined };

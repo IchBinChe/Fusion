@@ -43,6 +43,8 @@ import {
   isEphemeralAgent,
   parseExplicitDuplicateMarker,
   isWorkflowColumnsEnabled,
+  resolveWorkflowIrForTask,
+  workflowHasColumn,
   TransitionRejectionError,
   getPlannerInterventionTimeline,
   isBuiltinWorkflowId,
@@ -2289,12 +2291,25 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     try {
       const { store: scopedStore, engine } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
-      const retrySpecification =
-        task.column === "triage" &&
-        (task.status === "failed" ||
-          task.status === "planning" ||
-          task.status === "needs-replan" ||
-          (task.stuckKillCount ?? 0) > 0);
+      const retrySpecificationStatus =
+        task.status === "failed" ||
+        task.status === "planning" ||
+        task.status === "needs-replan" ||
+        (task.stuckKillCount ?? 0) > 0;
+      let retrySpecification = task.column === "triage" && retrySpecificationStatus;
+      /*
+      FNXC:ManualRetry 2026-07-13-12:20:
+      Plan-in-place workflows (Coding (Ideas): no "triage" column) keep planning/replanning
+      cards in "todo", so the manual Retry button — which the cards already show for
+      needs-replan/planning/failed states — must offer the planning retry there too instead
+      of 400ing with "not in a retryable state". Gated on the task's OWN workflow declaring
+      no "triage" column, so default-workflow todo cards (where todo failures are execution
+      failures) keep the existing generic-retry semantics.
+      */
+      if (!retrySpecification && task.column === "todo" && retrySpecificationStatus) {
+        const workflowIr = await resolveWorkflowIrForTask(scopedStore, task.id);
+        retrySpecification = !workflowHasColumn(workflowIr, "triage");
+      }
       const isInReviewStatusNone =
         task.column === "in-review" && (task.status === null || task.status === undefined);
       const hasIncompleteSteps = task.steps.some(

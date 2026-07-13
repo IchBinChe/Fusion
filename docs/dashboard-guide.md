@@ -651,7 +651,7 @@ Use the terminal on desktop/tablet:
 1. Select the **Terminal** button in the footer executor status bar.
    Expected outcome: the terminal opens as a bottom-docked overlay panel with the active shell session and a draggable top resize handle. The font size / clear / shortcuts / preferences controls, connection status, pin, and pop-out controls render in the terminal's bottom action-control footer at every desktop/tablet width, so the header only has to carry the tab affordance, title/status, workspace picker, and close button.
 2. Select **Pin terminal (push content)** from the bottom action-control footer.
-   Expected outcome: the terminal moves into a persisted below-application panel that reserves space instead of covering the board, chat, or right sidebar. Select **Unpin terminal (overlay content)** to return to the overlay docked panel.
+   Expected outcome: the terminal moves into a persisted below-application panel that reserves space instead of covering the board, chat, or right sidebar. The pinned panel also reserves space above the fixed status footer (the executor status bar), so the terminal's own bottom action-control footer (font size, Clear, Shortcuts, Preferences, connection status, pin/pop-out) stays fully visible instead of being covered by it. Select **Unpin terminal (overlay content)** to return to the overlay docked panel.
 3. Drag the top edge of the docked or pinned panel.
    Expected outcome: the panel height changes within its viewport-safe bounds and persists per project, with pinned mode clamped shorter so the application remains usable.
 4. Select **Pop out** from the bottom action-control footer.

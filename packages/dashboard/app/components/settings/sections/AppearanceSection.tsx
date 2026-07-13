@@ -53,6 +53,14 @@ export function AppearanceSection({ scopeBanner, form, setForm, themeMode, color
         <small className="form-text text-muted">{t("settings.appearance.openMobileTasksInPopupHelp", "When enabled, ordinary board task-card and right-dock Tasks-list clicks open the existing task popup so the board or list remains visible. Deep-tab and other task opens keep their current behavior. Default: disabled.")}</small>
       </div>
       <div className="form-group">
+        {/* FNXC:TaskPopupViewGating 2026-07-13-00:00: This project-scoped setting is opt-in because existing task popups float globally by default. When enabled, each popup stays attached to the Board/List view where it was opened, hiding on other views without closing or clearing geometry. */}
+        <label className="checkbox-label">
+          <input type="checkbox" checked={form.taskPopupsBoardListOnly === true} onChange={(e) => setForm((f) => ({ ...f, taskPopupsBoardListOnly: e.target.checked }))}/>
+          <span>{t("settings.appearance.taskPopupsBoardListOnly", "Keep task popups on their Board/List view")}</span>
+        </label>
+        <small className="form-text text-muted">{t("settings.appearance.taskPopupsBoardListOnlyHelp", "When enabled, each open task-detail popup appears only on the Board or List view where it was opened. Switching to another view hides it without closing; returning to that view restores it in the same position. Default: disabled.")}</small>
+      </div>
+      <div className="form-group">
         {/* FNXC:TaskCardCostBadge 2026-07-11-12:15: This project setting is opt-in because board cards are already dense; when enabled, only tasks with recorded positive token usage render a read-time derived spend badge. */}
         <label className="checkbox-label">
           <input type="checkbox" checked={form.showCostBadgeOnCards === true} onChange={(e) => setForm((f) => ({ ...f, showCostBadgeOnCards: e.target.checked }))}/>

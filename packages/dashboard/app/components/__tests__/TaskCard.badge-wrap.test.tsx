@@ -156,6 +156,8 @@ function expectHeaderActionsControlCenterline(container: HTMLElement, expected: 
     expect(sendBackStyles.alignItems).toBe("center");
     expect(sendBackStyles.lineHeight).toBe("1");
     expect(sendBackStyles.minHeight).toBe("");
+    // Text+chevron Actions chip reads optically low vs ⋯ / size; tokenized 1px raise keeps the three on one centerline.
+    expect(sendBackStyles.transform).toMatch(/^translateY\(calc\(var\(--space-xs\) \/ -4\)\)$/);
   } else {
     expect(sendBack).toBeNull();
   }
@@ -516,6 +518,7 @@ describe("TaskCard badge wrapping (FN-5162)", () => {
     expectCssRuleToContain(mobileSection, ".card-send-back", "height: 100%;");
     expectCssRuleToContain(mobileSection, ".card-send-back", "align-items: center;");
     expectCssRuleToContain(mobileSection, ".card-send-back-btn", "line-height: 1;");
+    expectCssRuleToContain(mobileSection, ".card-send-back-btn", "transform: translateY(calc(var(--space-xs) / -4));");
     expectCssRuleToContain(mobileSection, ".card-menu-btn", "line-height: 1;");
     expectCssRuleToContain(mobileSection, ".card-size-badge", "line-height: 1;");
     expectCssRuleToContain(mobileSection, ".card-size-badge", "font-size: 0.5625rem;");

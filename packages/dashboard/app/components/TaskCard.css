@@ -1675,10 +1675,14 @@ too so future divergence doesn't have to rediscover the shared selector group.
 /*
 FNXC:TaskCardLayout 2026-07-12-00:00:
 FN-7928 requires the Send-back/Actions trigger, ⋯ menu button, and size badge to share one optical vertical center inside .card-header-actions. Normalize their line boxes while preserving FN-7889's cluster↔id transform nudge, FN-7862's flex-start header anchor, FN-7837's middle-badge wrap/size-chip-not-orphaned contract, and FN-4351's mobile no-min-height rule.
+
+FNXC:TaskCardLayout 2026-07-13-01:03:
+The Actions/Send-back text+chevron chip still reads a little low against the ⋯ icon and single-letter size badge even after the locked chip-height row. Use a quarter-space-xs optical raise (and box-sizing so the 1px border does not inflate the flex cross size) so the three controls share one centerline.
 */
 .card-send-back-btn {
   display: inline-flex;
   align-items: center;
+  box-sizing: border-box;
   gap: calc(var(--space-xs) / 2);
   padding: calc(var(--space-xs) / 4)
     calc(var(--space-sm) - (var(--space-xs) / 2));
@@ -1692,6 +1696,7 @@ FN-7928 requires the Send-back/Actions trigger, ⋯ menu button, and size badge 
   color: var(--text-muted);
   cursor: pointer;
   opacity: 0;
+  transform: translateY(calc(var(--space-xs) / -4));
   transition: opacity var(--transition-fast), background var(--transition-fast),
     color var(--transition-fast), border-color var(--transition-fast);
 }
@@ -1891,6 +1896,8 @@ FN-7928 requires the Send-back/Actions trigger, ⋯ menu button, and size badge 
     line-height: 1;
     margin-top: 0;
     margin-bottom: 0;
+    /* Keep the base optical raise so Actions does not sit below ⋯ / size on the locked mobile row. */
+    transform: translateY(calc(var(--space-xs) / -4));
   }
 
   .card-promote-action.card-send-back-btn {

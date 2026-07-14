@@ -175,4 +175,79 @@ pgDescribe("startup-factory: external PostgreSQL boot (integration)", () => {
       await second!.shutdown();
     }
   });
+
+  /*
+  FNXC:MultiProjectIsolation 2026-07-13-21:20:
+  A rootDir-only boot (`fn dashboard` in the project directory — the main
+  cutover path) must still stamp migrated NULL-project_id rows when the
+  central registry knows the project. The previous `if (options.projectId)`
+  guard skipped stamping on exactly this path, so every project-bound reader
+  (engine, project-store-resolver) filtered the migrated tasks out and the
+  board showed empty right after a successful migration.
+  */
+  it("stamps migrated rows with the central-registry project id on a rootDir-only boot", async () => {
+    rootDir = await mkdtemp(join(tmpdir(), "startup-factory-stamp-"));
+    dbName = uniqueDbName();
+    adminExec(`CREATE DATABASE "${dbName}"`);
+    const testUrl = `${PG_TEST_URL_BASE}/${dbName}`;
+
+    const fusionDir = join(rootDir, ".fusion");
+    const globalDir = join(rootDir, ".fusion-global");
+    mkdirSync(fusionDir, { recursive: true });
+    mkdirSync(globalDir, { recursive: true });
+
+    const legacy = new DatabaseSync(join(fusionDir, "fusion.db"));
+    try {
+      legacy.exec(`CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
+        title TEXT,
+        description TEXT NOT NULL,
+        "column" TEXT NOT NULL,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      );`);
+      legacy.prepare(
+        `INSERT INTO tasks (id, title, description, "column", createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run("FN-STAMP-1", "Stamped task", "migrated from sqlite", "todo", "2026-06-01T00:00:00Z", "2026-06-01T00:00:00Z");
+    } finally {
+      legacy.close();
+    }
+
+    // Legacy central registry that knows this project by its rootDir path.
+    const legacyCentral = new DatabaseSync(join(globalDir, "fusion-central.db"));
+    try {
+      legacyCentral.exec(`CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        path TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL
+      );`);
+      legacyCentral.prepare(
+        `INSERT INTO projects (id, name, path, status, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run("proj_stamp_test", "Stamp Test", rootDir, "active", "2026-06-01T00:00:00Z", "2026-06-01T00:00:00Z");
+    } finally {
+      legacyCentral.close();
+    }
+
+    const boot = await createTaskStoreForBackend({
+      rootDir,
+      globalSettingsDir: globalDir,
+      env: { DATABASE_URL: testUrl },
+    });
+    expect(boot).not.toBeNull();
+    try {
+      const layer = boot!.taskStore.getAsyncLayer()!;
+      const rows = (await layer.db.execute(
+        `SELECT id, project_id FROM project.tasks ORDER BY id`,
+      )) as unknown as Array<{ id: string; project_id: string | null }>;
+      expect(rows.map((r) => r.id)).toContain("FN-STAMP-1");
+      for (const row of rows) {
+        expect(row.project_id, `${row.id} must be stamped with the registered project id`).toBe("proj_stamp_test");
+      }
+    } finally {
+      await boot!.shutdown();
+    }
+  });
 });

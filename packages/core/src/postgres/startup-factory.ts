@@ -432,17 +432,43 @@ export async function createTaskStoreForBackend(
             scoped emptiness check above guarantees every NULL-project_id row
             in tasks/archived_tasks was written by THIS migration pass.
             */
-            if (options.projectId) {
+            /*
+            FNXC:MultiProjectIsolation 2026-07-13-21:20:
+            The stamping id must also be derivable WITHOUT options.projectId.
+            The main cutover path — `fn dashboard` in the project directory —
+            boots with rootDir only, so the previous `if (options.projectId)`
+            guard skipped stamping on exactly the boot that performs most
+            real-world migrations. The rows stayed NULL, every project-bound
+            reader (engine InProcessRuntime, dashboard project-store-resolver)
+            filtered them out, and the board showed no tasks right after a
+            successful migration. When no projectId is bound, resolve it from
+            the just-migrated central registry by matching the registered
+            project path to this rootDir. If the project was never registered
+            centrally, leave rows NULL — readers for unregistered
+            single-project setups use an unbound layer with no scope filter.
+            */
+            let stampProjectId = options.projectId;
+            if (!stampProjectId) {
+              try {
+                const projectRows = (await connections.migration.execute(
+                  drizzleSql`SELECT id FROM central.projects WHERE path = ${rootDir} LIMIT 1`,
+                )) as Array<{ id: string }>;
+                stampProjectId = projectRows[0]?.id;
+              } catch {
+                stampProjectId = undefined;
+              }
+            }
+            if (stampProjectId) {
               await connections.migration.execute(
-                drizzleSql`UPDATE project.tasks SET project_id = ${options.projectId} WHERE project_id IS NULL`,
+                drizzleSql`UPDATE project.tasks SET project_id = ${stampProjectId} WHERE project_id IS NULL`,
               );
               await connections.migration.execute(
-                drizzleSql`UPDATE project.archived_tasks SET project_id = ${options.projectId} WHERE project_id IS NULL`,
+                drizzleSql`UPDATE project.archived_tasks SET project_id = ${stampProjectId} WHERE project_id IS NULL`,
               );
               // The cold-storage archive is also partitioned (PR #2007 review
               // P1); migrated snapshots must be owned by this project too.
               await connections.migration.execute(
-                drizzleSql`UPDATE archive.archived_tasks SET project_id = ${options.projectId} WHERE project_id IS NULL`,
+                drizzleSql`UPDATE archive.archived_tasks SET project_id = ${stampProjectId} WHERE project_id IS NULL`,
               );
             }
             /*

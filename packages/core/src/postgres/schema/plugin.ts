@@ -16,7 +16,7 @@
  * while still materializing on a fresh database.
  */
 
-import { text, integer, boolean, foreignKey, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { text, integer, bigint, boolean, foreignKey, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { projectSchema } from "./project.js";
 
 /**
@@ -87,7 +87,14 @@ export const ceSessions = projectSchema.table("ce_sessions", {
   artifactPath: text("artifact_path"),
   error: text("error"),
   turnIntervalMs: integer("turn_interval_ms").notNull().default(120000),
-  lastActivityAt: integer("last_activity_at").notNull(),
+  /*
+  FNXC:PostgresSchema 2026-07-13-19:35:
+  last_activity_at stores epoch milliseconds (Date.now()), which overflows PG
+  integer (max ~2.1e9) — epoch-ms values are ~1.78e12. Must be bigint like the
+  other epoch-ms columns (see project.ts pr_* tables). An integer column here
+  broke the SQLite → PostgreSQL first-boot auto-migration and blocked startup.
+  */
+  lastActivityAt: bigint("last_activity_at", { mode: "number" }).notNull(),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 }, (t) => [

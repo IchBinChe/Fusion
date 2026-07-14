@@ -107,10 +107,16 @@ export const cePluginSchemaInit: PluginSchemaInitHook = {
         artifact_path text,
         error text,
         turn_interval_ms integer NOT NULL DEFAULT 120000,
-        last_activity_at integer NOT NULL,
+        last_activity_at bigint NOT NULL,
         created_at text NOT NULL,
         updated_at text NOT NULL
       );
+      -- FNXC:PostgresSchema 2026-07-13-19:35:
+      -- last_activity_at holds epoch milliseconds (Date.now()), which overflows
+      -- PG integer. Datadirs created before this fix materialized the column as
+      -- integer via the CREATE TABLE IF NOT EXISTS above, so widen it in place.
+      -- Idempotent: ALTER ... TYPE bigint on an already-bigint column is a no-op.
+      ALTER TABLE project.ce_sessions ALTER COLUMN last_activity_at TYPE bigint;
       CREATE INDEX IF NOT EXISTS "idxCeSessionsStatusUpdated"
         ON project.ce_sessions(status, updated_at DESC, id);
       CREATE INDEX IF NOT EXISTS "idxCeSessionsStageCreated"

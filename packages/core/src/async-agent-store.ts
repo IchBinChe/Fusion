@@ -896,11 +896,15 @@ export async function getAllBlockedStates(
 export async function getMetaValue(
   handle: QueryHandle,
   key: string,
+  projectId = "",
 ): Promise<string | undefined> {
   const rows = await handle
     .select({ value: schema.project.projectMeta.value })
     .from(schema.project.projectMeta)
-    .where(eq(schema.project.projectMeta.key, key));
+    .where(and(
+      eq(schema.project.projectMeta.projectId, projectId),
+      eq(schema.project.projectMeta.key, key),
+    ));
   return rows[0]?.value ?? undefined;
 }
 
@@ -911,12 +915,17 @@ export async function upsertMetaValue(
   handle: QueryHandle,
   key: string,
   value: string,
+  projectId = "",
 ): Promise<void> {
+  /*
+  FNXC:PostgresMultiProjectCutover 2026-07-14-11:18:
+  Agent-store migration markers share the project schema but not project ownership. Include the bound project in their composite key; the empty binding remains the explicit project-agnostic compatibility partition.
+  */
   await handle
     .insert(schema.project.projectMeta)
-    .values({ key, value })
+    .values({ projectId, key, value })
     .onConflictDoUpdate({
-      target: schema.project.projectMeta.key,
+      target: [schema.project.projectMeta.projectId, schema.project.projectMeta.key],
       set: { value },
     });
 }

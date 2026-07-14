@@ -182,6 +182,7 @@ export interface MigrationOptions {
 }
 
 const SQLITE_MIGRATION_STATE_TABLE = "fusion_sqlite_migrations";
+export const CENTRAL_SQLITE_MIGRATION_KEY = "central:legacy-sqlite";
 
 async function ensureMigrationStateTable(db: PostgresJsDatabase<Record<string, never>>): Promise<void> {
   await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS public.${SQLITE_MIGRATION_STATE_TABLE} (
@@ -215,6 +216,22 @@ export async function completeSqliteMigration(
     UPDATE public.${sql.identifier(SQLITE_MIGRATION_STATE_TABLE)}
     SET status = 'complete', last_error = NULL, updated_at = now()
     WHERE migration_key = ${migrationKey}
+  `);
+}
+
+/** Record a verified source independently of a project cutover marker. */
+export async function recordSqliteMigrationComplete(
+  db: PostgresJsDatabase<Record<string, never>>,
+  migrationKey: string,
+  projectId?: string,
+): Promise<void> {
+  await ensureMigrationStateTable(db);
+  await db.execute(sql`
+    INSERT INTO public.${sql.identifier(SQLITE_MIGRATION_STATE_TABLE)}
+      (migration_key, project_id, status, last_error, updated_at)
+    VALUES (${migrationKey}, ${projectId ?? null}, 'complete', NULL, now())
+    ON CONFLICT (migration_key) DO UPDATE
+    SET project_id = EXCLUDED.project_id, status = 'complete', last_error = NULL, updated_at = now()
   `);
 }
 
@@ -450,12 +467,21 @@ async function buildMigrationPlan(
       // Legacy SQLite table names are camelCase; PostgreSQL tables are
       // snake_case. toSnakeCase is the identity for already-snake names.
       const pgTable = toSnakeCase(table);
-      const { columns: cols, targetColumnNames } = resolveColumnMapping(
+      const { columns: resolvedColumns, targetColumnNames } = resolveColumnMapping(
         pgTable,
         table,
         sqlite,
         targetColumnsByTable,
       );
+      /*
+      FNXC:PostgresMultiProjectCutover 2026-07-14-11:46:
+      Preserve task-document revision identities as provenance, not as the shared table primary key. Two SQLite files can both use id=1, while one file can also contain distinct rows with the same task/key/revision; map the local id into legacy_sqlite_id and let PostgreSQL generate its runtime id.
+      */
+      const cols = source.pgSchema === PROJECT_SCHEMA && pgTable === "task_document_revisions"
+        ? resolvedColumns.map((column) => column.sqliteName === "id"
+          ? { ...column, pgName: "legacy_sqlite_id", type: "plain" as const }
+          : column)
+        : resolvedColumns;
       /*
       FNXC:PostgresMigration 2026-07-14-08:52:
       A legacy per-project SQLite table can already contain a nullable projectId column while its existing rows still hold NULL. The registry identity resolved for this one-project-file cutover is authoritative whenever the PostgreSQL target is partitioned, so insertion and verification must override absent, NULL, or stale source project IDs instead of copying them into the required project_id partition.
@@ -909,27 +935,30 @@ async function migrateTable(
     // (md5(string_agg(...)) on PostgreSQL, and a Node-side md5 over the SQLite
     // converted stream) so the comparison is a single short string per side.
     const targetRows = await countTargetRows(db, plan.pgSchema, plan.pgTable, plan.partitionProjectId);
-    const rowCountOk = targetRows === sourceRows;
+    /*
+    FNXC:PostgresMultiProjectCutover 2026-07-14-11:18:
+    A bound project imports into a shared PostgreSQL schema. Tables with a project_id column remain exact per-partition checks; intentionally cluster-shared project tables must instead prove the converted source multiset is contained in the accumulated target. A same-key/different-content conflict still fails because the exact source row is absent.
+    */
+    const verifiesSharedProjectTable =
+      plan.pgSchema === PROJECT_SCHEMA && plan.partitionProjectId === undefined;
+    const rowCountOk = verifiesSharedProjectTable
+      ? targetRows >= sourceRows
+      : targetRows === sourceRows;
     let contentOk = true;
     if (rowCountOk && sourceRows > 0) {
-      const sourceChecksum = computeSourceContentChecksum(
-        sqlite,
-        plan.table,
-        insertableCols,
-        plan.partitionProjectId,
+      const sourceCanonicalRows = computeSourceCanonicalRows(
+        sqlite, plan.table, insertableCols, plan.partitionProjectId,
       );
-      const targetChecksum = await computeTargetContentChecksum(
-        db,
-        plan.pgSchema,
-        plan.pgTable,
-        insertableCols,
-        plan.partitionProjectId,
+      const targetCanonicalRows = await computeTargetCanonicalRows(
+        db, plan.pgSchema, plan.pgTable, insertableCols, plan.partitionProjectId,
       );
-      contentOk = sourceChecksum === targetChecksum;
+      contentOk = verifiesSharedProjectTable
+        ? isCanonicalMultisetSubset(sourceCanonicalRows, targetCanonicalRows)
+        : checksumCanonicalRows(sourceCanonicalRows) === checksumCanonicalRows(targetCanonicalRows);
       if (!contentOk) {
         log.warn(
           `Content checksum mismatch for ${plan.pgSchema}.${plan.pgTable}: ` +
-            `source=${sourceChecksum}, target=${targetChecksum}`,
+            `source=${checksumCanonicalRows(sourceCanonicalRows)}, target=${checksumCanonicalRows(targetCanonicalRows)}`,
         );
       }
     } else if (!rowCountOk) {
@@ -1260,19 +1289,19 @@ function stableJsonStringify(value: unknown): string {
  * is the correct semantic: it verifies the copy faithfully reproduced what the
  * conversion produced.
  */
-function computeSourceContentChecksum(
+function computeSourceCanonicalRows(
   sqlite: DatabaseSync,
   table: string,
   cols: readonly ColumnMapping[],
   partitionProjectId?: string,
-): string {
-  if (cols.length === 0) return "";
+): string[] {
+  if (cols.length === 0) return [];
   const selectCols = cols.map((c) => quoteIdent(c.sqliteName)).join(", ");
   const rows = sqlite
     .prepare(`SELECT ${selectCols} FROM ${quoteIdent(table)}`)
     .all() as Array<Record<string, unknown>>;
 
-  const canonicalRows = rows.map((row) => {
+  return rows.map((row) => {
     let canonical = "";
     for (const col of cols) {
       const converted = col.pgName === "project_id" && partitionProjectId
@@ -1282,12 +1311,26 @@ function computeSourceContentChecksum(
     }
     return canonical;
   }).sort();
+}
+
+function checksumCanonicalRows(canonicalRows: readonly string[]): string {
   const hash = createHash("md5");
   for (const row of canonicalRows) {
     hash.update(row);
     hash.update("\u0002");
   }
   return hash.digest("hex");
+}
+
+function isCanonicalMultisetSubset(sourceRows: readonly string[], targetRows: readonly string[]): boolean {
+  const targetCounts = new Map<string, number>();
+  for (const row of targetRows) targetCounts.set(row, (targetCounts.get(row) ?? 0) + 1);
+  for (const row of sourceRows) {
+    const available = targetCounts.get(row) ?? 0;
+    if (available === 0) return false;
+    targetCounts.set(row, available - 1);
+  }
+  return true;
 }
 
 /**
@@ -1302,14 +1345,14 @@ function computeSourceContentChecksum(
  * and doing both sides in Node with the same canonicalizeCell function
  * guarantees they agree.
  */
-async function computeTargetContentChecksum(
+async function computeTargetCanonicalRows(
   db: PostgresJsDatabase<Record<string, never>>,
   pgSchema: string,
   table: string,
   cols: readonly ColumnMapping[],
   projectId?: string,
-): Promise<string> {
-  if (cols.length === 0) return "";
+): Promise<string[]> {
+  if (cols.length === 0) return [];
   const selectCols = cols.map((c) => quoteIdent(c.pgName)).join(", ");
   const rows = (await db.execute(
     sql`SELECT ${sql.raw(selectCols)} FROM ${sql.raw(quoteIdent(pgSchema))}.${sql.raw(
@@ -1321,17 +1364,11 @@ async function computeTargetContentChecksum(
   FNXC:PostgresMigrationCompleteness 2026-07-14-09:27:
   Content verification must not depend on database collation. SQLite BINARY and PostgreSQL locale collation can order identical mixed-case paths differently, so both sides canonicalize complete rows and sort those strings in Node before hashing.
   */
-  const canonicalRows = rows.map((row) => {
+  return rows.map((row) => {
     let canonical = "";
     for (const col of cols) {
       canonical += `${canonicalizeCell(row[col.pgName])}\u0001`;
     }
     return canonical;
   }).sort();
-  const hash = createHash("md5");
-  for (const row of canonicalRows) {
-    hash.update(row);
-    hash.update("\u0002");
-  }
-  return hash.digest("hex");
 }

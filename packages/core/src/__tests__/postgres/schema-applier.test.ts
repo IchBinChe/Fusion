@@ -35,6 +35,7 @@ import {
 import {
   LEGACY_CUTOVER_PRESERVATION_SCHEMA_VERSION,
   MONITOR_APPROVAL_ISOLATION_SCHEMA_VERSION,
+  MULTI_PROJECT_CUTOVER_SCHEMA_VERSION,
 } from "../../postgres/schema-applier.js";
 
 const PG_ADMIN_URL =
@@ -55,7 +56,13 @@ describe("schema-applier: immutable migration identities", () => {
 
   it("keeps legacy cutover preservation assigned to version 0004", () => {
     expect(LEGACY_CUTOVER_PRESERVATION_SCHEMA_VERSION).toBe("0004");
-    expect(SCHEMA_BASELINE_VERSION).toBe(LEGACY_CUTOVER_PRESERVATION_SCHEMA_VERSION);
+    expect(Number(SCHEMA_BASELINE_VERSION))
+      .toBeGreaterThanOrEqual(Number(LEGACY_CUTOVER_PRESERVATION_SCHEMA_VERSION));
+  });
+
+  it("keeps multi-project cutover assigned to version 0005", () => {
+    expect(MULTI_PROJECT_CUTOVER_SCHEMA_VERSION).toBe("0005");
+    expect(SCHEMA_BASELINE_VERSION).toBe(MULTI_PROJECT_CUTOVER_SCHEMA_VERSION);
   });
 });
 
@@ -548,7 +555,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
     const versions = (await ctx.db.execute(sql`
       SELECT version FROM public.fusion_schema_migrations ORDER BY version
     `)) as unknown as Array<{ version: string }>;
-    expect(versions.map(({ version }) => version)).toEqual(["0000", "0001", "0002", "0003", SCHEMA_BASELINE_VERSION]);
+    expect(versions.map(({ version }) => version)).toEqual(["0000", "0001", "0002", "0003", "0004", SCHEMA_BASELINE_VERSION]);
     expect((await applySchemaBaseline(ctx.db, { pluginHooks: [] })).applied).toBe(false);
   });
 
@@ -572,7 +579,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       applySchemaBaseline(ctx.db, { pluginHooks: [] }),
     ]);
     expect(results.filter(({ applied }) => applied)).toHaveLength(1);
-    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", SCHEMA_BASELINE_VERSION]);
+    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", "0004", SCHEMA_BASELINE_VERSION]);
   });
 
   it("upgrades a 0001 database by backfilling analytics ownership", async () => {
@@ -602,7 +609,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       ))) as unknown as Array<{ project_id: string }>;
       expect(rows).toEqual([{ project_id: "project-a" }]);
     }
-    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", "0004"]);
+    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", "0004", "0005"]);
   });
 
   /**
@@ -634,7 +641,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       ))) as unknown as Array<{ project_id: string }>;
       expect(rows).toEqual([{ project_id: "project-a" }]);
     }
-    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", "0004"]);
+    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", "0004", "0005"]);
   });
 
   /*
@@ -672,7 +679,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       "project_auth_users",
       "task_reviewer_runs",
     ]);
-    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", "0004"]);
+    expect(await getAppliedMigrations(ctx.db)).toEqual(["0000", "0001", "0002", "0003", "0004", "0005"]);
   });
 });
 

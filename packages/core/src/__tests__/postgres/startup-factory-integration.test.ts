@@ -516,12 +516,35 @@ pgDescribe("startup-factory: external PostgreSQL boot (integration)", () => {
     expect(first).not.toBeNull();
     await first!.shutdown();
 
+    /*
+    FNXC:PostgresMultiProjectCutover 2026-07-14-11:18:
+    Central SQLite is a one-time cluster source. A legitimate PostgreSQL-side update after project A's cutover must survive project B startup; re-verifying central content for B caused the reported plugin_installs checksum failure.
+    */
+    const betweenProjects = postgres(testUrl, { max: 1 });
+    try {
+      await betweenProjects`UPDATE central.projects SET name = 'Updated in PostgreSQL' WHERE id = 'project-a'`;
+    } finally {
+      await betweenProjects.end();
+    }
+
     const second = await createTaskStoreForBackend({ rootDir: projectB, globalSettingsDir: globalDir, env: { DATABASE_URL: testUrl } });
     expect(second).not.toBeNull();
     try {
       expect(second!.taskStore.getAsyncLayer()!.projectId).toBe("project-b");
       expect((await second!.taskStore.getTask("B-1")).title).toBe("Project B task");
       await expect(second!.taskStore.getTask("A-1")).rejects.toThrow();
+      const client = postgres(testUrl, { max: 1 });
+      try {
+        const projects = await client<{ name: string }[]>`SELECT name FROM central.projects WHERE id = 'project-a'`;
+        expect(projects).toEqual([{ name: "Updated in PostgreSQL" }]);
+        const centralMarkers = await client<{ status: string }[]>`
+          SELECT status FROM public.fusion_sqlite_migrations
+          WHERE migration_key = 'central:legacy-sqlite'
+        `;
+        expect(centralMarkers).toEqual([{ status: "complete" }]);
+      } finally {
+        await client.end();
+      }
     } finally {
       await second!.shutdown();
     }

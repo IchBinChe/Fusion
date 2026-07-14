@@ -886,6 +886,8 @@ export const artifacts = projectSchema.table("artifacts", {
 
 export const taskDocumentRevisions = projectSchema.table("task_document_revisions", {
   id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
+  projectId: text("project_id"),
+  legacySqliteId: integer("legacy_sqlite_id"),
   taskId: text("task_id").notNull(),
   key: text("key").notNull(),
   content: text("content").notNull(),
@@ -893,7 +895,10 @@ export const taskDocumentRevisions = projectSchema.table("task_document_revision
   author: text("author").notNull(),
   metadata: jsonb("metadata"),
   createdAt: text("created_at").notNull(),
-}, (t) => [index("idxTaskDocumentRevisionsTaskKey").on(t.taskId, t.key)]);
+}, (t) => [
+  index("idxTaskDocumentRevisionsTaskKey").on(t.taskId, t.key),
+  unique("task_document_revisions_legacy_identity_unique").on(t.projectId, t.legacySqliteId),
+]);
 
 // ── Research runs ────────────────────────────────────────────────────
 export const researchRuns = projectSchema.table("research_runs", {
@@ -1081,9 +1086,14 @@ export const secrets = projectSchema.table("secrets", {
 
 // ── Schema version meta ──────────────────────────────────────────────
 export const projectMeta = projectSchema.table("__meta", {
-  key: text("key").primaryKey(),
+  /*
+  FNXC:PostgresMultiProjectCutover 2026-07-14-11:18:
+  Embedded PostgreSQL is shared by every registered project, so SQLite __meta keys must be partitioned by the authoritative registry project ID. A global key primary key makes the second project inherit or overwrite the first project's identity and migration markers.
+  */
+  projectId: text("project_id").notNull(),
+  key: text("key").notNull(),
   value: text("value"),
-});
+}, (t) => [primaryKey({ columns: [t.projectId, t.key] })]);
 
 // ── Missions hierarchy ───────────────────────────────────────────────
 export const missions = projectSchema.table("missions", {

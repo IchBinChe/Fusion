@@ -665,6 +665,68 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
   });
 
   /*
+  FNXC:PostgresMultiProjectCutover 2026-07-14-11:18:
+  Sequential project cutovers share one PostgreSQL schema. Verification must accept accumulated shared-table rows, keep __meta isolated by project, and generate a new task-revision identity when both SQLite files start their local sequence at 1.
+  */
+  it("converges sequential project migrations in one shared PostgreSQL database", async () => {
+    const makeProjectDb = (name: string, projectId: string, taskId: string): string => {
+      const sqlitePath = join(ctx!.fusionDir, name);
+      const legacy = new DatabaseSync(sqlitePath);
+      try {
+        legacy.exec(`
+          CREATE TABLE agents (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, role TEXT NOT NULL,
+            state TEXT NOT NULL, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL
+          );
+          CREATE TABLE task_document_revisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, taskId TEXT NOT NULL, key TEXT NOT NULL,
+            content TEXT NOT NULL, revision INTEGER NOT NULL, author TEXT NOT NULL,
+            metadata TEXT, createdAt TEXT NOT NULL
+          );
+          CREATE TABLE __meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        `);
+        legacy.prepare("INSERT INTO agents VALUES (?, ?, ?, ?, ?, ?)").run(
+          `agent-${projectId}`, `Agent ${projectId}`, "worker", "idle", "2026-07-14", "2026-07-14",
+        );
+        legacy.prepare("INSERT INTO task_document_revisions VALUES (1, ?, 'docs', ?, 1, 'agent', '{}', '2026-07-14')").run(
+          taskId, `content-${projectId}`,
+        );
+        legacy.prepare("INSERT INTO __meta VALUES ('projectId', ?)").run(projectId);
+      } finally {
+        legacy.close();
+      }
+      return sqlitePath;
+    };
+
+    const firstPath = makeProjectDb("project-a.db", "project-a", "A-1");
+    const secondPath = makeProjectDb("project-b.db", "project-b", "B-1");
+    const first = await migrateTest(
+      ctx!.db, [{ sqlitePath: firstPath, pgSchema: "project" as const }], { projectId: "project-a" },
+    );
+    const second = await migrateTest(
+      ctx!.db, [{ sqlitePath: secondPath, pgSchema: "project" as const }], { projectId: "project-b" },
+    );
+
+    expect(first.tables.every((table) => table.verified)).toBe(true);
+    expect(second.tables.every((table) => table.verified)).toBe(true);
+    expect(second.tables.find((table) => table.table === "agents")).toEqual(
+      expect.objectContaining({ sourceRows: 1, targetRows: 2, verified: true }),
+    );
+    const revisions = await ctx!.db.execute(sql`
+      SELECT id, task_id FROM project.task_document_revisions ORDER BY task_id
+    `) as unknown as Array<{ id: number; task_id: string }>;
+    expect(revisions.map(({ task_id }) => task_id)).toEqual(["A-1", "B-1"]);
+    expect(new Set(revisions.map(({ id }) => id)).size).toBe(2);
+    const metadata = await ctx!.db.execute(sql`
+      SELECT project_id, key, value FROM project.__meta ORDER BY project_id
+    `) as unknown as Array<{ project_id: string; key: string; value: string }>;
+    expect(metadata).toEqual([
+      { project_id: "project-a", key: "projectId", value: "project-a" },
+      { project_id: "project-b", key: "projectId", value: "project-b" },
+    ]);
+  });
+
+  /*
   FNXC:PostgresMigrationRetry 2026-07-14-09:06:
   Retrying after the former non-transactional migrator must repair a globally keyed row copied under a NULL project partition. Reconciliation may replace only an exact migrated-content match, so unrelated PostgreSQL state remains untouched.
   */

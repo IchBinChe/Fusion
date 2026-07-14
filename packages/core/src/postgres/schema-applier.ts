@@ -27,7 +27,7 @@ import { sql } from "drizzle-orm";
 import { runPluginSchemaInitHooks, DEFAULT_PLUGIN_SCHEMA_INIT_HOOKS, type PluginSchemaInitHook } from "./plugin-schema-hook.js";
 
 /** The latest PostgreSQL schema version known to this applier. */
-export const SCHEMA_BASELINE_VERSION = "0004";
+export const SCHEMA_BASELINE_VERSION = "0005";
 const INITIAL_SCHEMA_VERSION = "0000";
 const AUTOMATION_ISOLATION_SCHEMA_VERSION = "0001";
 const ANALYTICS_ISOLATION_SCHEMA_VERSION = "0002";
@@ -37,6 +37,7 @@ const ANALYTICS_ISOLATION_SCHEMA_VERSION = "0002";
  */
 export const MONITOR_APPROVAL_ISOLATION_SCHEMA_VERSION = "0003";
 export const LEGACY_CUTOVER_PRESERVATION_SCHEMA_VERSION = "0004";
+export const MULTI_PROJECT_CUTOVER_SCHEMA_VERSION = "0005";
 
 /** Bookkeeping table for the fresh Drizzle migration history. */
 export const MIGRATION_BOOKKEEPING_TABLE = "fusion_schema_migrations";
@@ -62,6 +63,11 @@ const LEGACY_CUTOVER_PRESERVATION_MIGRATION_PATH = join(
   __dirname,
   "migrations",
   "0004_legacy_cutover_preservation.sql",
+);
+const MULTI_PROJECT_CUTOVER_MIGRATION_PATH = join(
+  __dirname,
+  "migrations",
+  "0005_multi_project_cutover.sql",
 );
 
 /**
@@ -124,6 +130,7 @@ export async function applySchemaBaseline(
     const analyticsIsolationAlreadyApplied = applied.includes(ANALYTICS_ISOLATION_SCHEMA_VERSION);
     const monitorApprovalIsolationAlreadyApplied = applied.includes(MONITOR_APPROVAL_ISOLATION_SCHEMA_VERSION);
     const legacyCutoverPreservationAlreadyApplied = applied.includes(LEGACY_CUTOVER_PRESERVATION_SCHEMA_VERSION);
+    const multiProjectCutoverAlreadyApplied = applied.includes(MULTI_PROJECT_CUTOVER_SCHEMA_VERSION);
     let schemaChanged = false;
 
     if (!baselineAlreadyApplied) {
@@ -186,6 +193,19 @@ export async function applySchemaBaseline(
       await tx.execute(sql.raw(migrationSql));
       await tx.execute(
         sql`INSERT INTO public.${sql.identifier(MIGRATION_BOOKKEEPING_TABLE)} (version) VALUES (${LEGACY_CUTOVER_PRESERVATION_SCHEMA_VERSION}) ON CONFLICT (version) DO NOTHING`,
+      );
+      schemaChanged = true;
+    }
+
+    /*
+    FNXC:PostgresMultiProjectCutover 2026-07-14-11:18:
+    Existing targets may already contain one completed project plus a partially copied second project. Apply metadata partitioning and collision-safe revision identity before any retry builds its migration plan.
+    */
+    if (!multiProjectCutoverAlreadyApplied) {
+      const migrationSql = await readFile(MULTI_PROJECT_CUTOVER_MIGRATION_PATH, "utf8");
+      await tx.execute(sql.raw(migrationSql));
+      await tx.execute(
+        sql`INSERT INTO public.${sql.identifier(MIGRATION_BOOKKEEPING_TABLE)} (version) VALUES (${MULTI_PROJECT_CUTOVER_SCHEMA_VERSION}) ON CONFLICT (version) DO NOTHING`,
       );
       schemaChanged = true;
     }

@@ -440,13 +440,21 @@ export async function createTaskStoreForBackend(
         considered.
         */
         const migrationKey = `project:${migrationProjectId ?? rootDir}`;
-        const { migrateSqliteToPostgres, defaultMigrationSources, isSqliteMigrationComplete, completeSqliteMigration } = await import("./sqlite-migrator.js");
+        const { migrateSqliteToPostgres, defaultMigrationSources, isSqliteMigrationComplete, completeSqliteMigration, recordSqliteMigrationComplete, CENTRAL_SQLITE_MIGRATION_KEY } = await import("./sqlite-migrator.js");
         const migrationComplete = await isSqliteMigrationComplete(connections.migration, migrationKey);
         if (!migrationComplete && isValidSqliteDatabaseFile(legacySqlitePath)) {
           // The central (global-dir) source is optional: when no global dir is
           // resolvable (e.g. tests without an explicit dir), migrate only the
           // project-local sources rather than failing the boot.
+          /*
+          FNXC:PostgresMultiProjectCutover 2026-07-14-11:18:
+          The central SQLite database is cluster-global, not a per-project source. Migrate and verify it once, then exclude it from later registered-project cutovers so mutable global rows are not compared with each project's accumulated PostgreSQL state.
+          */
+          const centralMigrationComplete = await isSqliteMigrationComplete(
+            connections.migration, CENTRAL_SQLITE_MIGRATION_KEY,
+          );
           const sources = defaultMigrationSources(fusionDir, globalDir ?? join(fusionDir, "__no-global-dir__"))
+            .filter((source) => !centralMigrationComplete || source.pgSchema !== "central")
             .filter((source) => existsSync(source.sqlitePath) && isValidSqliteDatabaseFile(source.sqlitePath));
           if (sources.length > 0) {
             log.log(`startup-factory: empty PostgreSQL database with legacy SQLite data present — auto-migrating ${sources.length} source(s) (SQLite files are kept as backups)`);
@@ -510,6 +518,11 @@ export async function createTaskStoreForBackend(
               });
             }
             await completeSqliteMigration(connections.migration, migrationKey);
+            if (sources.some((source) => source.pgSchema === "central")) {
+              await recordSqliteMigrationComplete(
+                connections.migration, CENTRAL_SQLITE_MIGRATION_KEY, stampProjectId,
+              );
+            }
             /*
             FNXC:PostgresMigrationBanner 2026-07-12:
             Remember the successful auto-migration so the dashboard can show a

@@ -370,6 +370,29 @@ export async function createTaskStoreForBackend(
   let autoMigrationNotice:
     | { migratedAt: string; migratedRows: number; tables: number; sqliteBackups: string[] }
     | undefined;
+  /*
+  FNXC:CentralProjectIdentity 2026-07-13-22:00:
+  Resolve the central-registry project id for a rootDir-booted store. Post
+  de-cwd architecture: cwd/rootDir is ONLY a lookup key into central.projects;
+  project IDENTITY (the partition key every task/config read and write is
+  scoped by) comes from the registry. Before this, `fn dashboard` / `fn serve`
+  booted their main store UNBOUND (rootDir only), so unscoped API requests
+  read and wrote NULL-project_id rows on the shared embedded cluster while the
+  projectId-bound engine could not see them. Returns undefined when the path
+  is not registered (legacy/unregistered single-project setups stay unbound,
+  matching their unfiltered readers).
+  */
+  const lookupRegisteredProjectIdByPath = async (): Promise<string | undefined> => {
+    if (!rootDir) return undefined;
+    try {
+      const projectRows = (await connections.migration.execute(
+        drizzleSql`SELECT id FROM central.projects WHERE path = ${rootDir} LIMIT 1`,
+      )) as Array<{ id: string }>;
+      return projectRows[0]?.id;
+    } catch {
+      return undefined;
+    }
+  };
   if (rootDir) {
     try {
       const fusionDir = join(rootDir, ".fusion");
@@ -447,17 +470,7 @@ export async function createTaskStoreForBackend(
             centrally, leave rows NULL — readers for unregistered
             single-project setups use an unbound layer with no scope filter.
             */
-            let stampProjectId = options.projectId;
-            if (!stampProjectId) {
-              try {
-                const projectRows = (await connections.migration.execute(
-                  drizzleSql`SELECT id FROM central.projects WHERE path = ${rootDir} LIMIT 1`,
-                )) as Array<{ id: string }>;
-                stampProjectId = projectRows[0]?.id;
-              } catch {
-                stampProjectId = undefined;
-              }
-            }
+            const stampProjectId = options.projectId ?? (await lookupRegisteredProjectIdByPath());
             if (stampProjectId) {
               await connections.migration.execute(
                 drizzleSql`UPDATE project.tasks SET project_id = ${stampProjectId} WHERE project_id IS NULL`,
@@ -469,6 +482,23 @@ export async function createTaskStoreForBackend(
               // P1); migrated snapshots must be owned by this project too.
               await connections.migration.execute(
                 drizzleSql`UPDATE archive.archived_tasks SET project_id = ${stampProjectId} WHERE project_id IS NULL`,
+              );
+              /*
+              FNXC:CentralProjectIdentity 2026-07-13-22:00:
+              project.config is keyed by project_id (DEFAULT '' — the legacy
+              SQLite-parity row). The migrator copies the legacy singleton
+              config into the '' row, but configScope() has NO bound→''
+              fallback, so a bound reader silently lost the migrated project
+              settings, workflowSteps, taskPrefix, and nextId floor (defaults
+              returned right after a "successful" migration). Re-key the
+              migrated row to this project. Guarded so a pre-existing
+              per-project row is never clobbered (then the '' row is left for
+              manual reconciliation rather than destroying either copy).
+              */
+              await connections.migration.execute(
+                drizzleSql`UPDATE project.config SET project_id = ${stampProjectId}
+                  WHERE project_id = ''
+                    AND NOT EXISTS (SELECT 1 FROM project.config WHERE project_id = ${stampProjectId})`,
               );
             }
             /*
@@ -508,7 +538,18 @@ export async function createTaskStoreForBackend(
   // single project. options.projectId is the central-registry ID both the
   // dashboard (getOrCreateProjectStore) and the engine (InProcessRuntime) pass,
   // so a task's row is stamped and filtered under one consistent partition key.
-  const asyncLayer = createAsyncDataLayer(connections, { projectId: options.projectId });
+  /*
+  FNXC:CentralProjectIdentity 2026-07-13-22:00:
+  rootDir-only boots (fn dashboard / fn serve / desktop / per-path project
+  stores) now ALSO bind: when the rootDir is a centrally-registered project,
+  its registry id becomes the layer's partition key. cwd/rootDir is only the
+  lookup key; identity comes from central.projects. Runs after Step 5.5 so a
+  first boot resolves against the registry the migration just populated.
+  Unregistered paths resolve to undefined and boot unbound, preserving legacy
+  single-project behavior.
+  */
+  const resolvedProjectId = options.projectId ?? (await lookupRegisteredProjectIdByPath());
+  const asyncLayer = createAsyncDataLayer(connections, { projectId: resolvedProjectId });
 
   // Step 7: construct the TaskStore in backend mode.
   /*

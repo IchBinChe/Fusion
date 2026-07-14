@@ -209,6 +209,18 @@ pgDescribe("startup-factory: external PostgreSQL boot (integration)", () => {
       legacy.prepare(
         `INSERT INTO tasks (id, title, description, "column", createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)`,
       ).run("FN-STAMP-1", "Stamped task", "migrated from sqlite", "todo", "2026-06-01T00:00:00Z", "2026-06-01T00:00:00Z");
+      // Legacy singleton config row — must be re-keyed from '' to the
+      // registered project id so bound configScope readers still see the
+      // migrated settings (FNXC:CentralProjectIdentity).
+      legacy.exec(`CREATE TABLE IF NOT EXISTS config (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        settings TEXT DEFAULT '{}',
+        updatedAt TEXT
+      );`);
+      legacy.prepare(`INSERT INTO config (id, settings, updatedAt) VALUES (1, ?, ?)`).run(
+        JSON.stringify({ taskPrefix: "ST", merger: { mode: "ai" } }),
+        "2026-06-01T00:00:00Z",
+      );
     } finally {
       legacy.close();
     }
@@ -239,6 +251,13 @@ pgDescribe("startup-factory: external PostgreSQL boot (integration)", () => {
     expect(boot).not.toBeNull();
     try {
       const layer = boot!.taskStore.getAsyncLayer()!;
+      /*
+      FNXC:CentralProjectIdentity 2026-07-13-22:00:
+      A rootDir-only boot of a REGISTERED project must bind its layer to the
+      registry id — cwd/rootDir is only the lookup key; identity comes from
+      central.projects.
+      */
+      expect(layer.projectId, "rootDir-only boot must bind to the registered project id").toBe("proj_stamp_test");
       const rows = (await layer.db.execute(
         `SELECT id, project_id FROM project.tasks ORDER BY id`,
       )) as unknown as Array<{ id: string; project_id: string | null }>;
@@ -246,6 +265,15 @@ pgDescribe("startup-factory: external PostgreSQL boot (integration)", () => {
       for (const row of rows) {
         expect(row.project_id, `${row.id} must be stamped with the registered project id`).toBe("proj_stamp_test");
       }
+      // The migrated legacy config row ('' key) must be re-keyed to the
+      // project so bound settings reads see the migrated settings.
+      const configRows = (await layer.db.execute(
+        `SELECT project_id, settings FROM project.config`,
+      )) as unknown as Array<{ project_id: string; settings: { taskPrefix?: string } | null }>;
+      const projectConfig = configRows.find((r) => r.project_id === "proj_stamp_test");
+      expect(projectConfig, "migrated config row must be re-keyed to the project").toBeDefined();
+      expect(projectConfig!.settings?.taskPrefix).toBe("ST");
+      expect(configRows.some((r) => r.project_id === ""), "no orphaned '' config row").toBe(false);
     } finally {
       await boot!.shutdown();
     }

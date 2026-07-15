@@ -370,8 +370,8 @@ The built-in workflows also declare triage/spec policy settings that were **not*
 | `triageSubtaskFileScopeThreshold` | `20` | File Scope entry count that signals broad work. |
 | `triageSubtaskRemediationBatchThreshold` | `30` | Large remediation batch threshold. |
 | `triageNoCommitsDecisionVerbs` | all seven built-ins | Decision-only verbs: Decide, Evaluate, Verify, Confirm, Audit, Review whether, Investigate and report. |
-| `triageDecisionOnlyWorkflowId` | `builtin:quick-fix` | Preferred workflow for decision-only/no-commit tasks when the user explicitly requests that routing or the agent is creating the task. |
-| `triageDefaultWorkflowId` | `builtin:coding` | Default workflow for standard coding tasks and for existing tasks without an explicit user-requested or creator-owned workflow selection. |
+| `triageDecisionOnlyWorkflowId` | `builtin:quick-fix` | Preferred built-in or custom workflow for decision-only/no-commit tasks when the user explicitly requests that routing or the agent is creating the task. |
+| `triageDefaultWorkflowId` | empty (inherits project default) | Accepts any valid built-in or custom workflow id as a triage override. Empty (and legacy `builtin:coding`) inherits `config.settings.defaultWorkflowId`; the triage prompt falls back to `builtin:coding` only when neither is configured. |
 | `leanPlanning` | `false` | Workflow-native fast-mode policy: select the lean `planning-fast` prompt variant instead of the full triage spec prompt. |
 | `autoApproveSpec` | `false` | Legacy compatibility setting. Workflow Plan Review now owns optional pre-execution AI plan approval. |
 | `planReviewMaxRevisions` | unset | Workflow-native Plan Review/spec revision cap. Unset/empty means unbounded automatic replans; a non-negative integer caps attempts; `0` disables automatic Plan Review revision. |

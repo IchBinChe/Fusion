@@ -1031,7 +1031,11 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   ): Promise<ResolvedColumnInfo> {
     if (!flagOn) return {};
     try {
-      const selection = projectStore.getTaskWorkflowSelection(task.id);
+      /*
+      FNXC:WorkflowSelection 2026-07-14-17:06:
+      The dashboard TUI must resolve task workflow selections through the asynchronous store API so PostgreSQL-backed projects retain custom workflow column names and trait flags. The synchronous compatibility method has no backend result and is reserved for legacy test doubles.
+      */
+      const selection = await projectStore.getTaskWorkflowSelectionAsync(task.id);
       const workflowId = selection?.workflowId;
       let columns = workflowIrCache.get(workflowId);
       if (columns === undefined) {
@@ -3175,7 +3179,11 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
                 try {
                   const values = (t as { customFields?: Record<string, unknown> }).customFields;
                   if (values && Object.keys(values).length > 0) {
-                    const selection = projectStore.getTaskWorkflowSelection(t.id);
+                    /*
+                    FNXC:WorkflowSelection 2026-07-14-17:06:
+                    Task-detail custom-field chips must use the asynchronous workflow-selection read so PostgreSQL tasks render fields declared by their selected workflow.
+                    */
+                    const selection = await projectStore.getTaskWorkflowSelectionAsync(t.id);
                     const def = selection?.workflowId
                       ? await projectStore.getWorkflowDefinition(selection.workflowId)
                       : undefined;

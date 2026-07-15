@@ -5135,7 +5135,10 @@ export class TaskExecutor {
       */
       settings = { ...settings };
       let selection: { workflowId: string; stepIds: string[] } | undefined;
-      if (typeof this.store.getTaskWorkflowSelection !== "function") {
+      if (
+        typeof this.store.getTaskWorkflowSelectionAsync !== "function"
+        && typeof this.store.getTaskWorkflowSelection !== "function"
+      ) {
         /*
         FNXC:WorkflowExecution 2026-06-23-22:01:
         Graph execution is the default for production TaskStore implementations, which expose workflow-selection APIs. Minimal test stores and older embedded adapters can lack that API; fall back to the legacy executor instead of half-entering graph routing with no workflow persistence surface.
@@ -5159,7 +5162,7 @@ export class TaskExecutor {
             disposition: "failed",
             outcome: "failure",
             reason:
-              "workflow-selection-api-unavailable: store lacks getTaskWorkflowSelection so the workflow graph cannot run "
+              "workflow-selection-api-unavailable: store lacks a workflow-selection reader so the workflow graph cannot run "
               + `${gateTask.enabledWorkflowSteps?.length ?? 0} enabled pre-merge workflow step(s); the legacy runWorkflowSteps path was removed (U4). Failing closed rather than skipping gates (KTD-5).`,
             visitedNodeIds: [],
           });
@@ -5249,8 +5252,12 @@ export class TaskExecutor {
       const runner = new WorkflowGraphTaskRunner({
         store: {
           ...this.store,
-          getTaskWorkflowSelection: (taskId: string) =>
-            this.store.getTaskWorkflowSelection?.(taskId) ?? { workflowId: "builtin:coding", stepIds: [] },
+          /*
+          FNXC:WorkflowSelection 2026-07-14-17:06:
+          Graph execution must reuse the asynchronously resolved selection. A PostgreSQL TaskStore cannot provide that selection through the synchronous compatibility method, and substituting builtin:coding here would silently execute the wrong graph.
+          */
+          getTaskWorkflowSelection: () => selection,
+          getTaskWorkflowSelectionAsync: async () => selection,
           getWorkflowDefinition: async (id: string) =>
             (await this.store.getWorkflowDefinition?.(id))
               ?? (id === "builtin:coding" ? getBuiltinWorkflow("builtin:coding") : undefined),
@@ -5940,7 +5947,10 @@ export class TaskExecutor {
    */
   private async maybeObserveWorkflowParity(taskId: string, settings: Settings): Promise<void> {
     if (!isExperimentalFeatureEnabled(settings, WORKFLOW_INTERPRETER_DUAL_OBSERVE_FLAG)) return;
-    if (typeof this.store.getTaskWorkflowSelection !== "function") return;
+    if (
+      typeof this.store.getTaskWorkflowSelectionAsync !== "function"
+      && typeof this.store.getTaskWorkflowSelection !== "function"
+    ) return;
     try {
       const selection = typeof this.store.getTaskWorkflowSelectionAsync === "function"
         ? await this.store.getTaskWorkflowSelectionAsync(taskId)

@@ -33,12 +33,15 @@ export type { GitlabConfigSettingsSource, ResolvedGitlabConfig, ResolveGitlabCon
 export { validateMcpServerDefinitionDetailed, validateMcpServerDefinitionsDetailed } from "./settings-validation.js";
 
 /*
- * FNXC:WorkflowBrainstorming 2026-07-15-15:49:
- * Keep deprecation IDs browser-safe because Settings renders the management list
- * (including disabled built-ins) and must not offer deprecated entries again.
+ * FNXC:WorkflowDeprecation 2026-07-15-16:35:
+ * Keep deprecated IDs browser-safe because Settings loads the management list
+ * (including disabled built-ins) but must not re-offer retired workflows for new
+ * selection. FN-7970 and FN-7969 preserve direct resolution for pre-existing
+ * Brainstorming and Coding (Ideas) task selections while hiding them elsewhere.
  */
 export const DEPRECATED_BUILTIN_WORKFLOW_IDS: ReadonlySet<string> = new Set([
   "builtin:brainstorming",
+  "builtin:coding-ideas",
 ]);
 
 

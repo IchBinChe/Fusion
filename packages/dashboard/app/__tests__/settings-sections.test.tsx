@@ -123,6 +123,7 @@ describe("GeneralSection", () => {
     vi.mocked(fetchWorkflows).mockResolvedValue([
       { id: "builtin:coding", name: "Coding", kind: "workflow", ir: {} },
       { id: "builtin:brainstorming", name: "Brainstorming", kind: "workflow", ir: {} },
+      { id: "builtin:coding-ideas", name: "Coding (Ideas)", kind: "workflow", ir: {} },
     ] as never);
 
     render(
@@ -141,6 +142,7 @@ describe("GeneralSection", () => {
 
     await waitFor(() => expect(screen.getByLabelText("Coding")).toBeInTheDocument());
     expect(screen.queryByLabelText("Brainstorming")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Coding (Ideas)")).not.toBeInTheDocument();
   });
 
   it("emits the absolute file-browser path toggle via setForm", () => {

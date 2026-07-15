@@ -35,10 +35,11 @@ const PLUGIN_GATED_BUILTIN_WORKFLOWS: ReadonlyMap<string, string> = new Map([
 ]);
 
 /*
- * FNXC:WorkflowBrainstorming 2026-07-15-15:49:
- * FN-7970 deprecates builtin:brainstorming after its occupancy preflight: hide it
- * from new selection while retaining its definition for existing task resolution.
- * Keep this generic registry so later deprecated built-ins share the same policy.
+ * FNXC:CodingIdeasWorkflow 2026-07-15-16:35:
+ * FN-7969 deprecates builtin:coding-ideas only after its occupancy preflight
+ * verified no active task, including a parked `ideas` intake card, selected it.
+ * This generic registry hides deprecated workflows from new selection while
+ * retaining their definitions so existing task selections continue to resolve.
  */
 const DEPRECATED_BUILTIN_WORKFLOWS: ReadonlySet<string> = DEPRECATED_BUILTIN_WORKFLOW_IDS;
 

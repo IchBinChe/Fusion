@@ -368,6 +368,19 @@ export interface SelfHealingOptions {
    * Used to avoid clearing a transient merge status mid-merge.
    */
   getActiveMergeTaskId?: () => string | null;
+  /**
+   * Wall-clock ms when the current active merge session was claimed
+   * (`activeMergeTaskId` set). Used to reclaim wedged merges without trusting
+   * `task.updatedAt` (overseer/logEntry refresh that field continuously).
+   */
+  getActiveMergeStartedAtMs?: () => number | null;
+  /**
+   * Force-abort the in-process active merge for `taskId` (AbortController +
+   * session dispose + clear identity) so drainMergeQueue can settle even when
+   * the agent ignores cooperative abort. Returns true when this task was the
+   * active owner and abort was issued.
+   */
+  abortActiveMerge?: (taskId: string, reason: string) => boolean;
   /*
   FNXC:Workspace 2026-06-22-16:40 (Phase D P1 TOCTOU — merge-queue dispatch blind spot):
   Returns true if the task is ANYWHERE in ProjectEngine's in-memory merge pipeline — queued in
@@ -436,7 +449,11 @@ const ORPHANED_EXECUTION_RECOVERY_GRACE_MS = 60_000;
  */
 const LEAKED_WORKTREE_SLOT_GRACE_MS = 60_000;
 export const VALIDATOR_RUN_STALE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
-const ACTIVE_MERGE_STATUSES = new Set(["merging", "merging-pr", "merging-fix"]);
+/*
+FNXC:MergeQueue 2026-07-15-09:50:
+AI merge sets status="reviewing" during the clean-room review pass (merger-ai mergeAndReview). That is still live merge activity. Without it here, recoverInterruptedMergingTasks ignored hung review-phase merges and the single-flight pump stayed wedged while the board showed no merging badge.
+*/
+const ACTIVE_MERGE_STATUSES = new Set(["merging", "merging-pr", "merging-fix", "reviewing"]);
 const NON_TERMINAL_STEP_STATUSES = new Set(["pending", "in-progress"]);
 const STRANDED_COMPLETED_TODO_ACTIVE_STATUSES = new Set([
   "in-progress",
@@ -1358,6 +1375,7 @@ export class SelfHealingManager {
       { name: "failed-pre-merge-steps", fn: () => this.recoverReviewTasksWithFailedPreMergeSteps().then(() => undefined) },
       { name: "missing-worktree-review-failures", fn: () => this.recoverMissingWorktreeReviewFailures().then(() => undefined) },
       { name: "interrupted-merging", fn: () => this.recoverInterruptedMergingTasks().then(() => undefined) },
+      { name: "wedged-active-merge", fn: () => this.recoverWedgedActiveMerge().then(() => undefined) },
       { name: "transient-merge-failures", fn: () => this.recoverTransientMergeFailures().then(() => undefined) },
       { name: "done-merge-metadata", fn: () => this.recoverDoneTaskMergeMetadata().then(() => undefined) },
       { name: "reconcile-done-task-integrity", fn: () => this.reconcileDoneTaskIntegrity().then(() => undefined) },
@@ -1870,6 +1888,53 @@ export class SelfHealingManager {
     const updatedAt = task.updatedAt ? Date.parse(task.updatedAt) : 0;
     if (!Number.isFinite(updatedAt) || updatedAt <= 0) return false;
     return Date.now() - updatedAt >= timeoutMs;
+  }
+
+  /*
+  FNXC:MergeQueue 2026-07-15-09:50:
+  Do not use task.updatedAt as the sole stall clock for an in-flight merge. Overseer "progressing" lines and other logEntry writes refresh updatedAt while the merger agent is completely wedged (e.g. hung fn_task_show), so age gates never fire. Prefer last merger agent-log timestamp, then active-merge claim wall clock, then updatedAt only as last resort.
+  */
+  private async getLastMergerAgentActivityMs(taskId: string): Promise<number | null> {
+    if (typeof this.store.getAgentLogs !== "function") return null;
+    try {
+      const logs = await this.store.getAgentLogs(taskId, { limit: 80 });
+      if (!Array.isArray(logs) || logs.length === 0) return null;
+      for (let i = logs.length - 1; i >= 0; i--) {
+        const entry = logs[i] as { agent?: string; timestamp?: string };
+        if (entry.agent !== "merger" || !entry.timestamp) continue;
+        const ms = Date.parse(entry.timestamp);
+        if (Number.isFinite(ms) && ms > 0) return ms;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async isActiveMergeWedged(taskId: string, timeoutMs: number): Promise<boolean> {
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return false;
+    const activeId = this.options.getActiveMergeTaskId?.() ?? null;
+    if (activeId !== taskId) return false;
+
+    const now = Date.now();
+    const lastMergerMs = await this.getLastMergerAgentActivityMs(taskId);
+    if (lastMergerMs != null) {
+      return now - lastMergerMs >= timeoutMs;
+    }
+    const startedAt = this.options.getActiveMergeStartedAtMs?.() ?? null;
+    if (startedAt != null && Number.isFinite(startedAt) && startedAt > 0) {
+      return now - startedAt >= timeoutMs;
+    }
+    return false;
+  }
+
+  private async isPastInterruptedMergeGraceAsync(task: Task, timeoutMs: number): Promise<boolean> {
+    const activeId = this.options.getActiveMergeTaskId?.() ?? null;
+    if (activeId === task.id) {
+      // Live owner: require merger silence / claim-age, not updatedAt (overseer noise).
+      return this.isActiveMergeWedged(task.id, timeoutMs);
+    }
+    return this.isPastInterruptedMergeGrace(task, timeoutMs);
   }
 
   private async findLandedTaskCommit(
@@ -2567,6 +2632,7 @@ export class SelfHealingManager {
           { name: "recover-failed-pre-merge-steps", fn: () => this.recoverReviewTasksWithFailedPreMergeSteps() },
           { name: "recover-missing-worktree-review-failures", fn: () => this.recoverMissingWorktreeReviewFailures() },
           { name: "recover-interrupted-merging", fn: () => this.recoverInterruptedMergingTasks() },
+          { name: "recover-wedged-active-merge", fn: () => this.recoverWedgedActiveMerge() },
           { name: "recover-transient-merge-failures", fn: () => this.recoverTransientMergeFailures() },
           { name: "recover-done-merge-metadata", fn: () => this.recoverDoneTaskMergeMetadata() },
           { name: "recover-stale-merging-status", fn: () => this.recoverStaleMergingStatus() },
@@ -2892,7 +2958,10 @@ export class SelfHealingManager {
       const tasks = await this.store.listTasks({ column: "in-review", slim: true });
       const stale = tasks.filter((task) => {
         if (task.column !== "in-review" || task.paused) return false;
-        if (!task.status || (task.status !== "merging" && task.status !== "merging-pr")) return false;
+        // Include AI-merge "reviewing" (same ACTIVE_MERGE_STATUSES as interrupted recovery).
+        if (!task.status || !ACTIVE_MERGE_STATUSES.has(task.status)) return false;
+        // Live owner is reclaimed by recoverWedgedActiveMerge / recoverInterruptedMergingTasks
+        // using merger-silence clocks; this path only clears orphan status without a live owner.
         if (activeMergeTaskId && activeMergeTaskId === task.id) return false;
 
         const updatedAtMs = task.updatedAt ? Date.parse(task.updatedAt) : Number.NaN;
@@ -2933,6 +3002,79 @@ export class SelfHealingManager {
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       log.error(`Stale merging status recovery failed: ${errorMessage}`);
+      return 0;
+    }
+  }
+
+  /*
+  FNXC:MergeQueue 2026-07-15-09:50:
+  Reclaim the in-process single-flight merge owner when it is wedged with no merger agent progress. Covers:
+  - status="reviewing" (AI merge review pass) that recoverStaleMergingStatus skipped because getActiveMergeTaskId still pointed at the owner
+  - status already cleared/null while activeMergeTaskId + mergeRunning still hold the pump (board shows no merging badge, nothing starts)
+  - overseer logEntry noise keeping updatedAt fresh so status-age gates never fire
+  Uses merger agent-log silence (preferred) or active-merge claim wall clock — never updatedAt alone.
+  */
+  async recoverWedgedActiveMerge(): Promise<number> {
+    try {
+      const settings = await this.store.getSettings();
+      if (settings.globalPause || settings.enginePaused) return 0;
+      const timeoutMs = settings.taskStuckTimeoutMs;
+      if (!timeoutMs || timeoutMs <= 0) return 0;
+
+      const activeId = this.options.getActiveMergeTaskId?.() ?? null;
+      if (!activeId) return 0;
+
+      if (!(await this.isActiveMergeWedged(activeId, timeoutMs))) {
+        return 0;
+      }
+
+      const task = await this.store.getTask(activeId).catch(() => null);
+      if (task?.paused) {
+        // Pause should already abort; if identity remains, force-clear the lane.
+        const aborted = this.options.abortActiveMerge?.(activeId, "wedged-active-merge-while-paused") ?? false;
+        if (aborted) {
+          log.warn(`Force-aborted wedged active merge ${activeId} that remained after pause`);
+          return 1;
+        }
+        return 0;
+      }
+
+      if (task && task.column !== "in-review") {
+        const aborted = this.options.abortActiveMerge?.(activeId, "wedged-active-merge-left-in-review") ?? false;
+        if (aborted) {
+          log.warn(`Force-aborted wedged active merge ${activeId}: task column is ${task.column}`);
+          return 1;
+        }
+        return 0;
+      }
+
+      log.warn(`Reclaiming wedged active merge ${activeId} (no merger agent progress past stuck timeout)`);
+      this.options.abortActiveMerge?.(activeId, "wedged-active-merge-no-merger-progress");
+      this.options.clearMergeActive?.(activeId);
+      if (task) {
+        if (task.status && ACTIVE_MERGE_STATUSES.has(task.status)) {
+          await this.store.updateTask(activeId, { status: null, error: null }).catch(() => undefined);
+        }
+        await this.store
+          .logEntry(
+            activeId,
+            "Auto-recovered: wedged active merge reclaimed after merger agent silence — merge will be retried",
+          )
+          .catch(() => undefined);
+      }
+      if (task && allowsAutoMergeProcessing(task, settings) && !task.paused && task.column === "in-review") {
+        try {
+          this.options.enqueueMerge?.(activeId);
+        } catch (enqueueErr: unknown) {
+          log.warn(
+            `Failed to re-enqueue ${activeId} after wedged-active-merge recovery: ${enqueueErr instanceof Error ? enqueueErr.message : String(enqueueErr)}`,
+          );
+        }
+      }
+      return 1;
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      log.error(`Wedged active merge recovery failed: ${errorMessage}`);
       return 0;
     }
   }
@@ -7472,13 +7614,18 @@ export class SelfHealingManager {
       if (!timeoutMs || timeoutMs <= 0) return 0;
 
       const tasks = await this.store.listTasks({ column: "in-review", slim: true });
-      const candidates = tasks.filter((task) =>
+      const statusCandidates = tasks.filter((task) =>
         task.column === "in-review" &&
         allowsAutoMergeProcessing(task, settings) &&
         !task.paused &&
-        Boolean(task.status && ACTIVE_MERGE_STATUSES.has(task.status)) &&
-        this.isPastInterruptedMergeGrace(task, timeoutMs),
+        Boolean(task.status && ACTIVE_MERGE_STATUSES.has(task.status)),
       );
+      const candidates: Task[] = [];
+      for (const task of statusCandidates) {
+        if (await this.isPastInterruptedMergeGraceAsync(task, timeoutMs)) {
+          candidates.push(task);
+        }
+      }
 
       if (candidates.length === 0) return 0;
 
@@ -7487,6 +7634,13 @@ export class SelfHealingManager {
       let recovered = 0;
       for (const task of candidates) {
         try {
+          /*
+          FNXC:MergeQueue 2026-07-15-09:50:
+          If this task still owns the in-process active merge, force-abort first. Cooperative abort alone left mergeRunning=true when the agent ignored the signal; abortActiveMerge + raceMergeWithAbort free the single-flight drain so re-enqueue can actually start.
+          */
+          if (this.options.getActiveMergeTaskId?.() === task.id) {
+            this.options.abortActiveMerge?.(task.id, "recover-interrupted-merging-wedged-owner");
+          }
           /*
           FNXC:Workspace 2026-06-22-09:30 (Phase D U1, KTD1 — P0 workspace gate):
           A workspace task lands PER-REPO and `landWorkspaceTask` sets status:"merging". The

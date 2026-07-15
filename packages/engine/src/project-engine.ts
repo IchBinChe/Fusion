@@ -460,6 +460,8 @@ export class ProjectEngine {
   private mergeRunning = false;
   private activeMergeSession: { dispose: () => void } | null = null;
   private activeMergeTaskId: string | null = null;
+  /** Wall-clock when `activeMergeTaskId` was claimed; self-healing uses this when agent logs are silent. */
+  private activeMergeStartedAtMs: number | null = null;
   private mergeAbortController: AbortController | null = null;
   private mergeRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private autostashSweepTimer: ReturnType<typeof setTimeout> | null = null;
@@ -579,16 +581,14 @@ export class ProjectEngine {
     //
     // Tests substitute a minimal runtime mock that may not implement this hook.
     this.runtime.setActiveMergeTaskIdProvider?.(() => this.getActiveMergeTaskId());
+    this.runtime.setActiveMergeStartedAtMsProvider?.(() => this.activeMergeStartedAtMs);
+    this.runtime.setActiveMergeAborter?.((taskId, reason) => this.abortActiveMerge(taskId, reason));
     this.runtime.setMergeEnqueuer?.((taskId) => {
       // If the wedged attempt was the active one, abort its in-flight signal
       // and dispose its session so subsequent code paths can release file
       // handles / child processes promptly.
       if (this.activeMergeTaskId === taskId) {
-        this.mergeAbortController?.abort();
-        this.mergeAbortController = null;
-        this.activeMergeSession?.dispose();
-        this.activeMergeSession = null;
-        this.activeMergeTaskId = null;
+        this.abortActiveMerge(taskId, "merge-enqueuer-reclaim");
       }
       this.mergeActive.delete(taskId);
       return this.internalEnqueueMerge(taskId);
@@ -608,6 +608,43 @@ export class ProjectEngine {
 
   getActiveMergeTaskId(): string | null {
     return this.activeMergeTaskId;
+  }
+
+  getActiveMergeStartedAtMs(): number | null {
+    return this.activeMergeStartedAtMs;
+  }
+
+  /*
+  FNXC:MergeQueue 2026-07-15-09:50:
+  Self-healing reclaim path for a wedged single-flight merge. Always abort + dispose + clear identity so raceMergeWithAbort can settle drainMergeQueue even when the agent ignores cooperative abort.
+  */
+  abortActiveMerge(taskId: string, reason: string): boolean {
+    if (this.activeMergeTaskId !== taskId) return false;
+    runtimeLog.log(`Aborting active merge for ${taskId} (${reason})`);
+    this.mergeAbortController?.abort();
+    this.mergeAbortController = null;
+    if (this.activeMergeSession) {
+      this.activeMergeSession.dispose();
+      this.activeMergeSession = null;
+    }
+    this.mergeActive.delete(taskId);
+    this.activeMergeTaskId = null;
+    this.activeMergeStartedAtMs = null;
+    return true;
+  }
+
+  private claimActiveMerge(taskId: string): AbortSignal {
+    this.activeMergeTaskId = taskId;
+    this.activeMergeStartedAtMs = Date.now();
+    this.mergeAbortController = new AbortController();
+    return this.mergeAbortController.signal;
+  }
+
+  private clearActiveMergeClaim(taskId: string): void {
+    if (this.activeMergeTaskId === taskId) {
+      this.activeMergeTaskId = null;
+      this.activeMergeStartedAtMs = null;
+    }
   }
 
   /*
@@ -1040,6 +1077,7 @@ export class ProjectEngine {
     this.mergeAbortController?.abort();
     this.mergeAbortController = null;
     this.activeMergeTaskId = null;
+    this.activeMergeStartedAtMs = null;
     this.pausedReviewTaskIds.clear();
 
     const queuedTaskIds = [...this.mergeQueue];
@@ -2413,6 +2451,39 @@ export class ProjectEngine {
     return true;
   }
 
+  /*
+  FNXC:MergeQueue 2026-07-15-09:41:
+  Operator-visible hang: pause/cancel aborted the merge AbortController and disposed the session, but runAiMerge/promptWithFallback often keeps awaiting a wedged agent tool (e.g. fn_task_show) that never observes the signal. drainMergeQueue stayed parked on that await with mergeRunning=true, so no card got a merging badge and later enqueues no-op'd. Race the merge work with the abort signal so pause always unblocks the single-flight pump even when the agent ignores abort; dispose remains best-effort cleanup for the orphan session.
+  */
+  private createMergeAbortedError(taskId: string): Error {
+    // Name-tagged Error (not a class import) so test mocks of merger.js stay compatible and catch paths that match err.name === "MergeAbortedError" keep working.
+    const err = new Error(`Merge aborted for ${taskId}: pause or cancel requested`);
+    err.name = "MergeAbortedError";
+    return err;
+  }
+
+  private raceMergeWithAbort<T>(work: Promise<T>, signal: AbortSignal, taskId: string): Promise<T> {
+    if (signal.aborted) {
+      return Promise.reject(this.createMergeAbortedError(taskId));
+    }
+    return new Promise<T>((resolve, reject) => {
+      const onAbort = (): void => {
+        reject(this.createMergeAbortedError(taskId));
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      work.then(
+        (value) => {
+          signal.removeEventListener("abort", onAbort);
+          resolve(value);
+        },
+        (err: unknown) => {
+          signal.removeEventListener("abort", onAbort);
+          reject(err);
+        },
+      );
+    });
+  }
+
   /**
    * Filter a sweep's listTasks() result to merge-eligible tasks, sort by
    * priority (urgent → low, then createdAt ASC, then id ASC), and enqueue.
@@ -3339,7 +3410,7 @@ export class ProjectEngine {
           const routeWorkspaceDirect = !!mergeCandidate && isWorkspaceTask(mergeCandidate);
 
           if (mergeStrategy === "pull-request" && this.options.processPullRequestMerge && !routeWorkspaceDirect) {
-            this.activeMergeTaskId = taskId;
+            this.claimActiveMerge(taskId);
             runtimeLog.log(`${hasManualResolver ? "Manual" : "Auto"}-merge processing PR flow for ${taskId}...`);
             const result = await this.options.processPullRequestMerge(
               store,
@@ -3391,19 +3462,28 @@ export class ProjectEngine {
             const usageLimitPauser = (this.runtime as any).usageLimitPauser;
 
             const rawMerge = async () => {
-              this.activeMergeTaskId = taskId;
-              this.mergeAbortController = new AbortController();
+              const abortSignal = this.claimActiveMerge(taskId);
+              /*
+              FNXC:GrokCliRouting 2026-07-15-09:45:
+              AI merge creates sessions via createResolvedAgentSession with the same Grok CLI no-visible-key auto-derive seam as chat/executor. Without pluginRunner, getRuntimeById("grok") is unavailable and grok-cli merger/fallback selections throw "Grok CLI models require the bundled Grok CLI runtime" even when chat works (ChatManager already receives engine.getPluginRunner()). Forward the engine PluginRunner so merge can route to the logged-in grok CLI like every other lane.
+              */
               const mergerOptions = {
                 manual: hasManualResolver,
                 pool,
                 usageLimitPauser,
                 agentStore,
-                signal: this.mergeAbortController.signal,
+                pluginRunner: this.getPluginRunner(),
+                signal: abortSignal,
                 syncGroupPr: this.options.syncGroupPr,
                 onSession: (session: { dispose: () => void }) => {
                   this.activeMergeSession = session;
                 },
               };
+              /*
+              FNXC:MergeQueue 2026-07-15-09:41:
+              Always race the merge body with the pause/cancel abort signal. Cooperative abort inside runAiMerge is best-effort; without this outer race a wedged agent tool parks drainMergeQueue forever (no merging badge board-wide).
+              */
+              return this.raceMergeWithAbort((async () => {
               // FNXC:Workspace 2026-06-21-23:40 (Phase C U1, KTD2):
               // Engine merge dispatch door. A workspace-mode task (non-empty
               // `workspaceWorktrees`) routes to the per-repo merge loop
@@ -3486,6 +3566,7 @@ export class ProjectEngine {
                 allowDirtyLocalCheckoutSync: settings.merger?.allowDirtyLocalCheckoutSync === true,
               };
               return runAiMerge(store, cwd, taskId, mergeOptionsWithSettings);
+              })(), abortSignal, taskId);
             };
 
             let result: MergeResult;
@@ -4269,9 +4350,7 @@ export class ProjectEngine {
             }
           }
         } finally {
-          if (this.activeMergeTaskId === taskId) {
-            this.activeMergeTaskId = null;
-          }
+          this.clearActiveMergeClaim(taskId);
           this.mergeAbortController = null;
           this.mergeActive.delete(taskId);
           // If a manual merge was requested while this task was already in-flight,
@@ -4493,16 +4572,11 @@ export class ProjectEngine {
           return;
         }
 
-        runtimeLog.log(`Paused in-review task interrupting active merge: ${task.id}`);
-        this.mergeAbortController?.abort();
-        this.mergeAbortController = null;
-
-        if (this.activeMergeSession) {
-          this.activeMergeSession.dispose();
-          this.activeMergeSession = null;
-        }
-
-        this.mergeActive.delete(task.id);
+        /*
+        FNXC:MergeQueue 2026-07-15-09:41:
+        Pause of the active merge must free the single-flight lane the same way soft-delete does. Abort + dispose alone left activeMergeTaskId set and, when the agent ignored abort, drainMergeQueue wedged with mergeRunning=true (no merging badge on any card). Clear identity now; raceMergeWithAbort rejects the parked await so the drain finally settles and later enqueues can start.
+        */
+        this.abortActiveMerge(task.id, "task-paused");
         return;
       }
 
@@ -4547,17 +4621,7 @@ export class ProjectEngine {
         return;
       }
 
-      runtimeLog.log(`Soft-deleted task interrupting active merge: ${task.id}`);
-      this.mergeAbortController?.abort();
-      this.mergeAbortController = null;
-
-      if (this.activeMergeSession) {
-        this.activeMergeSession.dispose();
-        this.activeMergeSession = null;
-      }
-
-      this.mergeActive.delete(task.id);
-      this.activeMergeTaskId = null;
+      this.abortActiveMerge(task.id, "task-soft-deleted");
     };
 
     store.on("task:updated", this.taskUpdatedHandler);

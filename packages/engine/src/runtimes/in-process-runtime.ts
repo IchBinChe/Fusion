@@ -245,6 +245,8 @@ export class InProcessRuntime
   ) => Promise<import("@fusion/core").MergeResult>;
   private clearMergeActive?: (taskId: string) => void;
   private activeMergeTaskIdProvider?: () => string | null;
+  private activeMergeStartedAtMsProvider?: () => number | null;
+  private activeMergeAborter?: (taskId: string, reason: string) => boolean;
   /**
    * FNXC:Workspace 2026-06-22-16:40 (Phase D P1 TOCTOU): predicate that reports whether a task is
    * anywhere in ProjectEngine's in-memory merge pipeline (queued OR dequeued-and-merging). Set by
@@ -1050,6 +1052,10 @@ export class InProcessRuntime
         isTaskActive: (taskId: string) => this.executor.isTaskActive(taskId),
         clearMergeActive: this.clearMergeActive ? (taskId: string) => this.clearMergeActive?.(taskId) : undefined,
         getActiveMergeTaskId: () => this.activeMergeTaskIdProvider?.() ?? null,
+        getActiveMergeStartedAtMs: () => this.activeMergeStartedAtMsProvider?.() ?? null,
+        abortActiveMerge: this.activeMergeAborter
+          ? (taskId: string, reason: string) => this.activeMergeAborter?.(taskId, reason) ?? false
+          : undefined,
         // FNXC:Workspace 2026-06-22-16:40 (Phase D P1 TOCTOU): undefined provider → "not pending"
         // (graceful when unwired; existing guards still apply). In production it is always wired.
         isMergePending: this.mergePendingProvider ? (taskId: string) => this.mergePendingProvider?.(taskId) ?? false : undefined,
@@ -1496,6 +1502,14 @@ export class InProcessRuntime
 
   setActiveMergeTaskIdProvider(getActiveMergeTaskId: () => string | null): void {
     this.activeMergeTaskIdProvider = getActiveMergeTaskId;
+  }
+
+  setActiveMergeStartedAtMsProvider(getActiveMergeStartedAtMs: () => number | null): void {
+    this.activeMergeStartedAtMsProvider = getActiveMergeStartedAtMs;
+  }
+
+  setActiveMergeAborter(abortActiveMerge: (taskId: string, reason: string) => boolean): void {
+    this.activeMergeAborter = abortActiveMerge;
   }
 
   setMergePendingProvider(isMergePending: (taskId: string) => boolean): void {

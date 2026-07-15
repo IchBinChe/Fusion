@@ -596,6 +596,44 @@ describe("createResolvedAgentSession", () => {
     );
   });
 
+  it("forwards sessionPurpose into runtime.createSession for host-extension policy", async () => {
+    /*
+    FNXC:MergeQueue 2026-07-15-11:20:
+    FN-7956 fix requires sessionPurpose "merger" to reach createFnAgent so host extensions are skipped.
+    */
+    const mockSession = { prompt: vi.fn() } as any;
+    const createSessionMock = vi.fn().mockResolvedValue({
+      session: mockSession,
+      sessionFile: "session.json",
+    });
+    resolveRuntimeMock.mockResolvedValue({
+      runtime: {
+        id: "pi",
+        name: "Default PI Runtime",
+        createSession: createSessionMock,
+        promptWithFallback: vi.fn(),
+        describeModel: vi.fn(() => "mock/model"),
+      },
+      runtimeId: "pi",
+      wasConfigured: false,
+    });
+
+    const { createResolvedAgentSession } = await import("../agent-session-helpers.js");
+
+    await createResolvedAgentSession({
+      sessionPurpose: "merger",
+      pluginRunner: undefined,
+      cwd: "/tmp/project",
+      systemPrompt: "merge",
+    });
+
+    expect(createSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionPurpose: "merger",
+      }),
+    );
+  });
+
   it("emits session:runtime-resolved when runAuditor is provided", async () => {
     const mockSession = { prompt: vi.fn() } as any;
     const createSessionMock = vi.fn().mockResolvedValue({ session: mockSession });

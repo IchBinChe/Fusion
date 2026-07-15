@@ -2281,9 +2281,14 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
   const skipHostExtensions = isReadonly || options.sessionPurpose === "merger";
   const effectiveExtensionPaths = skipHostExtensions ? [] : hostExtensionPaths;
   if (skipHostExtensions && hostExtensionPaths.length > 0) {
-    piLog.log(
-      `${isReadonly ? "readonly" : "merger"} session — host extensions (${hostExtensionPaths.length}) skipped`,
-    );
+    /*
+    FNXC:MergeQueue 2026-07-15-11:20:
+    Log the actual skip reason (readonly vs sessionPurpose) so future skip reasons do not mislabel as "merger".
+    */
+    const skipReason = isReadonly
+      ? "readonly"
+      : `sessionPurpose=${options.sessionPurpose ?? "unknown"}`;
+    piLog.log(`${skipReason} session — host extensions (${hostExtensionPaths.length}) skipped`);
   }
 
   const resourceLoader = new DefaultResourceLoader({

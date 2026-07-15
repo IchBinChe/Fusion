@@ -241,6 +241,13 @@ Concurrent first-call fn_* tools must share one boot promise. Without this, two 
 */
 const storeBootInflight = new Map<string, Promise<TaskStore>>();
 /*
+FNXC:MergeQueue 2026-07-15-11:20:
+After a hard boot failure, brief cooldown prevents stampede re-boots against a broken backend.
+Timeout alone does not set cooldown — the orphan inflight may still succeed and populate storeCache.
+*/
+const storeBootFailureCooldown = new Map<string, { untilMs: number; error: string }>();
+const BOOT_FAILURE_COOLDOWN_MS = 5_000;
+/*
 FNXC:MergeQueue 2026-07-15-11:08:
 Propagate the active tool AbortSignal into getStore without rewriting every execute body. registerTool installs the signal here before invoking the real execute.
 */
@@ -249,15 +256,46 @@ const extensionToolSignal = new AsyncLocalStorage<AbortSignal | undefined>();
 const EXTENSION_STORE_BOOT_TIMEOUT_MS = 30_000;
 /*
 FNXC:MergeQueue 2026-07-15-11:15:
-Default wall-clock budget for every host-extension fn_* tool. Store/CRUD tools must not park an agent turn forever; long shell work belongs in coding builtins (bash), not extension tools.
+Default wall-clock budget for store/CRUD host-extension tools. Long-running tools use resolveExtensionToolTimeoutMs instead of this flat default (research wait, skills install, imports).
 */
 const EXTENSION_TOOL_TIMEOUT_MS = 60_000;
+/** Slack added above fn_research_run max_wait_ms so the outer wrap cannot clip an intentional wait. */
+const RESEARCH_WAIT_SLACK_MS = 15_000;
+const RESEARCH_DEFAULT_MAX_WAIT_MS = 90_000;
+const SKILLS_INSTALL_TIMEOUT_MS = 300_000;
+const IMPORT_BROWSE_TIMEOUT_MS = 180_000;
+const WEB_FETCH_TIMEOUT_MS = 90_000;
 
 function isAbortError(error: unknown): boolean {
   return (
     (error instanceof Error && error.name === "AbortError") ||
     (typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError")
   );
+}
+
+/**
+ * FNXC:MergeQueue 2026-07-15-11:20:
+ * Per-tool outer budgets. A flat 60s wrap false-failed fn_research_run(wait_for_completion) whose default max_wait_ms is 90s.
+ * Store tools stay at 60s; intentional multi-minute tools get higher ceilings.
+ *
+ * @internal Exported for unit tests.
+ */
+export function resolveExtensionToolTimeoutMs(toolName: string, params?: unknown): number {
+  const name = toolName.trim();
+  if (name === "fn_research_run") {
+    const record = params && typeof params === "object" ? (params as Record<string, unknown>) : {};
+    if (record.wait_for_completion === true) {
+      const rawMax = record.max_wait_ms;
+      const maxWait =
+        typeof rawMax === "number" && Number.isFinite(rawMax) ? Math.max(0, rawMax) : RESEARCH_DEFAULT_MAX_WAIT_MS;
+      return maxWait + RESEARCH_WAIT_SLACK_MS;
+    }
+    return EXTENSION_TOOL_TIMEOUT_MS;
+  }
+  if (name === "fn_skills_install") return SKILLS_INSTALL_TIMEOUT_MS;
+  if (name.startsWith("fn_task_import_") || name.startsWith("fn_task_browse_")) return IMPORT_BROWSE_TIMEOUT_MS;
+  if (name === "fn_web_fetch") return WEB_FETCH_TIMEOUT_MS;
+  return EXTENSION_TOOL_TIMEOUT_MS;
 }
 
 /**
@@ -288,7 +326,7 @@ export async function raceWithTimeoutAndAbort<T>(
         if (onAbort && signal) signal.removeEventListener("abort", onAbort);
         fn();
       };
-      // Swallow late rejections after timeout/abort so the orphaned work cannot surface as unhandledRejection.
+      // Late settlement after timeout/abort is no-op'd; the .then handlers keep the promise from becoming unhandledRejection.
       promise.then(
         (value) => settle(() => resolve(value)),
         (error) => settle(() => reject(error)),
@@ -318,11 +356,12 @@ export async function raceWithTimeoutAndAbort<T>(
  * FNXC:MergeQueue 2026-07-15-11:15:
  * Wrap every extension tool execute with timeout + AbortSignal so a wedged store call cannot park the agent forever (FN-7956 fn_task_show hang).
  * Errors become isError tool results so the model can continue rather than leaving the turn blocked on an open tool call.
+ * FNXC:MergeQueue 2026-07-15-11:20: Timeout budget is per-tool (resolveExtensionToolTimeoutMs) unless an explicit timeoutMs is passed.
  */
 export function wrapExtensionToolExecute<TArgs extends unknown[], TResult>(
   toolName: string,
   execute: (...args: TArgs) => TResult | Promise<TResult>,
-  timeoutMs: number = EXTENSION_TOOL_TIMEOUT_MS,
+  timeoutMs?: number,
 ): (...args: TArgs) => Promise<TResult | {
   content: Array<{ type: "text"; text: string }>;
   details: { error: string };
@@ -331,17 +370,23 @@ export function wrapExtensionToolExecute<TArgs extends unknown[], TResult>(
   return async (...args: TArgs) => {
     // ExtensionAPI execute signature: (toolCallId, params, signal?, onUpdate?, ctx?)
     const signal = (args[2] instanceof AbortSignal ? args[2] : undefined) as AbortSignal | undefined;
+    const params = args[1];
+    const budgetMs =
+      timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 0
+        ? timeoutMs
+        : resolveExtensionToolTimeoutMs(toolName, params);
     try {
       return await extensionToolSignal.run(signal, () =>
         raceWithTimeoutAndAbort(
           Promise.resolve(execute(...args)),
-          timeoutMs,
+          budgetMs,
           signal,
           toolName,
         ),
       );
     } catch (error) {
       if (isAbortError(error)) {
+        console.warn(`[fusion-extension] ${toolName} aborted`);
         return {
           content: [{ type: "text" as const, text: `${toolName} aborted.` }],
           details: { error: "aborted" },
@@ -349,6 +394,11 @@ export function wrapExtensionToolExecute<TArgs extends unknown[], TResult>(
         };
       }
       const message = error instanceof Error ? error.message : String(error);
+      if (/timed out after \d+ms/.test(message)) {
+        console.warn(`[fusion-extension] ${toolName}: ${message}`);
+      } else {
+        console.error(`[fusion-extension] ${toolName} failed: ${message}`);
+      }
       return {
         content: [{ type: "text" as const, text: `${toolName} failed: ${message}` }],
         details: { error: message },
@@ -363,6 +413,13 @@ async function getStore(cwd: string, signal?: AbortSignal): Promise<TaskStore> {
   const existing = storeCache.get(projectRoot);
   if (existing) return existing.store;
 
+  const cooldown = storeBootFailureCooldown.get(projectRoot);
+  if (cooldown && Date.now() < cooldown.untilMs) {
+    throw new Error(
+      `fn extension TaskStore boot recently failed (cooldown ${BOOT_FAILURE_COOLDOWN_MS}ms): ${cooldown.error}`,
+    );
+  }
+
   const effectiveSignal = signal ?? extensionToolSignal.getStore();
 
   let inflight = storeBootInflight.get(projectRoot);
@@ -374,25 +431,61 @@ async function getStore(cwd: string, signal?: AbortSignal): Promise<TaskStore> {
     FNXC:MergeQueue 2026-07-15-11:08:
     First extension tool call in a dashboard/engine process boots a second TaskStore.
     Bound that boot and coalesce concurrent callers so a wedged boot cannot park every fn_* tool forever.
+
+    FNXC:MergeQueue 2026-07-15-11:20:
+    Boot failure sets a short cooldown to avoid stampede re-boots. Tool timeout does not cancel the orphan boot; on success it still populates storeCache for later calls.
     */
     inflight = (async () => {
       try {
         const boot = await createTaskStoreForBackend({ rootDir: projectRoot });
+        storeBootFailureCooldown.delete(projectRoot);
         storeCache.set(projectRoot, { store: boot.taskStore, shutdown: boot.shutdown });
         return boot.taskStore;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        storeBootFailureCooldown.set(projectRoot, {
+          untilMs: Date.now() + BOOT_FAILURE_COOLDOWN_MS,
+          error: message,
+        });
+        throw error;
       } finally {
         storeBootInflight.delete(projectRoot);
       }
     })();
+    // Keep a handler attached so timed-out waiters cannot leave an unhandledRejection when boot fails late.
+    void inflight.catch(() => undefined);
     storeBootInflight.set(projectRoot, inflight);
   }
 
-  return raceWithTimeoutAndAbort(
-    inflight,
-    EXTENSION_STORE_BOOT_TIMEOUT_MS,
-    effectiveSignal,
-    "fn extension TaskStore boot",
-  );
+  try {
+    return await raceWithTimeoutAndAbort(
+      inflight,
+      EXTENSION_STORE_BOOT_TIMEOUT_MS,
+      effectiveSignal,
+      "fn extension TaskStore boot",
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/timed out after \d+ms/.test(message)) {
+      /*
+      FNXC:MergeQueue 2026-07-15-11:20:
+      Timeout unblocks the tool turn only — the orphan createTaskStoreForBackend continues. Log so operators do not assume the dual-store boot stopped.
+      */
+      console.warn(
+        `[fusion-extension] TaskStore boot still running after ${EXTENSION_STORE_BOOT_TIMEOUT_MS}ms ` +
+          `(projectRoot=${projectRoot}); orphan boot continues and may populate the cache later`,
+      );
+    }
+    throw error;
+  }
+}
+
+/**
+ * @internal Test-only: clear inflight boot map and failure cooldown without closing cached stores.
+ */
+export function __clearExtensionStoreBootStateForTesting(): void {
+  storeBootInflight.clear();
+  storeBootFailureCooldown.clear();
 }
 
 /**

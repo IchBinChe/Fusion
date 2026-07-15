@@ -2,6 +2,28 @@
 
 ## Essential rules
 
+### Standing Rule: Never Work On `main` — Always Use A Worktree
+
+Agents must not check out, switch to, or commit on the primary `main` (or default-branch) working tree. All implementation, review-fix, and commit work happens in an isolated git worktree so the operator's main checkout stays clean and concurrent agent sessions never step on each other.
+
+- **Never** run `git checkout main`, `git switch main`, or otherwise move the primary repo checkout off/on `main` for agent work.
+- **Never** commit, amend, rebase, or leave uncommitted changes on the primary checkout when it is on `main` (or the repo default branch).
+- **Always** create an isolated worktree + feature branch before coding, fixing, or committing. Prefer Worktrunk when available:
+
+```bash
+# Preferred (Worktrunk)
+wt switch --create <branch-name>
+
+# Fallback (plain git) — keep the primary checkout on main
+git worktree add -b <branch-name> ../kb-worktrees/<branch-name> main
+cd ../kb-worktrees/<branch-name>
+```
+
+- Do all file edits, tests, and commits **inside that worktree**. Report the worktree path in handoffs.
+- Merge/land only via PR, `wt merge`, or an explicit operator request — do not `git checkout main && git merge …` as a substitute for a worktree workflow.
+- If you discover the session is already on `main` with a dirty or feature-bearing tree, stop, create a worktree from a clean `main`, move the work there (cherry-pick / re-apply), and leave the primary `main` checkout clean.
+- Read-only inspection of `main` (e.g. `git show main:path`, `git log main`) is fine; mutating the main checkout is not.
+
 ### Spec Generation Hygiene
 
 - Do not cite `.fusion/tasks/<id>/<file>` paths in Context/Steps/File Scope unless the file already exists, is explicitly created as a `(new)` Artifact, or is sibling `PROMPT.md`/`task.json`/`attachments/*`.
@@ -185,6 +207,7 @@ Use `superviseSpawn(...)` from `@fusion/core` for managed child processes; do no
 - One commit per step boundary
 - Include task ID prefix
 - Fusion task-worktree commits should carry `Fusion-Task-Id: FN-NNNN` trailers
+- **Worktree-only agent workflow (mandatory):** never switch the primary checkout to/from `main` for agent work. Create a worktree + feature branch (`wt switch --create <branch>` or `git worktree add -b …`) and work entirely there. See **Standing Rule: Never Work On `main` — Always Use A Worktree**.
 
 ### Merging Branches Into Main
 

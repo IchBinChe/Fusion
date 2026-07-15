@@ -22,6 +22,7 @@ import { useViewportMode } from "../hooks/useViewportMode";
 import { getScopedItem, removeScopedItem, setScopedItem } from "../utils/projectStorage";
 import { ALL_WORKFLOWS_BOARD_VIEW_ID } from "../utils/boardWorkflowSelection";
 import { getUnifiedTaskProgress, isPlanReviewRunning } from "../utils/taskProgress";
+import { getTaskStatusBadgeLabel } from "../utils/taskStatusBadgeLabel";
 import { useConfirm } from "../hooks/useConfirm";
 import { extractDependencyDeleteConflict, extractLineageDeleteConflict } from "../utils/taskDelete";
 import { WorkflowSwitcher } from "./WorkflowSwitcher";
@@ -76,9 +77,12 @@ function isListContextInteractiveTarget(target: EventTarget | null): boolean {
 
 type SortField = "title" | "status" | "column" | "retries";
 
+/*
+FNXC:MergeQueue 2026-07-15-10:45:
+List status column used to print raw engine statuses (landing/reviewing). Share the board badge mapper so list and card never diverge.
+*/
 function getTaskStatusLabel(status: string, t: TFunction<"app">): string {
-  if (status === "merging-fix") return t("listView.statusMergingFix", "Merging fixes…");
-  return status;
+  return getTaskStatusBadgeLabel(status, t);
 }
 type SortDirection = "asc" | "desc";
 

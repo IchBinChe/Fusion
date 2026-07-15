@@ -42,6 +42,7 @@ import { getTaskAgeStalenessCopy, shouldShowTaskAgeStalenessBadge } from "../uti
 import { getUnifiedTaskProgress, isPlanReviewRunning } from "../utils/taskProgress";
 import { getPrBadgeModifierClass } from "../utils/prBadgeClass";
 import { getActiveRuntimeMs, getEndToEndDurationMs, getTimedDurationMs, getWorkflowRuntimeMs, parseTimestampToMs } from "../utils/taskTiming";
+import { getTaskStatusBadgeLabel } from "../utils/taskStatusBadgeLabel";
 import { canStartPrFeedbackAddressing, getTaskPrimaryPrInfo } from "../utils/prFeedback";
 import type { ToastType } from "../hooks/useToast";
 import { useConfirm } from "../hooks/useConfirm";
@@ -295,15 +296,7 @@ const TIME_INDICATOR_COLUMNS = new Set<ColumnId>([
 const LIVE_TIME_INDICATOR_POLL_MS = 30_000;
 
 function getTaskStatusLabel(status: string, t: TFunction<"app">): string {
-  if (status === "merging-fix") return t("tasks.statusMergingFix", "Merging fixes…");
-  /*
-  FNXC:MergeQueue 2026-07-15-10:40:
-  Operators expect a "merging" badge while AI merge owns the pump. Map reviewing/landing to the same Merging… label so the board does not look idle during the long review and land phases.
-  */
-  if (status === "reviewing" || status === "landing" || status === "merging" || status === "merging-pr") {
-    return t("tasks.statusMerging", "Merging…");
-  }
-  return status;
+  return getTaskStatusBadgeLabel(status, t);
 }
 
 function getDoneCompletionMs(task: Task): number | null {

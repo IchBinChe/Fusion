@@ -314,7 +314,7 @@ export class AiSessionStore extends EventEmitter<AiSessionStoreEvents> {
    * surface them too. Completed sessions are pruned by `cleanupOld` after
    * the configured TTL, so this list does not grow unbounded.
    */
-  async listAll(projectId?: string, options?: { includeArchived?: boolean }): Promise<AiSessionSummary[]> {
+  async listAll(projectId?: string, options?: { includeArchived?: boolean; type?: AiSessionType }): Promise<AiSessionSummary[]> {
     const rows = await listAllAiSessions(this.dbAsync, projectId, options) as Array<Record<string, unknown>>;
     return rows.map((row) => toSidebarSummaryAsync(row));
   }

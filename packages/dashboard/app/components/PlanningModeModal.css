@@ -277,6 +277,51 @@ The New session button must look EXACTLY like Missions' primary sidebar create b
   line-height: 1.5;
 }
 
+.planning-sidebar-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.planning-sidebar-skeleton-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-sm) var(--space-sm) var(--space-md);
+}
+
+.planning-sidebar-skeleton-icon,
+.planning-sidebar-skeleton-title,
+.planning-sidebar-skeleton-meta {
+  display: block;
+  border-radius: var(--radius-sm);
+  background: var(--card-hover);
+}
+
+.planning-sidebar-skeleton-icon {
+  width: var(--space-md);
+  height: var(--space-md);
+  flex-shrink: 0;
+}
+
+.planning-sidebar-skeleton-copy {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding-block: var(--space-xs);
+}
+
+.planning-sidebar-skeleton-title {
+  width: 75%;
+  height: var(--space-sm);
+}
+
+.planning-sidebar-skeleton-meta {
+  width: 50%;
+  height: var(--space-xs);
+}
+
 .planning-sidebar-item {
   position: relative;
   display: flex;
@@ -516,6 +561,9 @@ The New session button must look EXACTLY like Missions' primary sidebar create b
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
+  }
+  .planning-sidebar-skeleton-row {
+    padding-inline: var(--space-md);
   }
   .planning-modal-body--show-list .planning-sidebar-footer {
     flex-shrink: 0;

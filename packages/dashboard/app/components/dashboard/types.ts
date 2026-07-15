@@ -100,6 +100,8 @@ export interface MainContentProps {
   isRemote: boolean;
   remoteData: UseRemoteNodeDataResult;
   tasks: Task[];
+  /** Active planning sessions loaded by App before the Planning view mounts. */
+  bgPlanningSessions: AiSessionSummary[];
   workflowSteps: WorkflowStep[];
   subscribePluginEvents: (
     pluginId: string,

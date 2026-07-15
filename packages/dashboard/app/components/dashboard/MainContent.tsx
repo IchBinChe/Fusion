@@ -65,6 +65,7 @@ export function MainContent({
   isRemote,
   remoteData,
   tasks,
+  bgPlanningSessions,
   workflowSteps,
   subscribePluginEvents,
   openDetailTask,
@@ -620,6 +621,7 @@ export function MainContent({
           onTaskCreated={handlePlanningTaskCreated}
           onTasksCreated={handlePlanningTasksCreated}
           tasks={tasks}
+          initialSessions={bgPlanningSessions}
           initialPlan={modalManager.planningInitialPlan ?? undefined}
           projectId={currentProject?.id}
           workflowId={modalManager.planningWorkflowId ?? planningHeaderWorkflowId}

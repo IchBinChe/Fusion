@@ -3965,6 +3965,71 @@ describe("PlanningModeModal", () => {
     });
   });
 
+  describe("planning sidebar loading", () => {
+    it("renders skeleton rows rather than a blank sidebar while the session refresh is pending", async () => {
+      let resolveSessions!: (sessions: Array<Record<string, unknown>>) => void;
+      mockFetchAiSessions.mockImplementationOnce(() => new Promise((resolve) => {
+        resolveSessions = resolve;
+      }));
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />,
+      );
+
+      expect(await screen.findByTestId("planning-sidebar-skeleton")).toBeDefined();
+      expect(screen.queryByText(/No saved sessions yet/i)).toBeNull();
+
+      await act(async () => {
+        resolveSessions([{
+          id: "loaded-planning-session",
+          type: "planning",
+          status: "complete",
+          title: "Loaded planning session",
+          projectId: null,
+          updatedAt: "2026-07-15T00:00:00.000Z",
+        }]);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: /Loaded planning session/i })).toBeDefined();
+        expect(screen.queryByTestId("planning-sidebar-skeleton")).toBeNull();
+      });
+    });
+
+    it("shows initial background planning sessions before an authoritative refresh resolves", async () => {
+      mockFetchAiSessions.mockImplementationOnce(() => new Promise(() => {}));
+      const initialSessions = [{
+        id: "background-planning-session",
+        type: "planning" as const,
+        status: "awaiting_input" as const,
+        title: "Continue background planning",
+        projectId: null,
+        updatedAt: "2026-07-15T00:00:00.000Z",
+      }];
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          initialSessions={initialSessions}
+        />,
+      );
+
+      expect(screen.getByRole("button", { name: /Continue background planning/i })).toBeDefined();
+      expect(screen.queryByTestId("planning-sidebar-skeleton")).toBeNull();
+      await waitFor(() => expect(mockFetchAiSessions).toHaveBeenCalledTimes(1));
+    });
+  });
+
   describe("dedupeSessionsById export", () => {
     it("keeps the newest session for duplicate ids while preserving stable order on ties", () => {
       expect(

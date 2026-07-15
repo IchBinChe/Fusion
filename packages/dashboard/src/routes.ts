@@ -40,7 +40,7 @@ import {
 } from "@fusion/core";
 import type { ServerOptions } from "./server.js";
 import { verifyWebhookSignature } from "./github-webhooks.js";
-import { SESSION_CLEANUP_DEFAULT_MAX_AGE_MS } from "./ai-session-store.js";
+import { SESSION_CLEANUP_DEFAULT_MAX_AGE_MS, type AiSessionType } from "./ai-session-store.js";
 import { getSession as getPlanningSession, cleanupSession as cleanupPlanningSession, normalizePlanningSummaryPayload } from "./planning.js";
 import { getSubtaskSession, cleanupSubtaskSession } from "./subtask-breakdown.js";
 import { getMissionInterviewSession, cleanupMissionInterviewSession } from "./mission-interview.js";
@@ -4155,7 +4155,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    * session that finished while the modal was closed remains selectable.
    * Pass `includeArchived=1` (only meaningful with `includeCompleted`) to
    * also surface sessions the user has explicitly archived.
-   * Query: { projectId?, includeCompleted?, includeArchived? }
+   * Query: { projectId?, includeCompleted?, includeArchived?, type? }
    */
   router.get("/ai-sessions", async (req, res) => {
     if (!aiSessionStore) {
@@ -4167,8 +4167,18 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       req.query.includeCompleted === "1" || req.query.includeCompleted === "true";
     const includeArchived =
       req.query.includeArchived === "1" || req.query.includeArchived === "true";
+    const requestedType = typeof req.query.type === "string" ? req.query.type : undefined;
+    const type = requestedType && ["planning", "subtask", "mission_interview", "milestone_interview", "slice_interview"].includes(requestedType)
+      ? requestedType as AiSessionType
+      : undefined;
+    /*
+    FNXC:PlanningMode 2026-07-15-00:00:
+    FN-7994 lets the Planning sidebar request only planning summaries, avoiding
+    non-planning inputPayload transfer. Invalid or absent values preserve the
+    historical all-types response.
+    */
     const sessions = includeCompleted
-      ? await aiSessionStore.listAll(projectId, { includeArchived })
+      ? await aiSessionStore.listAll(projectId, { includeArchived, type })
       : await aiSessionStore.listActive(projectId);
     res.json({ sessions });
   });

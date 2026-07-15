@@ -220,17 +220,22 @@ export async function listActiveAiSessions(
 /**
  * List all sessions (including complete), optionally filtered by projectId.
  * By default excludes archived. Returns summary rows with inputPayload.
+ *
+ * FNXC:PlanningMode 2026-07-15-00:00:
+ * FN-7994 narrows the Planning sidebar's refresh to planning rows before
+ * inputPayload blobs cross the API boundary; calls without a type stay broad.
  */
 export async function listAllAiSessions(
   handle: QueryHandle,
   projectId?: string,
-  options?: { includeArchived?: boolean },
+  options?: { includeArchived?: boolean; type?: AiSessionType },
 ): Promise<unknown[]> {
   const conditions: ReturnType<typeof eq>[] = [];
   if (!options?.includeArchived) {
     conditions.push(eq(schema.project.aiSessions.archived, 0));
   }
   if (projectId) conditions.push(eq(schema.project.aiSessions.projectId, projectId));
+  if (options?.type) conditions.push(eq(schema.project.aiSessions.type, options.type));
   const query = handle
     .select({
       id: schema.project.aiSessions.id,

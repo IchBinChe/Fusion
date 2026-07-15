@@ -9624,12 +9624,13 @@ export function parseConversationHistory(raw: string): ConversationHistoryEntry[
 
 export async function fetchAiSessions(
   projectId?: string,
-  options?: { includeCompleted?: boolean; includeArchived?: boolean },
+  options?: { includeCompleted?: boolean; includeArchived?: boolean; type?: AiSessionSummary["type"] },
 ): Promise<AiSessionSummary[]> {
   const search = new URLSearchParams();
   if (projectId) search.set("projectId", projectId);
   if (options?.includeCompleted) search.set("includeCompleted", "1");
   if (options?.includeArchived) search.set("includeArchived", "1");
+  if (options?.type) search.set("type", options.type);
   const qs = search.toString();
   const res = await fetch(buildApiUrl(`/ai-sessions${qs ? `?${qs}` : ""}`), {
     headers: withTokenHeader(),

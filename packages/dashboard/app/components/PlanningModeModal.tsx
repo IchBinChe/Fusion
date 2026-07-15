@@ -87,6 +87,8 @@ interface PlanningModeModalProps {
   workflowId?: string | null;
   /** When set, reconnect to a persisted background session instead of starting fresh */
   resumeSessionId?: string;
+  /** Already-loaded active planning sessions used to populate the sidebar before its full refresh. */
+  initialSessions?: AiSessionSummary[];
   /** Render without the full-screen modal chrome when Planning Mode is mounted as a top-level app view. */
   presentation?: ModalPresentation;
 }
@@ -294,7 +296,7 @@ function parseModelSelection(value: string): { provider?: string; modelId?: stri
   };
 }
 
-export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreated, tasks, initialPlan: initialPlanProp, projectId, workflowId, resumeSessionId, presentation = "modal" }: PlanningModeModalProps) {
+export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreated, tasks, initialPlan: initialPlanProp, projectId, workflowId, resumeSessionId, initialSessions, presentation = "modal" }: PlanningModeModalProps) {
   const { t } = useTranslation("app");
   // FNXC:EmbeddedPresentation 2026-06-22-12:00: shared hook supplies isEmbedded (DOM branching) plus the modal-only gates.
   // Note: the Escape handler intentionally does NOT gate on embedded here — embedded planning preserves its historical
@@ -439,7 +441,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   }>({});
 
   // Sidebar list state
-  const [planningSessions, setPlanningSessions] = useState<AiSessionSummary[]>([]);
+  const [planningSessions, setPlanningSessions] = useState<AiSessionSummary[]>(() => dedupeSessionsById(initialSessions ?? []));
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(resumeSessionId ?? null);
   // Mobile: when the modal is narrow, only one pane is visible at a time.
@@ -1347,6 +1349,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       const all = await fetchAiSessions(projectId, {
         includeCompleted: true,
         includeArchived: showArchived,
+        type: "planning",
       });
       const planning = all.filter((s) => s.type === "planning");
       setPlanningSessions(dedupeSessionsById(planning));
@@ -3630,6 +3633,26 @@ function PlanningSessionList({
       The embedded Planning view reads as a real two-pane layout matching Missions: the left sidebar is a full-height flex column whose session list scrolls and whose primary action ("New session") is pinned to a bottom footer (parity with MissionManager's mission-manager__sidebar-footer + sidebar-cta). The header that previously held the New session button is removed so the list owns the top of the sidebar like the Missions list.
       */}
       <div className="planning-sidebar-list">
+        {/*
+        FNXC:PlanningMode 2026-07-15-00:00:
+        FN-7994 requires the sidebar to never become an empty pane during its
+        authoritative session refresh. Skeleton rows provide immediate loading
+        feedback, while existing rows remain visible during refreshes.
+        */}
+        {loading && sessions.length === 0 && (
+          <div className="planning-sidebar-skeleton" data-testid="planning-sidebar-skeleton" aria-label={t("planning.loadingSessions", "Loading planning sessions")}>
+            {Array.from({ length: 4 }, (_, index) => (
+              <div key={index} className="planning-sidebar-skeleton-row" aria-hidden="true">
+                <span className="planning-sidebar-skeleton-icon" />
+                <span className="planning-sidebar-skeleton-copy">
+                  <span className="planning-sidebar-skeleton-title" />
+                  <span className="planning-sidebar-skeleton-meta" />
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
         {sessions.length === 0 && !loading && (
           <div className="planning-sidebar-empty text-muted">
             {t("planning.noSavedSessions", "No saved sessions yet. Start one on the right to see it here.")}

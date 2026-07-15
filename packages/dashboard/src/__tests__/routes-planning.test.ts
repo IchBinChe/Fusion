@@ -4118,6 +4118,35 @@ describe("Saturated-slot regression: heartbeat wake routes", () => {
   });
 });
 
+describe("GET /api/ai-sessions type filtering", () => {
+  it("returns planning rows for a valid type filter and preserves all types when omitted", async () => {
+    const sessions = [
+      { id: "planning-1", type: "planning", status: "complete", title: "Plan", projectId: null, updatedAt: "2026-07-15T00:00:00.000Z", archived: false },
+      { id: "subtask-1", type: "subtask", status: "complete", title: "Breakdown", projectId: null, updatedAt: "2026-07-15T00:00:00.000Z", archived: false },
+    ];
+    const mockAiSessionStore = {
+      listAll: vi.fn((_projectId: string | undefined, options?: { includeArchived?: boolean; type?: string }) =>
+        options?.type ? sessions.filter((session) => session.type === options.type) : sessions,
+      ),
+      listActive: vi.fn(() => []),
+    };
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(createMockStore(), { aiSessionStore: mockAiSessionStore as any }));
+
+    const filtered = await REQUEST(app, "GET", "/api/ai-sessions?includeCompleted=1&type=planning");
+    expect(filtered.status).toBe(200);
+    expect(filtered.body.sessions).toEqual([expect.objectContaining({ id: "planning-1", type: "planning" })]);
+    expect(mockAiSessionStore.listAll).toHaveBeenCalledWith(undefined, { includeArchived: false, type: "planning" });
+
+    const unfiltered = await REQUEST(app, "GET", "/api/ai-sessions?includeCompleted=1");
+    expect(unfiltered.status).toBe(200);
+    expect(unfiltered.body.sessions).toHaveLength(2);
+    expect(unfiltered.body.sessions.map((session: { type: string }) => session.type)).toEqual(["planning", "subtask"]);
+    expect(mockAiSessionStore.listAll).toHaveBeenLastCalledWith(undefined, { includeArchived: false, type: undefined });
+  });
+});
+
 describe("DELETE /api/ai-sessions/cleanup", () => {
   let store: TaskStore;
 

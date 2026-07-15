@@ -1392,6 +1392,7 @@ function AppInner() {
     isRemote,
     remoteData,
     tasks,
+    bgPlanningSessions,
     workflowSteps,
     subscribePluginEvents,
     openDetailTask,

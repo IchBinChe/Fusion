@@ -357,6 +357,8 @@ export async function raceWithTimeoutAndAbort<T>(
  * Wrap every extension tool execute with timeout + AbortSignal so a wedged store call cannot park the agent forever (FN-7956 fn_task_show hang).
  * Errors become isError tool results so the model can continue rather than leaving the turn blocked on an open tool call.
  * FNXC:MergeQueue 2026-07-15-11:20: Timeout budget is per-tool (resolveExtensionToolTimeoutMs) unless an explicit timeoutMs is passed.
+ * FNXC:MergeQueue 2026-07-15-11:50:
+ * On timeout, abort a linked AbortController so tools that honor signal (e.g. fn_skills_install npx) actually stop work instead of racing forever after the wrap rejects.
  */
 export function wrapExtensionToolExecute<TArgs extends unknown[], TResult>(
   toolName: string,
@@ -369,22 +371,45 @@ export function wrapExtensionToolExecute<TArgs extends unknown[], TResult>(
 }> {
   return async (...args: TArgs) => {
     // ExtensionAPI execute signature: (toolCallId, params, signal?, onUpdate?, ctx?)
-    const signal = (args[2] instanceof AbortSignal ? args[2] : undefined) as AbortSignal | undefined;
+    const parentSignal = (args[2] instanceof AbortSignal ? args[2] : undefined) as AbortSignal | undefined;
     const params = args[1];
     const budgetMs =
       timeoutMs !== undefined && Number.isFinite(timeoutMs) && timeoutMs > 0
         ? timeoutMs
         : resolveExtensionToolTimeoutMs(toolName, params);
+
+    const controller = new AbortController();
+    const onParentAbort = (): void => {
+      controller.abort();
+    };
+    if (parentSignal?.aborted) {
+      controller.abort();
+    } else {
+      parentSignal?.addEventListener("abort", onParentAbort, { once: true });
+    }
+
+    const invokeArgs = [...args] as unknown as unknown[];
+    while (invokeArgs.length < 2) invokeArgs.push(undefined);
+    if (invokeArgs.length === 2) {
+      invokeArgs.push(controller.signal);
+    } else {
+      invokeArgs[2] = controller.signal;
+    }
+
     try {
-      return await extensionToolSignal.run(signal, () =>
+      return await extensionToolSignal.run(controller.signal, () =>
         raceWithTimeoutAndAbort(
-          Promise.resolve(execute(...args)),
+          Promise.resolve(execute(...(invokeArgs as TArgs))),
           budgetMs,
-          signal,
+          controller.signal,
           toolName,
         ),
       );
     } catch (error) {
+      // Ensure nested work observing the tool signal stops on budget expiry (not only on parent abort).
+      if (!controller.signal.aborted) {
+        controller.abort();
+      }
       if (isAbortError(error)) {
         console.warn(`[fusion-extension] ${toolName} aborted`);
         return {
@@ -404,6 +429,8 @@ export function wrapExtensionToolExecute<TArgs extends unknown[], TResult>(
         details: { error: message },
         isError: true as const,
       };
+    } finally {
+      parentSignal?.removeEventListener("abort", onParentAbort);
     }
   };
 }
@@ -505,6 +532,7 @@ export function setHostTaskStore(projectRoot: string, store: TaskStore): void {
 /**
  * Remove host-injected store entries without closing them (host owns lifecycle).
  * Pass projectRoot to clear one project; omit to clear all external entries.
+ * FNXC:MergeQueue 2026-07-15-11:50: Full clear only drops external entries and their boot metadata — never wipe inflight/cooldown for non-host CLI boots that may still be active in the same process.
  */
 export function clearHostTaskStores(projectRoot?: string): void {
   if (projectRoot) {
@@ -516,10 +544,16 @@ export function clearHostTaskStores(projectRoot?: string): void {
     return;
   }
   for (const [key, entry] of [...storeCache.entries()]) {
-    if (entry.external) storeCache.delete(key);
+    if (!entry.external) continue;
+    storeCache.delete(key);
+    storeBootInflight.delete(key);
+    storeBootFailureCooldown.delete(key);
   }
-  storeBootInflight.clear();
-  storeBootFailureCooldown.clear();
+}
+
+/** @internal Test seam: read cached store for a project root after host injection / boot. */
+export function __peekCachedStoreForTesting(projectRoot: string): TaskStore | undefined {
+  return storeCache.get(resolveProjectRoot(projectRoot))?.store;
 }
 
 /**
@@ -2098,9 +2132,9 @@ export default function kbExtension(pi: ExtensionAPI) {
       }),
       limit: Type.Optional(
         Type.Number({
-          description: "Max issues to import (default: 30, max: 100)",
+          description: "Max issues to import (default: 30, max: 50)",
           minimum: 1,
-          maximum: 100,
+          maximum: 50,
         })
       ),
       labels: Type.Optional(
@@ -2290,9 +2324,9 @@ export default function kbExtension(pi: ExtensionAPI) {
       }),
       limit: Type.Optional(
         Type.Number({
-          description: "Max issues to show (default: 30, max: 100)",
+          description: "Max issues to show (default: 30, max: 50)",
           minimum: 1,
-          maximum: 100,
+          maximum: 50,
         })
       ),
       labels: Type.Optional(
@@ -2386,7 +2420,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     label: "fn: Browse GitLab Project Issues",
     description: "List GitLab project issues from the configured GitLab instance.",
     promptSnippet: "Browse GitLab project issues",
-    parameters: Type.Object({ project: Type.String({ description: "GitLab project path or numeric ID" }), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })), labels: Type.Optional(Type.Array(Type.String())) }),
+    parameters: Type.Object({ project: Type.String({ description: "GitLab project path or numeric ID" }), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 50 })), labels: Type.Optional(Type.Array(Type.String())) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const { client } = await createGitLabClient(ctx);
       const issues = await client.listProjectIssues(params.project, { limit: clampImportBrowseLimit(params.limit, 30), labels: params.labels });
@@ -2399,7 +2433,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     label: "fn: Import GitLab Project Issues",
     description: "Import GitLab project issues as Fusion tasks using configured GitLab HTTP API auth.",
     promptSnippet: "Import GitLab project issues",
-    parameters: Type.Object({ project: Type.String({ description: "GitLab project path or numeric ID" }), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })), labels: Type.Optional(Type.Array(Type.String())) }),
+    parameters: Type.Object({ project: Type.String({ description: "GitLab project path or numeric ID" }), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 50 })), labels: Type.Optional(Type.Array(Type.String())) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const { client } = await createGitLabClient(ctx);
       const issues = await client.listProjectIssues(params.project, { limit: clampImportBrowseLimit(params.limit, 30), labels: params.labels });
@@ -2413,7 +2447,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     label: "fn: Browse GitLab Group Issues",
     description: "List GitLab group issues while preserving each issue's originating project identity.",
     promptSnippet: "Browse GitLab group issues",
-    parameters: Type.Object({ group: Type.String({ description: "GitLab group path or numeric ID" }), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })), labels: Type.Optional(Type.Array(Type.String())) }),
+    parameters: Type.Object({ group: Type.String({ description: "GitLab group path or numeric ID" }), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 50 })), labels: Type.Optional(Type.Array(Type.String())) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const { client } = await createGitLabClient(ctx);
       const issues = await client.listGroupIssues(params.group, { limit: clampImportBrowseLimit(params.limit, 30), labels: params.labels });
@@ -2426,7 +2460,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     label: "fn: Import GitLab Group Issues",
     description: "Import GitLab group issues as Fusion tasks using each issue's originating project identity.",
     promptSnippet: "Import GitLab group issues",
-    parameters: Type.Object({ group: Type.String({ description: "GitLab group path or numeric ID" }), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })), labels: Type.Optional(Type.Array(Type.String())) }),
+    parameters: Type.Object({ group: Type.String({ description: "GitLab group path or numeric ID" }), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 50 })), labels: Type.Optional(Type.Array(Type.String())) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const { client } = await createGitLabClient(ctx);
       const issues = await client.listGroupIssues(params.group, { limit: clampImportBrowseLimit(params.limit, 30), labels: params.labels });
@@ -2440,7 +2474,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     label: "fn: Browse GitLab Merge Requests",
     description: "List GitLab project merge requests from the configured GitLab instance.",
     promptSnippet: "Browse GitLab merge requests",
-    parameters: Type.Object({ project: Type.String({ description: "GitLab project path or numeric ID" }), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })), labels: Type.Optional(Type.Array(Type.String())) }),
+    parameters: Type.Object({ project: Type.String({ description: "GitLab project path or numeric ID" }), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 50 })), labels: Type.Optional(Type.Array(Type.String())) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const { client } = await createGitLabClient(ctx);
       const mergeRequests = await client.listMergeRequests(params.project, { limit: clampImportBrowseLimit(params.limit, 30), labels: params.labels });
@@ -2453,7 +2487,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     label: "fn: Import GitLab Merge Requests",
     description: "Import GitLab project merge requests as Fusion review tasks using configured GitLab HTTP API auth.",
     promptSnippet: "Import GitLab merge requests",
-    parameters: Type.Object({ project: Type.String({ description: "GitLab project path or numeric ID" }), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })), labels: Type.Optional(Type.Array(Type.String())) }),
+    parameters: Type.Object({ project: Type.String({ description: "GitLab project path or numeric ID" }), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 50 })), labels: Type.Optional(Type.Array(Type.String())) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const { client } = await createGitLabClient(ctx);
       const mergeRequests = await client.listMergeRequests(params.project, { limit: clampImportBrowseLimit(params.limit, 30), labels: params.labels });
@@ -5405,20 +5439,32 @@ export default function kbExtension(pi: ExtensionAPI) {
         stderr += data.toString();
       });
 
-      const killChild = () => {
+      /*
+      FNXC:MergeQueue 2026-07-15-11:50:
+      Prefer SIGTERM first; escalate to SIGKILL after a short grace so npx can flush, while still guaranteeing orphans do not survive tool timeout/abort.
+      */
+      let killEscalation: ReturnType<typeof setTimeout> | undefined;
+      const killChild = (force = false) => {
         try {
-          child.kill("SIGTERM");
+          child.kill(force ? "SIGKILL" : "SIGTERM");
         } catch {
           /* ignore */
         }
-        try {
-          child.kill("SIGKILL");
-        } catch {
-          /* ignore */
+        if (!force && killEscalation === undefined && child.exitCode === null && child.signalCode === null) {
+          killEscalation = setTimeout(() => {
+            try {
+              child.kill("SIGKILL");
+            } catch {
+              /* ignore */
+            }
+          }, 1_000);
+          if (typeof killEscalation === "object" && killEscalation && "unref" in killEscalation) {
+            killEscalation.unref();
+          }
         }
       };
 
-      const onAbort = () => killChild();
+      const onAbort = () => killChild(false);
       signal?.addEventListener("abort", onAbort, { once: true });
 
       let exitCode: number;
@@ -5433,7 +5479,11 @@ export default function kbExtension(pi: ExtensionAPI) {
         });
       } finally {
         signal?.removeEventListener("abort", onAbort);
-        killChild();
+        if (killEscalation !== undefined) clearTimeout(killEscalation);
+        // Process already exited on the success path; kill is a no-op. On hang/abort, ensure cleanup.
+        if (child.exitCode === null && child.signalCode === null) {
+          killChild(true);
+        }
       }
 
       if (signal?.aborted) {

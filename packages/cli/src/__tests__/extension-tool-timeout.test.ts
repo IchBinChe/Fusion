@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   __clearExtensionStoreBootStateForTesting,
+  __peekCachedStoreForTesting,
   clampImportBrowseLimit,
   clearHostTaskStores,
   raceWithTimeoutAndAbort,
@@ -50,13 +51,33 @@ describe("clampImportBrowseLimit", () => {
 });
 
 describe("setHostTaskStore", () => {
-  it("is available as a production injection seam for dashboard/serve/daemon", () => {
+  it("caches the host store so getStore reuses it without dual-boot", () => {
     /*
-    FNXC:MergeQueue 2026-07-15-11:40:
-    Host injection must be a real export so dashboard/serve can share the engine TaskStore without dual-boot.
+    FNXC:MergeQueue 2026-07-15-11:50:
+    Host injection must place the store under resolveProjectRoot so tool getStore hits the external entry.
     */
-    expect(typeof setHostTaskStore).toBe("function");
-    expect(typeof clearHostTaskStores).toBe("function");
+    const fakeStore = { id: "host-store" } as unknown as import("@fusion/core").TaskStore;
+    const root = "/tmp/fusion-host-store-test";
+    setHostTaskStore(root, fakeStore);
+    expect(__peekCachedStoreForTesting(root)).toBe(fakeStore);
+    clearHostTaskStores(root);
+    expect(__peekCachedStoreForTesting(root)).toBeUndefined();
+  });
+});
+
+describe("wrapExtensionToolExecute timeout abort", () => {
+  it("aborts the tool signal when the outer budget expires so nested work can stop", async () => {
+    let seenSignal: AbortSignal | undefined;
+    const execute = vi.fn((_id: string, _params: unknown, signal?: AbortSignal) => {
+      seenSignal = signal;
+      return new Promise(() => {
+        /* never settles */
+      });
+    });
+    const wrapped = wrapExtensionToolExecute("fn_budget", execute, 30);
+    const result = await wrapped("id", {}, undefined);
+    expect(result).toMatchObject({ isError: true });
+    expect(seenSignal?.aborted).toBe(true);
   });
 });
 

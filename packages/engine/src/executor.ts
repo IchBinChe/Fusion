@@ -13,7 +13,7 @@ import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, AsyncMissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode, WorkflowIrNodeKind, WorkflowStepResult as CoreWorkflowStepResult, ThinkingLevel } from "@fusion/core";
 import { getUnmetSchedulingDependencies } from "./scheduler.js";
-import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker, allowsAutoMergeProcessing, resolveEffectiveAutoMerge, isLiveSharedBranchGroupMemberIntegration, resolveMaxAutoMergeRetries, resolveOptionalStepRevisionBudget, resolveOptionalReviewRevisionBudget, COMPLETION_SUMMARY_NODE_ID, upsertWorkflowStepResult, AWAITING_APPROVAL_PAUSE_REASON, THINKING_LEVELS, AgentStore } from "@fusion/core";
+import { RetryStormError, serializeRetryStormError, isExperimentalFeatureEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker, allowsAutoMergeProcessing, resolveEffectiveAutoMerge, isLiveSharedBranchGroupMemberIntegration, resolveMaxAutoMergeRetries, resolveOptionalStepRevisionBudget, resolveOptionalReviewRevisionBudget, COMPLETION_SUMMARY_NODE_ID, upsertWorkflowStepResult, AWAITING_APPROVAL_PAUSE_REASON, THINKING_LEVELS, AgentStore } from "@fusion/core";
 import { finalizeProvenAutoMergeTask } from "./auto-merge-finalization.js";
 import { mergeEffectiveSettings } from "./effective-settings.js";
 import { moveTaskToReplanColumn, resolveReplanTargetColumn } from "./replan-target.js";
@@ -94,7 +94,6 @@ import {
   resolveValidatorFallbackThinkingLevel,
 } from "./agent-session-helpers.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
-import type { SkillSelectionContext } from "./skill-resolver.js";
 import { assertMcpResolutionSucceeded, resolveMcpServersForStore } from "./mcp-resolution.js";
 import { reviewStep, proseSignalsClearApproval, extractJsonObjectCandidates, ReviewerProviderError, type ReviewVerdict, type ReviewResult } from "./reviewer.js";
 import { buildUserCommentsPromptSection, selectUserCommentsForAgentContext } from "./agent-user-comments.js";
@@ -277,94 +276,25 @@ export {
   taskLogParams,
 } from "./agent-tools.js";
 
-export const AGENT_BROWSER_NAVIGATION_SKILL_ID = "agent-browser-navigation";
-
-export interface AgentBrowserAvailabilityProbeResult {
-  available: boolean;
-  version?: string;
-  reason?: string;
-}
-
-type AgentBrowserExec = (
-  command: string,
-  options: { encoding: BufferEncoding; timeout: number; maxBuffer: number; env?: NodeJS.ProcessEnv; cwd?: string },
-) => Promise<{ stdout: string; stderr: string }>;
-
-function isAgentBrowserNotFoundError(error: unknown): boolean {
-  const err = error as { code?: unknown; stderr?: unknown; message?: unknown } | null;
-  const code = typeof err?.code === "string" || typeof err?.code === "number" ? String(err.code) : undefined;
-  if (code === "ENOENT" || code === "127") return true;
-  const combined = `${typeof err?.stderr === "string" ? err.stderr : ""}\n${typeof err?.message === "string" ? err.message : ""}`.toLowerCase();
-  return combined.includes("agent-browser") && (combined.includes("not found") || combined.includes("command not found"));
-}
-
-function isAgentBrowserProbeTimeout(error: unknown): boolean {
-  const err = error as { code?: unknown; killed?: unknown; signal?: unknown; message?: unknown } | null;
-  return err?.code === "ETIMEDOUT"
-    || err?.killed === true
-    || err?.signal === "SIGTERM"
-    || (typeof err?.message === "string" && err.message.toLowerCase().includes("timed out"));
-}
-
-/**
- * Probe the agent-browser CLI without making browser verification fatal.
- *
- * FNXC:WorkflowBrowserVerification 2026-06-27-13:20:
- * Browser Verification needs an actionable signal when `agent-browser` is absent or hung. Keep this async, bounded, and injectable so the executor logs availability without blocking or requiring the plugin at import time.
- */
-export async function probeAgentBrowserAvailability(
-  execImpl: AgentBrowserExec = execAsync as AgentBrowserExec,
-  opts?: { timeoutMs?: number; maxBuffer?: number; env?: NodeJS.ProcessEnv; cwd?: string },
-): Promise<AgentBrowserAvailabilityProbeResult> {
-  try {
-    const { stdout, stderr } = await execImpl("agent-browser --version", {
-      encoding: "utf-8",
-      timeout: Math.min(Math.max(opts?.timeoutMs ?? 5_000, 1_000), 10_000),
-      maxBuffer: opts?.maxBuffer ?? 64 * 1024,
-      ...(opts?.env ? { env: opts.env } : {}),
-      ...(opts?.cwd ? { cwd: opts.cwd } : {}),
-    });
-    const version = (stdout.trim() || stderr.trim() || "unknown").split("\n")[0]?.trim() || "unknown";
-    return { available: true, version };
-  } catch (error) {
-    if (isAgentBrowserNotFoundError(error)) {
-      return { available: false, reason: "not installed" };
-    }
-    if (isAgentBrowserProbeTimeout(error)) {
-      return { available: false, reason: "probe timed out" };
-    }
-    const reason = error instanceof Error ? error.message : String(error);
-    return { available: false, reason };
-  }
-}
-
-/** Merge the agent-browser navigation skill into a workflow-step session. */
-export function augmentSessionSkillsForBrowserStep(
-  skillSelection: SkillSelectionContext | undefined,
-  projectRootDir: string,
-): SkillSelectionContext {
-  const existing = skillSelection?.requestedSkillNames ?? [];
-  return {
-    projectRootDir: skillSelection?.projectRootDir ?? projectRootDir,
-    sessionPurpose: skillSelection?.sessionPurpose ?? "executor",
-    requestedSkillNames: [...new Set([...existing, AGENT_BROWSER_NAVIGATION_SKILL_ID])],
-  };
-}
+export {
+  AGENT_BROWSER_NAVIGATION_SKILL_ID,
+  probeAgentBrowserAvailability,
+  augmentSessionSkillsForBrowserStep,
+  formatAgentBrowserAvailabilityLog,
+} from "./executor/browser-probe.js";
+export type { AgentBrowserAvailabilityProbeResult } from "./executor/browser-probe.js";
+import {
+  probeAgentBrowserAvailability,
+  augmentSessionSkillsForBrowserStep,
+  formatAgentBrowserAvailabilityLog,
+} from "./executor/browser-probe.js";
+import type { AgentBrowserExec } from "./executor/browser-probe.js";
 
 function mergeAdditionalSkillPaths(...pathGroups: Array<string[] | undefined>): string[] | undefined {
   const merged = Array.from(new Set(pathGroups.flatMap((paths) => paths ?? [])));
   return merged.length > 0 ? merged : undefined;
 }
 
-export function formatAgentBrowserAvailabilityLog(result: AgentBrowserAvailabilityProbeResult): string {
-  if (result.available) {
-    return `[browser-verification] agent-browser available — version ${result.version ?? "unknown"}`;
-  }
-  if (result.reason === "probe timed out") {
-    return "[browser-verification] agent-browser availability probe timed out — the step relies on the agent-browser CLI; continuing so the step can fast-bail or report its own failure.";
-  }
-  return "[browser-verification] agent-browser not found on PATH — the step relies on the agent-browser CLI; install the agent-browser plugin/binary. Continuing; the step may fast-bail or fail.";
-}
 const yieldEventLoop = (): Promise<void> => new Promise((resolve) => setImmediateCb(resolve));
 
 function getPromptSection(prompt: string, heading: string): string {
@@ -503,15 +433,21 @@ const MAX_WORKFLOW_STEP_RETRIES = 3;
 const MAX_TASK_DONE_SESSION_RETRIES = 3;
 /** Maximum todo requeues after exhausting in-session fn_task_done retries. */
 const MAX_TASK_DONE_REQUEUE_RETRIES = 3;
-/** Maximum no-progress execute-node self-requeues before terminalizing the loop. */
-export const MAX_EXECUTE_REQUEUE_LOOP_CYCLES = 6;
-/** Low-water mark for surfacing a visible warning before loop terminalization. */
-export const EXECUTE_REQUEUE_LOOP_VISIBLE_THRESHOLD = 3;
-/**
- * Maximum bounded retries for the narrow resume-after-restart graph transient.
- * Budget exhaustion falls through to terminal status:"failed" so FN-5704's
- * self-healing anti-loop exemption remains intact for genuine graph failures.
- */
+export {
+  MAX_EXECUTE_REQUEUE_LOOP_CYCLES,
+  EXECUTE_REQUEUE_LOOP_VISIBLE_THRESHOLD,
+  buildExecuteRequeueLoopSignature,
+  isTransientMissingTaskJsonError,
+} from "./executor/requeue-loop.js";
+import {
+  MAX_EXECUTE_REQUEUE_LOOP_CYCLES,
+  EXECUTE_REQUEUE_LOOP_VISIBLE_THRESHOLD,
+  buildExecuteRequeueLoopHighWaterSignature,
+  isInvalidAssistantContinuationErrorMessage,
+  isTransientMissingTaskJsonError,
+  TRANSIENT_WORKTREE_TASK_JSON_ENOENT_PATTERN,
+} from "./executor/requeue-loop.js";
+
 const MAX_TRANSIENT_GRAPH_RESUME_RETRIES = 2;
 const TRANSIENT_GRAPH_RESUME_RETRY_BACKOFF_MS = process.env.VITEST || process.env.NODE_ENV === "test" ? 0 : 1_000;
 /**
@@ -547,88 +483,6 @@ const WORKFLOW_RERUN_WATCHDOG_MS = 15_000;
 const LOOP_COMPACTION_TIMEOUT_MS = 60_000;
 
 const TASK_DONE_REFUSAL_SUFFIX = "Either finish the work and resubmit, or do not call fn_task_done — exit the session and the engine will requeue.";
-
-function countExecuteRequeueTerminalSteps(live: TaskDetail): number {
-  return live.steps?.filter((step) => step.status === "done" || step.status === "skipped").length ?? 0;
-}
-
-function parseExecuteRequeueLoopProgressSignature(signature: string | null | undefined): { terminalStepCount: number; totalSteps: number } | null {
-  if (!signature) return null;
-  try {
-    const parsed = JSON.parse(signature) as { terminalStepCount?: unknown; totalSteps?: unknown };
-    if (typeof parsed.terminalStepCount !== "number" || typeof parsed.totalSteps !== "number") return null;
-    return {
-      terminalStepCount: parsed.terminalStepCount,
-      totalSteps: parsed.totalSteps,
-    };
-  } catch {
-    return null;
-  }
-}
-
-export function buildExecuteRequeueLoopSignature(live: TaskDetail): string {
-  /*
-  FNXC:WorkflowLifecycle 2026-07-13-07:42:
-  FN-7941: human reports #2043/#2045/#2046/#2047 showed that FN-7863's raw currentStep/status signature could drift on every execute self-requeue while no step reached a terminal state, resetting the loop counter to 1 forever. Anchor the bounded streak to monotonic terminal-step progress instead: pending/in-progress/currentStep oscillation still counts toward exhaustion, while real done/skipped progress resets the streak and FN-7926 still diverts completed-blocked work before this guard can fail it.
-  */
-  return JSON.stringify({
-    terminalStepCount: countExecuteRequeueTerminalSteps(live),
-    totalSteps: live.steps?.length ?? 0,
-  });
-}
-
-function buildExecuteRequeueLoopHighWaterSignature(live: TaskDetail, previousSignature: string | null | undefined): { signature: string; madeForwardProgress: boolean } {
-  // FNXC:WorkflowLifecycle 2026-07-13-08:20: derive current terminal-step
-  // progress by parsing buildExecuteRequeueLoopSignature's own output rather
-  // than duplicating countExecuteRequeueTerminalSteps/totalSteps inline, so
-  // the two functions cannot silently drift out of sync.
-  const current = parseExecuteRequeueLoopProgressSignature(buildExecuteRequeueLoopSignature(live));
-  const currentTerminalStepCount = current?.terminalStepCount ?? countExecuteRequeueTerminalSteps(live);
-  const totalSteps = current?.totalSteps ?? (live.steps?.length ?? 0);
-  const previous = parseExecuteRequeueLoopProgressSignature(previousSignature);
-  const previousTerminalStepCount = previous?.terminalStepCount ?? currentTerminalStepCount;
-  const madeForwardProgress = previous != null && currentTerminalStepCount > previousTerminalStepCount;
-  return {
-    madeForwardProgress,
-    signature: JSON.stringify({
-      terminalStepCount: Math.max(previousTerminalStepCount, currentTerminalStepCount),
-      totalSteps,
-    }),
-  };
-}
-
-const INVALID_ASSISTANT_CONTINUATION_PATTERN = /cannot continue from message role:\s*assistant/i;
-
-function isInvalidAssistantContinuationErrorMessage(errorMessage: string): boolean {
-  return INVALID_ASSISTANT_CONTINUATION_PATTERN.test(errorMessage);
-}
-
-const TRANSIENT_WORKTREE_TASK_JSON_ENOENT_PATTERN = /ENOENT:\s+no such file or directory,\s+open\s+'([^']+\/\.fusion\/tasks\/([^/]+)\/task\.json)'/;
-
-export function isTransientMissingTaskJsonError(error: unknown, task: Pick<Task, "id" | "worktree">): boolean {
-  if (error instanceof TaskDeletedError) {
-    return false;
-  }
-  const message = typeof error === "string"
-    ? error
-    : error instanceof Error
-      ? error.message
-      : "";
-  const match = TRANSIENT_WORKTREE_TASK_JSON_ENOENT_PATTERN.exec(message);
-  if (!match) {
-    return false;
-  }
-  const [, filePath, taskIdFromPath] = match;
-  if (taskIdFromPath !== task.id) {
-    return false;
-  }
-  if (typeof task.worktree !== "string" || task.worktree.length === 0) {
-    return false;
-  }
-  const normalizedWorktree = resolvePath(task.worktree);
-  const normalizedTaskJsonPath = resolvePath(filePath);
-  return normalizedTaskJsonPath.startsWith(`${normalizedWorktree}/`);
-}
 
 export const DISSENT_PATTERNS: RegExp[] = [
   /\btask (is|was)(?: not|n['’]?t) complete\b/i,
@@ -19202,44 +19056,12 @@ function formatCommentForInjection(comment: import("@fusion/core").SteeringComme
   return `📣 **New feedback** — ${timestamp} (${comment.author}):\n\n${comment.text}\n\nPlease adjust your approach based on this feedback.`;
 }
 
-/**
- * Result of a pseudo-pause detection check.
- */
-export interface PseudoPauseResult {
-  /** Detection method: "regex" if a regex pattern matched, "structural" for structural
-   * heuristics, or "none" if no pseudo-pause was detected. */
-  kind: "regex" | "structural" | "none";
-  /** The matched text or pattern description when kind is not "none". */
-  matched?: string;
-}
-
 function hasNonTerminalWorkflowSteps(task: Pick<TaskDetail, "steps">): boolean {
   return task.steps.length > 0 && task.steps.some((step) => step.status !== "done" && step.status !== "skipped");
 }
 
-/*
-FNXC:ReviewLeniency 2026-07-02-01:00:
-Retrying a task must clear PRIOR FAILURE states so the retry starts clean — including on optional gate nodes like code-review / browser-verification. Results are upserted by node id, so a re-running node overwrites its own stale entry, but a send-back-for-fix leaves the failed entry in place until (and unless) that node re-runs; meanwhile self-healing's failed-pre-merge scan and the dashboard both see a stale failure, and a node that is skipped/relaxed on the retry never clears it. Drop every terminal failure result (`failed`/`advisory_failure`) on retry while keeping `passed`/`skipped`/`pending` evidence (so a previously-passed Plan Review is not re-run). Returns the same array reference when nothing changed so callers can skip a no-op write.
-
-FNXC:WorkflowStepResults 2026-07-09-00:30:
-FN-7727 explicit decision: an explicit user/agent RETRY remains a clean-slate —
-it MAY drop the current `failed`/`advisory_failure` entry entirely (along with
-any `priorAttempts` history it carried), since retry is deliberately
-discarding prior failure state, not preserving it. This is DIFFERENT from the
-self-healing recovery re-run path (`recoverFailedPreMergeWorkflowStep` /
-`recoverReviewTasksWithFailedPreMergeSteps`), which does NOT call this
-function — that path re-runs the SAME node in place and its result goes
-through `upsertWorkflowStepResult`, which is where prior-attempt history is
-preserved. This filter must not throw on entries carrying `priorAttempts`
-(it only reads `status`, so `priorAttempts` is inert here regardless).
-*/
-export function clearTerminalWorkflowStepFailures(
-  results: CoreWorkflowStepResult[] | undefined,
-): CoreWorkflowStepResult[] {
-  const current = results ?? [];
-  const kept = current.filter((result) => result.status !== "failed" && result.status !== "advisory_failure");
-  return kept.length === current.length ? current : kept;
-}
+export { clearTerminalWorkflowStepFailures } from "./executor/workflow-step-failures.js";
+import { clearTerminalWorkflowStepFailures } from "./executor/workflow-step-failures.js";
 
 function workflowStepResultPassed(task: Pick<Task, "workflowStepResults"> | undefined, workflowStepId: string): boolean {
   const results = task?.workflowStepResults ?? [];
@@ -19326,80 +19148,12 @@ function preservePreExecutionWorkflowStepResults(task: Pick<Task, "workflowStepR
   ];
 }
 
-/**
- * Detect whether the last assistant text output looks like a "pseudo-pause" —
- * where the agent ended a turn by asking for permission or summarizing progress
- * instead of calling a tool.
- *
- * Returns a {@link PseudoPauseResult} describing the detection kind and the
- * matched text/pattern. Returns `{ kind: "none" }` when no pseudo-pause is found.
- *
- * @param lastText - The last assistant text output from the session.
- */
-export function detectPseudoPause(lastText: string): PseudoPauseResult {
-  if (!lastText || lastText.trim().length === 0) {
-    return { kind: "none" };
-  }
-
-  const regexPatterns: RegExp[] = [
-    /\bif you (?:want|wish|need|like|prefer|'?d like)\b/i,
-    /\bshould I (?:continue|proceed|go ahead|move on|start|begin)\b/i,
-    /\blet me know\b/i,
-    /\b(?:want|would you like) me to (?:continue|proceed|finish|complete|do)\b/i,
-    /\bready to (?:proceed|continue|move on|begin)\b/i,
-    /\bshall I\b/i,
-    /\b(?:awaiting|waiting for) (?:your )?(?:approval|confirmation|go-ahead|response)\b/i,
-  ];
-
-  for (const pattern of regexPatterns) {
-    const match = pattern.exec(lastText);
-    if (match) {
-      // Capture surrounding context (up to 120 chars around the match)
-      const start = Math.max(0, match.index - 40);
-      const end = Math.min(lastText.length, match.index + match[0].length + 80);
-      const snippet = lastText.slice(start, end).replace(/\n+/g, " ").trim();
-      return { kind: "regex", matched: snippet };
-    }
-  }
-
-  // Structural fallback: long output that ends with a question or a markdown "next steps" heading
-  const trimmed = lastText.trimEnd();
-  if (trimmed.length > 200) {
-    if (trimmed.endsWith("?")) {
-      const lastLine = trimmed.split("\n").at(-1) ?? trimmed;
-      return { kind: "structural", matched: lastLine.trim() };
-    }
-    const nextStepsPattern = /(?:^|\n)#+\s*(?:notes?|next steps?|summary|what'?s? next)\s*:?\s*$/i;
-    if (nextStepsPattern.test(trimmed)) {
-      const lastLine = trimmed.split("\n").at(-1) ?? trimmed;
-      return { kind: "structural", matched: lastLine.trim() };
-    }
-    // Also catch plain "Next steps:" or "### Next steps" at the very end
-    if (/next steps?\s*:?\s*$/i.test(trimmed)) {
-      const lastLine = trimmed.split("\n").at(-1) ?? trimmed;
-      return { kind: "structural", matched: lastLine.trim() };
-    }
-  }
-
-  return { kind: "none" };
-}
-
-/**
- * Detect if a steering comment contains a review handoff request.
- * Matches common handoff phrases that agents can use to request
- * human review of their work.
- */
-export function detectReviewHandoffIntent(commentText: string): boolean {
-  const text = commentText.toLowerCase();
-  const handoffPhrases = [
-    "send it back to me",
-    "hand off to user",
-    "needs human review",
-    "assign to user",
-    "return to user",
-    "user review needed",
-    "requesting user review",
-  ];
-
-  return handoffPhrases.some((phrase) => text.includes(phrase));
-}
+export {
+  detectPseudoPause,
+  detectReviewHandoffIntent,
+} from "./executor/pseudo-pause.js";
+export type { PseudoPauseResult } from "./executor/pseudo-pause.js";
+import {
+  detectPseudoPause,
+  detectReviewHandoffIntent,
+} from "./executor/pseudo-pause.js";

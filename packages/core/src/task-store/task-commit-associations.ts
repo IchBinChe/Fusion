@@ -1,10 +1,13 @@
 /**
- * remaining-ops-9 operations.
+ * Task commit-association persistence (domain module).
  *
  * FNXC:StoreModularization 2026-06-25-00:00:
  * Extracted from the monolithic packages/core/src/store.ts as a pure
  * behavior-preserving refactor. Each function receives the TaskStore
  * instance as its first parameter and performs byte-identical work.
+ *
+ * FNXC:CodeOrganization 2026-07-15-00:00:
+ * Renamed from remaining-ops-9 to a domain name; no behavior change.
  */
 
 import { TaskStore } from "../store.js";

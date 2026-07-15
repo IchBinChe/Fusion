@@ -878,9 +878,17 @@ describe("ChatView core interactions", () => {
     expect(within(message).getByText("I need to think about this...")).toBeVisible();
   });
 
+  /*
+  FNXC:DashboardTests 2026-07-15-16:30:
+  Mobile Chat restores the sidebar after a remount even when useChat restores an active
+  session. Streaming tests must therefore open a direct thread through the sidebar before
+  proving that a stream, including an activeSession refresh to null, does not collapse its
+  back-navigation control.
+  */
   describe("streaming states", () => {
     it("keeps mobile thread visible when active session metadata refreshes during streaming", async () => {
       const mediaQuerySpy = mockViewportMode("mobile");
+      const user = userEvent.setup();
       const streamingState: UseChatReturn = {
         ...defaultChatState,
         sessions: [{ ...activeSessionFixture }],
@@ -905,6 +913,9 @@ describe("ChatView core interactions", () => {
       const { rerender } = await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
       expect(document.querySelector(".chat-message--streaming")?.textContent).toContain("Working");
+      await user.click(screen.getByTestId("chat-session-session-001"));
+      expect(screen.getByTestId("chat-back-btn")).toBeInTheDocument();
+
       rerender(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
       expect(document.querySelector(".chat-message--streaming")?.textContent).toContain("Working");
@@ -954,8 +965,11 @@ describe("ChatView core interactions", () => {
 
     it("keeps mobile accepted silent requests in the visible thread", async () => {
       const mediaQuerySpy = mockViewportMode("mobile");
+      const user = userEvent.setup();
       setupMockChat({
-        activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+        sessions: [{ ...activeSessionFixture }],
+        filteredSessions: [{ ...activeSessionFixture }],
+        activeSession: { ...activeSessionFixture },
         messages: [
           { id: "msg-001", sessionId: "session-001", role: "user", content: "Slow mobile prompt", createdAt: "2026-04-08T00:00:00.000Z" },
         ],
@@ -965,10 +979,13 @@ describe("ChatView core interactions", () => {
       });
 
       await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+      await user.click(screen.getByTestId("chat-session-session-001"));
 
       expect(screen.queryByText("Response failed")).not.toBeInTheDocument();
       expect(screen.queryByText("Timed out waiting for first response event")).not.toBeInTheDocument();
       expect(document.querySelector(".chat-message--streaming")?.textContent).toContain("Working");
+      expect(screen.queryByText("Start a new conversation")).not.toBeInTheDocument();
+      expect(screen.queryByText("No messages yet. Start the conversation!")).not.toBeInTheDocument();
       expect(screen.getByTestId("chat-back-btn")).toBeInTheDocument();
 
       void mediaQuerySpy;

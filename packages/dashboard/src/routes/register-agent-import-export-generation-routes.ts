@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline as streamPipeline } from "node:stream/promises";
+import { applyTestModeOverrides, resolvePlanningSettingsModel } from "@fusion/core";
 import { listEligibleExecutorAgents } from "@fusion/engine";
 import { ApiError, badRequest, notFound, rateLimited } from "../api-error.js";
 import { createSessionDiagnostics } from "../ai-session-diagnostics.js";
@@ -898,6 +899,26 @@ export function registerAgentGenerationRoutes(ctx: ApiRoutesContext): void {
         throw badRequest("intent is required and must be a string");
       }
 
+      const hasPlanningProvider = planningModelProvider !== undefined;
+      const hasPlanningModelId = planningModelId !== undefined;
+      if (hasPlanningProvider !== hasPlanningModelId) {
+        throw badRequest("planningModelProvider and planningModelId must be provided together");
+      }
+      if (
+        hasPlanningProvider
+        && (typeof planningModelProvider !== "string" || planningModelProvider.trim().length === 0)
+      ) {
+        throw badRequest("planningModelProvider must be a non-empty string when provided");
+      }
+      if (
+        hasPlanningModelId
+        && (typeof planningModelId !== "string" || planningModelId.trim().length === 0)
+      ) {
+        throw badRequest("planningModelId must be a non-empty string when provided");
+      }
+      const explicitPlanningProvider = hasPlanningProvider ? planningModelProvider!.trim() : undefined;
+      const explicitPlanningModelId = hasPlanningModelId ? planningModelId!.trim() : undefined;
+
       const resolvedMode = mode ?? context?.mode ?? "create";
       if (resolvedMode !== "create" && resolvedMode !== "edit") {
         throw badRequest("mode must be 'create' or 'edit'");
@@ -907,6 +928,14 @@ export function registerAgentGenerationRoutes(ctx: ApiRoutesContext): void {
 
       const { store: scopedStore } = await getProjectContext(req);
       const settings = await scopedStore.getSettings();
+      const resolvedPlanningSettings = resolvePlanningSettingsModel(settings);
+      const hasExplicitPlanningModel = Boolean(explicitPlanningProvider && explicitPlanningModelId);
+      const resolvedPlanningModel = applyTestModeOverrides(
+        hasExplicitPlanningModel
+          ? { provider: explicitPlanningProvider, modelId: explicitPlanningModelId }
+          : resolvedPlanningSettings,
+        settings,
+      );
       const ip = req.ip || req.socket.remoteAddress || "unknown";
       const { startAgentOnboardingSession } = await import("../agent-onboarding.js");
       const sessionId = await startAgentOnboardingSession(
@@ -919,8 +948,8 @@ export function registerAgentGenerationRoutes(ctx: ApiRoutesContext): void {
           existingAgentConfig: resolvedExistingAgentConfig,
         },
         scopedStore.getRootDir(),
-        planningModelProvider,
-        planningModelId,
+        resolvedPlanningModel.provider,
+        resolvedPlanningModel.modelId,
         settings.promptOverrides,
         options?.pluginRunner as Parameters<typeof import("@fusion/engine").buildSessionSkillContextSync>[3],
         scopedStore,

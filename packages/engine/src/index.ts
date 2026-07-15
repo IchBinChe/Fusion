@@ -25,6 +25,13 @@ export {
   createTaskShowTool,
   createTaskSearchTool,
   createTaskReadTools,
+  createListAgentsTool,
+  createDelegateTaskTool,
+  createGetAgentConfigTool,
+  createWebFetchTool,
+  createGoalRetrievalTools,
+  createMemoryTools,
+  createResearchTools,
   createArtifactListTool,
   createArtifactRegisterTool,
   createArtifactViewTool,
@@ -69,6 +76,25 @@ export {
   workflowDeleteParams,
   workflowSettingsParams,
   traitListParams,
+  listAgentsParams,
+  delegateTaskParams,
+  getAgentConfigParams,
+  webFetchParams,
+  memorySearchParams,
+  memoryGetParams,
+  goalListParams,
+  goalShowParams,
+  researchRunParams,
+  researchListParams,
+  researchGetParams,
+  researchCancelParams,
+  researchRetryParams,
+  /*
+  FNXC:ChatAgentTools 2026-07-15-00:00:
+  Dashboard chat needs these coordination factories re-exported so its shared
+  toolset can match the safe heartbeat productivity surface for pi and Grok
+  plugin runtimes without importing the engine's internal module path.
+  */
   executeApprovedAgentProvisioning,
   createWorkflowValidateTool,
   validateWorkflowIrDryRun,

@@ -57,6 +57,17 @@ import {
   createChatArtifactTools,
   createChatTaskDocumentTools,
   createWorkflowAuthoringTools,
+  createTaskCreateTool,
+  createTaskListTool,
+  createTaskShowTool,
+  createTaskSearchTool,
+  createListAgentsTool,
+  createDelegateTaskTool,
+  createGetAgentConfigTool,
+  createWebFetchTool,
+  createGoalRetrievalTools,
+  createMemoryTools,
+  createResearchTools,
   resolveMcpServersForStore,
   resolveExecutorThinkingLevel,
 } from "@fusion/engine";
@@ -327,6 +338,62 @@ function createChatWorkflowAuthoringTools(taskStore: TaskStore | undefined, proj
   */
   return createWorkflowAuthoringTools(taskStore, "", { stripApprovalFlags: true })
     .map((tool) => wrapWorkflowMutationTool(tool, projectId));
+}
+
+export interface ChatFusionToolsetOptions {
+  taskStore?: TaskStore;
+  agentStore?: AgentStore;
+  rootDir: string;
+  agentId?: string;
+}
+
+/*
+FNXC:ChatAgentTools 2026-07-15-00:00:
+Chat agents, including Grok CLI sessions reached through the plugin MCP bridge,
+must receive one safe coordination/productivity toolset in both model-loop and
+room-responder lanes. Workflow, document, artifact, messaging, and task-planner
+tools stay additive at their call sites; agent lifecycle mutation and memory
+append remain excluded because chat has no action-gate context.
+*/
+export async function createChatFusionToolset(options: ChatFusionToolsetOptions): Promise<ChatCustomTool[]> {
+  const { taskStore, agentStore, rootDir, agentId } = options;
+  const tools: ChatCustomTool[] = [];
+
+  if (taskStore) {
+    const settings = await taskStore.getSettings?.();
+    tools.push(
+      createTaskListTool(taskStore),
+      createTaskShowTool(taskStore),
+      createTaskSearchTool(taskStore),
+      createTaskCreateTool(taskStore, { sourceType: "api" }, { rootDir }),
+      ...createGoalRetrievalTools(taskStore),
+      /* FNXC:ChatAgentTools 2026-07-15-00:00: Chat exposes memory retrieval only and respects the workspace memory-enabled setting; prompt-triggered persistent writes stay excluded without an action-gate context. */
+      ...createMemoryTools(rootDir, settings).filter((tool) => tool.name !== "fn_memory_append"),
+      ...createResearchTools({ store: taskStore, rootDir, getSettings: () => taskStore.getSettings() }),
+    );
+  }
+
+  if (agentStore) {
+    tools.push(createListAgentsTool(agentStore));
+    if (taskStore) {
+      tools.push(createDelegateTaskTool(agentStore, taskStore, { rootDir }));
+    }
+    if (agentId) {
+      tools.push(createGetAgentConfigTool(agentStore, agentId));
+    }
+  }
+
+  tools.push(createWebFetchTool());
+  return dedupeChatTools(tools);
+}
+
+export function dedupeChatTools(tools: ChatCustomTool[]): ChatCustomTool[] {
+  const names = new Set<string>();
+  return tools.filter((tool) => {
+    if (names.has(tool.name)) return false;
+    names.add(tool.name);
+    return true;
+  });
 }
 
 function createTaskPlannerMetricsTool(taskStore: TaskStore, taskId: string, getPricingOverrides: () => Promise<Settings["modelPricingOverrides"] | undefined>) {
@@ -1790,6 +1857,12 @@ export class ChatManager {
     );
 
     const workflowTools = createChatWorkflowAuthoringTools(this.taskStore, input.roomProjectId);
+    const chatFusionTools = await createChatFusionToolset({
+      taskStore: this.taskStore,
+      agentStore: this.agentStore,
+      rootDir: this.rootDir,
+      agentId: input.responder.id,
+    });
 
     const resolvedSession = await createResolvedAgentSession({
       sessionPurpose: "heartbeat",
@@ -1806,7 +1879,9 @@ export class ChatManager {
       cwd: this.rootDir,
       systemPrompt,
       tools: "coding",
-      ...(workflowTools.length > 0 ? { customTools: workflowTools } : {}),
+      ...(workflowTools.length + chatFusionTools.length > 0
+        ? { customTools: dedupeChatTools([...workflowTools, ...chatFusionTools]) }
+        : {}),
       ...(effectiveModelProvider && effectiveModelId
         ? {
             defaultProvider: effectiveModelProvider,
@@ -2334,7 +2409,23 @@ export class ChatManager {
         ? [createTaskPlannerRefinementTool(this.taskStore, taskPlannerChatTaskId)]
         : [];
 
-      const customTools = [createAskQuestionTool(), ...taskPlannerSteeringTools, ...taskPlannerMetricsTools, ...taskPlannerRefinementTools, ...messagingTools, ...workflowTools, ...documentTools, ...artifactTools];
+      const chatFusionTools = await createChatFusionToolset({
+        taskStore: this.taskStore,
+        agentStore: this.agentStore,
+        rootDir: this.rootDir,
+        agentId: agent?.id,
+      });
+      const customTools = dedupeChatTools([
+        createAskQuestionTool(),
+        ...taskPlannerSteeringTools,
+        ...taskPlannerMetricsTools,
+        ...taskPlannerRefinementTools,
+        ...messagingTools,
+        ...workflowTools,
+        ...documentTools,
+        ...artifactTools,
+        ...chatFusionTools,
+      ]);
 
       const sessionOptions = {
         cwd: this.rootDir,

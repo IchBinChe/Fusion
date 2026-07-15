@@ -18,6 +18,7 @@ import {
   resolveValidatorSessionModel,
   resolveValidatorThinkingLevel,
   resolveValidatorFallbackThinkingLevel,
+  wrapCustomToolsForPluginRuntime,
 } from "../agent-session-helpers.js";
 
 const { resolveRuntimeMock } = vi.hoisted(() => ({
@@ -32,6 +33,20 @@ vi.mock("../runtime-resolution.js", async () => {
   };
 });
 
+
+describe("non-pi custom tool wrapping", () => {
+  it("preserves chat fusion tool names without an action-gate context", () => {
+    const tools = [
+      { name: "fn_task_list", description: "List tasks", parameters: {}, execute: async () => ({}) },
+      { name: "fn_delegate_task", description: "Delegate a task", parameters: {}, execute: async () => ({}) },
+      { name: "fn_list_agents", description: "List agents", parameters: {}, execute: async () => ({}) },
+      { name: "fn_web_fetch", description: "Fetch a URL", parameters: {}, execute: async () => ({}) },
+    ] as any;
+
+    expect(wrapCustomToolsForPluginRuntime(tools, {}, { runtimeId: "grok", sessionPurpose: "heartbeat" })?.map((tool) => tool.name))
+      .toEqual(tools.map((tool: { name: string }) => tool.name));
+  });
+});
 
 describe("resolve model-lane thinking levels", () => {
   it("applies node/task > workflow execution lane > global lane > project default lane > global default precedence", () => {

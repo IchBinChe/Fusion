@@ -55,6 +55,7 @@ export type OverseerTaskRef = Pick<
   Task,
   | "id"
   | "column"
+  | "status"
   | "prInfo"
   | "reviewState"
   | "paused"
@@ -176,6 +177,21 @@ function deriveSignalAndSources(
         return {
           signal: "blocked",
           reason: task.pausedReason ? `Executor stage paused: ${task.pausedReason}` : "Executor stage paused",
+          sources: [{ kind: "agent-log", ref: taskId }],
+        };
+      }
+
+      /*
+      FNXC:PlannerOversight 2026-07-15-17:05:
+      FN-7965: an executor-stage row parked `status: "failed"` (e.g. the terminal fn_task_done refusal/invariant park) reported `progressing` — "Task is actively executing in-progress work" — because nothing here read `status`. The overseer observed a dead task as healthy and took no action; `failed` was only ever derived for the merger/pull-request stages, so the sole backstop was the FN-7743 stall proxy below firing HOURS later. Read the status so bounded recovery engages on the next poll instead.
+      `paused` deliberately keeps precedence above: an operator/user-paused row is `blocked` because a human owns it, not an autonomously recoverable failure.
+      Downstream this yields `retry_step` (executor sources are `agent-log`, never an ERROR_SOURCE_KIND), bounded by `PLANNER_RECOVERY_MAX_ATTEMPTS` and then escalated on exhaustion — the pre-existing failed-signal policy, not a new one.
+      The reason must stay CONSTANT per (stage|signal): the FN-7577 feed dedup keys on `stage|signal|reason`, so never interpolate `task.error`/`status` here — a per-failure string would re-emit an observation every poll.
+      */
+      if (task.status === "failed") {
+        return {
+          signal: "failed",
+          reason: "Executor stage parked failed with work incomplete",
           sources: [{ kind: "agent-log", ref: taskId }],
         };
       }

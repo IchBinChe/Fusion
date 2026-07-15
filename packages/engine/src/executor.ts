@@ -11518,8 +11518,26 @@ export class TaskExecutor {
             let retryAbortedDueToReclaim = false;
             let refusalHandled = false;
             let pendingReviewParked = false;
+            /* FNXC:ExecutorTaskDonePark 2026-07-15-16:10: FN-7965 — set when the row was terminally parked (status=failed) by the in-session fn_task_done refusal handler; suppresses both the retry and every post-loop completion/requeue branch so the park survives. */
+            let terminallyParked = false;
             while (!taskDone && taskDoneSessionRetries < MAX_TASK_DONE_SESSION_RETRIES) {
               const liveTask = await this.store.getTask(task.id);
+              /*
+              FNXC:ExecutorTaskDonePark 2026-07-15-16:10:
+              FN-7965: the explicit `fn_task_done` tool handler parks the task terminally (status=failed, worktree/branch/sessionFile cleared) once the refusal retry budget is exhausted — but it runs INSIDE the agent session, so this loop never learned the row had been parked and spawned a retry session anyway. That session completed and marked the task done against a row with no worktree, so the pre-merge graph died on the first write-capable node with `no-worktree-for-write-node` and surfaced as a bogus "terminated at code-review-remediation" instead of the real refusal. Re-read state and honor the park.
+              This deliberately does NOT reuse the FN-4806 reclaim branch below: that silently requeues to `todo`, which would clear the park and — with the refusal budget already exhausted — re-park on the next pickup, looping todo→execute→park. A terminal park is the agent's own failure and must stay parked for a human.
+              Note the reclaim probes below cannot cover this: they test `liveTask.worktree === null`, but the store maps a cleared column to `undefined`, never `null` (`task-store/serialization.ts` — `row.worktree || undefined`). Tightening that probe is a separate change with real blast radius, so the park is detected by status here instead.
+              */
+              if (liveTask.status === "failed") {
+                const parkMessage = `${task.id}: task parked failed during no-fn_task_done retry — honoring park, not retrying`;
+                executorLog.log(parkMessage);
+                await this.store.logEntry(task.id, parkMessage, undefined, this.getRunContextFor(task.id));
+                this.deleteActiveSession(task.id);
+                this.tokenUsageBaselines.delete(task.id);
+                session.dispose();
+                terminallyParked = true;
+                break;
+              }
               const hasExplicitWorktreeBinding = typeof liveTask.worktree === "string" || liveTask.worktree === null;
               const hasExplicitBranchBinding = typeof liveTask.branch === "string" || liveTask.branch === null;
               const worktreeContractIntact = liveTask.column === "in-progress"
@@ -11798,6 +11816,12 @@ export class TaskExecutor {
               this.clearCompletedTaskWatchdog(task.id);
               executorLog.log(`✓ ${task.id} completed on retry → in-review`);
               this.signalTaskComplete(task);
+            } else if (terminallyParked) {
+              // FN-7965: the in-session refusal handler already wrote the terminal failure and cleared
+              // the binding. Nothing further to do — requeueing or handing off to review here is exactly
+              // the resurrection that stranded the pre-merge graph.
+              await this.persistTokenUsage(task.id);
+              return;
             } else if (retryAbortedDueToReclaim) {
               // FN-4806: Worktree/branch was reclaimed mid-retry by an engine-side housekeeping path
               // (e.g. FN-4546 stale-active-branch reclaim, FN-4742 self-healing removals). This is NOT

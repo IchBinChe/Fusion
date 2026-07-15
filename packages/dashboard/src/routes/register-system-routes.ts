@@ -4,6 +4,10 @@ import { join } from "node:path";
 import type { Request, Response } from "express";
 import { superviseSpawn, AgentStore } from "@fusion/core";
 import { ApiError, badRequest, notFound } from "../api-error.js";
+import {
+  runLinkLocalFnBinary,
+  runUseGlobalFnBinary,
+} from "../fn-binary-local-install.js";
 import { writeSSEEvent } from "../sse-buffer.js";
 import type { ApiRoutesContext } from "./types.js";
 import type { SystemLogEntry } from "../server.js";
@@ -24,10 +28,16 @@ in-dashboard debug/maintenance controls:
   - POST /system/agents/restart-all   pause+resume every active agent (stops active runs)
   - POST /system/plugins/reload-all   hot-reload every started plugin
 
+FNXC:SystemPanelFnBinary 2026-07-15-09:54:
+  - POST /system/fn-binary/link-local build standalone `fn` from source + install as default
+                                      (~/.local/share/fusion + ~/.local/bin shims). Source
+                                      checkout only (same gate as rebuild).
+  - POST /system/fn-binary/use-global remove local shims and `npm install -g runfusion.ai`.
+
 Restart/rebuild only work when the host CLI injected `systemControl`
 (supervised process + source checkout); every route degrades to an explicit
 409 with a reason instead of failing silently, so the UI can disable controls.
-Rebuild jobs are serialized — one at a time — because concurrent workspace
+Rebuild and fn-binary jobs share one active-job slot — concurrent workspace
 builds would corrupt each other's dist output.
 */
 
@@ -86,6 +96,9 @@ function startSseHeartbeat(res: Response): () => void {
 }
 
 type RebuildScope = "app" | "full" | "plugins";
+type FnBinaryScope = "link-local" | "use-global";
+type SystemJobScope = RebuildScope | FnBinaryScope;
+type SystemJobKind = "rebuild" | "fn-binary";
 
 interface SystemJobLine {
   i: number;
@@ -96,8 +109,8 @@ interface SystemJobLine {
 
 interface SystemJob {
   id: string;
-  kind: "rebuild";
-  scope: RebuildScope;
+  kind: SystemJobKind;
+  scope: SystemJobScope;
   restartAfter: boolean;
   status: "running" | "succeeded" | "failed";
   startedAt: number;
@@ -244,10 +257,20 @@ export function registerSystemRoutes(ctx: ApiRoutesContext, deps: SystemRouteDep
 
   /** GET /api/system/info — capability discovery for the System panel. */
   router.get("/system/info", (_req, res) => {
+    const fromSource = Boolean(systemControl?.sourceWorkspaceRoot);
     res.json({
       supervised: systemControl?.supervised ?? false,
       restartSupported: systemControl?.supervised ?? false,
-      rebuildSupported: Boolean(systemControl?.sourceWorkspaceRoot),
+      rebuildSupported: fromSource,
+      /*
+      FNXC:SystemPanelFnBinary 2026-07-15-09:54:
+      Build-and-link-local only makes sense from a Fusion source checkout under
+      a supervised/dev host (`pnpm dev` / `pnpm local` / `fn dashboard` from
+      source). Packaged installs hide that control; use-global remains always
+      available so operators can drop a prior local link without a checkout.
+      */
+      fnBinaryLinkLocalSupported: fromSource,
+      fnBinaryUseGlobalSupported: true,
       sourceWorkspaceRoot: systemControl?.sourceWorkspaceRoot,
       logsSupported: Boolean(systemLogs),
       // Engine restart needs both the manager and CentralCore (see the
@@ -590,5 +613,114 @@ export function registerSystemRoutes(ctx: ApiRoutesContext, deps: SystemRouteDep
       if (err instanceof ApiError) throw err;
       rethrowAsApiError(err, "Failed to reload plugins");
     }
+  });
+
+  /**
+   * Begin a serialized system job. Shares the activeJob slot with rebuild so
+   * concurrent workspace builds can't clobber each other's dist.
+   */
+  function beginSystemJob(kind: SystemJobKind, scope: SystemJobScope, restartAfter = false): SystemJob {
+    if (activeJob) {
+      throw new ApiError(409, `A ${activeJob.kind}/${activeJob.scope} job is already running`);
+    }
+    const job: SystemJob = {
+      id: randomUUID(),
+      kind,
+      scope,
+      restartAfter,
+      status: "running",
+      startedAt: Date.now(),
+      droppedLines: 0,
+      lines: [],
+      subscribers: new Set(),
+    };
+    activeJob = job;
+    jobsById.set(job.id, job);
+    if (jobsById.size > 5) {
+      const oldest = jobsById.keys().next().value;
+      if (oldest && oldest !== job.id) jobsById.delete(oldest);
+    }
+    return job;
+  }
+
+  /*
+  FNXC:SystemPanelFnBinary 2026-07-15-09:54:
+  Build the standalone Bun `fn` binary from this source checkout and install it
+  as the default PATH binary under ~/.local. Gated on sourceWorkspaceRoot so
+  packaged npm/desktop installs never offer a button that cannot succeed.
+  Output streams through the shared /system/jobs/:id/stream SSE used by rebuild.
+  */
+  router.post("/system/fn-binary/link-local", (req, res) => {
+    if (rejectCrossOrigin(req, res)) return;
+    const root = systemControl?.sourceWorkspaceRoot;
+    if (!root) {
+      throw new ApiError(
+        409,
+        "Build & link local fn is only available when running from a Fusion source checkout in dev mode",
+      );
+    }
+
+    const job = beginSystemJob("fn-binary", "link-local", false);
+    appendJobLine(job, "system", "Building and linking local fn binary from source…");
+    log.info("System fn-binary link-local started", { jobId: job.id, root });
+
+    void runLinkLocalFnBinary(root, (stream, text) => appendJobLine(job, stream, text))
+      .then((result) => {
+        if (!result.success) {
+          appendJobLine(job, "system", result.error ?? "Link-local failed");
+          finishJob(job, "failed", { exitCode: 1, error: result.error });
+          log.warn("System fn-binary link-local failed", { jobId: job.id, error: result.error });
+          return;
+        }
+        appendJobLine(job, "system", "Link-local completed.");
+        finishJob(job, "succeeded", { exitCode: 0 });
+        log.info("System fn-binary link-local succeeded", { jobId: job.id });
+      })
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        appendJobLine(job, "system", `Link-local failed: ${message}`);
+        finishJob(job, "failed", { error: message });
+        log.error("System fn-binary link-local crashed", { jobId: job.id, error: message });
+      });
+
+    res.status(202).json(jobSnapshot(job, false));
+  });
+
+  /*
+  FNXC:SystemPanelFnBinary 2026-07-15-09:54:
+  Drop ~/.local/bin shims that point at the local Fusion install and reinstall
+  the published `runfusion.ai` package globally so PATH returns to npm.
+  Available outside source checkouts so an operator can undo a prior link-local.
+  */
+  router.post("/system/fn-binary/use-global", (req, res) => {
+    if (rejectCrossOrigin(req, res)) return;
+
+    const job = beginSystemJob("fn-binary", "use-global", false);
+    appendJobLine(job, "system", "Switching default fn to the global npm install…");
+    log.info("System fn-binary use-global started", { jobId: job.id });
+
+    void runUseGlobalFnBinary((stream, text) => appendJobLine(job, stream, text))
+      .then((result) => {
+        if (!result.success) {
+          if (result.permissionsHint) {
+            appendJobLine(job, "system", result.permissionsHint);
+          }
+          appendJobLine(job, "system", result.error ?? "Use-global failed");
+          finishJob(job, "failed", { exitCode: 1, error: result.error });
+          log.warn("System fn-binary use-global failed", { jobId: job.id, error: result.error });
+          return;
+        }
+        appendJobLine(job, "system", "Use-global completed.");
+        finishJob(job, "succeeded", { exitCode: 0 });
+        log.info("System fn-binary use-global succeeded", { jobId: job.id });
+      })
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        appendJobLine(job, "system", `Use-global failed: ${message}`);
+        finishJob(job, "failed", { error: message });
+        log.error("System fn-binary use-global crashed", { jobId: job.id, error: message });
+      });
+
+    res.status(202).json(jobSnapshot(job, false));
   });
 }

@@ -11526,10 +11526,15 @@ in-place restart, rebuild jobs with streamed output, engine/agent restarts,
 plugin reload, and the host-process log viewer.
 */
 
+/*
+FNXC:SystemPanelFnBinary 2026-07-15-09:54:
+Job snapshots cover rebuild scopes and the fn-binary link-local / use-global
+actions that stream into the same System panel log viewer.
+*/
 export interface SystemRebuildJobSnapshot {
   id: string;
-  kind: "rebuild";
-  scope: "app" | "full" | "plugins";
+  kind: "rebuild" | "fn-binary";
+  scope: "app" | "full" | "plugins" | "link-local" | "use-global";
   restartAfter: boolean;
   status: "running" | "succeeded" | "failed";
   startedAt: number;
@@ -11554,6 +11559,10 @@ export interface SystemInfoResponse {
   supervised: boolean;
   restartSupported: boolean;
   rebuildSupported: boolean;
+  /** True when the host is a Fusion source checkout (dev) — can build & link local fn. */
+  fnBinaryLinkLocalSupported?: boolean;
+  /** Always true when the route is wired; UI may still disable while a job runs. */
+  fnBinaryUseGlobalSupported?: boolean;
   sourceWorkspaceRoot?: string;
   logsSupported: boolean;
   engineAvailable: boolean;
@@ -11594,6 +11603,19 @@ export function startSystemRebuild(
     method: "POST",
     body: JSON.stringify({ scope, restart }),
   });
+}
+
+/*
+FNXC:SystemPanelFnBinary 2026-07-15-09:54:
+Client wrappers for System panel fn-binary actions. Both return a job snapshot
+that the panel streams via /system/jobs/:id/stream (same path as rebuild).
+*/
+export function startFnBinaryLinkLocal(): Promise<SystemRebuildJobSnapshot> {
+  return api<SystemRebuildJobSnapshot>("/system/fn-binary/link-local", { method: "POST" });
+}
+
+export function startFnBinaryUseGlobal(): Promise<SystemRebuildJobSnapshot> {
+  return api<SystemRebuildJobSnapshot>("/system/fn-binary/use-global", { method: "POST" });
 }
 
 export function fetchCurrentSystemRebuild(): Promise<{ job: SystemRebuildJobSnapshot | null }> {

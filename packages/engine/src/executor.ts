@@ -63,6 +63,18 @@ import { WorkflowCustomNodeExecutionService } from "./workflow-custom-node-execu
 import { WorkflowReviewService } from "./workflow-review-service.js";
 import { WorkflowPlanningService } from "./workflow-planning-service.js";
 import {
+  buildPlanVerifiedMessage,
+  buildReviewUnavailableMessage,
+  buildReviewRollbackFailureMessage,
+  buildReviewVerdictMessage,
+  buildStepFailureMessage,
+  buildStepSkippedMessage,
+  buildStepStartMessage,
+  buildStepSuccessMessage,
+  emitProactiveStatus,
+  sanitizeFailureReason,
+} from "./proactive-status.js";
+import {
   ApprovalRequestStore,
   buildExecutionMemoryInstructions,
   getTaskMergeBlocker,
@@ -5035,7 +5047,14 @@ export class TaskExecutor {
    *  (the read path threads the same instanceId through `runGraphTaskStep`). */
   private graphStepActiveContext = new Map<string, ForeachActiveContext>();
 
-  /** Composite key for {@link graphStepActiveContext}: per-instance, not per-task. */
+  /**
+   * FNXC:ProactiveChatStatus 2026-07-16-12:30:
+   * Keep a graph RETHINK summary until its rework reset succeeds. The status wording says the step
+   * was rolled back, so it must not reach the task chat before resetStepToBaseline completes.
+   */
+  private graphRethinkNarrations = new Map<string, string>();
+
+  /** Composite key for graph-owned per-instance state: never share parallel foreach instances. */
   private graphActiveContextKey(taskId: string, instanceId: string): string {
     return `${taskId}:${instanceId}`;
   }
@@ -5436,6 +5455,9 @@ export class TaskExecutor {
       const ctxPrefix = `${task.id}:`;
       for (const key of this.graphStepActiveContext.keys()) {
         if (key.startsWith(ctxPrefix)) this.graphStepActiveContext.delete(key);
+      }
+      for (const key of this.graphRethinkNarrations.keys()) {
+        if (key.startsWith(ctxPrefix)) this.graphRethinkNarrations.delete(key);
       }
     }
   }
@@ -5911,30 +5933,50 @@ export class TaskExecutor {
       }
     }
     const liveSteps = await this.store.getTask(taskId).then((t) => t.steps).catch(() => []);
-    await resetStepToBaseline(
-      {
-        store: this.store,
-        worktreePath,
-        // No single session ref for graph-owned step-sessions — rewind is skipped
-        // when checkpointId resolves but no session is current (KTD-2 partial path).
-        sessionRef: { current: null },
-        reviewType: "code",
-        // Branch-scoped RETHINK under worktree isolation makes the guard structural
-        // (the reset can only touch the instance's own branch); shared isolation
-        // keeps the defensive ancestry guard (KTD-2/KTD-11).
-        blastRadiusGuard: branchScoped
-          ? undefined
-          : makeAncestryBlastRadiusGuard({
-              worktreePath,
-              task: { id: taskId, steps: liveSteps },
-              stepIndex: active.stepIndex,
-            }),
-      },
-      { id: taskId, steps: liveSteps },
-      active.stepIndex,
-      active.baselineSha,
-      active.checkpointId,
-    );
+    const narrationKey = this.graphActiveContextKey(taskId, active.instanceId);
+    const reviewSummary = this.graphRethinkNarrations.get(narrationKey);
+    try {
+      await resetStepToBaseline(
+        {
+          store: this.store,
+          worktreePath,
+          // No single session ref for graph-owned step-sessions — rewind is skipped
+          // when checkpointId resolves but no session is current (KTD-2 partial path).
+          sessionRef: { current: null },
+          reviewType: "code",
+          // Branch-scoped RETHINK under worktree isolation makes the guard structural
+          // (the reset can only touch the instance's own branch); shared isolation
+          // keeps the defensive ancestry guard (KTD-2/KTD-11).
+          blastRadiusGuard: branchScoped
+            ? undefined
+            : makeAncestryBlastRadiusGuard({
+                worktreePath,
+                task: { id: taskId, steps: liveSteps },
+                stepIndex: active.stepIndex,
+              }),
+        },
+        { id: taskId, steps: liveSteps },
+        active.stepIndex,
+        active.baselineSha,
+        active.checkpointId,
+      );
+      if (reviewSummary !== undefined) {
+        const narration = buildReviewVerdictMessage("RETHINK", reviewSummary);
+        void emitProactiveStatus(this.store, taskId, narration, "reviewer", sanitizeFailureReason(reviewSummary));
+      }
+    } catch (error) {
+      const safeReason = sanitizeFailureReason(error);
+      void emitProactiveStatus(
+        this.store,
+        taskId,
+        buildReviewRollbackFailureMessage(safeReason),
+        "reviewer",
+        safeReason,
+      );
+      throw error;
+    } finally {
+      this.graphRethinkNarrations.delete(narrationKey);
+    }
   }
 
   /**
@@ -7063,6 +7105,8 @@ export class TaskExecutor {
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           reviewerLog.error(`${seamTask.id}: step-review failed: ${message}`);
+          const narration = buildReviewUnavailableMessage(err);
+          void emitProactiveStatus(this.store, seamTask.id, narration, "reviewer", sanitizeFailureReason(err));
           return { verdict: "UNAVAILABLE", review: `reviewer error: ${message}` };
         }
 
@@ -7071,6 +7115,17 @@ export class TaskExecutor {
           `${config.type} step-review Step ${stepIndex}: ${review.verdict}${config.advisory ? " (advisory)" : ""}`,
           review.summary,
         );
+        const narration = config.type === "plan" && review.verdict === "APPROVE"
+          ? buildPlanVerifiedMessage()
+          : review.verdict === "UNAVAILABLE"
+            ? buildReviewUnavailableMessage(review.summary)
+            : buildReviewVerdictMessage(review.verdict, review.summary);
+        if (review.verdict === "RETHINK") {
+          // RETHINK's rollback claim is emitted by applyGraphRethinkReset only after reset succeeds.
+          this.graphRethinkNarrations.set(this.graphActiveContextKey(seamTask.id, active.instanceId), review.summary);
+        } else {
+          void emitProactiveStatus(this.store, seamTask.id, narration, "reviewer", narration ? sanitizeFailureReason(review.summary) : undefined);
+        }
 
         // Single-writer rule (KTD-4): advisory (split-branch) reviews never write
         // the projection — they are fan-out checks that cannot clobber the
@@ -10465,6 +10520,7 @@ export class TaskExecutor {
               this.store.updateStep(task.id, stepIndex, "in-progress", stepProjectionOptions).catch((err) => {
                 executorLog.warn(`${task.id}: failed to update step ${stepIndex} status to in-progress: ${err}`);
               });
+              void emitProactiveStatus(this.store, task.id, buildStepStartMessage(stepIndex, detail.steps[stepIndex]?.name), "executor");
             } catch (err) {
               executorLog.warn(`${task.id}: failed to update step ${stepIndex} status to in-progress: ${err}`);
             }
@@ -10475,6 +10531,12 @@ export class TaskExecutor {
               this.store.updateStep(task.id, stepIndex, result.success ? "done" : "skipped", stepProjectionOptions).catch((err) => {
                 executorLog.warn(`${task.id}: failed to update step ${stepIndex} status: ${err}`);
               });
+              const stepName = detail.steps[stepIndex]?.name;
+              const safeReason = result.success ? undefined : sanitizeFailureReason(result.error);
+              const message = result.success
+                ? buildStepSuccessMessage(stepIndex, stepName)
+                : buildStepFailureMessage(stepIndex, stepName, safeReason!);
+              void emitProactiveStatus(this.store, task.id, message, "executor", safeReason);
             } catch (err) {
               executorLog.warn(`${task.id}: failed to update step ${stepIndex} status: ${err}`);
             }
@@ -13211,6 +13273,18 @@ export class TaskExecutor {
           };
         }
 
+        // FNXC:ProactiveChatStatus 2026-07-16-12:45:
+        // Only store-accepted transitions narrate progress. A skipped step is terminal work too,
+        // so it needs its own status row rather than silently looking like an ignored no-op.
+        const narration = status === "in-progress"
+          ? buildStepStartMessage(stepIndex, stepInfo.name)
+          : status === "done"
+            ? buildStepSuccessMessage(stepIndex, stepInfo.name)
+            : status === "skipped"
+              ? buildStepSkippedMessage(stepIndex, stepInfo.name)
+              : null;
+        void emitProactiveStatus(this.store, taskId, narration, "executor");
+
         return {
           content: [{
             type: "text" as const,
@@ -14367,6 +14441,7 @@ export class TaskExecutor {
           );
         }
 
+        let rollbackFailureNarrated = false;
         try {
           // Merge per-task effective workflow settings (U3, KTD-3) so the
           // validator model-lane reads below pick up workflow values; this tool
@@ -14457,6 +14532,15 @@ export class TaskExecutor {
             result.summary,
           );
           reviewerLog.log(`${taskId}: Step ${step} ${reviewType} → ${result.verdict}`);
+          const narration = (reviewType === "plan" || reviewType === ("spec" as typeof reviewType)) && result.verdict === "APPROVE"
+            ? buildPlanVerifiedMessage()
+            : result.verdict === "UNAVAILABLE"
+              ? buildReviewUnavailableMessage(result.summary)
+              : buildReviewVerdictMessage(result.verdict, result.summary);
+          // A RETHINK message asserts rollback completion, so wait for resetStepToBaseline below.
+          if (result.verdict !== "RETHINK") {
+            void emitProactiveStatus(store, taskId, narration, "reviewer", narration ? sanitizeFailureReason(result.summary) : undefined);
+          }
           stuckDetector?.recordProgress(taskId);
 
           // Track code review verdicts for enforcement. Plan reviews remain
@@ -14515,19 +14599,33 @@ export class TaskExecutor {
               // agent-supplied baseline (KTD-2 — the guard is for graph-owned
               // shared-isolation resets), so behavior stays byte-identical.
               const checkpointId = stepCheckpoints.get(stepIndex);
-              await resetStepToBaseline(
-                {
+              try {
+                await resetStepToBaseline(
+                  {
+                    store,
+                    worktreePath,
+                    sessionRef,
+                    reviewType: reviewType === "plan" ? "plan" : "code",
+                    summary: result.summary,
+                  },
+                  { id: taskId, steps: taskSteps },
+                  stepIndex,
+                  reviewType === "code" ? baseline : undefined,
+                  checkpointId,
+                );
+              } catch (error) {
+                const safeReason = sanitizeFailureReason(error);
+                void emitProactiveStatus(
                   store,
-                  worktreePath,
-                  sessionRef,
-                  reviewType: reviewType === "plan" ? "plan" : "code",
-                  summary: result.summary,
-                },
-                { id: taskId, steps: taskSteps },
-                stepIndex,
-                reviewType === "code" ? baseline : undefined,
-                checkpointId,
-              );
+                  taskId,
+                  buildReviewRollbackFailureMessage(safeReason),
+                  "reviewer",
+                  safeReason,
+                );
+                rollbackFailureNarrated = true;
+                throw error;
+              }
+              void emitProactiveStatus(store, taskId, narration, "reviewer", sanitizeFailureReason(result.summary));
 
               if (reviewType === "plan") {
                 text = `RETHINK\n\nYour plan was rejected. Here is why:\n\n${result.review}\n\nTake a different approach to planning this step. Do NOT repeat the rejected strategy.`;
@@ -14573,6 +14671,10 @@ export class TaskExecutor {
           const errorMessage = err instanceof Error ? err.message : String(err);
           reviewerLog.error(`${taskId}: review failed: ${errorMessage}`);
           await store.logEntry(taskId, `${reviewType} review failed: ${errorMessage}`);
+          if (!rollbackFailureNarrated) {
+            const narration = buildReviewUnavailableMessage(err);
+            void emitProactiveStatus(store, taskId, narration, "reviewer", sanitizeFailureReason(err));
+          }
 
           /*
           FNXC:ReviewerProviderErrors 2026-07-15-11:20:

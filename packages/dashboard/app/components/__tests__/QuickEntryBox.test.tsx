@@ -416,7 +416,7 @@ function mockMobileViewport() {
 FNXC:BoardComposer 2026-07-10-12:00:
 DOM order mirrors the reorganized composer action row: the options group (subtask, deps,
 models, node, agent) comes first, followed by the right-aligned primary group (attach, GitHub,
-Priority, Fast, Save) with Save as the LAST control.
+session advisor, Priority, Fast, Save) with Save as the LAST control.
 */
 const QUICK_ENTRY_ACTION_BUTTONS = [
   ["Subtask", "subtask-button"],
@@ -426,9 +426,18 @@ const QUICK_ENTRY_ACTION_BUTTONS = [
   ["Agent", "quick-entry-agent-button"],
   ["Attach", "quick-entry-attach"],
   ["GitHub", "quick-entry-github-toggle"],
+  ["Session advisor", "quick-entry-session-advisor-toggle"],
   ["Priority", "quick-entry-priority-button"],
   ["Fast", "quick-entry-fast-toggle"],
   ["Save", "quick-entry-save"],
+] as const;
+
+const QUICK_ENTRY_PRIMARY_ICON_BUTTON_IDS = [
+  "quick-entry-attach",
+  "quick-entry-github-toggle",
+  "quick-entry-session-advisor-toggle",
+  "quick-entry-priority-button",
+  "quick-entry-fast-toggle",
 ] as const;
 
 const QUICK_ENTRY_PRIORITY_ICON_CLASS: Record<TaskPriority, string> = {
@@ -454,6 +463,20 @@ function expectPriorityOptionColor(priority: TaskPriority) {
   const icon = option.querySelector("svg");
   expect(icon?.classList.contains(QUICK_ENTRY_PRIORITY_ICON_CLASS[priority])).toBe(true);
   expect(icon?.getAttribute("style")).toContain(`color: ${getPriorityColorVar(priority)}`);
+}
+
+/**
+ * FNXC:QuickAddActionRow 2026-07-15-00:00:
+ * The primary action cluster is visually uniform only when every icon control opts into btn-icon.
+ * Assert the shared treatment rather than SVG attributes because ProviderIcon's public sm size is
+ * intentionally broader than this local CSS override.
+ */
+function expectQuickEntryPrimaryIconCluster() {
+  for (const testId of QUICK_ENTRY_PRIMARY_ICON_BUTTON_IDS) {
+    const button = screen.getByTestId(testId);
+    expect(button).toHaveClass("btn-icon");
+    expect(button.querySelector("svg")).not.toBeNull();
+  }
 }
 
 describe("QuickEntryBox", () => {
@@ -894,16 +917,17 @@ describe("QuickEntryBox", () => {
       expandQuickEntry();
 
       const actionButtonTestIds = getActionButtonTestIdsInDomOrder();
-      expect(actionButtonTestIds.slice(-5)).toEqual([
+      expect(actionButtonTestIds.slice(-6)).toEqual([
         "quick-entry-attach",
         "quick-entry-github-toggle",
+        "quick-entry-session-advisor-toggle",
         "quick-entry-priority-button",
         "quick-entry-fast-toggle",
         "quick-entry-save",
       ]);
 
       const primaryGroup = screen.getByTestId("quick-entry-primary-group");
-      for (const testId of ["quick-entry-attach", "quick-entry-github-toggle", "quick-entry-priority-button", "quick-entry-fast-toggle", "quick-entry-save"]) {
+      for (const testId of ["quick-entry-attach", "quick-entry-github-toggle", "quick-entry-session-advisor-toggle", "quick-entry-priority-button", "quick-entry-fast-toggle", "quick-entry-save"]) {
         expect(primaryGroup.contains(screen.getByTestId(testId))).toBe(true);
       }
       const optionsGroup = screen.getByTestId("quick-entry-options-group");
@@ -1003,6 +1027,18 @@ describe("QuickEntryBox", () => {
         vi.runOnlyPendingTimers();
       });
     }
+
+    it("keeps the uniform icon cluster in the shared mobile button touch-target contract", async () => {
+      await renderMobileQuickEntryWithEnabledActions();
+      const actions = screen.getByTestId("quick-entry-actions");
+
+      expectQuickEntryPrimaryIconCluster();
+      for (const testId of QUICK_ENTRY_PRIMARY_ICON_BUTTON_IDS) {
+        const button = screen.getByTestId(testId);
+        expect(button).toHaveClass("btn");
+        expect(actions.contains(button)).toBe(true);
+      }
+    });
 
     it("captures an SVG touch target inside the priority button and opens the picker", async () => {
       await renderMobileQuickEntryWithEnabledActions();
@@ -1240,6 +1276,9 @@ describe("QuickEntryBox", () => {
           break;
         case "quick-entry-github-toggle":
           expect(screen.getByTestId(testId)).toHaveAttribute("aria-pressed", "false");
+          break;
+        case "quick-entry-session-advisor-toggle":
+          expect(screen.getByTestId(testId)).toHaveAttribute("aria-pressed", "true");
           break;
         case "quick-entry-priority-button":
           expect(await screen.findByTestId("quick-entry-priority-option-normal")).toBeTruthy();
@@ -2160,6 +2199,24 @@ describe("QuickEntryBox", () => {
       const priorityButton = screen.getByTestId("quick-entry-priority-button");
       expect(priorityButton).toBeTruthy();
       expectQuickEntryPriorityButton("normal");
+    });
+
+    it("keeps every primary icon control in one btn-icon cluster across toggle and priority states", () => {
+      renderQuickEntryBox({});
+      expandQuickEntry();
+
+      expectQuickEntryPrimaryIconCluster();
+      fireEvent.click(screen.getByTestId("quick-entry-session-advisor-toggle"));
+      fireEvent.click(screen.getByTestId("quick-entry-github-toggle"));
+      fireEvent.click(screen.getByTestId("quick-entry-fast-toggle"));
+      expectQuickEntryPrimaryIconCluster();
+
+      for (const taskPriority of TASK_PRIORITIES) {
+        openPriorityMenu();
+        fireEvent.click(screen.getByTestId(`quick-entry-priority-option-${taskPriority}`));
+        expectQuickEntryPriorityButton(taskPriority);
+        expectQuickEntryPrimaryIconCluster();
+      }
     });
 
     it("renders urgency-colored priority glyphs in the trigger and picker for every level", () => {

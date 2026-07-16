@@ -2181,6 +2181,11 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
             FNXC:QuickAddAttachments 2026-06-30-00:00 (relocated 2026-07-10): the attachment affordance
             stays adjacent to Save (now immediately to its LEFT) preserving the icon-only label, hidden
             file input trigger, and pending-count badge.
+
+            FNXC:QuickAddActionRow 2026-07-15-00:00:
+            Attach, GitHub, session advisor, Priority, and Fast are one icon-only cluster. Every control
+            uses `btn-icon` so its SVG resolves to the shared `--icon-size-sm` token; do not fork
+            ProviderIcon's shared size map to size this one GitHub use case.
             */}
             <div className="quick-entry-primary-group" data-testid="quick-entry-primary-group">
               <button
@@ -2200,7 +2205,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
 
               <button
                 type="button"
-                className={`btn btn-sm ${effectiveGithubTracking ? "btn-primary" : ""}`}
+                className={`btn btn-icon btn-sm ${effectiveGithubTracking ? "btn-primary" : ""}`}
                 onClick={() => {
                   setGithubTrackingOverride((prev) => !(prev ?? projectGithubTrackingDefault));
                 }}
@@ -2225,7 +2230,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
               */}
               <button
                 type="button"
-                className={`btn btn-sm ${effectiveSessionAdvisor ? "btn-primary" : ""}`}
+                className={`btn btn-icon btn-sm ${effectiveSessionAdvisor ? "btn-primary" : ""}`}
                 onClick={() => {
                   setSessionAdvisorOverride((prev) => {
                     const currentEffective = prev ?? projectSessionAdvisorDefault;
@@ -2239,14 +2244,14 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
                 title={sessionAdvisorToggleLabel}
                 aria-label={sessionAdvisorToggleLabel}
               >
-                {effectiveSessionAdvisor ? <Eye size={12} aria-hidden="true" /> : <EyeOff size={12} aria-hidden="true" />}
+                {effectiveSessionAdvisor ? <Eye size={14} aria-hidden="true" /> : <EyeOff size={14} aria-hidden="true" />}
               </button>
 
               <div className="priority-trigger-wrap" ref={priorityPickerRef}>
                 <button
                   type="button"
                   onMouseDown={(e) => e.preventDefault()}
-                  className="btn btn-sm dep-trigger"
+                  className="btn btn-icon btn-sm dep-trigger"
                   data-testid="quick-entry-priority-button"
                   title={priorityButtonLabel}
                   aria-label={priorityButtonLabel}
@@ -2271,7 +2276,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
                   }}
                 >
                   {/* FNXC:PriorityColorCoding 2026-07-11-00:00: The quick-add icon-only priority trigger must preview urgency color from priorityIndicator without changing its label, test id, or picker behavior. */}
-                  <PriorityIcon size={12} aria-hidden="true" style={{ color: getPriorityColorVar(priority) }} />
+                  <PriorityIcon size={14} aria-hidden="true" style={{ color: getPriorityColorVar(priority) }} />
                 </button>
               </div>
 
@@ -2316,7 +2321,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
 
               <button
                 type="button"
-                className={`btn btn-sm ${isFastMode ? "btn-primary" : ""}`}
+                className={`btn btn-icon btn-sm ${isFastMode ? "btn-primary" : ""}`}
                 onClick={toggleFastMode}
                 onMouseDown={(e) => e.preventDefault()}
                 aria-pressed={isFastMode}
@@ -2324,7 +2329,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
                 title={fastToggleLabel}
                 aria-label={fastToggleLabel}
               >
-                <Zap size={12} aria-hidden="true" />
+                <Zap size={14} aria-hidden="true" />
               </button>
 
               <button

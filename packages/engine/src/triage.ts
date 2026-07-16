@@ -12,6 +12,8 @@ import type {
 import {
   DUPLICATE_OF_METADATA_KEY,
   PLAN_REVIEW_GROUP_ID,
+  RetryStormError,
+  serializeRetryStormError,
   TaskDeletedError,
   buildTriageMemoryInstructions,
   isUnplannedSeedPrompt,
@@ -2339,6 +2341,7 @@ export class TriageProcessor {
     instead of step-checkbox language that does not match this gate. Inline PROMPT.md
     repair remains allowed so the reviewer can fix-and-APPROVE instead of REVISE-looping.
     */
+    let reviewFailure: unknown;
     const review = await reviewStep(
       this.rootDir,
       task.id,
@@ -2362,6 +2365,7 @@ export class TriageProcessor {
         onSessionEnded: (session) => this.unregisterSubagentSession(task.id, session),
       },
     ).catch((error: unknown) => {
+      reviewFailure = error;
       const message = error instanceof Error ? error.message : String(error);
       planLog.warn(`${task.id}: Plan Review unavailable before execution (${message})`);
       return {
@@ -2372,6 +2376,35 @@ export class TriageProcessor {
     });
 
     const completedAt = new Date().toISOString();
+    /*
+    FNXC:PlanReview 2026-07-15-18:00:
+    A reviewer-fallback RetryStormError is a terminal guard, not a transient reviewer
+    outage. Preserve its structured core serialization and stop here so Plan Review does
+    not re-enter `plan-review-unavailable`, where another poll would re-increment
+    reviewerFallbackRetryCount beyond the cap.
+    */
+    if (reviewFailure instanceof RetryStormError) {
+      const terminalError = JSON.stringify(serializeRetryStormError(reviewFailure));
+      const output = review.review || reviewFailure.message;
+      await this.recordPlanReviewWorkflowResult(task, {
+        workflowStepId: PLAN_REVIEW_GROUP_ID,
+        workflowStepName: "Plan Review",
+        phase: "pre-merge",
+        status: "failed",
+        output,
+        notes: review.summary,
+        startedAt,
+        completedAt,
+      });
+      await this.store.logEntry(task.id, "[pre-merge] Workflow step failed: Plan Review", terminalError);
+      await this.store.updateTask(task.id, {
+        status: "failed",
+        error: terminalError,
+        nextRecoveryAt: null,
+      });
+      return "blocked";
+    }
+
     if (review.verdict === "APPROVE") {
       await this.recordPlanReviewWorkflowResult(task, {
         workflowStepId: PLAN_REVIEW_GROUP_ID,

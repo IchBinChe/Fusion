@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import type { Settings, Task, TaskStore } from "@fusion/core";
+import { RetryStormError, type Settings, type Task, type TaskStore } from "@fusion/core";
 import { join } from "node:path";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
@@ -206,6 +206,51 @@ describe("Plan Review unavailable retry", () => {
       task.id,
       "[pre-merge] Workflow step unavailable: Plan Review",
       expect.stringContaining(expectedOutput),
+    );
+  });
+
+  it("terminalizes a reviewer retry storm instead of scheduling another unavailable retry", async () => {
+    const rootDir = await createFixtureRoot();
+    roots.push(rootDir);
+    const task = createRetryTask({ id: "FN-PLAN-RETRY-STORM", reviewerFallbackRetryCount: 3 });
+    const prompt = `# Task: ${task.id} - Existing draft\n\n## Mission\n\nKeep this exact text.\n`;
+    await writePrompt(rootDir, task.id, prompt);
+    const store = createStore(task);
+    const storm = new RetryStormError({
+      category: "reviewerFallback",
+      total: 3,
+      cap: 2,
+      breakdown: {
+        stuckKill: 0,
+        recovery: 0,
+        taskDone: 0,
+        worktreeSession: 0,
+        workflowStep: 0,
+        verification: 0,
+        postReviewFix: 0,
+        mergeConflict: 0,
+        branchConflict: 0,
+        reviewerContext: 0,
+        reviewerFallback: 3,
+        total: 3,
+      },
+    });
+    mockReviewStep.mockRejectedValue(storm);
+
+    await retryTask(rootDir, task, store);
+
+    expect(store.updateTask).toHaveBeenCalledWith(task.id, expect.objectContaining({
+      status: "failed",
+      error: expect.stringContaining('"type":"RetryStormError"'),
+      nextRecoveryAt: null,
+    }));
+    expect(store.updateTask).not.toHaveBeenCalledWith(task.id, expect.objectContaining({
+      status: "plan-review-unavailable",
+    }));
+    expect(store.logEntry).toHaveBeenCalledWith(
+      task.id,
+      "[pre-merge] Workflow step failed: Plan Review",
+      expect.stringContaining('"type":"RetryStormError"'),
     );
   });
 

@@ -2176,7 +2176,7 @@ UI contract boundary:
 
 Fusion derives a per-task `retrySummary` at read time by aggregating retry counters (stuck-kill, recovery, task_done, workflow-step, verification, post-review-fix, merge-conflict bounce, branch-conflict recovery, reviewer context retry, reviewer fallback retry). The engine emits a structured `retry-burned` log channel with `{ taskId, agentId, role, category, attempt, total, breakdown }` so token-cost telemetry can correlate retry burn with spend.
 
-Project settings expose per-category caps (`maxBranchConflictRecoveries`, `maxReviewerContextRetries`, `maxReviewerFallbackRetries`) plus a master cap (`maxTotalRetriesBeforeFail`). When a cap is exceeded, engine code throws `RetryStormError`; executor terminal failure handling serializes this into `task.error` so dashboard surfaces can render structured failure details.
+Project settings expose per-category caps (`maxBranchConflictRecoveries`, `maxReviewerContextRetries`, `maxReviewerFallbackRetries`) plus a master cap (`maxTotalRetriesBeforeFail`). When a cap is exceeded, engine code throws `RetryStormError`; executor and triage Plan Review terminal failure handling serialize this into `task.error` so dashboard surfaces can render structured failure details. Plan Review must terminalize this guard rather than re-queue `plan-review-unavailable`, which would otherwise continue burning the reviewer-fallback budget.
 
 ## Lifecycle invariants
 

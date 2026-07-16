@@ -1263,6 +1263,32 @@ Across the thread: a top filter (All/Human/Bot) and prev/next chevrons live in t
   margin-left: auto;
 }
 
+/*
+FNXC:GitHubImport 2026-07-16-18:15:
+Per-comment task import stays in the metadata flow so every human and bot comment has a reachable action without displacing author or timestamp context. Result feedback is inline because the detail window remains open for additional feedback imports.
+*/
+.github-import-comment__import {
+  margin-left: var(--space-xs);
+  white-space: nowrap;
+}
+
+.github-import-comment__import svg {
+  flex: 0 0 auto;
+}
+
+.github-import-comment__result {
+  margin: 0 0 var(--space-xs);
+  font-size: var(--font-size-sm);
+}
+
+.github-import-comment__result--success {
+  color: var(--color-success);
+}
+
+.github-import-comment__result--error {
+  color: var(--color-error);
+}
+
 .github-import-pr-comment--active {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -1631,6 +1657,15 @@ Import Tasks embedded header now adopts the canonical ViewHeader chrome — edge
 
 
 @media (max-width: 768px) {
+  /* FNXC:GitHubImport 2026-07-16-18:15: Mobile detail sheets keep each comment import action on its own reachable row when metadata wraps. */
+  .github-import-comment__import {
+    margin-left: 0;
+  }
+
+  .github-import-comment__time + .github-import-comment__import {
+    flex-basis: 100%;
+  }
+
   .github-import-provider,
   .github-import-gitlab .github-import-toolbar {
     flex-wrap: wrap;

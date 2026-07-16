@@ -1636,6 +1636,79 @@ describe("POST /github/issues/batch-import", () => {
   });
 });
 
+describe("POST /github/pulls/import and /github/comments/import", () => {
+  let store: TaskStore;
+
+  beforeEach(() => {
+    mockIsGhAuthenticated.mockReturnValue(true);
+    store = createMockStore({
+      listTasks: vi.fn().mockResolvedValue([]),
+      createTask: vi.fn().mockResolvedValue({ ...FAKE_TASK_DETAIL, id: "FN-FEEDBACK", column: "triage" }),
+      logEntry: vi.fn().mockResolvedValue(undefined),
+    });
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  function buildApp() {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store));
+    return app;
+  }
+
+  it("creates resolve-feedback PR tasks while retaining provenance and deduplication", async () => {
+    vi.spyOn(GitHubClient.prototype, "getPullRequest").mockResolvedValue({
+      number: 9,
+      title: "Feedback PR",
+      body: "PR body",
+      html_url: "https://github.com/owner/repo/pull/9",
+      headBranch: "feature/feedback",
+      baseBranch: "main",
+      state: "open",
+    });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/github/pulls/import", JSON.stringify({ owner: "owner", repo: "repo", prNumber: 9 }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(201);
+    expect(store.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Resolve feedback: PR #9 — Feedback PR",
+      description: expect.stringContaining("Resolve the pull request review feedback and address any failed CI checks."),
+    }));
+    expect(store.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      description: expect.stringContaining("PR: https://github.com/owner/repo/pull/9\nBranch: feature/feedback → main\n\nPR body"),
+    }));
+  });
+
+  it("creates comment feedback tasks without deduplicating repeated imports", async () => {
+    const payload = { owner: "owner", repo: "repo", number: 9, type: "pull", comment: { author: "reviewer", body: "Please add coverage", createdAt: "2026-07-16T00:00:00Z" } };
+    const first = await REQUEST(buildApp(), "POST", "/api/github/comments/import", JSON.stringify(payload), { "Content-Type": "application/json" });
+    const second = await REQUEST(buildApp(), "POST", "/api/github/comments/import", JSON.stringify(payload), { "Content-Type": "application/json" });
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(store.createTask).toHaveBeenCalledTimes(2);
+    expect(store.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Resolve feedback from @reviewer on #9",
+      description: "Resolve or address this feedback comment.\n\n> reviewer\n> Please add coverage\n\nSource: https://github.com/owner/repo/pull/9",
+    }));
+    expect(store.logEntry).toHaveBeenCalledWith("FN-FEEDBACK", "Imported PR/issue comment from GitHub", "https://github.com/owner/repo/pull/9");
+  });
+
+  it("requires GitHub authentication and complete comment payloads", async () => {
+    const invalid = await REQUEST(buildApp(), "POST", "/api/github/comments/import", JSON.stringify({ owner: "owner" }), { "Content-Type": "application/json" });
+    expect(invalid.status).toBe(400);
+
+    mockIsGhAuthenticated.mockReturnValue(false);
+    const unauthenticated = await REQUEST(buildApp(), "POST", "/api/github/comments/import", JSON.stringify({
+      owner: "owner", repo: "repo", number: 1, type: "issue", comment: { author: "reviewer", body: "Fix it" },
+    }), { "Content-Type": "application/json" });
+    expect(unauthenticated.status).toBe(401);
+  });
+});
+
 describe("projectId store scoping regressions", () => {
   const projectId = "proj-scoped";
   let defaultStore: TaskStore;

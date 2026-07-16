@@ -10,6 +10,7 @@ import {
   apiFetchGitHubIssueDetail,
   apiCloseGitHubIssue,
   apiImportGitHubPull,
+  apiImportGitHubComment,
   apiFetchGitLabProjectIssues,
   apiFetchGitLabGroupIssues,
   apiFetchGitLabMergeRequests,
@@ -38,6 +39,7 @@ vi.mock("../../api", async (importOriginal) => {
     apiFetchGitHubIssueDetail: vi.fn(),
     apiCloseGitHubIssue: vi.fn(),
     apiImportGitHubPull: vi.fn(),
+    apiImportGitHubComment: vi.fn(),
     apiFetchGitLabProjectIssues: vi.fn(),
     apiFetchGitLabGroupIssues: vi.fn(),
     apiFetchGitLabMergeRequests: vi.fn(),
@@ -171,6 +173,7 @@ describe("GitHubImportModal", () => {
     vi.mocked(apiFetchGitHubIssueDetail).mockReset();
     vi.mocked(apiCloseGitHubIssue).mockReset();
     vi.mocked(apiImportGitHubPull).mockReset();
+    vi.mocked(apiImportGitHubComment).mockReset();
     vi.mocked(apiFetchGitLabProjectIssues).mockReset();
     vi.mocked(apiFetchGitLabGroupIssues).mockReset();
     vi.mocked(apiFetchGitLabMergeRequests).mockReset();
@@ -187,6 +190,7 @@ describe("GitHubImportModal", () => {
     vi.mocked(apiFetchGitHubPullDetail).mockResolvedValue({ comments: [], checks: [] });
     vi.mocked(apiFetchGitHubIssueDetail).mockResolvedValue({ comments: [] });
     vi.mocked(apiCloseGitHubIssue).mockResolvedValue(undefined);
+    vi.mocked(apiImportGitHubComment).mockResolvedValue(mockTask);
     vi.mocked(apiFetchGitLabProjectIssues).mockResolvedValue([]);
     vi.mocked(apiFetchGitLabGroupIssues).mockResolvedValue([]);
     vi.mocked(apiFetchGitLabMergeRequests).mockResolvedValue([]);
@@ -1302,6 +1306,58 @@ describe("GitHubImportModal", () => {
       const timeEl = commentEls[0].querySelector("time");
       expect(timeEl?.getAttribute("title")).toBe("2024-01-01T00:00:00Z");
       expect(timeEl?.textContent?.length).toBeGreaterThan(0);
+    });
+
+    /*
+    FNXC:GitHubImport 2026-07-16-18:20:
+    PR and issue comment threads share the same import affordance; this test protects the source context passed from each parent call site and confirms bot feedback remains actionable.
+    */
+    it("imports human and bot feedback from PR and issue comment threads", async () => {
+      vi.mocked(fetchGitRemotes).mockResolvedValue(singleRemote);
+      vi.mocked(apiFetchGitHubPulls).mockResolvedValue([{ number: 21, title: "Feedback PR", body: "body", html_url: "https://github.com/owner/repo/pull/21", headBranch: "feature", baseBranch: "main" }]);
+      vi.mocked(apiFetchGitHubPullDetail).mockResolvedValue({ comments: [
+        { author: "reviewer", body: "Please test this", createdAt: "2026-07-16T00:00:00Z", authorIsBot: false },
+        { author: "github-actions[bot]", body: "CI failed", createdAt: "2026-07-16T01:00:00Z", authorIsBot: true },
+      ], checks: [] });
+
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} projectId="project-1" />);
+      fireEvent.click(await screen.findByRole("tab", { name: /Pull Requests/i }));
+      fireEvent.click(await screen.findByRole("button", { name: /Select pull request #21/i }));
+      const prComments = await screen.findByTestId("github-import-pr-comments");
+      const prButtons = await within(prComments).findAllByTestId("github-import-comment-import");
+      expect(prButtons).toHaveLength(2);
+      fireEvent.click(prButtons[1]);
+      await waitFor(() => expect(vi.mocked(apiImportGitHubComment)).toHaveBeenCalledWith({
+        owner: "dustinbyrne", repo: "kb", number: 21, type: "pull",
+        comment: { author: "github-actions[bot]", body: "CI failed", createdAt: "2026-07-16T01:00:00Z", authorIsBot: true },
+      }, "project-1"));
+      expect(onImport).toHaveBeenCalledWith(mockTask);
+      expect(await within(prComments).findByText("Comment imported as a task")).toBeTruthy();
+      expect(screen.getByTestId("github-import-detail-actions")).toBeTruthy();
+
+      vi.mocked(apiFetchGitHubIssues).mockResolvedValue([{ number: 22, title: "Feedback issue", body: "body", html_url: "https://github.com/owner/repo/issues/22", labels: [], state: "open", author: "owner" }]);
+      vi.mocked(apiFetchGitHubIssueDetail).mockResolvedValue({ comments: [{ author: "issue-reviewer", body: "Address this", createdAt: "2026-07-16T02:00:00Z", authorIsBot: false }] });
+      fireEvent.click(screen.getByRole("tab", { name: "Issues" }));
+      fireEvent.click(await screen.findByRole("button", { name: /Select issue #22/i }));
+      const issueComments = await screen.findByTestId("github-import-issue-comments");
+      fireEvent.click(await within(issueComments).findByTestId("github-import-comment-import"));
+      await waitFor(() => expect(vi.mocked(apiImportGitHubComment)).toHaveBeenLastCalledWith({
+        owner: "dustinbyrne", repo: "kb", number: 22, type: "issue",
+        comment: { author: "issue-reviewer", body: "Address this", createdAt: "2026-07-16T02:00:00Z", authorIsBot: false },
+      }, "project-1"));
+    });
+
+    it("shows Resolve feedback only for the pull request detail action", async () => {
+      vi.mocked(fetchGitRemotes).mockResolvedValue(singleRemote);
+      vi.mocked(apiFetchGitHubPulls).mockResolvedValue([{ number: 23, title: "Action PR", body: "body", html_url: "https://github.com/owner/repo/pull/23", headBranch: "feature", baseBranch: "main" }]);
+      vi.mocked(apiFetchGitHubIssues).mockResolvedValue([{ number: 24, title: "Action issue", body: "body", html_url: "https://github.com/owner/repo/issues/24", labels: [], state: "open", author: "owner" }]);
+      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} presentation="embedded" />);
+      fireEvent.click(await screen.findByRole("tab", { name: /Pull Requests/i }));
+      fireEvent.click(await screen.findByRole("button", { name: /Select pull request #23/i }));
+      expect(await screen.findByRole("button", { name: "Resolve feedback" })).toBeTruthy();
+      fireEvent.click(screen.getByRole("tab", { name: "Issues" }));
+      fireEvent.click(await screen.findByRole("button", { name: /Select issue #24/i }));
+      expect(await screen.findByRole("button", { name: "Import" })).toBeTruthy();
     });
 
     // FNXC:GitHubImport 2026-06-23-03:30: The Human filter hides bot comments; All (default) shows both.

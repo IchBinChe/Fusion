@@ -10,6 +10,7 @@ import {
   apiFetchGitHubIssueDetail,
   apiCloseGitHubIssue,
   apiImportGitHubPull,
+  apiImportGitHubComment,
   apiFetchGitLabProjectIssues,
   apiFetchGitLabGroupIssues,
   apiFetchGitLabMergeRequests,
@@ -27,7 +28,7 @@ import {
   type GitRemote,
   type GitLabImportItem,
 } from "../api";
-import { Loader2, RefreshCw, GitPullRequest, CircleDot, ChevronUp, ChevronDown, Bot, User, Filter } from "lucide-react";
+import { Loader2, RefreshCw, GitPullRequest, CircleDot, ChevronUp, ChevronDown, Bot, User, Filter, ListPlus } from "lucide-react";
 import { GithubIcon } from "./GithubIcon";
 import { MailboxMessageContent } from "./MailboxMessageContent";
 import {
@@ -102,6 +103,12 @@ function CommentsThread({
   errorTestId,
   emptyTestId,
   bodyTestId,
+  owner,
+  repo,
+  number,
+  sourceType,
+  projectId,
+  onImport,
   t,
 }: {
   comments: GitHubCommentDetail[];
@@ -113,6 +120,12 @@ function CommentsThread({
   errorTestId: string;
   emptyTestId: string;
   bodyTestId: string;
+  owner: string;
+  repo: string;
+  number: number;
+  sourceType: "issue" | "pull";
+  projectId?: string;
+  onImport: (task: Task) => void;
   t: TFunction<"app">;
 }) {
   const [filter, setFilter] = useState<CommentFilter>("all");
@@ -121,6 +134,8 @@ function CommentsThread({
   const commentRefs = useRef<Array<HTMLLIElement | null>>([]);
   // Avatar URLs that failed to load fall back to a generic lucide icon.
   const [brokenAvatars, setBrokenAvatars] = useState<Set<string>>(new Set());
+  const [importingCommentKeys, setImportingCommentKeys] = useState<Set<string>>(new Set());
+  const [commentImportResult, setCommentImportResult] = useState<{ key: string; kind: "success" | "error"; message: string } | null>(null);
 
   const filtered = useMemo(() => {
     if (filter === "human") return comments.filter((c) => !c.authorIsBot);
@@ -159,6 +174,29 @@ function CommentsThread({
       return next;
     });
   }, [scrollToIndex, filtered.length]);
+
+  /*
+  FNXC:GitHubImport 2026-07-16-18:10:
+  Each real comment row can create its own resolve-feedback task. The filtered-list index is deliberately part of the key: identical author/body/timestamp comments must retain independent loading and retry state.
+  */
+  const handleImportComment = useCallback(async (comment: GitHubCommentDetail, key: string) => {
+    setImportingCommentKeys((current) => new Set(current).add(key));
+    setCommentImportResult(null);
+    try {
+      const task = await apiImportGitHubComment({ owner, repo, number, type: sourceType, comment }, projectId);
+      onImport(task);
+      setCommentImportResult({ key, kind: "success", message: t("git.commentImported", "Comment imported as a task") });
+      window.setTimeout(() => setCommentImportResult((current) => current?.key === key ? null : current), 4000);
+    } catch (err) {
+      setCommentImportResult({ key, kind: "error", message: getErrorMessage(err) || t("git.failedToImportComment", "Failed to import comment") });
+    } finally {
+      setImportingCommentKeys((current) => {
+        const next = new Set(current);
+        next.delete(key);
+        return next;
+      });
+    }
+  }, [number, onImport, owner, projectId, repo, sourceType, t]);
 
   const renderFilter = (
     <div className="github-import-comments-filter" data-testid="github-import-comments-filter" role="group" aria-label={t("git.filterCommentsAriaLabel", "Filter comments by author type")}>
@@ -231,6 +269,9 @@ function CommentsThread({
             const authorType = comment.authorIsBot ? "bot" : "human";
             const timestamp = formatCommentTimestamp(comment.createdAt);
             const avatarKey = `${comment.author}-${idx}`;
+            const commentKey = `${sourceType}:${number}:${idx}`;
+            const importingComment = importingCommentKeys.has(commentKey);
+            const result = commentImportResult?.key === commentKey ? commentImportResult : null;
             const showAvatarImg = comment.authorAvatarUrl && !brokenAvatars.has(avatarKey);
             return (
               <li
@@ -265,7 +306,23 @@ function CommentsThread({
                       {timestamp}
                     </time>
                   )}
+                  <button
+                    type="button"
+                    className="btn github-import-comment__import"
+                    data-testid="github-import-comment-import"
+                    onClick={() => void handleImportComment(comment, commentKey)}
+                    disabled={importingComment}
+                    aria-label={t("git.importCommentAsTask", "Import as task")}
+                  >
+                    {importingComment ? <Loader2 className="spin" aria-hidden="true" /> : <ListPlus aria-hidden="true" />}
+                    {t("git.importCommentAsTask", "Import as task")}
+                  </button>
                 </div>
+                {result && (
+                  <div className={`github-import-comment__result github-import-comment__result--${result.kind}`} role="status">
+                    {result.message}
+                  </div>
+                )}
                 <MailboxMessageContent
                   className="github-import-pr-comment__body preview-body--markdown"
                   content={comment.body || t("git.noCommentBody", "(empty comment)")}
@@ -1884,6 +1941,12 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
                       errorTestId="github-import-issue-comments-error"
                       emptyTestId="github-import-issue-comments-empty"
                       bodyTestId="github-import-issue-comment-body"
+                      owner={owner.trim()}
+                      repo={repo.trim()}
+                      number={selectedIssue.number}
+                      sourceType="issue"
+                      projectId={projectId}
+                      onImport={onImport}
                       t={t}
                     />
                   </div>
@@ -2009,6 +2072,12 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
                       errorTestId="github-import-pr-comments-error"
                       emptyTestId="github-import-pr-comments-empty"
                       bodyTestId="github-import-pr-comment-body"
+                      owner={owner.trim()}
+                      repo={repo.trim()}
+                      number={selectedPull.number}
+                      sourceType="pull"
+                      projectId={projectId}
+                      onImport={onImport}
                       t={t}
                     />
                   </div>
@@ -2022,13 +2091,8 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
                 ) : null}
               </div>
               {/*
-              FNXC:GitHubImport 2026-07-15-23:20:
-              Bottom action bar for the detail preview — the ONLY place an import is committed now
-              (the list's footer Import was removed, so you can no longer import an issue whose body
-              you never opened). Import stays last/right as the primary action; Close issue sits to
-              its LEFT and still acts on the selected OPEN issue: hidden on the PR tab and for
-              already-closed issues, disabled while a close is in flight, and closing reflects
-              locally (the badge flips) without dismissing the preview.
+              FNXC:GitHubImport 2026-07-16-18:10:
+              The detail action remains Import for issues, while pull requests are explicitly Resolve feedback so their imported task covers reviewer feedback and failed checks. Close issue remains to its left and is unaffected.
               */}
               <div className="github-import-detail-actions" data-testid="github-import-detail-actions">
                 {activeTab === "issues" && selectedIssue && !selectedIssueClosed && (
@@ -2050,7 +2114,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
                     (activeTab === "issues" ? selectedIssueNumber === null || isUrlImported(selectedIssue?.html_url) : selectedPullNumber === null || isUrlImported(selectedPull?.html_url)) || importing
                   }
                 >
-                  {importing ? <Loader2 size={14} className="spin" /> : t("git.import", "Import")}
+                  {importing ? <Loader2 size={14} className="spin" /> : activeTab === "pulls" ? t("git.resolveFeedback", "Resolve feedback") : t("git.import", "Import")}
                 </button>
               </div>
               </div>

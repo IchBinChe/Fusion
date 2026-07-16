@@ -4787,10 +4787,13 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
         }
       }
 
-      // Create the task with "Review PR:" prefix
-      const title = `Review PR #${pr.number}: ${pr.title.slice(0, 180)}`;
+      /*
+      FNXC:GitHubImport 2026-07-16-18:00:
+      PR imports are resolve-feedback work, so their executor prompt must explicitly cover reviewer feedback and failed CI while retaining URL, branch, and body provenance for deduplication and auditability.
+      */
+      const title = `Resolve feedback: PR #${pr.number} — ${pr.title.slice(0, 180)}`;
       const body = pr.body?.trim() || "(no description)";
-      const description = `Review and address any issues in this pull request.\n\nPR: ${sourceUrl}\nBranch: ${pr.headBranch} → ${pr.baseBranch}\n\n${body}`;
+      const description = `Resolve the pull request review feedback and address any failed CI checks.\n\nPR: ${sourceUrl}\nBranch: ${pr.headBranch} → ${pr.baseBranch}\n\n${body}`;
 
       // FNXC:Workflows 2026-07-05-00:00: FN-7611 — no workflowId here; let the store
       // resolve the project-default workflow's intake column (byte-identical "triage"
@@ -4817,6 +4820,45 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
     }
   });
 
+  /*
+  FNXC:GitHubImport 2026-07-16-18:00:
+  A reviewer or bot comment can become independent resolve-feedback work. Comments expose no stable source ID/URL, so repeated imports intentionally create separate tasks rather than applying PR-style deduplication.
+  */
+  router.post("/github/comments/import", async (req, res) => {
+    try {
+      const { owner, repo, number, type, comment } = req.body ?? {};
+      const author = comment?.author;
+      const body = comment?.body;
+
+      if (!owner || typeof owner !== "string" || !owner.trim()) throw badRequest("owner is required");
+      if (!repo || typeof repo !== "string" || !repo.trim()) throw badRequest("repo is required");
+      if (!Number.isInteger(number) || number < 1) throw badRequest("number is required and must be a positive number");
+      if (type !== "issue" && type !== "pull") throw badRequest("type must be 'issue' or 'pull'");
+      if (!author || typeof author !== "string" || !author.trim()) throw badRequest("comment.author is required");
+      if (!body || typeof body !== "string" || !body.trim()) throw badRequest("comment.body is required");
+      if (comment.createdAt !== undefined && (typeof comment.createdAt !== "string" || !comment.createdAt.trim())) {
+        throw badRequest("comment.createdAt must be a non-empty string when provided");
+      }
+      if (!isGhAuthenticated()) throw unauthorized("Not authenticated with GitHub. Run `gh auth login`.");
+
+      const { store: scopedStore } = await getProjectContext(req);
+      const sourceUrl = `https://github.com/${owner.trim()}/${repo.trim()}/${type === "pull" ? "pull" : "issues"}/${number}`;
+      const task = await scopedStore.createTask({
+        title: `Resolve feedback from @${author.trim()} on #${number}`,
+        description: `Resolve or address this feedback comment.\n\n> ${author.trim()}\n> ${body.trim().replace(/\n/g, "\n> ")}\n\nSource: ${sourceUrl}`,
+        dependencies: [],
+        source: {
+          sourceType: "github_import",
+          sourceMetadata: { sourceUrl, number, type, commentAuthor: author.trim(), commentCreatedAt: comment.createdAt },
+        },
+      });
+      await scopedStore.logEntry(task.id, "Imported PR/issue comment from GitHub", sourceUrl);
+      res.status(201).json(task);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err);
+    }
+  });
 
   /**
    * POST /api/github/webhooks

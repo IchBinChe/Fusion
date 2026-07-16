@@ -788,6 +788,25 @@ export function readPortFromPostmasterPid(dataDir: string): number | null {
  * instead surfaces `23505` unique_violation on `pg_database_datname_index`. Scope the 23505 arm
  * to that constraint so an unrelated unique violation still throws.
  */
+/**
+ * True when a start failed because another postmaster already holds the data dir's lock.
+ *
+ * FNXC:PostgresStartupRace 2026-07-15-21:10:
+ * The startup-race join must fire ONLY on this, the one error that proves our postgres refused
+ * to start and someone else owns the dir. Joining on any failure was unsound: a start that took
+ * the lock and then failed later (readiness timeout, non-admin poll error) leaves
+ * `postmaster.pid` pointing at OUR OWN postmaster, so `isAlreadyRunning` hands back our own port
+ * and we "join" ourselves with `ownsProcess=false` — nothing ever stops it, orphaning a live
+ * postmaster for the life of the host. Every other failure belongs to the existing cancellation
+ * and cleanup paths, which stop the instance they started.
+ */
+function isPostgresLockCollisionError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /lock file .*postmaster\.pid.* already exists/i.test(message)
+    || /another (postmaster|server) .*(is |might be )?running/i.test(message)
+    || /server is already running/i.test(message);
+}
+
 function isDuplicateDatabaseError(error: unknown): boolean {
   const { code, constraint_name: constraint } = (error ?? {}) as {
     code?: string;
@@ -1149,9 +1168,34 @@ export class EmbeddedPostgresLifecycle {
       // that happens to see a postmaster.pid would publish a joined instance
       // instead of the EmbeddedStartCancelledError the post-start phases raise.
       if (signal?.aborted) throw error;
+      /*
+      FNXC:PostgresStartupRace 2026-07-15-21:10:
+      Join ONLY on a lock collision — the one failure that proves our postgres refused to start
+      and another process owns the dir. Joining on any error let a start that took the lock and
+      then failed later read back its OWN postmaster.pid, "join itself" with ownsProcess=false,
+      and orphan a live postmaster nothing would ever stop. See isPostgresLockCollisionError.
+      */
+      if (!isPostgresLockCollisionError(error)) throw error;
       const existing = isAlreadyRunning(this.options.dataDir);
       if (!existing) throw error;
 
+      /*
+      FNXC:PostgresStartupRace 2026-07-15-21:10:
+      Reap our own losing launch before dropping the handle — a dropped handle leaks the wrapper
+      process. It must be stopWrapperOnly(): both nonAdminHandle.stop() and pg.stop() resolve
+      their target through the SHARED data dir (postmaster.pid / pg_ctl -D), so on this path they
+      would kill the winner we are about to join. That is also why `pg` is only dropped here and
+      never stopped, and why settleCancelledStart — which calls both — must not be reused here.
+      */
+      if (this.nonAdminHandle) {
+        try {
+          await this.nonAdminHandle.stopWrapperOnly();
+        } catch (cleanupError) {
+          this.options.onError(
+            `embedded postgres: could not reap the losing non-admin wrapper after a startup race: ${String(cleanupError)}`,
+          );
+        }
+      }
       this.pg = null;
       this.nonAdminHandle = null;
       this.resolvedPort = existing.port;

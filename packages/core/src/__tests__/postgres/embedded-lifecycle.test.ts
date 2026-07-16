@@ -838,6 +838,71 @@ unreachable joined instance must return the URL exactly as it did before the ver
 let the connection layer report it. A hard throw here would turn every stale-pid start into a
 startup failure.
 */
+/*
+FNXC:PostgresStartupRace 2026-07-15-21:10:
+The startup-race join must fire only on a lock collision. Joining on ANY failure meant a start
+that took the lock and then failed later read back its own postmaster.pid, "joined itself" with
+ownsProcess=false, and orphaned a live postmaster nothing would stop. Mocked ctor, no real
+Postgres, outside the real-process block so it runs under the gate/CI default.
+*/
+describe("embedded-lifecycle: startup race only joins on a lock collision", () => {
+  it("propagates a non-lock startup failure even when a postmaster.pid is present", async () => {
+    const dataDir = makeDataDir();
+    writeFileSync(join(dataDir, "PG_VERSION"), "15\n");
+
+    class FailingEmbeddedPostgres {
+      initialise = vi.fn(async () => {});
+      async start() {
+        // A postmaster.pid exists (ours, or a racer's) but the failure is NOT a lock collision.
+        writeFileSync(
+          join(dataDir, "postmaster.pid"),
+          ["12345", dataDir, "/tmp", "localhost", "55442", "5432101", String(Date.now())].join("\n") + "\n",
+        );
+        throw new Error("could not start postgres: readiness poll timed out");
+      }
+      stop = vi.fn(async () => {});
+    }
+
+    __setEmbeddedPostgresCtorForTests(FailingEmbeddedPostgres as never);
+    try {
+      const lifecycle = new EmbeddedPostgresLifecycle({ ...baseOptions(dataDir), port: 55443 });
+
+      await expect(lifecycle.start()).rejects.toThrow(/readiness poll timed out/i);
+      expect(lifecycle.isRunning()).toBe(false);
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("still joins on a lock collision", async () => {
+    const dataDir = makeDataDir();
+    writeFileSync(join(dataDir, "PG_VERSION"), "15\n");
+
+    class RacingEmbeddedPostgres {
+      initialise = vi.fn(async () => {});
+      async start() {
+        writeFileSync(
+          join(dataDir, "postmaster.pid"),
+          ["12345", dataDir, "/tmp", "localhost", "55444", "5432101", String(Date.now())].join("\n") + "\n",
+        );
+        throw new Error('lock file "postmaster.pid" already exists');
+      }
+      stop = vi.fn(async () => {});
+    }
+
+    __setEmbeddedPostgresCtorForTests(RacingEmbeddedPostgres as never);
+    try {
+      const lifecycle = new EmbeddedPostgresLifecycle({ ...baseOptions(dataDir), port: 55445 });
+
+      await expect(lifecycle.start()).resolves.toMatchObject({
+        runtimeUrl: expect.stringContaining(":55444/"),
+      });
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("embedded-lifecycle: join-path database verify is best-effort", () => {
   it("still resolves optimistically when the joined instance is unreachable", async () => {
     const dataDir = makeDataDir();

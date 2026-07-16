@@ -37,8 +37,27 @@ export interface NonAdminServerHandle {
    * available). May be the cmd wrapper pid until postmaster.pid appears.
    */
   readonly postgresPid: number;
-  /** Stop the non-admin postgres process (taskkill). Safe to call once. */
+  /**
+   * Stop the non-admin postgres process (taskkill). Safe to call once.
+   *
+   * FNXC:PostgresStartupRace 2026-07-15-21:10:
+   * Resolves its target through the data dir's `postmaster.pid`, so it kills whichever
+   * postmaster currently owns that dir — NOT necessarily the one this handle launched. Only
+   * call it when this process is the sole starter. A caller that lost a startup race to
+   * another process must use {@link stopWrapperOnly}, or it will kill the winner.
+   */
   stop(): Promise<void>;
+  /**
+   * Kill only the wrapper this handle launched (and its children), never the postmaster named
+   * by the shared `postmaster.pid`.
+   *
+   * FNXC:PostgresStartupRace 2026-07-15-21:10:
+   * Exists for the lost-startup-race path: our postgres refused the lock and exited, so the
+   * wrapper is dead or dying, but `postmaster.pid` now belongs to the process we are about to
+   * join. Dropping the handle would leak the wrapper; calling {@link stop} would kill the
+   * winner. This kills our side only, and is a harmless no-op once the wrapper has exited.
+   */
+  stopWrapperOnly(): Promise<void>;
 }
 
 export interface NonAdminStartOptions {
@@ -462,6 +481,13 @@ export async function startServerAsNonAdminUser(
     },
     async stop() {
       killAll();
+    },
+    async stopWrapperOnly() {
+      if (stopped) return;
+      stopped = true;
+      // /t takes our wrapper's own children (our postgres.exe, if it ever came up). It cannot
+      // reach a racing winner: that postmaster is another process's child, not ours.
+      spawnSync("taskkill", ["/pid", String(wrapperPid), "/f", "/t"], { encoding: "utf8" });
     },
   };
   opts.onLaunched?.(handle);

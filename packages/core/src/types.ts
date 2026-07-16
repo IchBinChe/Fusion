@@ -6160,6 +6160,7 @@ export const AGENT_PERMISSION_POLICY_EXEMPT_TOOL_EXAMPLES: readonly string[] = [
   "fn_post_room_message",
   "fn_read_messages",
   "fn_task_log",
+  "fn_task_logs_read",
   "fn_task_done",
   "fn_heartbeat_done",
   "fn_task_document_write",

@@ -1154,6 +1154,18 @@ Checks + Comments sections live below the PR body in the scrollable preview pane
   color: var(--text);
   text-decoration: none;
   word-break: break-word;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/*
+FNXC:GitHubImport 2026-07-16-17:00:
+FN-8110 keeps a failed check's repair action attached to its own row without introducing a new button visual system.
+The shared btn primitives own colors and control treatment; this rule only reserves row layout and mobile-safe wrapping.
+*/
+.github-import-pr-check-fix-task {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
 }
 
 a.github-import-pr-check-name:hover {
@@ -1626,6 +1638,17 @@ Import Tasks embedded header now adopts the canonical ViewHeader chrome — edge
 
   .github-import-gitlab__workspace {
     grid-template-columns: 1fr;
+  }
+
+  .github-import-pr-check-row {
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .github-import-pr-check-fix-task {
+    width: 100%;
+    justify-content: center;
+    margin-inline-start: 0;
   }
 
   /*

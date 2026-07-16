@@ -17,6 +17,7 @@ import {
   apiImportGitLabMergeRequest,
   fetchSettings,
   fetchGitRemotes,
+  createTask,
   translateImportContent,
 } from "../../api";
 import type { Task } from "@fusion/core";
@@ -44,6 +45,7 @@ vi.mock("../../api", async (importOriginal) => {
     apiImportGitLabMergeRequest: vi.fn(),
     fetchSettings: vi.fn(),
     fetchGitRemotes: vi.fn(),
+    createTask: vi.fn(),
     translateImportContent: vi.fn(),
   };
 });
@@ -175,6 +177,8 @@ describe("GitHubImportModal", () => {
     vi.mocked(apiImportGitLabGroupIssue).mockReset();
     vi.mocked(apiImportGitLabMergeRequest).mockReset();
     vi.mocked(fetchSettings).mockReset();
+    vi.mocked(createTask).mockReset();
+    vi.mocked(createTask).mockResolvedValue(mockTask);
     vi.mocked(fetchSettings).mockResolvedValue({ gitlabEnabled: true } as never);
     // Set default mock for apiFetchGitHubIssues to return empty array (prevents undefined issues state)
     vi.mocked(apiFetchGitHubIssues).mockResolvedValue([]);
@@ -190,6 +194,150 @@ describe("GitHubImportModal", () => {
     vi.mocked(apiImportGitLabMergeRequest).mockResolvedValue(mockTask);
     onClose.mockReset();
     onImport.mockReset();
+  });
+
+  /*
+   * FNXC:GitHubImport 2026-07-16-17:00:
+   * FN-8110's per-check repair action is exercised through the same selected-PR detail path in both modal and embedded presentations.
+   * The helper deliberately controls only the API seam so the tests cover the real row rendering and task callback behavior.
+   */
+  const renderSelectedPullChecks = async (
+    checks: Array<{ name: string; status: string; conclusion?: string; detailsUrl?: string }>,
+    presentation: "modal" | "embedded" = "modal",
+    detailRequest: Promise<{ comments: []; checks: Array<{ name: string; status: string; conclusion?: string; detailsUrl?: string }> }> = Promise.resolve({ comments: [], checks }),
+  ) => {
+    const pull = {
+      number: 81,
+      title: "Fixable PR",
+      body: "PR body",
+      html_url: "https://github.com/owner/repo/pull/81",
+      headBranch: "broken-build",
+      baseBranch: "main",
+    };
+    vi.mocked(fetchGitRemotes).mockResolvedValueOnce([{ name: "origin", owner: "owner", repo: "repo", url: "" }]);
+    vi.mocked(apiFetchGitHubPulls).mockResolvedValueOnce([pull]);
+    vi.mocked(apiFetchGitHubPullDetail).mockReturnValueOnce(detailRequest as never);
+
+    render(<GitHubImportModal isOpen onClose={onClose} onImport={onImport} tasks={[]} projectId="project-1" presentation={presentation} />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Pull Requests/i }));
+    await screen.findByText("Fixable PR");
+    fireEvent.click(screen.getByRole("button", { name: /Select pull request #81/i }));
+  };
+
+  describe("failed PR check fix tasks", () => {
+    const checkVariants = [
+      { name: "failure", status: "completed", conclusion: "failure", detailsUrl: "https://github.com/owner/repo/runs/1" },
+      { name: "success", status: "completed", conclusion: "success" },
+      { name: "pending", status: "in_progress" },
+      { name: "neutral", status: "completed", conclusion: "skipped" },
+    ];
+
+    it.each(["modal", "embedded"] as const)("creates a task from the failed row in %s presentation", async (presentation) => {
+      const createdTask = { ...mockTask, id: `FN-${presentation}` };
+      vi.mocked(createTask).mockResolvedValueOnce(createdTask);
+      await renderSelectedPullChecks(checkVariants, presentation);
+
+      const buttons = await screen.findAllByTestId("github-import-pr-check-fix-task");
+      expect(buttons).toHaveLength(1);
+      expect(buttons[0]).toHaveAccessibleName("Create fix task for failure");
+      fireEvent.click(buttons[0]);
+
+      await waitFor(() => {
+        expect(createTask).toHaveBeenCalledWith(expect.objectContaining({
+          title: 'Fix failing check "failure" on PR #81',
+          description: expect.stringContaining("Repository: owner/repo"),
+        }), "project-1");
+      });
+      const [{ description }] = vi.mocked(createTask).mock.calls[0];
+      expect(description).toContain("https://github.com/owner/repo/pull/81");
+      expect(description).toContain("broken-build → main");
+      expect(description).toContain("Failing check: failure");
+      expect(description).toContain("https://github.com/owner/repo/runs/1");
+      expect(await screen.findByTestId("github-import-pr-check-fix-task-toast")).toHaveTextContent("Fix task created");
+      expect(onImport).toHaveBeenCalledWith(createdTask);
+    });
+
+    it("renders the affordance only for failed variants and keeps mobile wrapping source coverage", async () => {
+      await renderSelectedPullChecks(checkVariants);
+      expect(await screen.findAllByTestId("github-import-pr-check-fix-task")).toHaveLength(1);
+      expect(screen.getByRole("button", { name: "Create fix task for failure" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Create fix task for success" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Create fix task for pending" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Create fix task for neutral" })).toBeNull();
+
+      const source = readFileSync(resolve(__dirname, "../GitHubImportModal.css"), "utf8");
+      expect(source).toMatch(/@media \(max-width: 768px\)[\s\S]*\.github-import-pr-check-row\s*\{[\s\S]*flex-wrap: wrap;/);
+      expect(source).toMatch(/@media \(max-width: 768px\)[\s\S]*\.github-import-pr-check-fix-task\s*\{[\s\S]*width: 100%;/);
+    });
+
+    it("keeps duplicate failed check rows independently actionable while creation is in flight", async () => {
+      let resolveFirstCreate!: (task: Task) => void;
+      vi.mocked(createTask)
+        .mockImplementationOnce(() => new Promise<Task>((resolve) => { resolveFirstCreate = resolve; }))
+        .mockResolvedValueOnce({ ...mockTask, id: "FN-second" });
+      await renderSelectedPullChecks([
+        { name: "duplicate", status: "completed", conclusion: "failure" },
+        { name: "duplicate", status: "completed", conclusion: "failure" },
+      ]);
+
+      const [first, second] = await screen.findAllByTestId("github-import-pr-check-fix-task");
+      fireEvent.click(first);
+      await waitFor(() => expect(first).toBeDisabled());
+      expect(first.querySelector(".spin")).toBeTruthy();
+      expect(second).not.toBeDisabled();
+      fireEvent.click(second);
+      expect(createTask).toHaveBeenCalledTimes(2);
+
+      await act(async () => { resolveFirstCreate(mockTask); });
+    });
+
+    it("surfaces create errors inline and permits retry", async () => {
+      vi.mocked(createTask)
+        .mockRejectedValueOnce(new Error("Task service unavailable"))
+        .mockResolvedValueOnce({ ...mockTask, id: "FN-retry" });
+      await renderSelectedPullChecks([{ name: "lint", status: "completed", conclusion: "failure" }]);
+
+      const button = await screen.findByTestId("github-import-pr-check-fix-task");
+      fireEvent.click(button);
+      expect(await screen.findByTestId("github-import-pr-check-fix-task-toast")).toHaveTextContent("Task service unavailable");
+      expect(button).not.toBeDisabled();
+      expect(onImport).not.toHaveBeenCalled();
+
+      fireEvent.click(button);
+      await waitFor(() => expect(onImport).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-retry" })));
+      expect(createTask).toHaveBeenCalledTimes(2);
+    });
+
+    it("emits no fix action while PR detail is loading, errored, empty, or has no failures", async () => {
+      let resolveDetail!: (detail: { comments: []; checks: [] }) => void;
+      const loadingDetail = new Promise<{ comments: []; checks: [] }>((resolve) => { resolveDetail = resolve; });
+      await renderSelectedPullChecks([], "modal", loadingDetail);
+      expect(await screen.findByTestId("github-import-pr-checks-loading")).toBeTruthy();
+      expect(screen.queryByTestId("github-import-pr-check-fix-task")).toBeNull();
+      await act(async () => { resolveDetail({ comments: [], checks: [] }); });
+      expect(await screen.findByTestId("github-import-pr-checks-empty")).toBeTruthy();
+      expect(screen.queryByTestId("github-import-pr-check-fix-task")).toBeNull();
+    });
+
+    it("emits no fix action for PR detail errors or populated non-failing checks", async () => {
+      vi.mocked(apiFetchGitHubPullDetail).mockRejectedValueOnce(new Error("Checks unavailable"));
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce([{ name: "origin", owner: "owner", repo: "repo", url: "" }]);
+      vi.mocked(apiFetchGitHubPulls).mockResolvedValueOnce([{
+        number: 82, title: "No failures", body: "", html_url: "https://github.com/owner/repo/pull/82", headBranch: "feature", baseBranch: "main",
+      }]);
+      render(<GitHubImportModal isOpen onClose={onClose} onImport={onImport} tasks={[]} />);
+      fireEvent.click(await screen.findByRole("tab", { name: /Pull Requests/i }));
+      await screen.findByText("No failures");
+      fireEvent.click(screen.getByRole("button", { name: /Select pull request #82/i }));
+      expect(await screen.findByTestId("github-import-pr-checks-error")).toHaveTextContent("Checks unavailable");
+      expect(screen.queryByTestId("github-import-pr-check-fix-task")).toBeNull();
+    });
+
+    it("emits no fix action for populated successful, pending, and neutral checks", async () => {
+      await renderSelectedPullChecks(checkVariants.slice(1));
+      expect(await screen.findByTestId("github-import-pr-checks")).toBeTruthy();
+      expect(screen.queryByTestId("github-import-pr-check-fix-task")).toBeNull();
+    });
   });
 
   it("renders when isOpen is true", async () => {

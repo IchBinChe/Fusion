@@ -18,6 +18,7 @@ import {
   apiImportGitLabMergeRequest,
   fetchSettings,
   fetchGitRemotes,
+  createTask,
   type GitHubIssue,
   type GitHubPull,
   type GitHubPullDetail,
@@ -302,6 +303,34 @@ notice tells the operator to refine by label rather than pretending the list is 
 const ISSUES_FETCH_CAP = 300;
 const ISSUES_PAGE_SIZE = 30;
 
+/**
+ * FNXC:GitHubImport 2026-07-16-17:00:
+ * FN-8110 lets an operator create a repair task from a failed PR check without retyping its context.
+ * Keep this prompt composition pure so every check row carries its repository, PR, branch, status, and details-link evidence.
+ */
+export function buildCheckFixTaskPrompt(
+  pull: GitHubPull,
+  check: GitHubPullDetail["checks"][number],
+  repoSlug: string,
+): { title: string; description: string } {
+  const indicator = check.conclusion ?? check.status ?? "unknown";
+  const details = check.detailsUrl ? `\nCheck details: ${check.detailsUrl}` : "";
+
+  return {
+    title: `Fix failing check "${check.name}" on PR #${pull.number}`,
+    description: [
+      "Fix the failing GitHub pull request check described below.",
+      "",
+      `Repository: ${repoSlug}`,
+      `Pull request: #${pull.number} — ${pull.title}`,
+      `PR URL: ${pull.html_url}`,
+      `Branches: ${pull.headBranch} → ${pull.baseBranch}`,
+      `Failing check: ${check.name}`,
+      `Check status: ${indicator}${details}`,
+    ].join("\n"),
+  };
+}
+
 export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId, presentation = "modal" }: GitHubImportModalProps) {
   const { isEmbedded, scrollLockEnabled, resizePersistEnabled, escapeEnabled } = useEmbeddedPresentation(presentation);
   useMobileScrollLock(isOpen && scrollLockEnabled);
@@ -438,6 +467,10 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
   const [closingIssue, setClosingIssue] = useState(false);
   const [closeToast, setCloseToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const closeToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // FNXC:GitHubImport 2026-07-16-17:00: Track check-task submission by name + row index so duplicate GitHub check names never disable each other's controls.
+  const [creatingCheckFixTaskRows, setCreatingCheckFixTaskRows] = useState<Set<string>>(new Set());
+  const [checkFixTaskToast, setCheckFixTaskToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const checkFixTaskToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [isIssuesEmptyState, setIsIssuesEmptyState] = useState(false);
@@ -1120,6 +1153,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
   // FNXC:GitHubImport 2026-06-23-03:15: Clear the transient close toast timer on unmount.
   useEffect(() => () => {
     if (closeToastTimerRef.current) clearTimeout(closeToastTimerRef.current);
+    if (checkFixTaskToastTimerRef.current) clearTimeout(checkFixTaskToastTimerRef.current);
   }, []);
 
   /*
@@ -1150,6 +1184,36 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
 
   const selectedIssue = issues.find((i) => i.number === selectedIssueNumber);
   const selectedPull = pulls.find((p) => p.number === selectedPullNumber);
+
+  const handleCreateCheckFixTask = useCallback(async (
+    check: GitHubPullDetail["checks"][number],
+    rowKey: string,
+  ) => {
+    if (!selectedPull || !owner.trim() || !repo.trim()) return;
+
+    setCreatingCheckFixTaskRows((current) => new Set(current).add(rowKey));
+    if (checkFixTaskToastTimerRef.current) clearTimeout(checkFixTaskToastTimerRef.current);
+    setCheckFixTaskToast(null);
+
+    try {
+      const task = await createTask(buildCheckFixTaskPrompt(selectedPull, check, `${owner.trim()}/${repo.trim()}`), projectId);
+      onImport(task);
+      setCheckFixTaskToast({ type: "success", message: t("git.checkFixTaskCreated", "Fix task created") });
+    } catch (err: unknown) {
+      setCheckFixTaskToast({
+        type: "error",
+        message: getErrorMessage(err) || t("git.failedToCreateCheckFixTask", "Failed to create fix task"),
+      });
+    } finally {
+      setCreatingCheckFixTaskRows((current) => {
+        const next = new Set(current);
+        next.delete(rowKey);
+        return next;
+      });
+      checkFixTaskToastTimerRef.current = setTimeout(() => setCheckFixTaskToast(null), 4000);
+    }
+  }, [onImport, owner, projectId, repo, selectedPull, t]);
+
   /*
   FNXC:GitHubImport 2026-06-23-03:15:
   An issue counts as closed if the upstream state is closed OR we closed it locally this session. Only OPEN issues show the Close button.
@@ -1882,13 +1946,29 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
                                   : indicator === "neutral" || indicator === "skipped"
                                     ? "neutral"
                                     : "pending";
+                            // FNXC:GitHubImport 2026-07-16-18:00: GitHub can return duplicate check names, and a user can switch PRs before a create finishes; include the PR number so only the originating row is disabled.
+                            const rowKey = `${selectedPull.number}:${check.name}-${idx}`;
+                            const creatingFixTask = creatingCheckFixTaskRows.has(rowKey);
                             return (
-                              <li key={`${check.name}-${idx}`} className="github-import-pr-check-row">
+                              <li key={rowKey} className="github-import-pr-check-row">
                                 <span className={`github-import-pr-check-pill github-import-pr-check-pill--${variant}`}>{indicator || "pending"}</span>
                                 {check.detailsUrl ? (
                                   <a className="github-import-pr-check-name" href={check.detailsUrl} target="_blank" rel="noopener noreferrer">{check.name}</a>
                                 ) : (
                                   <span className="github-import-pr-check-name">{check.name}</span>
+                                )}
+                                {variant === "failure" && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm github-import-pr-check-fix-task"
+                                    data-testid="github-import-pr-check-fix-task"
+                                    aria-label={t("git.createCheckFixTaskAria", "Create fix task for {{checkName}}", { checkName: check.name })}
+                                    disabled={creatingFixTask}
+                                    onClick={() => handleCreateCheckFixTask(check, rowKey)}
+                                  >
+                                    {creatingFixTask && <Loader2 size={14} className="spin" aria-hidden="true" />}
+                                    {t("git.createCheckFixTask", "Create fix task")}
+                                  </button>
                                 )}
                               </li>
                             );
@@ -1896,6 +1976,15 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
                         </ul>
                       ) : (
                         <div className="preview-detail-empty" data-testid="github-import-pr-checks-empty">{t("git.noChecks", "No checks")}</div>
+                      )}
+                      {checkFixTaskToast && (
+                        <div
+                          className={`github-import-close-toast github-import-close-toast--${checkFixTaskToast.type}`}
+                          role="status"
+                          data-testid="github-import-pr-check-fix-task-toast"
+                        >
+                          {checkFixTaskToast.message}
+                        </div>
                       )}
                     </div>
                     <CommentsThread

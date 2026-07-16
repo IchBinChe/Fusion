@@ -2775,14 +2775,15 @@ describe("TaskChatTab", () => {
     const toolSummaryRule = getCssRuleBlock(getCssAfter(css, "FN-7215 aligns task-detail tool-call summaries"), ".task-chat-tool-group-summary");
     const toolEntriesRule = getCssRuleBlock(getCssAfter(css, ".task-chat-tool-group-entries {\n  gap"), ".task-chat-tool-group-entries");
     const toolEntryRule = getCssRuleBlock(css, ".task-chat-tool-entry");
-    const thinkingRule = getCssRuleBlock(css, ".task-chat-thinking");
-    const thinkingBodyRule = getCssRuleBlock(css, ".task-chat-thinking-body");
+    const thinkingBaseRule = getCssRuleBlock(css, ".task-chat-thinking");
+    const compactThinkingCss = getCssAfter(css, "FN-8029 keeps collapsed thinking blocks compact");
+    const thinkingRule = getCssRuleBlock(compactThinkingCss, ".task-chat-thinking");
+    const thinkingSummaryRule = getCssRuleBlock(getCssAfter(css, ".task-chat-thinking {\n  border-color"), ".task-chat-thinking-summary");
+    const thinkingBodyRule = getCssRuleBlock(getCssAfter(css, ".task-chat-tool-group-entries {\n  gap: var(--space-xs);\n  padding: 0 var(--space-xs) var(--space-xs);\n}"), ".task-chat-thinking-body");
     const toolDetailRule = getCssRuleBlock(getCssAfter(css, ".task-chat-tool-detail {"), ".task-chat-tool-detail");
     const mobileCss = getCssAfter(css, "@media (max-width: 768px)");
-    const mobileBlockPaddingCss = getCssAfter(mobileCss, ".task-chat-entry,\n  .task-chat-tool-group,\n  .task-chat-thinking");
-    const mobileEntryRule = getCssRuleBlock(mobileBlockPaddingCss, ".task-chat-entry");
-    const mobileToolGroupRule = getCssRuleBlock(mobileBlockPaddingCss, ".task-chat-tool-group");
-    const mobileThinkingRule = getCssRuleBlock(mobileBlockPaddingCss, ".task-chat-thinking");
+    const mobileStandardBlockRule = getCssRuleBlock(mobileCss, ".task-chat-entry,\n  .task-chat-tool-group");
+    const mobileThinkingRule = getCssRuleBlock(getCssAfter(mobileCss, ".task-chat-thinking {\n    padding"), ".task-chat-thinking");
     const mobileToolEntryRule = getCssRuleBlock(mobileCss, ".task-chat-tool-entry");
 
     expect(entryRule).toContain("box-sizing: border-box");
@@ -2790,20 +2791,21 @@ describe("TaskChatTab", () => {
     expect(userRule).not.toContain("padding");
     expect(toolGroupRule).toContain("box-sizing: border-box");
     expect(toolGroupRule).toContain("padding: var(--space-md)");
-    expect(thinkingRule).toContain("box-sizing: border-box");
-    expect(thinkingRule).toContain("padding: var(--space-md)");
+    expect(thinkingBaseRule).toContain("box-sizing: border-box");
+    expect(thinkingRule).toContain("padding: var(--space-sm)");
+    expect(thinkingRule).not.toContain("padding: var(--space-md)");
+    expect(thinkingSummaryRule).toContain("padding: var(--space-xs)");
     expect(toolSummaryRule).toContain("padding: var(--space-xs)");
     expect(toolEntriesRule).toContain("padding: 0 var(--space-xs) var(--space-xs)");
-    expect(thinkingBodyRule).toContain("padding: 0 var(--space-md) var(--space-md)");
+    expect(thinkingBodyRule).toContain("padding: 0 var(--space-sm) var(--space-sm)");
     expect(toolEntryRule).toContain("box-sizing: border-box");
     expect(toolEntryRule).toContain("padding: var(--space-sm)");
     expect(toolDetailRule).toContain("box-sizing: border-box");
     expect(toolDetailRule).toContain("padding: var(--space-xs)");
-    expect(mobileEntryRule).toContain("padding: var(--space-sm)");
-    expect(mobileToolGroupRule).toContain("padding: var(--space-sm)");
-    expect(mobileThinkingRule).toContain("padding: var(--space-sm)");
+    expect(mobileStandardBlockRule).toContain("padding: var(--space-sm)");
+    expect(mobileThinkingRule).toContain("padding: var(--space-xs)");
     expect(mobileToolEntryRule).toContain("padding: var(--space-xs)");
-    for (const rule of [entryRule, toolGroupRule, toolEntryRule, thinkingRule, toolDetailRule, mobileEntryRule]) {
+    for (const rule of [entryRule, toolGroupRule, toolEntryRule, thinkingBaseRule, thinkingRule, thinkingSummaryRule, toolDetailRule, mobileStandardBlockRule, mobileThinkingRule]) {
       expect(rule).not.toContain("px");
       expect(rule).not.toContain("#");
     }

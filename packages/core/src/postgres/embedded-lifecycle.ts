@@ -1121,6 +1121,12 @@ export class EmbeddedPostgresLifecycle {
       // create postmaster.pid after the preflight singleton check but before
       // this process starts Postgres. Re-read that lock and join its instance
       // rather than surfacing the expected lock-file collision to the TUI.
+      // FNXC:PostgresStartupRace 2026-07-15-20:06: A cancelled start must never
+      // be rescued into a success. `startServerAsNonAdminUser` rejects on abort
+      // from inside this try, so without this guard a timeout-cancelled launch
+      // that happens to see a postmaster.pid would publish a joined instance
+      // instead of the EmbeddedStartCancelledError the post-start phases raise.
+      if (signal?.aborted) throw error;
       const existing = isAlreadyRunning(this.options.dataDir);
       if (!existing) throw error;
 

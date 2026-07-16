@@ -8,20 +8,68 @@ import {
   isFusionSelfRepo,
 } from "./fusion-release-version.js";
 
+interface TaskSourceIssueRef {
+  provider: string;
+  repository: string;
+  issueNumber: number;
+}
+
 interface TaskMovedEvent {
   task: {
     id: string;
     title?: string;
-    sourceIssue?: {
-      provider: string;
-      repository: string;
-      issueNumber: number;
+    sourceIssue?: TaskSourceIssueRef;
+    githubTracking?: {
+      enabled?: boolean;
+      issue?: { owner?: string; repo?: string; number?: number };
     };
   };
+  /** Present on the real store event; GitHubTrackingCommentService no-ops when `from === to`. */
+  from?: string;
   to: string;
 }
 
 const DEFAULT_COMMENT_TEMPLATE = "✅ Task {taskId} ({taskTitle}) has been completed and resolved.";
+
+/*
+ * FNXC:GitHubIssueComment 2026-07-15-11:20:
+ * Requirement: a task must never receive TWO done comments on the SAME issue. A task can carry both
+ * linkages at once — maybeCreateTrackingIssue() ADOPTS a github sourceIssue as githubTracking.issue
+ * (github-tracking.ts, `source_issue_linked`), pointing both services at one issue — so with
+ * `githubCommentOnDone` on, this service and GitHubTrackingCommentService both commented on it.
+ *
+ * Suppress THIS service only when the tracking service will provably post to the SAME issue: it owns
+ * the richer comment (commit/branch/PR/files/merged + release lines). The two may legitimately target
+ * DIFFERENT issues (a tracking issue linked separately from the source issue) — that is two comments
+ * on two issues, which is correct and must keep working, so match on identity, never on "both linked".
+ *
+ * Mirrors the tracking service's own `from === to` no-op guard: on a same-column re-emit the tracking
+ * service stays silent, so suppressing here would drop the only comment.
+ */
+function sameGitHubIssue(
+  sourceIssue: TaskSourceIssueRef,
+  trackingIssue: { owner?: string; repo?: string; number?: number },
+): boolean {
+  const [owner, repo] = sourceIssue.repository.split("/");
+  if (!owner || !repo || !trackingIssue.owner || !trackingIssue.repo) {
+    return false;
+  }
+  return owner.toLowerCase() === trackingIssue.owner.toLowerCase()
+    && repo.toLowerCase() === trackingIssue.repo.toLowerCase()
+    && sourceIssue.issueNumber === trackingIssue.number;
+}
+
+/** True when GitHubTrackingCommentService will post its own done comment to this exact issue. */
+function trackingCommentCoversSourceIssue(event: TaskMovedEvent, sourceIssue: TaskSourceIssueRef): boolean {
+  if (event.from === event.to) {
+    return false;
+  }
+  const tracking = event.task.githubTracking;
+  if (tracking?.enabled !== true || !tracking.issue) {
+    return false;
+  }
+  return sameGitHubIssue(sourceIssue, tracking.issue);
+}
 
 /*
  * FNXC:GitHubIssueComment 2026-07-15-10:40:
@@ -88,6 +136,21 @@ export class GitHubIssueCommentService {
         task.id,
         "Failed to post GitHub issue comment",
         `Invalid GitHub repository format: ${sourceIssue.repository}`,
+      );
+      return;
+    }
+
+    if (trackingCommentCoversSourceIssue(event, sourceIssue)) {
+      /*
+       * FNXC:GitHubIssueComment 2026-07-15-11:20:
+       * Logged, not silent: suppression is otherwise invisible, and a custom `githubCommentTemplate`
+       * not appearing on a tracked issue is surprising enough to need a breadcrumb. Once per task
+       * completion, so this is not the high-frequency skip-log noise FN-8024 removed.
+       */
+      await this.store.logEntry(
+        task.id,
+        "Skipped GitHub issue completion comment",
+        `${sourceIssue.repository}#${sourceIssue.issueNumber} is tracked; GitHub tracking comment covers it`,
       );
       return;
     }

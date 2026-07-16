@@ -41,6 +41,9 @@ interface PreviewSession {
   url?: string;
   port?: number;
   command?: string;
+  cwd?: string;
+  cwdKind?: "worktree" | "qa-worktree";
+  ref?: string;
   errorMessage?: string;
 }
 
@@ -94,8 +97,21 @@ export function QualityTaskQaTab(props: QualityQaTabProps): ReactElement {
         },
       });
       if (!res.ok) {
+        /*
+        FNXC:Quality 2026-07-15-23:17:
+        Prefer the structured { error } body from gated plugin routes over raw JSON text.
+        */
         const text = await res.text();
-        throw new Error(text || res.statusText);
+        let message = text || res.statusText;
+        try {
+          const parsed = JSON.parse(text) as { error?: unknown };
+          if (typeof parsed.error === "string" && parsed.error.trim()) {
+            message = parsed.error;
+          }
+        } catch {
+          // keep text body
+        }
+        throw new Error(message);
       }
       return res.json();
     },
@@ -216,46 +232,58 @@ export function QualityTaskQaTab(props: QualityQaTabProps): ReactElement {
       : null,
 
     // Preview server
+    /*
+    FNXC:Quality 2026-07-15-23:23:
+    Always offer Start. Done tasks often have no live worktree after cleanup; the
+    API creates a disposable QA worktree at the task branch/merge commit so the
+    preview runs the done task's code.
+    */
     createElement(
       Section,
       { title: "Preview server", testId: "quality-qa-preview" },
-      !worktree
-        ? createElement("p", { style: { margin: 0, opacity: 0.8 } }, "Checkout/start this task to get a worktree before starting a preview server.")
-        : createElement(
-            "div",
-            null,
-            createElement(
-              "p",
-              { style: { margin: "0 0 8px", fontSize: 13, opacity: 0.85 } },
-              preview
-                ? `Status: ${preview.status}${preview.url ? ` · ${preview.url}` : ""}${preview.port ? ` · port ${preview.port}` : ""}`
-                : "No preview server running for this task.",
-            ),
-            createElement(
-              "div",
-              { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
-              createElement(
-                "button",
-                { type: "button", className: "btn btn-sm", disabled: busy || !worktree, onClick: () => void startPreview() },
-                "Start",
-              ),
-              createElement(
-                "button",
-                { type: "button", className: "btn btn-sm", disabled: busy || !preview, onClick: () => void stopPreview() },
-                "Stop",
-              ),
-              preview?.url
-                ? createElement(
-                    "a",
-                    { className: "btn btn-sm", href: preview.url, target: "_blank", rel: "noreferrer" },
-                    "Open URL",
-                  )
-                : null,
-            ),
-            preview?.errorMessage
-              ? createElement("p", { style: { color: "var(--error, #c00)", fontSize: 12 } }, preview.errorMessage)
-              : null,
+      createElement(
+        "div",
+        null,
+        createElement(
+          "p",
+          { style: { margin: "0 0 8px", fontSize: 13, opacity: 0.85 } },
+          preview
+            ? `Status: ${preview.status}${preview.url ? ` · ${preview.url}` : ""}${preview.port ? ` · port ${preview.port}` : ""}${
+                preview.cwdKind === "qa-worktree"
+                  ? ` · QA worktree${preview.ref ? ` @ ${preview.ref.slice(0, 12)}` : ""}`
+                  : preview.cwdKind === "worktree"
+                    ? " · worktree"
+                    : ""
+              }`
+            : worktree
+              ? "No preview server running for this task."
+              : "No live worktree — Start will check out this task's branch/merge commit into a temporary QA worktree.",
+        ),
+        createElement(
+          "div",
+          { style: { display: "flex", gap: 8, flexWrap: "wrap" } },
+          createElement(
+            "button",
+            { type: "button", className: "btn btn-sm", disabled: busy, onClick: () => void startPreview() },
+            "Start",
           ),
+          createElement(
+            "button",
+            { type: "button", className: "btn btn-sm", disabled: busy || !preview, onClick: () => void stopPreview() },
+            "Stop",
+          ),
+          preview?.url
+            ? createElement(
+                "a",
+                { className: "btn btn-sm", href: preview.url, target: "_blank", rel: "noreferrer" },
+                "Open URL",
+              )
+            : null,
+        ),
+        preview?.errorMessage
+          ? createElement("p", { style: { color: "var(--error, #c00)", fontSize: 12 } }, preview.errorMessage)
+          : null,
+      ),
       loadErrors.preview
         ? createElement("p", { role: "alert", style: { color: "var(--error, #c00)", margin: "8px 0 0" } }, loadErrors.preview)
         : null,

@@ -1,13 +1,20 @@
 import { createServer } from "node:net";
 import { superviseSpawn, type SupervisedChild } from "@fusion/core";
+import type { TaskCodeCwdKind } from "./task-code-worktree.js";
 
 /*
 FNXC:Quality 2026-07-14-21:45:
 Task-scoped preview servers for QA. Supervised spawn, free port (never 4040), worktree cwd.
 Composes Dev Server safety ideas without replacing the global Dev Server view.
+
+FNXC:Quality 2026-07-15-23:23:
+Done tasks lose their live worktree after land/cleanup. Preview still starts in a disposable
+QA worktree checked out at the task branch/merge commit (see task-code-worktree.ts) so the
+server runs the done task's code, not project root/mainline.
 */
 
 export type PreviewStatus = "starting" | "running" | "stopped" | "failed";
+export type PreviewCwdKind = TaskCodeCwdKind;
 
 export interface PreviewSession {
   projectId: string;
@@ -15,6 +22,10 @@ export interface PreviewSession {
   status: PreviewStatus;
   command: string;
   cwd: string;
+  /** Live task worktree, or disposable QA worktree for done/cleaned-up tasks. */
+  cwdKind?: PreviewCwdKind;
+  /** Git ref when cwdKind is qa-worktree. */
+  ref?: string;
   port?: number;
   url?: string;
   pid?: number;
@@ -96,6 +107,8 @@ export function createPreviewSessionManager() {
       projectId: string;
       taskId: string;
       cwd: string;
+      cwdKind?: PreviewCwdKind;
+      ref?: string;
       script: string;
     }): Promise<PreviewSession> {
       pruneTerminalPreviewSessions(sessions);
@@ -122,6 +135,8 @@ export function createPreviewSessionManager() {
         status: "starting",
         command,
         cwd: input.cwd,
+        cwdKind: input.cwdKind,
+        ref: input.ref,
         port,
         url: `http://127.0.0.1:${port}`,
         startedAt: new Date().toISOString(),

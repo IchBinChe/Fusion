@@ -8,6 +8,7 @@ import { getAllowRootFallback, getDefaultPreviewScript, getLogTruncateKb, getRun
 import { buildHeuristicSuggestedCases } from "../suggestions/heuristic-cases.js";
 import type { QualityPresetId } from "../store/quality-types.js";
 import { createPreviewSessionManager } from "../preview/preview-sessions.js";
+import { resolveTaskCodeCwd } from "../preview/task-code-worktree.js";
 
 /*
 FNXC:Quality 2026-07-14-21:45:
@@ -60,13 +61,49 @@ const previewManager = createPreviewSessionManager();
 
 const QUALITY_EXPERIMENTAL_FLAG = "qualityPlugin";
 
-function requireQualityExperimental(ctx: PluginContext): void {
-  const settings = (typeof (ctx.taskStore as { getSettings?: () => unknown }).getSettings === "function"
-    ? (ctx.taskStore as { getSettings: () => unknown }).getSettings()
-    : {}) as { experimentalFeatures?: Record<string, boolean> };
-  if (settings.experimentalFeatures?.[QUALITY_EXPERIMENTAL_FLAG] !== true) {
+/*
+FNXC:Quality 2026-07-15-23:17:
+TaskStore.getSettings() is always async and returns merged global+project settings
+(including global experimentalFeatures). Calling it without await made the return
+value a Promise; experimentalFeatures was always undefined, so every Quality route
+hard-failed even after the operator enabled Settings → Experimental → Quality Plugin.
+*/
+export async function loadTaskStoreSettings(ctx: PluginContext): Promise<Record<string, unknown>> {
+  const getSettings = (ctx.taskStore as { getSettings?: () => unknown }).getSettings;
+  if (typeof getSettings !== "function") return {};
+  try {
+    const result = getSettings.call(ctx.taskStore);
+    if (result != null && typeof (result as PromiseLike<unknown>).then === "function") {
+      const resolved = await (result as Promise<unknown>);
+      return resolved && typeof resolved === "object" && !Array.isArray(resolved)
+        ? (resolved as Record<string, unknown>)
+        : {};
+    }
+    return result && typeof result === "object" && !Array.isArray(result)
+      ? (result as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function requireQualityExperimental(ctx: PluginContext): Promise<void> {
+  const settings = await loadTaskStoreSettings(ctx);
+  const features = settings.experimentalFeatures;
+  const enabled =
+    features && typeof features === "object" && !Array.isArray(features)
+      ? (features as Record<string, unknown>)[QUALITY_EXPERIMENTAL_FLAG] === true
+      : false;
+  if (!enabled) {
     httpError(404, "Quality plugin is experimental; enable experimentalFeatures.qualityPlugin to use it");
   }
+}
+
+function asHttpError(err: unknown): { statusCode: number; message: string } | null {
+  if (!(err instanceof Error)) return null;
+  const statusCode = (err as Error & { statusCode?: unknown }).statusCode;
+  if (typeof statusCode !== "number" || !Number.isFinite(statusCode)) return null;
+  return { statusCode, message: err.message };
 }
 
 /*
@@ -148,27 +185,52 @@ export function createQualityRoutes(): PluginRouteDefinition[] {
         // Resolve cwd server-side
         const rootDir = ctx.taskStore.getRootDir?.() ?? process.cwd();
         let cwd = rootDir;
-        let cwdKind: "project-root" | "worktree" = "project-root";
+        let cwdKind: "project-root" | "worktree" | "qa-worktree" = "project-root";
         let filePaths: string[] = [];
 
         if (taskId) {
-          let task: { id: string; worktree?: string; modifiedFiles?: string[]; title?: string };
+          let task: {
+            id: string;
+            worktree?: string;
+            branch?: string;
+            modifiedFiles?: string[];
+            title?: string;
+            mergeDetails?: { commitSha?: string };
+          };
           try {
             task = (await ctx.taskStore.getTask(taskId)) as {
               id: string;
               worktree?: string;
+              branch?: string;
               modifiedFiles?: string[];
               title?: string;
+              mergeDetails?: { commitSha?: string };
             };
           } catch {
             httpError(404, "Task not found");
           }
-          const worktree = typeof task.worktree === "string" ? task.worktree.trim() : "";
-          if (worktree) {
-            cwd = worktree;
-            cwdKind = "worktree";
-          } else if (!getAllowRootFallback(ctx.settings as Record<string, unknown>)) {
-            httpError(400, "Task has no worktree; start/checkout the task first");
+          /*
+          FNXC:Quality 2026-07-15-23:23:
+          Task-scoped runs (including done tasks) must execute in the task's code.
+          Prefer the live worktree; otherwise create a disposable QA worktree at
+          the task branch/merge commit. Project-root fallback remains opt-in only.
+          */
+          try {
+            const resolvedCwd = await resolveTaskCodeCwd({ task, projectRoot: rootDir });
+            cwd = resolvedCwd.cwd;
+            cwdKind = resolvedCwd.cwdKind;
+          } catch (err) {
+            if (getAllowRootFallback(ctx.settings as Record<string, unknown>)) {
+              cwd = rootDir;
+              cwdKind = "project-root";
+            } else {
+              const message = err instanceof Error ? err.message : String(err);
+              const status =
+                err instanceof Error && typeof (err as Error & { statusCode?: number }).statusCode === "number"
+                  ? (err as Error & { statusCode: number }).statusCode
+                  : 400;
+              httpError(status, message);
+            }
           }
           filePaths = Array.isArray(task.modifiedFiles)
             ? task.modifiedFiles.filter((p): p is string => typeof p === "string")
@@ -182,12 +244,15 @@ export function createQualityRoutes(): PluginRouteDefinition[] {
           filePaths = body.filePaths.filter((p): p is string => typeof p === "string");
         }
 
-        const settings = (typeof (ctx.taskStore as { getSettings?: () => unknown }).getSettings === "function"
-          ? (ctx.taskStore as { getSettings: () => unknown }).getSettings()
-          : {}) as { testCommand?: string; verificationCommandTimeoutMs?: number };
+        const settings = await loadTaskStoreSettings(ctx);
+        const testCommand = typeof settings.testCommand === "string" ? settings.testCommand : undefined;
+        const verificationCommandTimeoutMs =
+          typeof settings.verificationCommandTimeoutMs === "number"
+            ? settings.verificationCommandTimeoutMs
+            : undefined;
         const resolved = resolvePresetCommand({
           preset,
-          testCommand: settings.testCommand,
+          testCommand,
           projectRoot: rootDir,
           filePaths,
           confirmFullSuite,
@@ -197,7 +262,7 @@ export function createQualityRoutes(): PluginRouteDefinition[] {
           httpError(status, resolved.reason);
         }
 
-        const timeoutMs = defaultTimeoutMs(settings.verificationCommandTimeoutMs);
+        const timeoutMs = defaultTimeoutMs(verificationCommandTimeoutMs);
         const run = store.createRun({
           projectId,
           taskId,
@@ -357,14 +422,33 @@ export function createQualityRoutes(): PluginRouteDefinition[] {
         const projectId = requireProjectId(r);
         const taskId = r.params?.taskId;
         if (!taskId) httpError(400, "taskId required");
-        let task: { worktree?: string };
+        let task: {
+          id?: string;
+          worktree?: string;
+          branch?: string;
+          mergeDetails?: { commitSha?: string };
+        };
         try {
-          task = (await ctx.taskStore.getTask(taskId)) as { worktree?: string };
+          task = (await ctx.taskStore.getTask(taskId)) as {
+            id?: string;
+            worktree?: string;
+            branch?: string;
+            mergeDetails?: { commitSha?: string };
+          };
         } catch {
           httpError(404, "Task not found");
         }
-        const worktree = typeof task.worktree === "string" ? task.worktree.trim() : "";
-        if (!worktree) httpError(400, "Task has no worktree");
+        /*
+        FNXC:Quality 2026-07-15-23:23:
+        Done tasks usually have no live worktree. Create/reuse a disposable QA
+        worktree checked out at the task branch or merge commit so the preview
+        server runs the done task's code, not project root/mainline.
+        */
+        const projectRoot = ctx.taskStore.getRootDir?.() ?? process.cwd();
+        const resolvedCwd = await resolveTaskCodeCwd({
+          task: { id: task.id ?? taskId, worktree: task.worktree, branch: task.branch, mergeDetails: task.mergeDetails },
+          projectRoot,
+        });
         const body = asRecord(r.body);
         if ("command" in body && typeof body.command === "string") {
           // Only allow simple package script names, not free shell
@@ -379,7 +463,9 @@ export function createQualityRoutes(): PluginRouteDefinition[] {
         const session = await previewManager.start({
           projectId,
           taskId,
-          cwd: worktree,
+          cwd: resolvedCwd.cwd,
+          cwdKind: resolvedCwd.cwdKind,
+          ref: resolvedCwd.ref,
           script,
         });
         return { session };
@@ -407,9 +493,23 @@ export function createQualityRoutes(): PluginRouteDefinition[] {
       The Quality plugin is an opt-in experiment. Gate every route at the
       server boundary so installed bundles cannot run commands until a global
       operator explicitly enables experimentalFeatures.qualityPlugin.
+
+      FNXC:Quality 2026-07-15-23:17:
+      Await the experimental gate (async settings) and map statusCode-bearing
+      errors to PluginRouteResponse. Dashboard catchHandler only preserves status
+      for ApiError instances; plain Error+statusCode was collapsed to HTTP 500,
+      so every gated Quality call looked like a hard failure.
       */
-      requireQualityExperimental(ctx);
-      return route.handler(req, ctx);
+      try {
+        await requireQualityExperimental(ctx);
+        return await route.handler(req, ctx);
+      } catch (err) {
+        const http = asHttpError(err);
+        if (http) {
+          return { status: http.statusCode, body: { error: http.message } };
+        }
+        throw err;
+      }
     },
   }));
 }

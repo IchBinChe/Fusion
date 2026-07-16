@@ -15,7 +15,7 @@ export type TestRunStatus =
 
 export type TestRunSource = "hub" | "task-tab" | "workflow" | "agent-qa";
 
-export type CwdKind = "project-root" | "worktree";
+export type CwdKind = "project-root" | "worktree" | "qa-worktree";
 
 export type QualityPresetId =
   | "project-test"

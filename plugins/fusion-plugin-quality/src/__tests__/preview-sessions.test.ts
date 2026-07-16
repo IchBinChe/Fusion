@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { pruneTerminalPreviewSessions } from "../preview/preview-sessions.js";
+import { candidateTaskCodeRefs, qualityQaWorktreePath } from "../preview/task-code-worktree.js";
 
 function terminalSession(stoppedAt: string) {
   return {
@@ -29,5 +30,21 @@ describe("preview session retention", () => {
     expect(sessions.has("expired")).toBe(false);
     expect(sessions.size).toBe(50);
     expect(sessions.has("recent-0")).toBe(false);
+  });
+});
+
+describe("task code worktree helpers", () => {
+  it("prefers recorded branch, fusion/<id>, then merge sha", () => {
+    expect(
+      candidateTaskCodeRefs({
+        id: "FN-12",
+        branch: "feature/fn-12",
+        mergeDetails: { commitSha: "abc1234" },
+      }),
+    ).toEqual(["feature/fn-12", "fusion/fn-12", "abc1234"]);
+  });
+
+  it("places disposable QA worktrees under .fusion/quality-qa", () => {
+    expect(qualityQaWorktreePath("/repo", "FN-99")).toBe("/repo/.fusion/quality-qa/fn-99");
   });
 });

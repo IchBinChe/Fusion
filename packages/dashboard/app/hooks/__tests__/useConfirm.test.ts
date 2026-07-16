@@ -62,6 +62,16 @@ function Harness() {
       "button",
       {
         onClick: async () => {
+          const outcome = await confirmWithCheckbox({ title: "Reset Task", message: "Reset FN-001?" });
+          setResult(JSON.stringify(outcome));
+        },
+      },
+      "open-checkbox-without-checkbox"
+    ),
+    React.createElement(
+      "button",
+      {
+        onClick: async () => {
           const choice = await confirmWithChoice({
             title: "Delete Done",
             message: "Delete or archive?",
@@ -78,6 +88,26 @@ function Harness() {
 }
 
 describe("useConfirm", () => {
+  it("skips dialogs with the primary/default outcomes when enabled", async () => {
+    render(React.createElement(ConfirmDialogProvider, { skipConfirmations: true }, React.createElement(Harness)));
+
+    fireEvent.click(screen.getByText("open"));
+    await waitFor(() => expect(screen.getByTestId("result")).toHaveTextContent("confirmed"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("open-choice"));
+    await waitFor(() => expect(screen.getByTestId("result")).toHaveTextContent("primary"));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("open-checkbox-default-checked"));
+    await waitFor(() => expect(screen.getByTestId("result")).toHaveTextContent('{"choice":"primary","checkboxValue":true}'));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("open-checkbox-without-checkbox"));
+    await waitFor(() => expect(screen.getByTestId("result")).toHaveTextContent('{"choice":"primary","checkboxValue":false}'));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
   it("resolves true when confirm is clicked", async () => {
     render(
       React.createElement(

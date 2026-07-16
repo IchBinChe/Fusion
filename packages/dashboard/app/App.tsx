@@ -688,6 +688,7 @@ function AppInner() {
     quickChatCloseOnOutsideClick,
     dashboardKeyboardShortcuts,
     dismissModalsOnOutsideClick,
+    skipConfirmationDialogs,
     maxTotalRetriesBeforeFail,
     prAuthAvailable,
     settingsLoaded,
@@ -1606,7 +1607,8 @@ function AppInner() {
     setShowGitHubStarPrompt,
   };
   return (
-    <ModalDismissPreferenceProvider enabled={dismissModalsOnOutsideClick}>
+    <ConfirmDialogProvider skipConfirmations={skipConfirmationDialogs}>
+      <ModalDismissPreferenceProvider enabled={dismissModalsOnOutsideClick}>
       <NavigationHistoryProvider value={{ pushNav, replaceCurrent, removeNav }}>
         <FileBrowserProvider openFile={openFileInBrowser}>
           <RetryWarningProvider value={maxTotalRetriesBeforeFail * RETRY_WARNING_RATIO}>
@@ -1974,7 +1976,8 @@ function AppInner() {
           </RetryWarningProvider>
         </FileBrowserProvider>
       </NavigationHistoryProvider>
-    </ModalDismissPreferenceProvider>
+      </ModalDismissPreferenceProvider>
+    </ConfirmDialogProvider>
   );
 }
 
@@ -1985,9 +1988,7 @@ export function App() {
         <ShellHostProvider>
           <ShellProvider>
             <NodeProvider>
-              <ConfirmDialogProvider>
-                <AppInner />
-              </ConfirmDialogProvider>
+              <AppInner />
             </NodeProvider>
           </ShellProvider>
         </ShellHostProvider>

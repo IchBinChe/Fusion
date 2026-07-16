@@ -2187,13 +2187,23 @@ function TaskCardComponent({
     }
   }, [addToast, isPaused, onPauseTask, onUnpauseTask, task.id, t]);
 
-  const handleTaskActionReset = useCallback(() => {
+  const handleTaskActionReset = useCallback(async () => {
     if (!onResetTask) return;
-    if (!window.confirm(t("taskDetail.reset.confirmMessage", "This will erase all progress for {{id}} and start the task from scratch. Continue?", { id: task.id }))) return;
-    void onResetTask(task.id)
-      .then(() => addToast(t("taskDetail.reset.resetSuccess", "Reset {{id}} — fresh run will be allocated", { id: task.id }), "success"))
-      .catch((err) => addToast(getErrorMessage(err), "error"));
-  }, [addToast, onResetTask, task.id, t]);
+    const shouldReset = await confirm({
+      title: t("taskDetail.reset.btn", "Reset"),
+      message: t("taskDetail.reset.confirmMessage", "This will erase all progress for {{id}} and start the task from scratch. Continue?", { id: task.id }),
+      confirmLabel: t("taskDetail.reset.btn", "Reset"),
+      cancelLabel: t("common.cancel", "Cancel"),
+      danger: true,
+    });
+    if (!shouldReset) return;
+    try {
+      await onResetTask(task.id);
+      addToast(t("taskDetail.reset.resetSuccess", "Reset {{id}} — fresh run will be allocated", { id: task.id }), "success");
+    } catch (err) {
+      addToast(getErrorMessage(err), "error");
+    }
+  }, [addToast, confirm, onResetTask, task.id, t]);
 
   const handleTaskActionDuplicate = useCallback(async () => {
     if (!onDuplicateTask) return;

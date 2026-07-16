@@ -2367,6 +2367,11 @@ export interface GlobalSettings {
    * Modal backdrop dismissal is a global operator preference, not project policy. Default false keeps fixed modal overlays from closing on accidental outside clicks unless the operator opts in.
    */
   dismissModalsOnOutsideClick?: boolean;
+  /**
+   * FNXC:Settings 2026-07-16-05:30:
+   * This global operator preference defaults to false. When enabled, the dashboard skips centralized critical-action confirmations and proceeds with their primary/default choice. It must never be project-scoped so shared projects cannot force destructive actions without a prompt.
+   */
+  skipConfirmationDialogs?: boolean;
   /** Active UI locale (e.g. `"en"`, `"zh-CN"`, `"fr"`). One of `SUPPORTED_LOCALES`.
    *  When unset, each surface resolves the locale at runtime (browser/env
    *  detection) and falls back to `DEFAULT_LOCALE` ("en"). */

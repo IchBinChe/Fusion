@@ -138,6 +138,7 @@ export const GLOBAL_SECTION_KEYS: Record<string, ReadonlySet<string>> = {
   "global-general": new Set([
     "language",
     "dismissModalsOnOutsideClick",
+    "skipConfirmationDialogs",
     "persistAgentToolOutput",
     "persistAgentThinkingLogPermanent",
     "persistAgentThinkingLogEphemeral",

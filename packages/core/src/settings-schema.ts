@@ -97,6 +97,11 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   Fixed dashboard modals must ignore backdrop clicks by default so accidental outside taps do not discard in-progress form state. Operators can globally opt in to the legacy outside-click dismissal behavior.
   */
   dismissModalsOnOutsideClick: false,
+  /*
+  FNXC:Settings 2026-07-16-05:30:
+  Critical-action confirmation dialogs stay enabled by default. This global-only preference may opt an operator into primary/default auto-approval, but project settings cannot enable it for collaborators.
+  */
+  skipConfirmationDialogs: false,
   language: undefined,
   defaultProvider: undefined,
   defaultModelId: undefined,

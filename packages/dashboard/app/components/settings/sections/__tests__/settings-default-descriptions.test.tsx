@@ -75,6 +75,7 @@ const SETTING_DESCRIPTION_KEYS: Record<string, string> = {
   gitlabAuthTokenType: "globalGeneral.gitLabTokenTypeHint",
   gitlabAuthToken: "globalGeneral.gitLabAuthTokenHint",
   dismissModalsOnOutsideClick: "globalGeneral.dismissModalsByClickingOutsideHint",
+  skipConfirmationDialogs: "globalGeneral.skipConfirmationDialogsHint",
   persistAgentToolOutput: "globalGeneral.whenDisabledToolRowsAreStillLoggedBut",
   persistAgentThinkingLogPermanent: "globalGeneral.rowsAndDoesNotAffectAssistantTextOr",
   persistAgentThinkingLogEphemeral: "globalGeneral.rowsAndDoesNotAffectAssistantTextOr",

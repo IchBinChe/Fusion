@@ -456,6 +456,23 @@ describe("TaskCard", () => {
     }
   });
 
+  it("routes reset through the centralized confirm seam and proceeds in skip mode", async () => {
+    const cleanupGeometry = mockBoardContextMenuGeometry();
+    const onResetTask = vi.fn(async () => makeTask());
+    mockConfirm.mockResolvedValueOnce(true);
+    try {
+      render(<TaskCard task={makeTask({ column: "in-progress" })} onOpenDetail={noop} onResetTask={onResetTask} addToast={noop} />);
+      fireEvent.click(screen.getByTestId("card-menu-btn-FN-001"));
+      await waitFor(() => expectBoardContextMenuPortaled());
+      fireEvent.click(screen.getByRole("menuitem", { name: "Reset" }));
+      await waitFor(() => expect(onResetTask).toHaveBeenCalledWith("FN-001"));
+      expect(mockConfirm).toHaveBeenCalledWith(expect.objectContaining({ danger: true, title: "Reset" }));
+      expect(document.querySelector(".confirm-dialog-overlay")).toBeNull();
+    } finally {
+      cleanupGeometry();
+    }
+  });
+
   /*
   FNXC:TaskCardMenu 2026-07-10-12:00:
   The card actions menu must ALSO be reachable from the visible ⋯ button (first-run users never

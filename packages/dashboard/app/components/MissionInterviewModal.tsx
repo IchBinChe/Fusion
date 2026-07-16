@@ -780,6 +780,8 @@ export function MissionInterviewModal({
       className="floating-window--mission-interview"
       defaultSize={{ width: 760, height: 680 }}
       minSize={{ width: 560, height: 420 }}
+      /* FNXC:ModalGeometryPersistence 2026-07-15-19:30: This interview is a ≤768px full-screen sheet, so do not replace its stored desktop window geometry while mobile. */
+      suspendGeometryPersistenceOnMobile
       persistGeometryKey="floating-window:mission-interview"
     >
       {/*

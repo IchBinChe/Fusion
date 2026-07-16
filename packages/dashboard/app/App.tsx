@@ -1812,6 +1812,8 @@ function AppInner() {
           hideHeader
           dragHandleSelector=".chat-view--floating .view-header"
           className="floating-window--chat"
+          /* FNXC:ModalGeometryPersistence 2026-07-15-19:30: Chat is a full-screen sheet at ≤768px, so preserve its desktop location and size instead of restoring or overwriting them there. */
+          suspendGeometryPersistenceOnMobile
           persistGeometryKey="kb-dashboard-chat-floating-window"
           defaultSize={{ width: 980, height: 680 }}
           /*
@@ -1865,6 +1867,8 @@ function AppInner() {
             hideHeader
             dragHandleSelector=".task-detail-content--embedded > .modal-header"
             className="floating-window--task-detail"
+            /* FNXC:ModalGeometryPersistence 2026-07-15-19:30: Task pop-outs are full-screen sheets at ≤768px; preserve the shared desktop geometry record for their next movable reopen. */
+            suspendGeometryPersistenceOnMobile
             persistGeometryKey={TASK_DETAIL_FLOATING_GEOMETRY_KEY}
             layer="task-detail"
           >

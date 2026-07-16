@@ -1641,6 +1641,8 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
               onClose={() => { setSelectedIssueNumber(null); setSelectedPullNumber(null); }}
               defaultSize={{ width: 760, height: 680 }}
               minSize={{ width: 420, height: 360 }}
+              /* FNXC:ModalGeometryPersistence 2026-07-15-19:30: Import detail is a ≤768px sheet, so preserve its desktop floating geometry instead of touching it on mobile. */
+              suspendGeometryPersistenceOnMobile
               persistGeometryKey="floating-window:github-import-detail"
               className="floating-window--github-import-detail"
             >
@@ -1938,6 +1940,8 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
                     onClose={() => setSelectedGitlabKey(null)}
                     defaultSize={{ width: 760, height: 680 }}
                     minSize={{ width: 420, height: 360 }}
+                    /* FNXC:ModalGeometryPersistence 2026-07-15-19:30: GitLab detail shares the ≤768px import sheet behavior and must preserve the shared desktop geometry record. */
+                    suspendGeometryPersistenceOnMobile
                     persistGeometryKey="floating-window:github-import-detail"
                     className="floating-window--github-import-detail"
                   >

@@ -60,6 +60,9 @@ Shortcut handling is intentionally guarded. Fusion ignores global shortcuts whil
 
 Press `Escape` to close the current/topmost dashboard popup. Popped-out task windows and floating Quick Chat close before fixed app modals such as Terminal, Settings, Files, or Task Detail, and only one surface closes per key press. Nested editors and menus that already handle Escape keep first ownership by preventing the global handler.
 
+<!-- FNXC:ModalGeometryPersistenceDocs 2026-07-16-00:40: Full-screen mobile FloatingWindow sheets must preserve, rather than overwrite, the movable desktop geometry record so a later desktop reopen restores the user's chosen location and size. -->
+Movable dashboard pop-outs remember their last desktop location and size, while centered resizable dialogs remember their size. When a pop-out becomes a full-screen sheet at mobile widths (or, for Artifact Gallery, its short-height sheet breakpoint), it leaves that desktop record untouched; reopening it on desktop restores the prior floating geometry.
+
 ## Mobile/PWA app icons
 
 The installed mobile/PWA home-screen icons are generated from `packages/dashboard/app/public/logo.svg` by the desktop icon generator. When the Fusion brand mark changes, run `pnpm --filter @fusion/desktop generate:icons` so `packages/dashboard/app/public/icons/icon-192.png` and `packages/dashboard/app/public/icons/icon-512.png` stay aligned with the canonical logo. Also bump `CACHE_NAME` in `packages/dashboard/app/public/sw.js` whenever those icon assets change so installed PWAs refresh the cached launcher images.

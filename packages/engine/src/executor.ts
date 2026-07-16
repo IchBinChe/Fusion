@@ -90,6 +90,7 @@ import { Type, type Static } from "@earendil-works/pi-ai";
 import { describeModel, formatModelMarkerDetails, promptWithFallback, compactSessionContext } from "./pi.js";
 import { buildAgentGatedActionSummary } from "./permanent-agent-gating.js";
 import { accumulateSessionTokenUsage, mergeTokenUsagePerModel } from "./session-token-usage.js";
+import { enforceTaskTokenBudgetForPersist } from "./token-budget-enforcer.js";
 import {
   createResolvedAgentSession,
   extractRuntimeHint,
@@ -4207,6 +4208,17 @@ export class TaskExecutor {
     }
   }
 
+  /**
+   * FNXC:TokenBudget 2026-07-16-00:00:
+   * Step-session token usage bypasses the shared session helper, so all executor
+   * writes use this seam to retain the required persist-time budget enforcement.
+   */
+  private async persistTaskTokenUsage(taskId: string, tokenUsage: TaskTokenUsage): Promise<void> {
+    const runContext = this.getRunContextFor(taskId);
+    await this.store.updateTask(taskId, { tokenUsage }, runContext);
+    await enforceTaskTokenBudgetForPersist(this.store, taskId, runContext);
+  }
+
   private async persistTokenUsage(taskId: string, session?: AgentSession): Promise<void> {
     const activeSession = session ?? this.activeSessions.get(taskId)?.session;
     const currentUsage = await this.extractSessionTokenUsage(activeSession);
@@ -4250,7 +4262,7 @@ export class TaskExecutor {
       hitRatio: tokenUsage.inputTokens + tokenUsage.cachedTokens > 0 ? tokenUsage.cachedTokens / (tokenUsage.inputTokens + tokenUsage.cachedTokens) : 0,
     }));
 
-    await this.store.updateTask(taskId, { tokenUsage });
+    await this.persistTaskTokenUsage(taskId, tokenUsage);
   }
 
   /**
@@ -10482,7 +10494,7 @@ export class TaskExecutor {
               return;
             }
 
-            this.store.updateTask(task.id, { tokenUsage: accumulatedStepTokenUsage }).catch((err) => {
+            this.persistTaskTokenUsage(task.id, accumulatedStepTokenUsage).catch((err) => {
               executorLog.warn(`${task.id}: failed to persist token usage on step ${stepIndex} complete: ${err}`);
             });
           },
@@ -10531,7 +10543,7 @@ export class TaskExecutor {
           }
 
           if (accumulatedStepTokenUsage) {
-            await this.store.updateTask(task.id, { tokenUsage: accumulatedStepTokenUsage });
+            await this.persistTaskTokenUsage(task.id, accumulatedStepTokenUsage);
           }
 
           const allSuccess = results.every(r => r.success);
@@ -10850,13 +10862,13 @@ export class TaskExecutor {
               nextRecoveryAt: null,
             });
             if (accumulatedStepTokenUsage) {
-              await this.store.updateTask(task.id, { tokenUsage: accumulatedStepTokenUsage });
+              await this.persistTaskTokenUsage(task.id, accumulatedStepTokenUsage);
             }
             executorLog.log(`✗ ${task.id} transient retries exhausted — failed in execution`);
             this.options.onError?.(task, err instanceof Error ? err : new Error(errorMessage));
           } else {
             if (accumulatedStepTokenUsage) {
-              await this.store.updateTask(task.id, { tokenUsage: accumulatedStepTokenUsage });
+              await this.persistTaskTokenUsage(task.id, accumulatedStepTokenUsage);
             }
             if (await this.handleNonContinuableSessionError(task, false, errorMessage)) {
               return;

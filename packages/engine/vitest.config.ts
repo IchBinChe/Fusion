@@ -371,18 +371,19 @@ export default defineConfig({
             Database class being deleted. Quarantined on sight per AGENTS.md; mirrored in
             scripts/lib/test-quarantine.json.
             */
-            // FNXC:PgMigrationQuarantine 2026-07-14-08:00:
+// FNXC:PgMigrationQuarantine 2026-07-14-08:00:
             // VAL-REMOVAL-005 deleted the SQLite Database class. These files use makeReliabilityFixture
             // (now PG-backed) but fail on sync SQLite APIs (getRunAuditEvents, getDatabase) that
             // return [] / throw in backend mode, or on mock drift from the async-satellite cutover.
             // Quarantined on sight per AGENTS.md; mirrored in scripts/lib/test-quarantine.json.
+            // FNXC:PgMigrationQuarantine 2026-07-16-04:59:
+            // FN-8044 migrated dependency-reconcile suites to the PG corrupt-row seeding seam, so
+            // they are deliberately absent from this quarantine list and ledger.
             // FNXC:PgMigrationQuarantine 2026-07-16-10:45:
             // FN-8047 restored multi-node claim and owning-node handoff coverage with shared PG-backed
             // AgentStores and AsyncCentralClaimStore; their paired ledger entries are intentionally live.
             "src/__tests__/reliability-interactions/integration-worktree-state.test.ts",
             "src/__tests__/reliability-interactions/explicit-duplicate-marker-sweep.test.ts",
-            "src/__tests__/reliability-interactions/self-defeating-dep-reconcile.test.ts",
-            "src/__tests__/reliability-interactions/dependency-cycle-reconcile.test.ts",
             "src/__tests__/reliability-interactions/merge-runner-spawn-enoent-prevention.test.ts",
             "src/__tests__/reliability-interactions/meta-archive-guard-composition.test.ts",
             "src/__tests__/reliability-interactions/meta-chain-auto-close.test.ts",

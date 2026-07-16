@@ -7,6 +7,7 @@ import {
   AgentStore, DEFAULT_SETTINGS, TaskStore, type Settings, type Task,
   type AsyncDataLayer, type CentralClaimStore, type ResolvedBackend,
   createConnectionSetFromUrl, applySchemaBaseline, createAsyncDataLayer,
+  drizzleEq, postgresSchema,
 } from "@fusion/core";
 import { aiMergeTask } from "../../merger.js";
 import { SelfHealingManager } from "../../self-healing.js";
@@ -235,6 +236,7 @@ export type ReliabilityFixture = {
   createBranch: (branch: string) => Promise<void>;
   checkout: (branch: string) => Promise<void>;
   mergeTask: () => Promise<unknown>;
+  seedRawTaskColumns: (taskId: string, patch: Partial<Pick<Task, "dependencies" | "title" | "column">>) => Promise<void>;
   selfHeal: {
     recoverAlreadyMergedReviewTasks: () => Promise<number>;
     recoverMisclassifiedFailures: () => Promise<number>;
@@ -321,6 +323,33 @@ export async function makeReliabilityFixture(input: {
       git(rootDir, `git checkout ${branch}`);
     },
     mergeTask: async () => aiMergeTask(store, rootDir, task.id),
+    /*
+    FNXC:PgReliabilitySeeding 2026-07-16-04:48:
+    Reconcile tests must seed intentionally corrupt dependency/title rows that write-time guards reject.
+    Raw PostgreSQL updates bypass those guards, then clear both read-through snapshots: otherwise
+    startupSlimListMemo or taskCache can hide the corruption and reconcilers return zero. Require
+    exactly one persisted row so a bad fixture ID cannot make a negative-path test pass vacuously.
+    */
+    seedRawTaskColumns: async (taskId, patch) => {
+      const values = {
+        ...(patch.dependencies !== undefined ? { dependencies: patch.dependencies } : {}),
+        ...(patch.title !== undefined ? { title: patch.title } : {}),
+        ...(patch.column !== undefined ? { column: patch.column } : {}),
+      };
+      if (Object.keys(values).length === 0) {
+        throw new Error("seedRawTaskColumns requires at least one column");
+      }
+      const updated = await layer.db
+        .update(postgresSchema.project.tasks)
+        .set(values)
+        .where(drizzleEq(postgresSchema.project.tasks.id, taskId))
+        .returning({ id: postgresSchema.project.tasks.id });
+      if (updated.length !== 1) {
+        throw new Error(`seedRawTaskColumns expected one task row for ${taskId}, updated ${updated.length}`);
+      }
+      store.clearStartupSlimListMemo();
+      store.taskCache.clear();
+    },
     selfHeal: {
       recoverAlreadyMergedReviewTasks: async () => manager.recoverAlreadyMergedReviewTasks(),
       recoverMisclassifiedFailures: async () => manager.recoverMisclassifiedFailures(),

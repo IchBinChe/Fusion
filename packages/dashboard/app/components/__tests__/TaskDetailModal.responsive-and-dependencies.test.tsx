@@ -666,7 +666,7 @@ describe("TaskDetailModal", () => {
       expect(overlayBlock).toContain("position: absolute;");
       expect(overlayBlock).toContain("top: var(--space-md);");
       expect(overlayBlock).toContain("right: var(--space-md);");
-      expect(mobileBlock).toContain("  .detail-activity {\n    padding-inline-end: calc(var(--space-2xl) + var(--space-lg));\n  }");
+      expect(mobileBlock).toContain("  .detail-activity {\n    padding-inline-end: var(--space-md);\n  }");
       expect(mobileOverlayBlock).toContain("top: var(--space-sm);");
       expect(mobileOverlayBlock).toContain("right: var(--space-sm);");
     });

@@ -3327,8 +3327,22 @@ Live and Feed Activity expansion overlays the content instead of reserving a too
     max-inline-size: calc(100vw - (var(--space-md) * 2));
   }
 
+  /*
+  FNXC:TaskDetailActivity 2026-07-16-00:00:
+  Mobile Feed uses a normal `var(--space-md)` right inset so the full scrolling list
+  uses available width. Reserve the overlay-toggle clearance only on top-of-panel
+  first-row elements, keeping the first visible row uncovered without a deep gutter.
+  */
   .detail-activity {
-    padding-inline-end: calc(var(--space-2xl) + var(--space-lg));
+    padding-inline-end: var(--space-md);
+  }
+
+  .detail-activity:not(.detail-activity--interventions) > h4,
+  .detail-activity:not(.detail-activity--interventions) > .detail-log-truncated,
+  .detail-activity:not(.detail-activity--interventions) > .detail-log-loading,
+  .detail-activity:not(.detail-activity--interventions) > .detail-log-empty,
+  .detail-activity:not(.detail-activity--interventions) > .detail-activity-list > .detail-log-entry:first-child {
+    padding-inline-end: calc(var(--space-2xl) + var(--space-sm));
   }
 
   /* FNXC:PlannerOversight 2026-07-05-00:00: mobile reserves more padding for the overlay toggle; neutralize it for Interventions too so FN-7519's timeline stays full width on mobile per FN-7581. */

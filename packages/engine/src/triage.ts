@@ -61,10 +61,10 @@ The triage pre-execution Plan Review gate (runPlanReviewBeforeExecution) routes 
 verdict back to `needs-replan`, which re-plans and re-reviews. Without a ceiling, a planner
 and reviewer that persistently disagree loop plan → Plan Review REVISE → replan forever
 (observed on TC-002), and in `planApprovalMode: require-all` there is no human escape because
-the task never reaches `awaiting-approval`. Bound the consecutive REVISE replans with a small
-cap (mirroring the executor graph's PLAN_REVIEW_REPLAN_HARD_CAP backstop): after this many
-replans the gate escalates the task to `awaiting-approval` for a human decision instead of
-replanning again. The counter (Task.planReviewReplanCount) resets when the gate passes.
+the task never reaches `awaiting-approval`. Bound the consecutive REVISE replans with a
+cap (default 8, mirroring the executor graph's PLAN_REVIEW_REPLAN_HARD_CAP backstop): after
+this many replans the gate escalates the task to `awaiting-approval` for a human decision
+instead of replanning again. The counter (Task.planReviewReplanCount) resets when the gate passes.
 
 FNXC:PlanReviewReplan 2026-07-15-11:09:
 Raise the automatic REVISE replan ceiling from 3 to 8 so planner/reviewer pairs get more

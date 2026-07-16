@@ -3,7 +3,7 @@ import type { Settings, Task, TaskStore } from "@fusion/core";
 import { join } from "node:path";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { PLAN_REVIEW_GATE_REPLAN_CAP, TriageProcessor } from "../triage.js";
+import { TriageProcessor } from "../triage.js";
 
 /*
  * Bug A (part 2): the triage pre-execution Plan Review gate must bound consecutive
@@ -142,11 +142,11 @@ describe("Plan Review replan cap", () => {
   it("escalates to awaiting-approval instead of replanning once the cap is reached", async () => {
     const rootDir = await createFixtureRoot();
     roots.push(rootDir);
-    // Cap is PLAN_REVIEW_GATE_REPLAN_CAP (8): a task that has already consumed that many
-    // consecutive REVISE replans must escalate on the next REVISE rather than replanning again.
+    // Cap is 8: a task that has already consumed that many consecutive REVISE replans must
+    // escalate on the next REVISE rather than replanning again.
     const task = createRetryTask({
       id: "FN-REPLAN-CAP-HIT",
-      planReviewReplanCount: PLAN_REVIEW_GATE_REPLAN_CAP,
+      planReviewReplanCount: 8,
     });
     const prompt = `# Task: ${task.id} - Existing draft\n\n## Mission\n\nOnly rewrite after reviewer feedback.\n`;
     await writePrompt(rootDir, task.id, prompt);
@@ -171,17 +171,22 @@ describe("Plan Review replan cap", () => {
     expect(store.logEntry).toHaveBeenCalledWith(
       task.id,
       "Plan Review replan cap reached — escalating to manual approval",
-      expect.stringContaining(`cap ${PLAN_REVIEW_GATE_REPLAN_CAP}`),
+      expect.stringContaining("cap 8"),
     );
   });
 
-  it("still replans when one attempt remains under the cap", async () => {
+  it("still replans from seven consecutive REVISE verdicts", async () => {
     const rootDir = await createFixtureRoot();
     roots.push(rootDir);
-    const priorCount = PLAN_REVIEW_GATE_REPLAN_CAP - 1;
+    /*
+    FNXC:PlanReviewReplan 2026-07-15-11:30:
+    Keep this boundary literal rather than deriving it from the production constant. FN-7986
+    requires proof that the default is truly 8: with the former cap of 3, seven prior REVISE
+    verdicts would escalate instead of returning the task to `needs-replan` at count 8.
+    */
     const task = createRetryTask({
       id: "FN-REPLAN-CAP-LAST",
-      planReviewReplanCount: priorCount,
+      planReviewReplanCount: 7,
     });
     const prompt = `# Task: ${task.id} - Existing draft\n\n## Mission\n\nOnly rewrite after reviewer feedback.\n`;
     await writePrompt(rootDir, task.id, prompt);
@@ -192,7 +197,7 @@ describe("Plan Review replan cap", () => {
 
     expect(store.updateTask).toHaveBeenCalledWith(task.id, expect.objectContaining({
       status: "needs-replan",
-      planReviewReplanCount: PLAN_REVIEW_GATE_REPLAN_CAP,
+      planReviewReplanCount: 8,
     }));
     expect(store.updateTask).not.toHaveBeenCalledWith(task.id, expect.objectContaining({
       status: "awaiting-approval",

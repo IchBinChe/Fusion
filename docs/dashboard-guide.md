@@ -460,6 +460,9 @@ When a Planning session is awaiting your input, use its **Background Tasks** foo
 <!-- FNXC:PlanningRetry 2026-07-13-00:00: If Planning AI generation stalls and the server persists a terminal generation error, Planning Mode should auto-retry the same session up to three times before showing the permanent Retry/Dismiss error panel; any question or summary progress resets that budget. -->
 When Planning AI generation appears stuck, Planning Mode automatically retries the same session up to three times and shows **Retrying… (attempt N of 3)** before falling back to the permanent **Retry**/**Dismiss** error panel. Any successful question or summary progress resets the automatic retry budget.
 
+<!-- FNXC:Planning 2026-07-15-00:00: FN-8003 preserves the user’s original planning idea across error and mid-interview recovery surfaces. -->
+Use **Copy prompt** in the error panel or an active interview question to copy the original “What do you want to build?” text, then paste it into **New session** to restart cleanly.
+
 <!-- FNXC:PlanningModeDeepeningCheckpoint 2026-07-02-12:18: Planning Mode must pause before every final summary at a mandatory "Would you like to go deeper?" checkpoint so users can request inferred follow-up themes, enter a custom topic, or proceed without deepening. -->
 <!-- FNXC:PlanningMode 2026-07-05-00:25: The planning AI now proposes plan-specific deepening themes (deepeningThemes on the completion payload) so this checkpoint surfaces topics tailored to the user's actual plan, including angles they had not anticipated, instead of a fixed generic set. The regex-derived generic themes remain the fallback whenever the AI supplies none (FN-7616 / issue #1912). -->
 

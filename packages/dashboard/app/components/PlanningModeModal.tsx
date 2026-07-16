@@ -51,7 +51,7 @@ import {
   clearPlanningDescription,
 } from "../hooks/modalPersistence";
 import { getRelativeTimeBucket } from "../utils/relativeTimeAgo";
-import { Lightbulb, X, Loader2, CheckCircle, ArrowLeft, ArrowRight, Sparkles, ListTree, GripVertical, ArrowUp, ArrowDown, Plus, Trash2, RefreshCw, ChevronLeft, MessageSquarePlus, AlertCircle, Clock, HelpCircle, StopCircle, Archive, ArchiveRestore } from "lucide-react";
+import { Lightbulb, X, Loader2, CheckCircle, ArrowLeft, ArrowRight, Sparkles, ListTree, GripVertical, ArrowUp, ArrowDown, Plus, Trash2, RefreshCw, ChevronLeft, MessageSquarePlus, AlertCircle, Clock, HelpCircle, StopCircle, Archive, ArchiveRestore, Copy } from "lucide-react";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { ConversationHistory } from "./ConversationHistory";
 import { OnboardingDisclosure } from "./OnboardingDisclosure";
@@ -61,6 +61,7 @@ import { useNavigationHistoryContext } from "../hooks/useNavigationHistory";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { useAutosizeTextarea } from "../hooks/useAutosizeTextarea";
 import { useToast } from "../hooks/useToast";
+import { copyTextToClipboard } from "../utils/copyToClipboard";
 
 const WARNING_ICON = "⚠️";
 
@@ -303,6 +304,11 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   // Escape-to-close behavior (the back-stack/onClose path), so escapeEnabled is deliberately not wired below.
   const { isEmbedded, scrollLockEnabled, resizePersistEnabled } = useEmbeddedPresentation(presentation);
   const [initialPlan, setInitialPlan] = useState("");
+  /*
+  FNXC:Planning 2026-07-15-00:00:
+  FN-8003 keeps the started prompt separate from the editable composer so users can recover the original idea when an interview errors or drifts off track. The composer may be reset or reused, but this value belongs only to the active session.
+  */
+  const [activePlanPrompt, setActivePlanPrompt] = useState("");
   const [view, setView] = useState<ViewState>({ type: "initial" });
   const [error, setError] = useState<string | null>(null);
   const [responseHistory, setResponseHistory] = useState<QuestionResponse[]>([]);
@@ -700,6 +706,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     if (!options?.preserveInitialPlan) {
       setInitialPlan("");
     }
+    setActivePlanPrompt("");
     setView({ type: "initial" });
     setError(null);
     setResponseHistory([]);
@@ -1069,10 +1076,30 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
 
   startPlanningAutoRetryRef.current = startPlanningAutoRetry;
 
+  /*
+  FNXC:Planning 2026-07-15-00:00:
+  FN-8003 exposes recovery only through the shared clipboard helper so Copy prompt works on secure desktop origins and non-secure LAN/mobile origins alike. Do not replace this with navigator.clipboard directly.
+  */
+  const handleCopyPlanPrompt = useCallback(async () => {
+    if (!activePlanPrompt.trim()) {
+      return;
+    }
+
+    const copied = await copyTextToClipboard(activePlanPrompt);
+    addToast(
+      copied
+        ? t("planning.copyPromptSuccess", "Prompt copied to clipboard")
+        : t("planning.copyPromptFailure", "Failed to copy prompt"),
+      copied ? "success" : "error",
+    );
+  }, [activePlanPrompt, addToast, t]);
+
   const handleStartPlanning = useCallback(async (planOverride?: string) => {
     const plan = planOverride ?? initialPlan;
-    if (!plan.trim()) return;
+    const startedPlan = plan.trim();
+    if (!startedPlan) return;
 
+    setActivePlanPrompt(startedPlan);
     setError(null);
     setStreamingOutput("");
     setConversationHistory([]);
@@ -1096,7 +1123,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
 
       const draftSessionId = draftSessionIdRef.current;
       const { sessionId } = await startPlanningStreaming(
-        plan.trim(),
+        startedPlan,
         projectId,
         modelOverride,
         {
@@ -1197,11 +1224,22 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           // new-session view rather than surfacing a scary error banner.
           setSelectedSessionId(null);
           setMobileShowDetail(false);
+          setActivePlanPrompt("");
           setView({ type: "initial" });
           return;
         }
 
         currentSessionIdRef.current = sessionId;
+        let inputPayload: Record<string, unknown> | null = null;
+        try {
+          const parsedPayload: unknown = session.inputPayload ? JSON.parse(session.inputPayload) : null;
+          if (parsedPayload && typeof parsedPayload === "object" && !Array.isArray(parsedPayload)) {
+            inputPayload = parsedPayload as Record<string, unknown>;
+          }
+        } catch {
+          // An unavailable payload cannot provide a safe copy target.
+        }
+        setActivePlanPrompt(typeof inputPayload?.initialPlan === "string" ? inputPayload.initialPlan : "");
         const parsedHistory = parseConversationHistory(session.conversationHistory);
         setConversationHistory(parsedHistory);
         setResponseHistory(
@@ -1236,20 +1274,15 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           let savedProvider: string | undefined;
           let savedModelId: string | undefined;
           let savedThinkingLevel: ThinkingLevel | "" = "";
-          try {
-            const payload = session.inputPayload ? JSON.parse(session.inputPayload) : null;
-            if (payload && typeof payload.initialPlan === "string") {
-              savedPlan = payload.initialPlan;
-            }
-            if (payload && typeof payload.modelProvider === "string" && typeof payload.modelId === "string") {
-              savedProvider = payload.modelProvider;
-              savedModelId = payload.modelId;
-            }
-            if (payload && THINKING_LEVELS.includes(payload.thinkingLevel as ThinkingLevel)) {
-              savedThinkingLevel = payload.thinkingLevel;
-            }
-          } catch {
-            // Fall through with empty text; the row will remain editable.
+          if (typeof inputPayload?.initialPlan === "string") {
+            savedPlan = inputPayload.initialPlan;
+          }
+          if (typeof inputPayload?.modelProvider === "string" && typeof inputPayload.modelId === "string") {
+            savedProvider = inputPayload.modelProvider;
+            savedModelId = inputPayload.modelId;
+          }
+          if (inputPayload && THINKING_LEVELS.includes(inputPayload.thinkingLevel as ThinkingLevel)) {
+            savedThinkingLevel = inputPayload.thinkingLevel as ThinkingLevel;
           }
           setInitialPlan(savedPlan);
           setPlanningModelProvider(savedProvider);
@@ -1299,6 +1332,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
         }
       } catch (err) {
         currentSessionIdRef.current = sessionId;
+        setActivePlanPrompt("");
         setError(null);
         setView({
           type: "error",
@@ -2461,6 +2495,18 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
                       {isRetrying ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
                       <span className="icon-ml-6">{isRetrying ? t("planning.retrying", "Retrying...") : t("common.retry", "Retry")}</span>
                     </button>
+                    {activePlanPrompt.trim() && (
+                      <button
+                        className="btn"
+                        type="button"
+                        onClick={() => void handleCopyPlanPrompt()}
+                        aria-label={t("planning.copyPromptLabel", "Copy original prompt to clipboard")}
+                        title={t("planning.copyPromptLabel", "Copy original prompt to clipboard")}
+                      >
+                        <Copy size={14} />
+                        <span className="icon-ml-6">{t("planning.copyPrompt", "Copy prompt")}</span>
+                      </button>
+                    )}
                     <button className="btn" onClick={handleClose} disabled={isRetrying}>{t("planning.dismiss", "Dismiss")}</button>
                   </div>
                 </div>
@@ -2477,6 +2523,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
                 onSubmit={handleSubmitResponse}
                 onBack={responseHistory.length > 0 ? handleBack : undefined}
                 isBackPending={isBackPending}
+                onCopyPlanPrompt={activePlanPrompt.trim() ? handleCopyPlanPrompt : undefined}
               />
             </div>
           )}
@@ -2534,6 +2581,10 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   );
 }
 
+/*
+FNXC:Planning 2026-07-15-00:00:
+FN-8003 places Copy prompt inside QuestionForm's progress header because the recovery control is part of the active interview panel, keeping it visible with the question on desktop and mobile rather than separating related interview actions at the modal level.
+*/
 interface QuestionFormProps {
   question: PlanningQuestion;
   progress: number;
@@ -2541,9 +2592,10 @@ interface QuestionFormProps {
   onSubmit: (responses: QuestionResponse) => void;
   onBack?: () => void;
   isBackPending?: boolean;
+  onCopyPlanPrompt?: () => void | Promise<void>;
 }
 
-function QuestionForm({ question: rawQuestion, progress, historyEntries, onSubmit, onBack, isBackPending = false }: QuestionFormProps) {
+function QuestionForm({ question: rawQuestion, progress, historyEntries, onSubmit, onBack, isBackPending = false, onCopyPlanPrompt }: QuestionFormProps) {
   const { t } = useTranslation("app");
   const question = normalizeQuestionOptions(rawQuestion);
   const questionOptions = question.options ?? [];
@@ -2663,13 +2715,27 @@ function QuestionForm({ question: rawQuestion, progress, historyEntries, onSubmi
 
         <div className="planning-question-panel">
           <div className="planning-progress">
-            <div className="planning-progress-bar">
-              {[1, 2, 3].map((step) => (
-                <div
-                  key={step}
-                  className={`planning-progress-step ${step <= progress ? "active" : ""}`}
-                />
-              ))}
+            <div className="planning-progress-header">
+              <div className="planning-progress-bar">
+                {[1, 2, 3].map((step) => (
+                  <div
+                    key={step}
+                    className={`planning-progress-step ${step <= progress ? "active" : ""}`}
+                  />
+                ))}
+              </div>
+              {onCopyPlanPrompt && (
+                <button
+                  className="btn btn-sm planning-copy-prompt-btn"
+                  type="button"
+                  onClick={() => void onCopyPlanPrompt()}
+                  aria-label={t("planning.copyPromptLabel", "Copy original prompt to clipboard")}
+                  title={t("planning.copyPromptLabel", "Copy original prompt to clipboard")}
+                >
+                  <Copy size={14} />
+                  <span className="icon-ml-6">{t("planning.copyPrompt", "Copy prompt")}</span>
+                </button>
+              )}
             </div>
             <span className="planning-progress-text">{t("planning.questionProgress", "Question {{progress}} of ~3", { progress })}</span>
           </div>

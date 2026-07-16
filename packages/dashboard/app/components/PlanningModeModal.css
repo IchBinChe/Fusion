@@ -927,6 +927,25 @@ An empty footer must NOT reserve vertical space or paint its divider band. When 
   flex-shrink: 0;
 }
 
+/*
+FNXC:Planning 2026-07-15-00:00:
+FN-8003 keeps Copy prompt in the question progress header so an interview can be restarted from its original idea without leaving the active question. The flexible progress bar preserves room for the recovery action at narrow desktop widths.
+*/
+.planning-progress-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.planning-progress-header .planning-progress-bar {
+  flex: 1;
+  min-width: 0;
+}
+
+.planning-copy-prompt-btn {
+  flex-shrink: 0;
+}
+
 .planning-progress-bar {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1749,6 +1768,19 @@ Tablet embedded Planning keeps the desktop two-pane shell, so the summary footer
     font-size: 16px;
   }
 
+  /*
+  FNXC:Planning 2026-07-15-00:00:
+  FN-8003 gives the recovery action its own mobile row so Copy prompt remains tappable without squeezing the interview progress bar or error actions.
+  */
+  .planning-progress-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .planning-copy-prompt-btn {
+    align-self: flex-start;
+  }
+
   /* Progress bar compact on narrow screens */
   .planning-progress-bar {
     gap: var(--space-xs);
@@ -1850,6 +1882,7 @@ Tablet embedded Planning keeps the desktop two-pane shell, so the summary footer
 }
 .ai-error-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-sm);
 }
 

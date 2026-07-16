@@ -64,6 +64,7 @@ import {
 } from "./PlanningModeModal.test-helpers";
 
 const mockAddToast = vi.fn();
+const mockCopyTextToClipboard = vi.fn();
 
 vi.mock("../../hooks/useToast", () => ({
   useToast: () => ({
@@ -113,6 +114,10 @@ vi.mock("../../api", () => ({
   deleteAiSession: (...args: any[]) => mockDeleteAiSession(...args),
 }));
 
+vi.mock("../../utils/copyToClipboard", () => ({
+  copyTextToClipboard: (...args: unknown[]) => mockCopyTextToClipboard(...args),
+}));
+
 vi.mock("../../hooks/useConfirm", () => ({
   useConfirm: () => ({ confirm: mockConfirm }),
 }));
@@ -137,6 +142,8 @@ describe("PlanningModeModal", () => {
     mockConfirm.mockReset();
     mockConfirm.mockResolvedValue(true);
     mockAddToast.mockReset();
+    mockCopyTextToClipboard.mockReset();
+    mockCopyTextToClipboard.mockResolvedValue(true);
     MockEventSource.reset();
     vi.stubGlobal("EventSource", MockEventSource as any);
     window.sessionStorage.clear();
@@ -3921,6 +3928,138 @@ describe("PlanningModeModal", () => {
       });
 
       expect(screen.queryByRole("button", { name: /Back/i })).toBeNull();
+    });
+  });
+
+  describe("copy original prompt recovery", () => {
+    it("copies the fresh original prompt from an active interview", async () => {
+      const originalPrompt = "Build a recovery flow\nwith a restart path";
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />,
+      );
+
+      fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), {
+        target: { value: originalPrompt },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Start Planning" }));
+
+      const copyButton = await screen.findByRole("button", { name: /copy original prompt/i });
+      fireEvent.click(copyButton);
+
+      await waitFor(() => {
+        expect(mockCopyTextToClipboard).toHaveBeenCalledWith(originalPrompt);
+        expect(mockAddToast).toHaveBeenCalledWith("Prompt copied to clipboard", "success");
+      });
+    });
+
+    it("copies the fresh original prompt after the interview errors", async () => {
+      const streamHandlers: any[] = [];
+      const originalPrompt = "Build an interview that can recover";
+      mockConnectPlanningStream.mockImplementation((_sessionId: string, _projectId: string | undefined, handlers: any) => {
+        streamHandlers.push(handlers);
+        return { close: vi.fn(), isConnected: vi.fn().mockReturnValue(true) };
+      });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+        />,
+      );
+
+      fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), {
+        target: { value: originalPrompt },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Start Planning" }));
+      await waitFor(() => expect(streamHandlers).toHaveLength(1));
+
+      for (let index = 0; index < 4; index += 1) {
+        await act(async () => {
+          streamHandlers[index].onError?.("Planning provider failed");
+        });
+      }
+
+      const copyButton = await screen.findByRole("button", { name: /copy original prompt/i });
+      fireEvent.click(copyButton);
+      await waitFor(() => expect(mockCopyTextToClipboard).toHaveBeenCalledWith(originalPrompt));
+    });
+
+    it("restores a resumable awaiting-input session prompt before copying", async () => {
+      const originalPrompt = "Resume awaiting-input prompt";
+      mockFetchAiSession.mockResolvedValueOnce({
+        id: "copy-awaiting-input",
+        type: "planning",
+        status: "awaiting_input",
+        title: "Recoverable session",
+        inputPayload: JSON.stringify({ initialPlan: originalPrompt }),
+        conversationHistory: "[]",
+        currentQuestion: JSON.stringify(mockQuestion),
+        result: null,
+        thinkingOutput: "",
+        error: null,
+        projectId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          resumeSessionId="copy-awaiting-input"
+        />,
+      );
+
+      const copyButton = await screen.findByRole("button", { name: /copy original prompt/i });
+      fireEvent.click(copyButton);
+      await waitFor(() => expect(mockCopyTextToClipboard).toHaveBeenCalledWith(originalPrompt));
+    });
+
+
+    it.each(["desktop", "mobile"] as const)("hides Copy prompt without a persisted prompt on %s", async (viewportMode) => {
+      mockViewport(viewportMode);
+      mockFetchAiSession.mockResolvedValueOnce({
+        id: `copy-empty-${viewportMode}`,
+        type: "planning",
+        status: "awaiting_input",
+        title: "Missing prompt",
+        inputPayload: "{}",
+        conversationHistory: "[]",
+        currentQuestion: JSON.stringify(mockQuestion),
+        result: null,
+        thinkingOutput: "",
+        error: null,
+        projectId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+      render(
+        <PlanningModeModal
+          isOpen={true}
+          onClose={mockOnClose}
+          onTaskCreated={mockOnTaskCreated}
+          onTasksCreated={vi.fn()}
+          tasks={mockTasks}
+          resumeSessionId={`copy-empty-${viewportMode}`}
+        />,
+      );
+
+      await screen.findByText(mockQuestion.question);
+      expect(screen.queryByRole("button", { name: /copy original prompt/i })).toBeNull();
+      expect(mockCopyTextToClipboard).not.toHaveBeenCalled();
     });
   });
 

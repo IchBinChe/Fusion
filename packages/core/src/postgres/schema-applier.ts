@@ -182,6 +182,18 @@ export async function applySchemaBaseline(
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('fusion:schema-applier'))`);
     await ensureBookkeepingTable(tx);
+    /*
+    FNXC:PostgresSchema 2026-07-16-00:55:
+    FN-8051 requires project, central, and archive to exist before plugin schema-init hooks run.
+    Hooks run even when migration markers are already recorded and target project tables, so
+    ensure the namespaces unconditionally inside the advisory-locked transaction rather than
+    relying on the baseline batch that a marker-present database skips.
+    */
+    await tx.execute(sql.raw(`
+      CREATE SCHEMA IF NOT EXISTS project;
+      CREATE SCHEMA IF NOT EXISTS central;
+      CREATE SCHEMA IF NOT EXISTS archive;
+    `));
     const applied = await getAppliedMigrations(tx);
     const baselineAlreadyApplied = applied.includes(INITIAL_SCHEMA_VERSION);
     const automationIsolationAlreadyApplied = applied.includes(AUTOMATION_ISOLATION_SCHEMA_VERSION);

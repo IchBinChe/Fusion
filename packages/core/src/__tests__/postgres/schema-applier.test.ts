@@ -47,6 +47,7 @@ import {
   SQLITE_SCHEMA_PARITY_VERSION,
 } from "../../postgres/schema-applier.js";
 import { rekeyFallbackProjectPartition } from "../../postgres/migration-stamping.js";
+import type { PluginSchemaInitHook } from "../../postgres/plugin-schema-hook.js";
 
 const PG_ADMIN_URL =
   process.env.FUSION_PG_TEST_ADMIN_URL ?? "postgresql://localhost:5432/postgres";
@@ -371,6 +372,48 @@ pgDescribe("schema-applier: VAL-SCHEMA-008 three-database topology", () => {
       ORDER BY schema_name
     `)) as unknown as Array<{ schema_name: string }>;
     expect(rows.map((r) => r.schema_name)).toEqual(["archive", "central", "project"]);
+  });
+
+  it("ensures schemas before hooks when all migration markers are already recorded", async () => {
+    ctx = await setupFreshDb();
+    await ctx.db.execute(sql.raw(`
+      CREATE TABLE public.fusion_schema_migrations (
+        version text PRIMARY KEY,
+        applied_at timestamptz NOT NULL DEFAULT now()
+      );
+      INSERT INTO public.fusion_schema_migrations (version)
+      SELECT lpad(n::text, 4, '0')
+      FROM generate_series(0, ${Number(SCHEMA_BASELINE_VERSION)}) AS migration(n);
+    `));
+
+    const observedSchemas: string[] = [];
+    const assertSchemasHook: PluginSchemaInitHook = {
+      pluginId: "assert-required-schemas",
+      async init(db) {
+        const rows = (await db.execute(sql`
+          SELECT schema_name FROM information_schema.schemata
+          WHERE schema_name IN ('project', 'central', 'archive')
+          ORDER BY schema_name
+        `)) as unknown as Array<{ schema_name: string }>;
+        observedSchemas.push(...rows.map(({ schema_name }) => schema_name));
+        if (rows.length !== 3) {
+          throw new Error(`Required schemas missing at plugin hook time: ${rows.map(({ schema_name }) => schema_name).join(", ")}`);
+        }
+      },
+    };
+
+    await expect(applySchemaBaseline(ctx.db, { pluginHooks: [assertSchemasHook] })).resolves.toEqual({
+      applied: false,
+      pluginHooksRun: 1,
+    });
+    expect(observedSchemas).toEqual(["archive", "central", "project"]);
+
+    const schemas = (await ctx.db.execute(sql`
+      SELECT schema_name FROM information_schema.schemata
+      WHERE schema_name IN ('project', 'central', 'archive')
+      ORDER BY schema_name
+    `)) as unknown as Array<{ schema_name: string }>;
+    expect(schemas.map(({ schema_name }) => schema_name)).toEqual(["archive", "central", "project"]);
   });
 });
 

@@ -54,6 +54,12 @@ describe("ThemeDropdown", () => {
     expect(renderedThemeIds(screen.getByRole("listbox", { name: /color theme/i }))).toEqual(EXPECTED_THEME_IDS);
   });
 
+  it("keeps tokenized space below the Settings current-theme row", () => {
+    const css = readFileSync("app/components/ThemeDropdown.css", "utf8");
+
+    expect(css).toMatch(/\.theme-dropdown--current-row\s*\{\s*margin-bottom:\s*var\(--space-lg\);\s*\}/);
+  });
+
   it("labels only Shadcn Ember as the default option", () => {
     render(<ThemeDropdown colorTheme="ocean" onColorThemeChange={vi.fn()} />);
 

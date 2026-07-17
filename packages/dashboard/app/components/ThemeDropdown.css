@@ -24,6 +24,14 @@ Glass theme surfaces create stronger translucent stacking contexts, so the Comma
   min-inline-size: 0;
 }
 
+/*
+FNXC:DashboardTheming 2026-07-16-15:00:
+FN-8200 gives the Settings-only current-theme selector breathing room before the Font Size section, using the established large spacing token without affecting Command Center's compact dropdown.
+*/
+.theme-dropdown--current-row {
+  margin-bottom: var(--space-lg);
+}
+
 .theme-dropdown-trigger .theme-option-swatch,
 .theme-dropdown-option .theme-option-swatch {
   flex: 0 0 auto;

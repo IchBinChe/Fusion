@@ -231,11 +231,21 @@ describe("CLI package.json publishing config", () => {
     // when adding to this list, document *why* it doesn't need to be a runtime dep
     // (transitive via another dep, only used by the Bun binary, etc.) so future
     // edits don't silently re-introduce the dockerode-class bug.
+    /*
+    FNXC:CliTests 2026-07-17-09:45:
+    FN-8210: extractStringArray("external") intentionally scans the entire tsup config, including per-plugin bundlePluginEntry externals. Optional Baileys dynamic-require helpers for the bundled WhatsApp Chat plugin are therefore allowlisted here: they must remain present in the config's external array, but are not runtime dependencies of the @runfusion/fusion CLI bin.
+    */
     const TRANSITIVE_EXTERNALS: Record<string, string> = {
       ssh2: "transitive dep of dockerode",
       "cpu-features": "transitive dep of dockerode (via ssh2)",
       "@homebridge/node-pty-prebuilt-multiarch":
         "aliased as node-pty in dependencies; the alias entry satisfies the import",
+      jimp:
+        "optional Baileys dynamic-require helper externalized only for bundled fusion-plugin-whatsapp-chat; not a @runfusion/fusion runtime dep — see tsup.config.ts bundlePluginEntry external",
+      "link-preview-js":
+        "optional Baileys dynamic-require helper externalized only for bundled fusion-plugin-whatsapp-chat; not a @runfusion/fusion runtime dep — see tsup.config.ts bundlePluginEntry external",
+      "qrcode-terminal":
+        "optional Baileys dynamic-require helper externalized only for bundled fusion-plugin-whatsapp-chat; not a @runfusion/fusion runtime dep — see tsup.config.ts bundlePluginEntry external",
       // FNXC:BuildConfig 2026-07-13-12:00: FN-7936 aliased @fusion/core to a runtime shim in bundled plugin outputs; it's no longer a tsup external, so this allowlist entry is stale.
       // "@fusion/core": REMOVED — was "plugin-entry bundling external only; not a runtime dep of the CLI bin",
       "@fusion/engine": "plugin-entry bundling external only; not a runtime dep of the CLI bin",
@@ -340,7 +350,7 @@ describe("Workspace bootstrap script contract", () => {
 
   it("defines verify:workspace in lint -> test:full -> build order", () => {
     const verifyScript = rootPkg.scripts?.["verify:workspace"];
-    expect(verifyScript).toBe("pnpm lint && pnpm test:full && pnpm build");
+    expect(verifyScript).toBe("pnpm lint && pnpm test:full && pnpm build:full");
 
     const lintIdx = verifyScript.indexOf("pnpm lint");
     const testIdx = verifyScript.indexOf("pnpm test:full");

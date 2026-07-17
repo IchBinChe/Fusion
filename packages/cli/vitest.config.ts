@@ -44,20 +44,19 @@ const quarantinedCliTests: string[] = [
   /*
   FNXC:CliTests 2026-06-25-14:00:
   The SQLite-to-PostgreSQL cutover (feature quarantine-sqlite-internals-tests, retry session)
-  quarantines 7 pre-existing CLI test failures observed during verify:workspace. All confirmed
-  failing on clean baseline (stash + rerun, 7 failed | 92 passed). Root causes vary:
+  quarantines pre-existing CLI test failures observed during verify:workspace. Root causes vary:
   - extension-fn-secret-get.test.ts: store.getAsyncLayer mock drift (async-satellite dual-path).
   - chat.test.ts: MessageStore.getInbox returns non-array under Node 26 node:sqlite (SQLite-path).
-  - package-config.test.ts: pi-coding-agent version drift + embedded-postgres not yet in deps.
   - skill-sync.test.ts: undocumented engine tools (fn_acquire_repo_worktree, fn_artifact_*).
   - version.test.ts: changeset script assertion drift (project now uses scripts/release.mjs).
   - dashboard.test.ts: mesh lifecycle mock assertion drift.
   - bundled-plugin-freshness.test.ts: bundled plugin build freshness drift.
   Quarantined on sight per AGENTS.md flaky-test rule so verify:workspace goes green.
-  Mirrored in scripts/lib/test-quarantine.json.
+
+  FNXC:CliTests 2026-07-17-09:45:
+  FN-8210 restores package-config.test.ts to the package lane after the direct green run proved its failures were stale tsup plugin-external and verify:workspace expectations, not flaky behavior. Its old exclusion had no matching ledger entry; do not re-quarantine without new root-cause evidence and a lockstep ledger entry.
   */
   "src/__tests__/extension-fn-secret-get.test.ts",
-  "src/__tests__/package-config.test.ts",
   "src/__tests__/skill-sync.test.ts",
   "src/__tests__/version.test.ts",
   "src/commands/__tests__/dashboard.test.ts",

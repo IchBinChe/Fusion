@@ -33,6 +33,7 @@ import { getFreshBatchData } from "../hooks/useBatchBadgeFetch";
 import { useTaskDiffStats } from "../hooks/useTaskDiffStats";
 import { useAgentsMapCache } from "../hooks/useAgentsMapCache";
 import { isTaskStuck } from "../utils/taskStuck";
+import { hasPendingAutomaticRecovery, isTaskManuallyRetryable } from "../utils/taskRecovery";
 import { getRevertOfId, isTaskReverted } from "../utils/taskRevert";
 import { getStalledReviewSignal } from "../utils/taskStalledReview";
 import { getInReviewStallCopy, shouldShowInReviewStallBadge } from "../utils/inReviewStallCopy";
@@ -1258,15 +1259,9 @@ function TaskCardComponent({
 
   const isDoneColumn = task.column === "done";
   const visualStatus = isDoneColumn ? "done" : task.status;
-  const isFailed = !isDoneColumn && task.status === "failed";
-  const canRetryTask =
-    task.status === "failed" ||
-    task.status === "stuck-killed" ||
-    task.status === "planning" ||
-    task.status === "needs-replan" ||
-    (task.stuckKillCount ?? 0) > 0 ||
-    (task.recoveryRetryCount ?? 0) > 0 ||
-    Boolean(task.nextRecoveryAt);
+  const hasPendingRecovery = hasPendingAutomaticRecovery(task, lastFetchTimeMs);
+  const isFailed = !isDoneColumn && task.status === "failed" && !hasPendingRecovery;
+  const canRetryTask = isTaskManuallyRetryable(task, lastFetchTimeMs);
   const isPaused = !isDoneColumn && (task.paused === true || task.userPaused === true);
   const pausedByAgent = Boolean(!isDoneColumn && task.paused && task.pausedByAgentId);
   const normalizedPriority = normalizeTaskPriorityValue(task.priority);

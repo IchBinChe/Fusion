@@ -1589,6 +1589,32 @@ describe("TaskDetailModal", () => {
     expect(screen.queryByText("Retry")).toBeNull();
   });
 
+  it("suppresses failure alert and Retry actions while a stale failed task has automatic recovery pending", () => {
+    render(
+      <TaskDetailModal
+        initialTab="definition"
+        task={makeTask({
+          status: "failed",
+          error: "Transient provider error",
+          recoveryRetryCount: 1,
+          nextRecoveryAt: new Date(Date.now() + 60_000).toISOString(),
+        })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        onRetryTask={noopRetry}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+    expect(screen.queryByRole("menuitem", { name: "Retry" })).toBeNull();
+    expect(screen.queryByText("Retry with a different model/node")).toBeNull();
+  });
+
   describe("retry action uniqueness for in-review failed tasks", () => {
     it("shows exactly one Retry button when task is in-review AND failed (in Actions dropdown)", () => {
       render(

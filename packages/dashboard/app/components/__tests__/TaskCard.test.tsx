@@ -3246,6 +3246,28 @@ describe("TaskCard", () => {
       expect(container.querySelector(".card-error")).toBeNull();
     });
 
+    it("suppresses failed chrome and Retry while a stale failed task has automatic recovery pending", () => {
+      const { container } = render(
+        <TaskCard
+          task={makeTask({
+            column: "todo",
+            status: "failed",
+            error: "Transient provider error",
+            recoveryRetryCount: 1,
+            nextRecoveryAt: new Date(Date.now() + 60_000).toISOString(),
+          })}
+          onOpenDetail={noop}
+          addToast={noop}
+          onRetryTask={vi.fn(async () => ({}) as Task)}
+        />,
+      );
+
+      expect(container.querySelector(".card-error")).toBeNull();
+      expect(container.querySelector(".card.failed")).toBeNull();
+      expect(container.querySelector(".card-status-badge.failed")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+    });
+
     it("calls onRetryTask with task id", async () => {
       const onRetryTask = vi.fn(async () => ({}) as Task);
       render(

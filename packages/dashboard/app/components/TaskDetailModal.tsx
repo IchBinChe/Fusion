@@ -69,6 +69,7 @@ import { getInReviewStallCopy, shouldShowInReviewStallBadge } from "../utils/inR
 import { getUnifiedTaskProgress } from "../utils/taskProgress";
 import { getStalePausedReviewCopy, shouldShowStalePausedReviewBadge } from "../utils/stalePausedReviewCopy";
 import { getTaskAgeStalenessCopy } from "../utils/taskAgeStalenessCopy";
+import { hasPendingAutomaticRecovery, isTaskManuallyRetryable } from "../utils/taskRecovery";
 import { findInReviewStallLogEntry, IN_REVIEW_STALL_LOG_REGEX } from "../utils/findInReviewStallLogEntry";
 import { getTaskLogEntryAction, getTaskLogEntryOutcome } from "../utils/taskLogEntryDisplay";
 import { getRelativeTimeBucket } from "../utils/relativeTimeAgo";
@@ -761,14 +762,8 @@ export function TaskDetailContent({
   const openPromptFile = useCallback(() => {
     fileBrowser?.openFile(`.fusion/tasks/${workingTask.id}/PROMPT.md`, { workspace: "project" });
   }, [fileBrowser, workingTask.id]);
-  const canRetryTask =
-    task.status === "failed" ||
-    task.status === "stuck-killed" ||
-    task.status === "planning" ||
-    task.status === "needs-replan" ||
-    (task.stuckKillCount ?? 0) > 0 ||
-    (task.recoveryRetryCount ?? 0) > 0 ||
-    Boolean(task.nextRecoveryAt);
+  const hasPendingRecovery = hasPendingAutomaticRecovery(task);
+  const canRetryTask = isTaskManuallyRetryable(task);
   const nearDuplicateOf = isStringValue(workingTask.sourceMetadata?.nearDuplicateOf)
     ? workingTask.sourceMetadata.nearDuplicateOf
     : null;
@@ -3390,7 +3385,7 @@ export function TaskDetailContent({
   independently of the Raw Logs segment because FN-7995 persists bounded `tool_error`
   detail there; the Raw-Logs-gated display list is not a diagnostic data source.
   */
-  const shouldShowTaskFailureAlert = Boolean(task.status === "failed" && !isPlannerChatExpanded);
+  const shouldShowTaskFailureAlert = Boolean(task.status === "failed" && !hasPendingRecovery && !isPlannerChatExpanded);
   const taskFailureReason = task.error?.trim() || t("taskDetail.error.genericFailureReason", "The task failed before it could complete.");
   const taskFailureToolDetail = useMemo(() => {
     const lastToolError = [...agentLogEntries].reverse().find((entry) => entry.type === "tool_error" && entry.detail?.trim());

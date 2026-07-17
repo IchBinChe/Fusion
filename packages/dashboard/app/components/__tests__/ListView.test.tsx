@@ -1972,6 +1972,44 @@ describe("ListView", () => {
     expect(statusBadge.className).toContain("failed");
   });
 
+  it("suppresses failed table styling and Retry for a stale failed task with automatic recovery pending", () => {
+    const viewportSpy = mockDesktopViewport();
+    const task = createMockTask({
+      id: "FN-RECOVERY",
+      status: "failed",
+      column: "todo",
+      recoveryRetryCount: 1,
+      nextRecoveryAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+
+    renderListView({ tasks: [task] });
+
+    const row = document.querySelector('.list-row[data-id="FN-RECOVERY"]') as HTMLElement;
+    expect(row).not.toHaveClass("failed");
+    expect(screen.getByText("failed")).not.toHaveClass("failed");
+    fireEvent.contextMenu(row, { clientX: 40, clientY: 50 });
+    expect(screen.queryByRole("menuitem", { name: "Retry" })).toBeNull();
+    viewportSpy.mockRestore();
+  });
+
+  it("suppresses failed card styling on the mobile ListView path while automatic recovery is pending", () => {
+    const viewportSpy = mockMobileViewport();
+    const task = createMockTask({
+      id: "FN-RECOVERY-MOBILE",
+      status: "failed",
+      column: "todo",
+      recoveryRetryCount: 1,
+      nextRecoveryAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+
+    renderListView({ tasks: [task] });
+
+    const card = document.querySelector('.list-card[data-id="FN-RECOVERY-MOBILE"]') as HTMLElement;
+    expect(card).toBeTruthy();
+    expect(screen.getByText("failed")).not.toHaveClass("failed");
+    viewportSpy.mockRestore();
+  });
+
   it.each([
     {
       name: "failed + in-review uses error token color",

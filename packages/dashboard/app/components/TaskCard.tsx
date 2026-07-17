@@ -1263,6 +1263,10 @@ function TaskCardComponent({
   const isFailed = !isDoneColumn && task.status === "failed" && !hasPendingRecovery;
   const canRetryTask = isTaskManuallyRetryable(task, lastFetchTimeMs);
   const isPaused = !isDoneColumn && (task.paused === true || task.userPaused === true);
+  const isTriageDuplicateDecision = isPaused
+    && task.pausedReason === "duplicate-decision-required"
+    && task.sourceMetadata?.duplicateSource === "triage-marker"
+    && typeof task.sourceMetadata?.nearDuplicateOf === "string";
   const pausedByAgent = Boolean(!isDoneColumn && task.paused && task.pausedByAgentId);
   const normalizedPriority = normalizeTaskPriorityValue(task.priority);
   const showPriorityBadge = normalizedPriority !== DEFAULT_TASK_PRIORITY;
@@ -2984,9 +2988,15 @@ function TaskCardComponent({
           <div className="card-header-badges" data-testid="card-header-badges">
         {isPaused && (
           <span
-            className="card-status-badge paused"
+            className={`card-status-badge paused${isTriageDuplicateDecision ? " needs-user-feedback" : ""}`}
+            title={isTriageDuplicateDecision
+              ? t("tasks.duplicateDecisionRequiredTitle", "This task is a duplicate candidate and needs your decision.")
+              : undefined}
+            data-testid={isTriageDuplicateDecision ? `card-needs-user-feedback-${task.id}` : undefined}
           >
-            {pausedByAgent ? t("tasks.pausedByAgent", "paused by agent") : t("tasks.paused", "paused")}
+            {isTriageDuplicateDecision
+              ? t("tasks.needsUserFeedback", "Needs your decision")
+              : pausedByAgent ? t("tasks.pausedByAgent", "paused by agent") : t("tasks.paused", "paused")}
           </span>
         )}
         {showStatusBadge && (

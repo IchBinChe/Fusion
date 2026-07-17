@@ -262,6 +262,10 @@ export class NotificationService {
       void this.writeAwaitingApprovalMailboxMessage(task);
     }
 
+    if (this.isTriageDuplicateDecision(task)) {
+      void this.writeTriageDuplicateDecisionMailboxMessage(task);
+    }
+
     if (!this.notificationsEnabled) {
       return;
     }
@@ -382,6 +386,51 @@ export class NotificationService {
     } catch (error) {
       schedulerLog.log(
         `[notify] ${task.id} awaiting-approval mailbox message failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private isTriageDuplicateDecision(task: Task): boolean {
+    return task.paused === true
+      && task.pausedReason === "duplicate-decision-required"
+      && task.sourceMetadata?.duplicateSource === "triage-marker"
+      && typeof task.sourceMetadata.nearDuplicateOf === "string";
+  }
+
+  /** Write one durable operator prompt for a duplicate candidate, independent of push configuration. */
+  private async writeTriageDuplicateDecisionMailboxMessage(task: Task): Promise<void> {
+    try {
+      const messageStore = this.options.messageStore;
+      if (!messageStore?.sendMessageOnce) {
+        return;
+      }
+      const canonicalTaskId = task.sourceMetadata?.nearDuplicateOf;
+      if (typeof canonicalTaskId !== "string") {
+        return;
+      }
+      const link = buildNtfyClickUrl({
+        dashboardHost: this.dashboardHost,
+        projectId: this.options.projectId,
+        taskId: task.id,
+      });
+      const content = [
+        `**${formatTaskIdentifier(task)} needs your decision**`,
+        "",
+        `It was flagged as a duplicate of ${canonicalTaskId}. Keep it to continue planning, or delete it if the work is already covered.`,
+        ...(link ? ["", `[Open ${task.id}](${link})`] : []),
+      ].join("\n");
+      await messageStore.sendMessageOnce({
+        fromId: "system",
+        fromType: "system",
+        toId: DASHBOARD_USER_ID,
+        toType: "user",
+        type: "system",
+        content,
+        metadata: { taskId: task.id, canonicalTaskId, kind: "triage-duplicate-decision" },
+      }, `triage-duplicate-decision:${task.id}`);
+    } catch (error) {
+      schedulerLog.log(
+        `[notify] ${task.id} triage duplicate-decision mailbox message failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }

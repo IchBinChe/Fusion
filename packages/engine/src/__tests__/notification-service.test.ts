@@ -262,6 +262,42 @@ describe("NotificationService", () => {
     expect(input.content).toContain("https://dash.example/?project=p1&task=FN-1");
   });
 
+  it("writes one mailbox message when a triage duplicate needs an operator decision", async () => {
+    const store = createStore({ ntfyEnabled: false });
+    const idempotencyKeys = new Set<string>();
+    let insertedCount = 0;
+    const sendMessageOnce = vi.fn(async (input: any, key: string) => {
+      const inserted = !idempotencyKeys.has(key);
+      idempotencyKeys.add(key);
+      if (inserted) insertedCount += 1;
+      return { message: { ...input, id: "msg-once-duplicate", read: false, createdAt: "", updatedAt: "" }, inserted };
+    });
+    const messageStore = Object.assign(new EventEmitter(), { sendMessageOnce });
+    const service = new NotificationService(store as any, { projectId: "p1", messageStore: messageStore as any });
+    await service.start();
+
+    const duplicate = task({
+      paused: true,
+      pausedReason: "duplicate-decision-required",
+      sourceMetadata: { duplicateSource: "triage-marker", nearDuplicateOf: "FN-7961" },
+    });
+    store.emit("task:updated", duplicate);
+    store.emit("task:updated", duplicate);
+    await vi.waitFor(() => expect(sendMessageOnce).toHaveBeenCalledTimes(2));
+    expect(insertedCount).toBe(1);
+
+    for (const [input, key] of sendMessageOnce.mock.calls) {
+      expect(key).toBe("triage-duplicate-decision:FN-1");
+      expect(input).toMatchObject({
+        type: "system",
+        toId: "dashboard",
+        toType: "user",
+        metadata: { taskId: "FN-1", canonicalTaskId: "FN-7961", kind: "triage-duplicate-decision" },
+      });
+      expect(input.content).toContain("flagged as a duplicate of FN-7961");
+    }
+  });
+
   it("labels the replan-cap escalation reason in the approval mailbox message", async () => {
     const store = createStore({ ntfyEnabled: true, ntfyTopic: "topic" });
     const sendMessageOnce = vi.fn(async (input: any, _key: string) => ({

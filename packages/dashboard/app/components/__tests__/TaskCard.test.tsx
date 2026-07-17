@@ -6175,6 +6175,23 @@ describe("TaskCard provider icons on agent row", () => {
 });
 
 describe("TaskCard near-duplicate chip", () => {
+  it("shows a needs-user-feedback status when a triage duplicate is paused for a decision", () => {
+    render(
+      <TaskCard
+        task={makeTask({
+          paused: true,
+          pausedReason: "duplicate-decision-required",
+          sourceMetadata: { nearDuplicateOf: "FN-1234", duplicateSource: "triage-marker" },
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.getByTestId("card-needs-user-feedback-FN-001")).toHaveTextContent("Needs your decision");
+    expect(screen.getByText("Duplicate of FN-1234")).toBeInTheDocument();
+  });
+
   it("renders duplicate chip when nearDuplicateOf is present", () => {
     render(
       <TaskCard

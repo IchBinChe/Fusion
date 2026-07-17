@@ -430,6 +430,12 @@ The Plan Review "Reviewing" badge must read as an active review state without ad
   color: var(--text-muted);
 }
 
+.card-status-badge.needs-user-feedback {
+  background: color-mix(in srgb, var(--color-warning) 14%, transparent);
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 45%, transparent);
+}
+
 .card-status-badge.awaiting-approval {
   background: var(--status-triage-bg-deep);
   color: var(--triage);

@@ -2,7 +2,7 @@ import "./TaskDetailModal.css";
 import React, { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { Pencil, Bot, X, ChevronDown, ChevronRight, GitBranch, ArrowLeft, Zap, Loader2, AlertTriangle, Sparkles, Maximize2, Minimize2, Send, Square, Info, MoreVertical, Eye, EyeOff } from "lucide-react";
+import { Pencil, Bot, X, ChevronDown, ChevronRight, GitBranch, ArrowLeft, Zap, Loader2, AlertTriangle, Sparkles, Maximize2, Minimize2, Send, Square, Info, Paperclip, Eye, EyeOff } from "lucide-react";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
@@ -4181,40 +4181,39 @@ export function TaskDetailContent({
                 </div>
               )}
               <div className="detail-meta">
+                {/*
+                FNXC:QuickAddActionRow 2026-07-16-16:00:
+                FN-8194: task-detail metadata mirrors Quick Add's action order:
+                attach, GitHub tracking, Oversight, Priority, then Fast. The compact
+                controls delegate to the existing single file-input upload and
+                GitHub-tracking handlers so this row never forks persistence paths.
+                */}
                 <div className="detail-meta-inline-controls" data-testid="detail-meta-inline-controls">
-                  <label
-                    className={`card-priority-badge card-priority-badge--${inlinePriority} detail-priority-chip ${isSavingInlinePriority ? "detail-priority-chip--saving" : ""}`}
-                  >
-                    <span>{t("taskDetail.priority.label", "Priority:")}</span>
-                    <select
-                      className="detail-priority-select"
-                      value={inlinePriority}
-                      onChange={(event) => {
-                        void handleInlinePriorityChange(event.target.value);
-                      }}
-                      disabled={isSavingInlinePriority}
-                      aria-label={t("taskDetail.priority.ariaLabel", "Task priority")}
-                    >
-                      {TASK_PRIORITIES.map((priorityOption) => (
-                        <option key={priorityOption} value={priorityOption}>
-                          {priorityOption}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
                   <button
                     type="button"
-                    className={`btn btn-sm detail-execution-mode-toggle ${inlineExecutionMode === "fast" ? "detail-execution-mode-toggle--fast" : ""} ${isSavingInlineExecutionMode ? "detail-execution-mode-toggle--saving" : ""}`}
-                    onClick={() => {
-                      void handleInlineExecutionModeToggle();
-                    }}
-                    disabled={isSavingInlineExecutionMode}
-                    aria-label={t("taskDetail.executionMode.ariaLabel", "Execution mode: {{mode}}", { mode: inlineExecutionMode })}
-                    aria-pressed={inlineExecutionMode === "fast"}
+                    className="btn btn-icon btn-sm"
+                    data-testid="detail-inline-attach"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    aria-label={t("taskDetail.attachments.attachInline", "Attach file")}
+                    title={t("taskDetail.attachments.attachInline", "Attach file")}
                   >
-                    <Zap aria-hidden="true" />
-                    <span>{inlineExecutionMode === "fast" ? t("taskDetail.executionMode.fast", "Fast") : t("taskDetail.executionMode.standard", "Standard")}</span>
+                    <Paperclip aria-hidden="true" />
                   </button>
+                  {canEditGithubTracking && !gitlabTrackedItem && (
+                    <button
+                      type="button"
+                      className={`btn btn-icon btn-sm ${githubTrackingEnabled ? "btn-primary" : ""}`}
+                      data-testid="detail-inline-github-toggle"
+                      onClick={() => void handleToggleGithubTracking()}
+                      disabled={isSavingGithubTracking}
+                      aria-pressed={githubTrackingEnabled}
+                      aria-label={t("taskDetail.githubTracking.toggleInline", "Toggle GitHub tracking")}
+                      title={t("taskDetail.githubTracking.toggleInline", "Toggle GitHub tracking")}
+                    >
+                      <ProviderIcon provider="github" size="sm" />
+                    </button>
+                  )}
                   {/*
                   FNXC:PlannerOversight 2026-07-04-17:00:
                   FN-7517 quick oversight-level-change control. Shows the current
@@ -4240,6 +4239,11 @@ export function TaskDetailContent({
                   stop / explain) render ONLY behind the "Oversight" overflow-menu
                   trigger on every surface (desktop and mobile); the former desktop
                   inline cluster was removed for a consistent, simpler control bar.
+
+                  FNXC:PlannerOversight 2026-07-16-16:00:
+                  FN-8194: use Eye for the Oversight overflow trigger so task detail
+                  matches Quick Add's planner-advisor affordance without changing
+                  the labeled menu's accessibility or behavior.
                   */}
                   {(hasTaskOversightOverride || workflowOversightResolved) && (
                       <div className="detail-oversight-menu-dropdown" ref={oversightMenuRef}>
@@ -4254,7 +4258,7 @@ export function TaskDetailContent({
                           aria-expanded={showOversightMenu}
                           aria-label={t("taskDetail.oversight.menuAriaLabel", "Oversight actions")}
                         >
-                          <MoreVertical aria-hidden="true" />
+                          <Eye aria-hidden="true" />
                           <span>{t("taskDetail.oversight.menuLabel", "Oversight")}</span>
                         </button>
                         {showOversightMenu && (
@@ -4404,6 +4408,39 @@ export function TaskDetailContent({
                         )}
                       </div>
                     )}
+                  <label
+                    className={`card-priority-badge card-priority-badge--${inlinePriority} detail-priority-chip ${isSavingInlinePriority ? "detail-priority-chip--saving" : ""}`}
+                  >
+                    <span>{t("taskDetail.priority.label", "Priority:")}</span>
+                    <select
+                      className="detail-priority-select"
+                      value={inlinePriority}
+                      onChange={(event) => {
+                        void handleInlinePriorityChange(event.target.value);
+                      }}
+                      disabled={isSavingInlinePriority}
+                      aria-label={t("taskDetail.priority.ariaLabel", "Task priority")}
+                    >
+                      {TASK_PRIORITIES.map((priorityOption) => (
+                        <option key={priorityOption} value={priorityOption}>
+                          {priorityOption}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className={`btn btn-sm detail-execution-mode-toggle ${inlineExecutionMode === "fast" ? "detail-execution-mode-toggle--fast" : ""} ${isSavingInlineExecutionMode ? "detail-execution-mode-toggle--saving" : ""}`}
+                    onClick={() => {
+                      void handleInlineExecutionModeToggle();
+                    }}
+                    disabled={isSavingInlineExecutionMode}
+                    aria-label={t("taskDetail.executionMode.ariaLabel", "Execution mode: {{mode}}", { mode: inlineExecutionMode })}
+                    aria-pressed={inlineExecutionMode === "fast"}
+                  >
+                    <Zap aria-hidden="true" />
+                    <span>{inlineExecutionMode === "fast" ? t("taskDetail.executionMode.fast", "Fast") : t("taskDetail.executionMode.standard", "Standard")}</span>
+                  </button>
                 </div>
                 {overseerExplainOpen && (
                   <div className="detail-overseer-explain-panel" data-testid="detail-overseer-explain-panel" role="region" aria-live="polite">

@@ -59,6 +59,25 @@ async function openOversightMenu() {
 }
 
 describe("TaskDetailModal oversight controls", () => {
+  it("uses the Eye icon for the labeled oversight overflow trigger", async () => {
+    render(
+      <TaskDetailModal
+        task={makeTask({ id: "FN-8194", column: "in-progress", plannerOversightLevel: "observe" })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    const trigger = await screen.findByTestId("detail-oversight-menu-trigger");
+    expect(trigger).toHaveTextContent("Oversight");
+    expect(trigger.querySelector('[data-testid="eye-icon"]')).toBeInTheDocument();
+    expect(trigger.querySelector('[data-testid="more-vertical-icon"]')).not.toBeInTheDocument();
+  });
+
   beforeEach(async () => {
     vi.clearAllMocks();
     mockConfirm.mockResolvedValue(true);

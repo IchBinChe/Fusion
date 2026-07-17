@@ -242,11 +242,14 @@ describe("TaskDetailModal", () => {
       expect(css).not.toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.detail-timestamps\s*\{[^}]*flex-direction:\s*column;/);
     });
 
-    it("keeps inline metadata controls in a single row without a narrow-screen column fallback", () => {
+    it("keeps inline metadata controls in a single row with a wrapping mobile fallback", () => {
       const css = readDashboardStylesSource();
+      const mobileBlock = getCssAtRuleBlockContaining(css, "@media (max-width: 768px)", ".detail-meta-inline-controls");
 
       expectBaseRule(css, ".detail-meta-inline-controls", "display: flex;");
       expectBaseRule(css, ".detail-meta-inline-controls", "flex-wrap: nowrap;");
+      expect(mobileBlock).toMatch(/\.detail-meta-inline-controls\s*\{[^}]*flex-wrap:\s*wrap;/);
+      expect(mobileBlock).not.toMatch(/\.detail-meta-inline-controls\s*\{[^}]*flex-direction:\s*column;/);
       expect(css).not.toMatch(/@media \(max-width: 640px\)\s*\{[^}]*\.detail-meta-inline-controls\s*\{[^}]*flex-direction:\s*column;/);
     });
 

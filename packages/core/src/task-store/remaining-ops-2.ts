@@ -26,6 +26,8 @@ import {type TaskRow, TASK_COLUMN_DESCRIPTORS} from "../task-store/persistence.j
 import {__setTaskActivityLogLimitsForTesting} from "../task-store/comments.js";
 import {assertSafeGitBranchName} from "../task-store/shell-safety.js";
 import {readTaskRow as readTaskRowAsync, readTaskRowInTransaction} from "../task-store/async-persistence.js";
+import {upsertArchivedTaskEntry} from "./async-archive-lineage.js";
+import {purgeTaskWorkflowSelectionRowsAsyncImpl} from "./remaining-ops-8.js";
 import * as schema from "../postgres/schema/index.js";
 import {and, asc, eq, isNotNull, isNull, sql} from "drizzle-orm";
 import {recoverExpiredMergeQueueLeases as recoverExpiredMergeQueueLeasesAsync} from "../task-store/async-merge-coordination.js";
@@ -1241,6 +1243,62 @@ export async function unlinkGithubIssueImpl(store: TaskStore, id: string): Promi
   }
 
 export async function cleanupArchivedTasksImpl(store: TaskStore): Promise<string[]> {
+    /*
+    FNXC:PostgresOnlyDataAccess 2026-07-17-15:10:
+    Backend-mode port. `cleanupArchivedTasks` is the hard-removal path for tasks
+    already in the `archived` column (the CLI documents it as such): it snapshots
+    each to cold storage, hard-deletes the live project row, and removes the task
+    directory. In PostgreSQL, archived rows are soft-deleted (`deleted_at` set), so
+    enumeration MUST pass `includeDeleted`. The cold snapshot upsert is idempotent
+    (archive already holds it from archive time); the project-row DELETE fires the
+    ON DELETE CASCADE that purges the task's documents/artifacts, matching the
+    SQLite path's dir removal. Selection rows are purged via the async helper.
+    */
+    if (store.backendMode) {
+      const layer = store.asyncLayer!;
+      /*
+      FNXC:PostgresOnlyDataAccess 2026-07-17-17:40:
+      Enumerate the archived rows with an EXPLICIT project predicate. `listTasks()`
+      derives its scope from `taskProjectScope(layer)`, which is a NO-OP when the
+      layer is unbound (projectId absent) — i.e. it would read archived rows across
+      every project, and this destructive sweep (snapshot + dir removal + cache
+      evict) would then touch tasks it must never own. Scoping the read here to the
+      same `projectId` the DELETE below uses keeps enumerate+delete lockstep: a bound
+      store sees only its project, an unbound store only the `__legacy_unscoped__`
+      quarantine partition.
+      */
+      const projectId = layer.projectId?.trim() || "__legacy_unscoped__";
+      const archivedRows = await layer.db
+        .select()
+        .from(schema.project.tasks)
+        .where(and(eq(schema.project.tasks.projectId, projectId), eq(schema.project.tasks.column, "archived")));
+      const cleanedUpIds: string[] = [];
+      const { rm } = await import("node:fs/promises");
+
+      for (const row of archivedRows) {
+        const task = store.rowToTask(store.pgRowToTaskRow(row));
+        const dir = store.taskDir(task.id);
+        // Guarantee a cold-storage snapshot before the destructive delete.
+        const entry = await store.taskToArchiveEntry(task, task.deletedAt ?? new Date().toISOString());
+        await upsertArchivedTaskEntry(layer.db, entry, layer.projectId);
+
+        await purgeTaskWorkflowSelectionRowsAsyncImpl(store, task.id);
+        await layer.db
+          .delete(schema.project.tasks)
+          .where(and(eq(schema.project.tasks.projectId, projectId), eq(schema.project.tasks.id, task.id)));
+
+        if (existsSync(dir)) {
+          await rm(dir, { recursive: true, force: true });
+        }
+        if (store.isWatching) {
+          store.taskCache.delete(task.id);
+        }
+        cleanedUpIds.push(task.id);
+      }
+
+      return cleanedUpIds;
+    }
+
     const archivedTasks = await store.listTasks({ column: "archived" });
 
     const cleanedUpIds: string[] = [];

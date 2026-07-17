@@ -7,6 +7,7 @@
  * instance as its first parameter and performs byte-identical work.
  */
 import {TaskStore, storeLog} from "../store.js";
+import {getFeatureByTaskId as getMissionFeatureByTaskId, unlinkFeatureFromTaskId as unlinkMissionFeatureFromTaskId} from "../async-mission-store-queries.js";
 import {TaskHasLineageChildrenError, TaskSelfDeleteError} from "./errors.js";
 import {mkdir, writeFile} from "node:fs/promises";
 import {join} from "node:path";
@@ -128,11 +129,25 @@ export async function deleteTaskBackendImpl(store: TaskStore, id: string, option
     const deletedAt = new Date().toISOString();
     const allowResurrection = options?.allowResurrection === true;
 
-    // Soft-delete + lineage clear + audit in one transaction (atomicity).
+    // Soft-delete + lineage clear + mission unlink + audit in one transaction (atomicity).
     await layer.transactionImmediate(async (tx) => {
       // Clear lineage references on live children so the parent can be deleted.
       if (lineageChildIds.length > 0) {
         await removeLineageReferences(tx, id, lineageChildIds, deletedAt, layer.projectId);
+      }
+      /*
+      FNXC:MissionStore 2026-07-17-17:40:
+      Clear any mission feature→task link IN THIS TRANSACTION so it commits (or rolls
+      back) atomically with the soft-delete. The prior post-commit / pre-commit variants
+      could leave the two out of sync on a partial failure: a committed delete with a
+      dangling feature pointer, or a committed unlink whose delete then failed and could
+      not be recovered (getFeatureByTaskId no longer finds it). Running the tx-scoped
+      taskId=NULL clear alongside the delete removes that window. The feature's status
+      rollup is non-critical for a deleted task and self-heals on the next mission read.
+      */
+      const linkedFeature = await getMissionFeatureByTaskId(tx, id);
+      if (linkedFeature) {
+        await unlinkMissionFeatureFromTaskId(tx, linkedFeature.id);
       }
       // Soft-delete the task row.
       await softDeleteTaskRowInTransaction(tx, id, deletedAt, allowResurrection, layer.projectId);

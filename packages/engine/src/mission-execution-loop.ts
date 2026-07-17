@@ -25,7 +25,7 @@ import type {
   Mission,
 } from "@fusion/core";
 import { normalizeMissionAssertionType } from "@fusion/core";
-import type { VerificationOutcome } from "./mission-verification.js";
+import { GitCheckoutMaterializer, type CheckoutMaterializer, type VerificationOutcome } from "./mission-verification.js";
 import { createFnAgent, promptWithFallback, type AgentResult } from "./pi.js";
 import { mergeEffectiveSettings } from "./effective-settings.js";
 import {
@@ -60,6 +60,25 @@ const VALIDATION_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
  * The agent evaluates each linked assertion and returns pass/fail/blocked
  * per assertion plus an overall status.
  */
+interface ValidationInspection {
+  inspectionRoot: string;
+  landedSha: string | undefined;
+  fallbackUsed: boolean;
+  workspaceStale: boolean;
+  /** Why the inspected tree could not be proven to contain landed code. */
+  inspectionUnavailableReason?: string;
+}
+
+interface ValidationWorkspaceStaleness {
+  workspaceStale: boolean;
+  inspectionUnavailableReason?: string;
+}
+
+interface ValidationExecution {
+  result: ValidationResult;
+  inspection: ValidationInspection;
+}
+
 export interface ValidationResult {
   /**
    * Overall validation status.
@@ -110,6 +129,8 @@ export interface MissionExecutionLoopOptions {
    * preserving the behavior of existing construction sites that inject nothing.
    */
   verificationCapability?: import("./mission-verification.js").VerificationCapability;
+  /** Injectable disposable-checkout seam for validator inspection tests. */
+  checkoutMaterializer?: CheckoutMaterializer;
 }
 
 export class MissionExecutionLoop extends EventEmitter {
@@ -122,6 +143,7 @@ export class MissionExecutionLoop extends EventEmitter {
   private pluginRunner?: MissionExecutionLoopOptions["pluginRunner"];
   private agentStore?: MissionExecutionLoopOptions["agentStore"];
   private verificationCapability?: MissionExecutionLoopOptions["verificationCapability"];
+  private checkoutMaterializer: CheckoutMaterializer;
   private activeValidations = new Set<string>(); // feature IDs currently being validated
 
   constructor(options: MissionExecutionLoopOptions) {
@@ -134,6 +156,7 @@ export class MissionExecutionLoop extends EventEmitter {
     this.pluginRunner = options.pluginRunner;
     this.agentStore = options.agentStore;
     this.verificationCapability = options.verificationCapability;
+    this.checkoutMaterializer = options.checkoutMaterializer ?? new GitCheckoutMaterializer();
     loopLog.log("MissionExecutionLoop created");
   }
 
@@ -519,12 +542,15 @@ export class MissionExecutionLoop extends EventEmitter {
     try {
       loopLog.log(`Running internal validation for feature ${feature.id} — no board task created (policy: docs/missions.md)`);
 
-      // Start the validator run (no board task per docs/missions.md)
-      const run = await this.missionStore.startValidatorRun(feature.id, "task_completion");
+      // FNXC:MissionValidation 2026-07-16-12:00:
+      // Validator runs retain task linkage, while routing consumes inspection
+      // provenance calculated in the exact root the judge read.
+      const run = feature.taskId
+        ? await this.missionStore.startValidatorRun(feature.id, "task_completion", feature.taskId)
+        : await this.missionStore.startValidatorRun(feature.id, "task_completion");
       loopLog.log(`Started validator run ${run.id} for feature ${feature.id}`);
 
-      // Run the validation
-      const result = await this.runValidation(feature, assertions, run);
+      const { result, inspection } = await this.runValidation(feature, assertions, run);
 
       // Handle the result
       if (result.status === "pass") {
@@ -544,18 +570,16 @@ export class MissionExecutionLoop extends EventEmitter {
             run.id,
             `linked task ${feature.taskId} is still "${premergeColumn}" (code not merged yet) — validation deferred`,
           );
-        } else if (await this.isValidationWorkspaceStale(feature)) {
-          // Even when the task column shows "done", the judge session ran in
-          // this.rootDir — if that working copy never fetched/reset to the
-          // merged commit (merge landed on remote or another worktree), the
-          // validator read PRE-merge files → a spurious fail. Defer instead of
-          // minting a bogus Fix Feature; a later validation judges the merged
-          // code. Only affirmative staleness evidence defers (fail-open).
-          await this.handleValidationInconclusive(
-            feature.id,
-            run.id,
-            `validation workspace predates the merged code for ${feature.taskId} — validation deferred`,
-          );
+        } else if (inspection.workspaceStale || inspection.inspectionUnavailableReason) {
+          // FNXC:MissionValidation 2026-07-16-14:00:
+          // A FAIL can create a Fix Feature only after the judge's inspection
+          // root is proven to contain the landed code. A stale root, unresolved
+          // merge SHA, or unavailable ancestry result is inconclusive instead;
+          // this prevents a wrong checkout from restarting implementation.
+          const reason = inspection.workspaceStale
+            ? `validation workspace predates the merged code for ${feature.taskId} — validation deferred`
+            : `validation could not prove the inspected workspace contains merged code (${inspection.inspectionUnavailableReason}) — validation deferred`;
+          await this.handleValidationInconclusive(feature.id, run.id, reason);
         } else {
           await this.handleValidationFail(feature.id, run.id, result);
         }
@@ -592,26 +616,29 @@ export class MissionExecutionLoop extends EventEmitter {
   }
 
   /**
-   * Affirmative-evidence check that the judged checkout (this.rootDir HEAD)
-   * predates the linked task's merged code. True ONLY when the integration SHA
-   * is resolvable AND is NOT an ancestor of rootDir HEAD. Fails open (returns
-   * false = trust the fail) on unresolvable SHA / unknown object / any git
-   * error — the guard may only ever defer a fail, never suppress one.
+   * Determine whether the exact inspection root proves it contains landed code.
+   * Exit 1 means the root is stale; missing SHA, bad objects, and other git
+   * failures are unproven inspections and must defer a FAIL rather than mint a
+   * remediation task from an unverifiable checkout.
    */
-  private async isValidationWorkspaceStale(feature: MissionFeature): Promise<boolean> {
-    const integrationSha = await this.resolveIntegrationSha(feature);
-    if (!integrationSha) return false; // no evidence → trust the fail
+  private async isValidationWorkspaceStale(
+    landedSha: string | undefined,
+    inspectionRoot: string,
+  ): Promise<ValidationWorkspaceStaleness> {
+    if (!landedSha) {
+      return { workspaceStale: false, inspectionUnavailableReason: "landed merge SHA is unavailable" };
+    }
     try {
-      await execAsync(`git merge-base --is-ancestor ${quoteShellArg(integrationSha)} HEAD`, {
-        cwd: this.rootDir,
+      await execAsync(`git merge-base --is-ancestor ${quoteShellArg(landedSha)} HEAD`, {
+        cwd: inspectionRoot,
         timeout: 30_000,
       });
-      return false; // exit 0 → ancestor → workspace is fresh
+      return { workspaceStale: false }; // exit 0 → ancestor → workspace is fresh
     } catch (err) {
-      // `--is-ancestor` exits 1 = NOT an ancestor (affirmatively stale); exit
-      // 128 = bad object / not a repo (unknown → fail-open). execAsync's thrown
-      // error carries `.code` = process exit code. ONLY code === 1 defers.
-      return (err as { code?: number })?.code === 1;
+      // `--is-ancestor` exits 1 = NOT an ancestor (affirmatively stale). A bad
+      // object/non-repo (usually 128) cannot prove the judge saw delivered code.
+      if ((err as { code?: number })?.code === 1) return { workspaceStale: true };
+      return { workspaceStale: false, inspectionUnavailableReason: "landed merge ancestry is unavailable" };
     }
   }
 
@@ -626,7 +653,7 @@ export class MissionExecutionLoop extends EventEmitter {
     feature: MissionFeature,
     assertions: MissionContractAssertion[],
     _run: MissionValidatorRun,
-  ): Promise<ValidationResult> {
+  ): Promise<ValidationExecution> {
     loopLog.log(`Running validation for feature ${feature.id} with ${assertions.length} assertions`);
 
     const milestone = await this.resolveFeatureMilestone(feature);
@@ -656,6 +683,25 @@ export class MissionExecutionLoop extends EventEmitter {
     );
 
     let session: AgentResult | null = null;
+    let checkout: Awaited<ReturnType<CheckoutMaterializer["materialize"]>> | undefined;
+    const landedSha = await this.resolveIntegrationSha(feature);
+    let inspectionRoot = this.rootDir;
+    let fallbackUsed = !landedSha;
+
+    // FNXC:MissionValidation 2026-07-16-12:00:
+    // Issue #2168 requires the read-only judge to inspect the landed merge
+    // checkout, not ambient rootDir whose branch can diverge. If checkout
+    // materialization fails, retain rootDir behavior and evaluate staleness in
+    // that exact fallback root before the disposable checkout is disposed.
+    if (landedSha) {
+      try {
+        checkout = await this.checkoutMaterializer.materialize(this.rootDir, landedSha);
+        inspectionRoot = checkout.dir;
+        fallbackUsed = false;
+      } catch (err) {
+        loopLog.warn(`Unable to materialize validation checkout for ${feature.id}; using rootDir fallback:`, err);
+      }
+    }
 
     try {
       // Create validation agent session
@@ -670,7 +716,7 @@ export class MissionExecutionLoop extends EventEmitter {
         sessionPurpose: "validation",
         runtimeHint: validationRuntimeHint,
         pluginRunner: this.pluginRunner,
-        cwd: this.rootDir,
+        cwd: inspectionRoot,
         systemPrompt: this.buildValidationSystemPrompt(feature, assertions, taskContext, milestone),
         tools: "readonly",
         defaultProvider: validationSessionModel.provider,
@@ -723,21 +769,28 @@ export class MissionExecutionLoop extends EventEmitter {
       // (or refuted) by a non-mutating verification run instead.
       const result = await this.applyBehavioralPosture(feature, assertions, judgeResult);
 
+      const workspace = await this.isValidationWorkspaceStale(landedSha, inspectionRoot);
       loopLog.log(`Validation completed for feature ${feature.id}: ${result.status}`);
-      return result;
+      return {
+        result,
+        inspection: { inspectionRoot, landedSha, fallbackUsed, ...workspace },
+      };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       loopLog.error(`Validation error for feature ${feature.id}:`, message);
 
       // Return an error result - the loop will handle it
       return {
-        status: "error",
-        assertions: assertions.map((a) => ({
-          assertionId: a.id,
-          passed: false,
-          message: `Validation error: ${message}`,
-        })),
-        summary: `Validation failed due to error: ${message}`,
+        result: {
+          status: "error",
+          assertions: assertions.map((a) => ({
+            assertionId: a.id,
+            passed: false,
+            message: `Validation error: ${message}`,
+          })),
+          summary: `Validation failed due to error: ${message}`,
+        },
+        inspection: { inspectionRoot, landedSha, fallbackUsed, workspaceStale: false },
       };
     } finally {
       // Always dispose the session
@@ -747,6 +800,13 @@ export class MissionExecutionLoop extends EventEmitter {
           loopLog.log(`Validation session disposed for feature ${feature.id}`);
         } catch (disposeErr) {
           loopLog.warn(`Error disposing validation session for ${feature.id}:`, disposeErr);
+        }
+      }
+      if (checkout) {
+        try {
+          await checkout.dispose();
+        } catch (disposeErr) {
+          loopLog.warn(`Error disposing validation checkout for ${feature.id}:`, disposeErr);
         }
       }
     }
@@ -888,20 +948,20 @@ export class MissionExecutionLoop extends EventEmitter {
   }
 
   /**
-   * Resolve the trusted revision (integration SHA) whose disposable checkout the
-   * verification run executes against. The live task worktree is pruned before
-   * the done-transition that triggers validation, so it cannot be used.
+   * Resolve the verified landed merge revision for a feature's linked task.
    *
-   * In this unit we read it from the linked task when available; callers that do
-   * not supply a resolvable SHA cause the verification run to resolve to
-   * inconclusive (fail-closed). A richer derivation is owned by a later unit.
+   * FNXC:MissionValidation 2026-07-16-12:00:
+   * `mergeDetails.commitSha` is the only delivered-code revision: it is the
+   * landed merge tip. `baseCommitSha` is the task worktree fork point and must
+   * never be inspected as delivered code; Task has no `integrationSha` or
+   * `baseCommit` fields. Inspection-root pinning, stale checking, and
+   * behavioral verification all consume this same revision.
    */
   private async resolveIntegrationSha(feature: MissionFeature): Promise<string | undefined> {
     if (!feature.taskId) return undefined;
     try {
       const task = await this.taskStore.getTask(feature.taskId);
-      const candidate = (task as { integrationSha?: string; baseCommit?: string } | undefined);
-      return candidate?.integrationSha ?? candidate?.baseCommit ?? undefined;
+      return task?.mergeDetails?.commitSha;
     } catch {
       return undefined;
     }

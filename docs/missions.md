@@ -490,6 +490,8 @@ On task completion, the scheduler calls `MissionExecutionLoop.processTaskOutcome
 5. Apply the **behavioral-verification posture** (see below): static assertions keep the judge's verdict; behavioral/bug assertions default to fail until a bounded, non-mutating verification run confirms them
 6. Record `MissionValidatorRun` metadata for the validation attempt (per-assertion failures are stored separately in `MissionAssertionFailureRecord` rows)
 
+For a linked task with a recorded `mergeDetails.commitSha`, the read-only judge runs from a disposable detached checkout of that landed merge revision rather than the ambient project checkout. If that checkout cannot be materialized, the judge falls back to the project root; a fail is deferred to **inconclusive** when the landed commit is not reachable from that same inspected root, or when the landed revision/its ancestry cannot be verified, preventing a branch-divergence false failure. The task worktree fork point (`baseCommitSha`) is never used as an inspection revision.
+
 **Behavioral-verification posture (adversarial default-to-fail).** A Contract Assertion now carries a `type` (`static` | `behavioral`). The validator no longer grades a Feature "done" purely from the diff's apparent intent:
 
 - **Static assertions** (e.g. "documented in README") keep today's read-only static judging — no added cost or strictness.

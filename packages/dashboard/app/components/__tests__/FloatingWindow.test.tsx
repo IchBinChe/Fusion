@@ -38,6 +38,38 @@ function cssRulesForClass(css: string, className: string): string[] {
   return [...css.matchAll(new RegExp(`\\.${escaped}[^{}]*\\{[^}]*\\}`, "g"))].map((match) => match[0]);
 }
 
+/*
+FNXC:FloatingWindow 2026-07-17-08:20:
+The FN-8015 desktop resize-hot-zone invariant only governs desktop widths. The
+mobile full-screen sheet variants hide every resize handle, so removing the
+inherited body gutter there is legitimate (and required — see the mobile
+task-detail left-shift fix). Strip `@media` blocks with balanced-brace matching
+before scanning so the desktop invariant ignores mobile-only overrides.
+*/
+function stripAtMediaBlocks(css: string): string {
+  let out = "";
+  let i = 0;
+  while (i < css.length) {
+    const at = css.indexOf("@media", i);
+    if (at === -1) {
+      out += css.slice(i);
+      break;
+    }
+    out += css.slice(i, at);
+    const open = css.indexOf("{", at);
+    if (open === -1) break;
+    let depth = 1;
+    let j = open + 1;
+    while (j < css.length && depth > 0) {
+      if (css[j] === "{") depth++;
+      else if (css[j] === "}") depth--;
+      j++;
+    }
+    i = j;
+  }
+  return out;
+}
+
 function setSheetViewport(isSheetWidth: boolean): void {
   vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
     matches: query === "(max-width: 768px)" ? isSheetWidth : query === "(max-height: 480px)",
@@ -107,7 +139,10 @@ describe("FloatingWindow", () => {
     expect(cssRuleFor(floatingWindowCss, ".floating-window__resize-handle--ne")).toContain("right: 0;");
     expect(cssRuleFor(floatingWindowCss, ".floating-window__resize-handle--se")).toContain("right: 0;");
 
-    // No shared caller may move a right handle back into the reserved scrollbar gutter.
+    // No shared caller may move a right handle back into the reserved scrollbar
+    // gutter, nor override the body gutter, AT DESKTOP WIDTHS. Mobile full-screen
+    // sheet overrides (inside @media) are legitimate and excluded from this scan.
+    const desktopAppCss = stripAtMediaBlocks(allAppCss);
     for (const callerClass of [
       "floating-window--task-detail",
       "floating-window--automation",
@@ -117,13 +152,30 @@ describe("FloatingWindow", () => {
       "floating-window--workflow-editor",
       "artifacts-gallery-window",
     ]) {
-      const rules = cssRulesForClass(allAppCss, callerClass);
+      const rules = cssRulesForClass(desktopAppCss, callerClass);
       const rightHandleRules = rules.filter((rule) => /floating-window__resize-handle(?:--(?:e|ne|se))?/.test(rule));
       const bodyRules = rules.filter((rule) => rule.includes("floating-window__body"));
 
       expect(rightHandleRules.some((rule) => /(?:right|width)\s*:/.test(rule)), callerClass).toBe(false);
       expect(bodyRules.some((rule) => /margin-inline-end\s*:/.test(rule)), callerClass).toBe(false);
     }
+
+    /*
+    FNXC:MobileTaskPopups 2026-07-17-08:20:
+    Regression guard for the mobile task-detail left-shift fix: the full-screen
+    task-detail sheet hides all resize handles, so FN-8015's inherited
+    `margin-inline-end: var(--space-lg)` body gutter only added dead space on the
+    right and shifted the whole panel left. The mobile breakpoint must zero it so
+    `.detail-body`'s own padding defines both insets equally. This is the sole
+    legitimate body-gutter override and lives only inside the mobile @media block.
+    */
+    const mobileTaskDetailBody = cssRuleContaining(
+      allAppCss,
+      ".floating-window--task-detail .floating-window__body",
+      "margin-inline-end",
+    );
+    expect(mobileTaskDetailBody).toContain("margin-inline-end: 0;");
+    expect(cssRulesForClass(desktopAppCss, "floating-window--task-detail").some((rule) => rule.includes("floating-window__body"))).toBe(false);
 
     // Headerless and chat variants replace only body overflow; the inherited gutter remains intact for their inner scrollers.
     expect(cssRuleFor(floatingWindowCss, ".floating-window--headerless .floating-window__body")).toContain("overflow: hidden;");

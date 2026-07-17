@@ -192,6 +192,21 @@ On mobile/narrow app viewports, opening Quick Chat should present the full Chat 
     display: none;
   }
 
+  /*
+  FNXC:MobileTaskPopups 2026-07-17-08:20:
+  FN-8015 reserves `margin-inline-end: var(--space-lg)` on the shared
+  `.floating-window__body` so a hosted scrollbar clears the desktop
+  east/north-east/south-east resize hot zones. The mobile task-detail sheet is
+  full-screen and hides every resize handle (above), so that gutter protects
+  nothing and instead shifts the whole panel left — leaving an uneven right
+  inset on every row. Zero it here so `.detail-body`'s own symmetric padding
+  defines both insets equally. Desktop resize-handle clearance is untouched
+  (this rule is mobile-only).
+  */
+  .floating-window--task-detail .floating-window__body {
+    margin-inline-end: 0;
+  }
+
   .floating-window--task-detail .task-detail-content--embedded,
   .floating-window--task-detail .task-detail-content--embedded > .modal-header {
     border-radius: 0;

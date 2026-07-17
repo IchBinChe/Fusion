@@ -60,7 +60,7 @@ describe("createFusionAuthStorage", () => {
     );
 
     const authStorage = createFusionAuthStorage();
-    authStorage.set("openrouter", { type: "api_key", key: "fusion-openrouter-key" });
+    await authStorage.set("openrouter", { type: "api_key", key: "fusion-openrouter-key" });
 
     expect(await authStorage.getApiKey("openrouter")).toBe("fusion-openrouter-key");
     expect(await authStorage.getApiKey("minimax")).toBe("legacy-minimax-key");
@@ -200,7 +200,7 @@ describe("createFusionAuthStorage", () => {
 
       expect(await authStorage.getApiKey("anthropic")).toBe("fallback-anthropic-runtime-key");
 
-      authStorage.logout("anthropic");
+      await authStorage.logout("anthropic");
 
       expect(authStorage.hasAuth("anthropic")).toBe(false);
       expect(await authStorage.getApiKey("anthropic")).toBeUndefined();
@@ -327,11 +327,11 @@ describe("createFusionAuthStorage", () => {
       // reporting "Login did not complete" despite a valid stored credential.
       const authStorage = createFusionAuthStorage();
 
-      authStorage.logout("anthropic-subscription");
+      await authStorage.logout("anthropic-subscription");
       expect(authStorage.hasAuth("anthropic-subscription")).toBe(false);
 
       // `set` under the legacy id mirrors what interactive login persists.
-      authStorage.set("anthropic", {
+      await authStorage.set("anthropic", {
         type: "oauth",
         access: "relogin-access-token",
         refresh: "relogin-refresh-token",
@@ -345,10 +345,10 @@ describe("createFusionAuthStorage", () => {
     it("restores the subscription card when re-auth writes under the subscription id", async () => {
       const authStorage = createFusionAuthStorage();
 
-      authStorage.logout("anthropic-subscription");
+      await authStorage.logout("anthropic-subscription");
       expect(authStorage.hasAuth("anthropic-subscription")).toBe(false);
 
-      authStorage.set("anthropic-subscription", {
+      await authStorage.set("anthropic-subscription", {
         type: "oauth",
         access: "subscription-relogin-token",
         refresh: "subscription-relogin-refresh",
@@ -363,8 +363,8 @@ describe("createFusionAuthStorage", () => {
       // the subscription's logged-out state — only OAuth credentials do.
       const authStorage = createFusionAuthStorage();
 
-      authStorage.logout("anthropic-subscription");
-      authStorage.set("anthropic", { type: "api_key", key: "sk-ant-api03-raw-key" });
+      await authStorage.logout("anthropic-subscription");
+      await authStorage.set("anthropic", { type: "api_key", key: "sk-ant-api03-raw-key" });
 
       expect(authStorage.hasAuth("anthropic-subscription")).toBe(false);
     });
@@ -603,7 +603,7 @@ describe("createFusionAuthStorage", () => {
       });
 
       const authStorage = createFusionAuthStorage();
-      authStorage.logout("anthropic");
+      await authStorage.logout("anthropic");
 
       // Raw-key logout removes only the raw slot; subscription OAuth still powers
       // the direct `anthropic` runtime provider.
@@ -621,10 +621,10 @@ describe("createFusionAuthStorage", () => {
       });
 
       const authStorage = createFusionAuthStorage();
-      authStorage.logout("anthropic");
+      await authStorage.logout("anthropic");
       expect(await authStorage.getApiKey("anthropic")).toBeUndefined();
 
-      authStorage.set("anthropic-subscription", {
+      await authStorage.set("anthropic-subscription", {
         type: "oauth",
         access: "subscription-access-token",
         refresh: "subscription-refresh-token",
@@ -648,7 +648,7 @@ describe("createFusionAuthStorage", () => {
       });
 
       const authStorage = createFusionAuthStorage();
-      authStorage.logout("anthropic-subscription");
+      await authStorage.logout("anthropic-subscription");
 
       expect(authStorage.get("anthropic-subscription")).toBeUndefined();
       expect(authStorage.get("anthropic")).toEqual({ type: "api_key", key: "sk-ant-api03-runtime-key" });
@@ -669,7 +669,7 @@ describe("createFusionAuthStorage", () => {
       // Before logout the legacy OAuth row drives direct runtime auth…
       expect(await authStorage.getApiKey("anthropic")).toBe("legacy-subscription-access-token");
 
-      authStorage.logout("anthropic-subscription");
+      await authStorage.logout("anthropic-subscription");
 
       // …and subscription logout suppresses the legacy OAuth alias everywhere.
       expect(authStorage.get("anthropic")).toBeUndefined();
@@ -699,7 +699,7 @@ describe("createFusionAuthStorage", () => {
       expect(authStorage.hasAuth("anthropic")).toBe(true);
       expect(authStorage.list()).toContain("anthropic");
 
-      authStorage.logout("anthropic-subscription");
+      await authStorage.logout("anthropic-subscription");
 
       expect(authStorage.get("anthropic")).toBeUndefined();
       expect(authStorage.has("anthropic")).toBe(false);
@@ -726,7 +726,7 @@ describe("createFusionAuthStorage", () => {
       });
 
       const authStorage = createFusionAuthStorage();
-      authStorage.logout("anthropic-subscription");
+      await authStorage.logout("anthropic-subscription");
 
       expect(authStorage.has("anthropic")).toBe(true);
       expect(authStorage.hasAuth("anthropic")).toBe(true);
@@ -747,7 +747,7 @@ describe("createFusionAuthStorage", () => {
       expect(authStorage.has("anthropic")).toBe(true);
       expect(await authStorage.getApiKey("anthropic")).toBe("models-runtime-key");
 
-      authStorage.logout("anthropic");
+      await authStorage.logout("anthropic");
 
       expect(authStorage.has("anthropic")).toBe(false);
       expect(authStorage.hasAuth("anthropic")).toBe(false);
@@ -958,7 +958,7 @@ describe("createFusionAuthStorage", () => {
     const pendingRefresh = authStorage.getApiKey("anthropic");
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
 
-    authStorage.set("anthropic", {
+    await authStorage.set("anthropic", {
       type: "oauth",
       access: "fresh-login-access-token",
       refresh: "fresh-login-refresh-token",
@@ -1235,7 +1235,7 @@ describe("createFusionAuthStorage", () => {
       expect(await authStorage.getApiKey("anthropic")).toBe("claude-access-token");
 
       // Log out
-      authStorage.logout("anthropic");
+      await authStorage.logout("anthropic");
 
       // After logout, supplemental credentials are hidden
       expect(authStorage.has("anthropic")).toBe(false);
@@ -1259,7 +1259,7 @@ describe("createFusionAuthStorage", () => {
       );
 
       const authStorage = createFusionAuthStorage();
-      authStorage.logout("anthropic");
+      await authStorage.logout("anthropic");
 
       // reload() should NOT bring back the supplemental credential
       authStorage.reload();
@@ -1284,7 +1284,7 @@ describe("createFusionAuthStorage", () => {
       );
 
       const authStorage = createFusionAuthStorage();
-      authStorage.logout("anthropic");
+      await authStorage.logout("anthropic");
 
       const all = authStorage.getAll();
       expect("anthropic" in all).toBe(false);
@@ -1305,7 +1305,7 @@ describe("createFusionAuthStorage", () => {
       );
 
       const authStorage = createFusionAuthStorage();
-      authStorage.logout("anthropic");
+      await authStorage.logout("anthropic");
 
       expect(authStorage.list()).not.toContain("anthropic");
     });
@@ -1325,10 +1325,10 @@ describe("createFusionAuthStorage", () => {
       );
 
       const authStorage = createFusionAuthStorage();
-      authStorage.logout("anthropic");
+      await authStorage.logout("anthropic");
 
       // Re-authenticate
-      authStorage.set("anthropic", { type: "api_key", key: "new-key" });
+      await authStorage.set("anthropic", { type: "api_key", key: "new-key" });
 
       // Provider is visible again
       expect(authStorage.has("anthropic")).toBe(true);
@@ -1359,7 +1359,7 @@ describe("createFusionAuthStorage", () => {
       );
 
       const authStorage = createFusionAuthStorage();
-      authStorage.logout("anthropic");
+      await authStorage.logout("anthropic");
 
       // anthropic is hidden
       expect(authStorage.hasAuth("anthropic")).toBe(false);

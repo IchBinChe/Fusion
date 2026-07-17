@@ -581,12 +581,12 @@ export const registerSettingsSyncRoutes: ApiRouteRegistrar = (ctx) => {
         const syncedProviders: string[] = [];
         for (const [providerId, credential] of Object.entries(applied.providerAuth)) {
           if (credential.type === "api_key" && credential.key) {
-            authStorage.set(providerId, { type: "api_key", key: credential.key });
+            await authStorage.set(providerId, { type: "api_key", key: credential.key });
             syncedProviders.push(providerId);
             continue;
           }
           if (credential.type === "oauth" && credential.accessToken && credential.refreshToken && typeof credential.expires === "number") {
-            authStorage.set(providerId, {
+            await authStorage.set(providerId, {
               type: "oauth",
               access: credential.accessToken,
               refresh: credential.refreshToken,

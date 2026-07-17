@@ -207,7 +207,7 @@ export async function runOnboard(options: OnboardOptions = {}): Promise<void> {
       }
 
       const apiKey = await prompts.prompt("Enter API key");
-      providerAuth.setApiKey(selectedProvider, apiKey);
+      await providerAuth.setApiKey(selectedProvider, apiKey);
       console.log(`✓ Stored API key for ${selectedProvider}`);
     });
 

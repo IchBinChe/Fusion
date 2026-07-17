@@ -1,6 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
 import {
   choosePreferredStoredCredential,
@@ -22,14 +22,50 @@ export interface FusionAuthStorage {
   list(): string[];
   has(provider: string): boolean;
   hasAuth(provider: string): boolean;
-  set(provider: string, credential: StoredCredential): void;
-  remove(provider: string): void;
-  logout(provider: string): void;
+  set(provider: string, credential: StoredCredential): Promise<void>;
+  remove(provider: string): Promise<void>;
+  logout(provider: string): Promise<void>;
   getApiKey(provider: string): Promise<string | undefined>;
   getOAuthProviders(): Array<{ id: string; name: string }>;
   login(provider: string, callbacks: unknown): Promise<void>;
   modify(provider: string, fn: (current: StoredCredential | undefined) => Promise<StoredCredential | undefined>): Promise<StoredCredential | undefined>;
   setModelRuntime(modelRuntime: ModelRuntime): void;
+}
+
+/*
+FNXC:ProviderAuth 2026-07-17-08:30:
+FN-8205 replaces the immediate-fail `lockSync` write path: proper-lockfile rejects
+synchronous retries with ESYNC, so a held shared auth.json lock used to surface ELOCKED
+straight through set/remove/logout. Writes now share this asynchronous retry policy with
+modify() and queue per resolved auth path before taking the cross-process file lock. This
+prevents same-engine sessions from self-contending while preserving fresh read-modify-merge
+under the lock for independent Fusion processes. The vendored pi-coding-agent synchronous
+lock defect from Runfusion/Fusion#2167 remains a separately tracked upstream follow-up.
+*/
+const AUTH_LOCK_OPTIONS = {
+  realpath: false,
+  stale: 30_000,
+  retries: {
+    retries: 10,
+    factor: 2,
+    minTimeout: 20,
+    maxTimeout: 10_000,
+    randomize: true,
+  },
+} as const;
+
+const authWriteQueues = new Map<string, Promise<void>>();
+
+function enqueueAuthWrite<T>(authPath: string, write: () => Promise<T>): Promise<T> {
+  const queueKey = resolve(authPath);
+  const previous = authWriteQueues.get(queueKey) ?? Promise.resolve();
+  const operation = previous.catch(() => undefined).then(write);
+  const tail = operation.then(() => undefined, () => undefined);
+  authWriteQueues.set(queueKey, tail);
+  void tail.finally(() => {
+    if (authWriteQueues.get(queueKey) === tail) authWriteQueues.delete(queueKey);
+  });
+  return operation;
 }
 
 class FusionFileAuthStorage implements FusionAuthStorage {
@@ -57,20 +93,22 @@ class FusionFileAuthStorage implements FusionAuthStorage {
     }
   }
 
-  private withLock<T>(fn: (current: Record<string, StoredCredential>) => T): T {
-    this.ensureFile();
-    // proper-lockfile's synchronous API cannot retry; writes remain serialized by the lock.
-    const release = lockfile.lockSync(this.authPath, { realpath: false });
-    try {
-      const current = this.readCurrent();
-      const result = fn(current);
-      this.data = current;
-      writeFileSync(this.authPath, JSON.stringify(current, null, 2), { encoding: "utf-8", mode: 0o600 });
-      chmodSync(this.authPath, 0o600);
-      return result;
-    } finally {
-      release();
-    }
+  private async withLock<T>(fn: (current: Record<string, StoredCredential>) => Promise<T>): Promise<T> {
+    return enqueueAuthWrite(this.authPath, async () => {
+      this.ensureFile();
+      const release = await lockfile.lock(this.authPath, AUTH_LOCK_OPTIONS);
+      try {
+        // Always merge the on-disk state observed after acquiring the lock, never this.data.
+        const current = this.readCurrent();
+        const result = await fn(current);
+        writeFileSync(this.authPath, JSON.stringify(current, null, 2), { encoding: "utf-8", mode: 0o600 });
+        chmodSync(this.authPath, 0o600);
+        this.data = current;
+        return result;
+      } finally {
+        await release();
+      }
+    });
   }
 
   reload(): void {
@@ -83,13 +121,13 @@ class FusionFileAuthStorage implements FusionAuthStorage {
   list(): string[] { return Object.keys(this.data); }
   has(provider: string): boolean { return Boolean(this.data[provider]); }
   hasAuth(provider: string): boolean { return this.has(provider); }
-  set(provider: string, credential: StoredCredential): void {
-    this.withLock((current) => { current[provider] = credential; });
+  async set(provider: string, credential: StoredCredential): Promise<void> {
+    await this.withLock(async (current) => { current[provider] = credential; });
   }
-  remove(provider: string): void {
-    this.withLock((current) => { delete current[provider]; });
+  async remove(provider: string): Promise<void> {
+    await this.withLock(async (current) => { delete current[provider]; });
   }
-  logout(provider: string): void { this.remove(provider); }
+  async logout(provider: string): Promise<void> { await this.remove(provider); }
   async getApiKey(provider: string): Promise<string | undefined> {
     return resolveStoredCredentialApiKey(provider, this.get(provider));
   }
@@ -128,19 +166,11 @@ class FusionFileAuthStorage implements FusionAuthStorage {
     this.reload();
   }
   async modify(provider: string, fn: (current: StoredCredential | undefined) => Promise<StoredCredential | undefined>): Promise<StoredCredential | undefined> {
-    this.ensureFile();
-    const release = await lockfile.lock(this.authPath, { realpath: false, retries: { retries: 10, minTimeout: 20 } });
-    try {
-      const current = this.readCurrent();
+    return this.withLock(async (current) => {
       const next = await fn(current[provider]);
       if (next !== undefined) current[provider] = next;
-      this.data = current;
-      writeFileSync(this.authPath, JSON.stringify(current, null, 2), { encoding: "utf-8", mode: 0o600 });
-      chmodSync(this.authPath, 0o600);
       return current[provider];
-    } finally {
-      await release();
-    }
+    });
   }
 }
 
@@ -164,7 +194,7 @@ export function createFusionCredentialStore(authStorage: FusionAuthStorage): Cre
         : [];
     }),
     modify: async (providerId, fn) => authStorage.modify(providerId, async (current) => fn(current as Credential | undefined) as Promise<StoredCredential | undefined>) as Promise<Credential | undefined>,
-    delete: async (providerId) => { authStorage.remove(providerId); },
+    delete: async (providerId) => { await authStorage.remove(providerId); },
   };
 }
 
@@ -433,6 +463,7 @@ export function createFusionAuthStorage(): FusionAuthStorage {
   */
   const oauthRefreshInFlight = new Map<string, Promise<StoredCredential | undefined>>();
   const oauthRefreshCooldownUntil = new Map<string, number>();
+  let supplementalHydration = Promise.resolve();
 
   // Providers the user has explicitly logged out from. These should not be
   // "resurrected" from supplemental credential files (e.g. ~/.claude/.credentials.json).
@@ -459,7 +490,14 @@ export function createFusionAuthStorage(): FusionAuthStorage {
     }
   };
 
-  const syncSupplementalOauthCredentials = () => {
+  /*
+  FNXC:ProviderAuth 2026-07-17-08:45:
+  Supplemental hydration persists through the same per-path queue as direct writes. Construction
+  and lock-free reload intentionally start it without blocking reads; callers that require a
+  hydrated credential use getApiKey(), which awaits its own persistence. Other reads observe
+  hydrated state after this queue drains rather than racing an un-awaited file write.
+  */
+  const syncSupplementalOauthCredentials = async (): Promise<void> => {
     for (const [provider, credential] of Object.entries(supplementalCredentials)) {
       if (loggedOutProviders.has(provider)) {
         continue;
@@ -472,11 +510,11 @@ export function createFusionAuthStorage(): FusionAuthStorage {
         if (typeof credential.expires !== "number" || Date.now() >= credential.expires) {
           continue;
         }
-        primary.set(provider, credential as StoredCredential);
+        await primary.set(provider, credential as StoredCredential);
         continue;
       }
       if (credential.type === "api_key") {
-        primary.set(provider, credential as StoredCredential);
+        await primary.set(provider, credential as StoredCredential);
       }
     }
   };
@@ -650,7 +688,7 @@ export function createFusionAuthStorage(): FusionAuthStorage {
           return resolveStoredCredentialApiKey(storageProvider, latestCredential);
         }
       }
-      primary.set(storageProvider, refreshedCredential as StoredCredential);
+      await primary.set(storageProvider, refreshedCredential as StoredCredential);
       loggedOutProviders.delete(storageProvider);
       return resolveStoredCredentialApiKey(storageProvider, refreshedCredential);
     }
@@ -706,7 +744,7 @@ export function createFusionAuthStorage(): FusionAuthStorage {
     return undefined;
   };
 
-  syncSupplementalOauthCredentials();
+  supplementalHydration = syncSupplementalOauthCredentials();
 
   return new Proxy(primary, {
     // Forward property writes to the target so that methods like
@@ -720,26 +758,26 @@ export function createFusionAuthStorage(): FusionAuthStorage {
 
     get(target, prop, receiver) {
       if (prop === "logout") {
-        return (provider: string) => {
-          target.logout(provider);
+        return async (provider: string): Promise<void> => {
+          await target.logout(provider);
           loggedOutProviders.add(provider);
           if (provider === ANTHROPIC_SUBSCRIPTION_PROVIDER_ID) {
             const legacyAnthropicCredential = target.get(ANTHROPIC_PROVIDER_ID) as StoredCredential | undefined;
             if (legacyAnthropicCredential?.type === "oauth") {
-              target.logout(ANTHROPIC_PROVIDER_ID);
+              await target.logout(ANTHROPIC_PROVIDER_ID);
             }
           }
         };
       }
 
       if (prop === "remove") {
-        return (provider: string) => {
-          target.remove(provider);
+        return async (provider: string): Promise<void> => {
+          await target.remove(provider);
           loggedOutProviders.add(provider);
           if (provider === ANTHROPIC_SUBSCRIPTION_PROVIDER_ID) {
             const legacyAnthropicCredential = target.get(ANTHROPIC_PROVIDER_ID) as StoredCredential | undefined;
             if (legacyAnthropicCredential?.type === "oauth") {
-              target.remove(ANTHROPIC_PROVIDER_ID);
+              await target.remove(ANTHROPIC_PROVIDER_ID);
             }
           }
         };
@@ -771,8 +809,8 @@ export function createFusionAuthStorage(): FusionAuthStorage {
       }
 
       if (prop === "set") {
-        return (provider: string, credential: StoredCredential) => {
-          target.set(provider, credential);
+        return async (provider: string, credential: StoredCredential): Promise<void> => {
+          await target.set(provider, credential);
           clearReauthenticatedLogoutState(provider, (credential as StoredCredential | undefined)?.type);
         };
       }
@@ -781,7 +819,7 @@ export function createFusionAuthStorage(): FusionAuthStorage {
         return () => {
           target.reload();
           supplementalCredentials = readSupplementalCredentials();
-          syncSupplementalOauthCredentials();
+          supplementalHydration = syncSupplementalOauthCredentials();
           modelsJsonApiKeys = readModelsJsonApiKeys();
         };
       }
@@ -873,6 +911,7 @@ export function createFusionAuthStorage(): FusionAuthStorage {
 
       if (prop === "getApiKey") {
         return async (provider: string) => {
+          await supplementalHydration;
           if (provider === ANTHROPIC_PROVIDER_ID) {
             return resolveAnthropicRuntimeApiKey();
           }
@@ -891,7 +930,7 @@ export function createFusionAuthStorage(): FusionAuthStorage {
               FNXC:ProviderAuth 2026-07-01-12:34:
               Legacy Anthropic OAuth rows are subscription credentials, not raw API keys. Hydrate them into `anthropic-subscription` before refresh so status, usage, and banner clearing share the same provider id without overwriting a raw `anthropic` API-key credential.
               */
-              primary.set(ANTHROPIC_SUBSCRIPTION_PROVIDER_ID, subscriptionCredential as StoredCredential);
+              await primary.set(ANTHROPIC_SUBSCRIPTION_PROVIDER_ID, subscriptionCredential as StoredCredential);
               loggedOutProviders.delete(ANTHROPIC_SUBSCRIPTION_PROVIDER_ID);
             }
             return resolveRefreshableCredentialApiKey(ANTHROPIC_SUBSCRIPTION_PROVIDER_ID, subscriptionCredential);

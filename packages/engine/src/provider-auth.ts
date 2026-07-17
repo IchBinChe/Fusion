@@ -35,10 +35,10 @@ export interface DashboardAuthStorage {
   getOAuthProviders(): Array<{ id: string; name: string }>;
   hasAuth(provider: string): boolean;
   login(providerId: string, callbacks: LoginCallbacks): Promise<void>;
-  logout(provider: string): void;
+  logout(provider: string): Promise<void>;
   getApiKeyProviders(): Array<{ id: string; name: string }>;
-  setApiKey(providerId: string, apiKey: string): void;
-  clearApiKey(providerId: string): void;
+  setApiKey(providerId: string, apiKey: string): Promise<void>;
+  clearApiKey(providerId: string): Promise<void>;
   hasApiKey(providerId: string): boolean;
   getApiKey(providerId: string): Promise<string | undefined>;
   get(providerId: string): { type?: string; key?: string } | undefined;
@@ -105,7 +105,7 @@ export function wrapAuthStorageWithApiKeyProviders(
     return legacyCredential?.type === "oauth" ? legacyCredential : undefined;
   };
 
-  const migrateStoredAnthropicSubscriptionCredential = () => {
+  const migrateStoredAnthropicSubscriptionCredential = async () => {
     const existingSubscription = authStorage.get(ANTHROPIC_SUBSCRIPTION_STORAGE_PROVIDER_ID) as StoredCredential | undefined;
     if (existingSubscription?.type === "oauth") {
       return existingSubscription;
@@ -121,7 +121,7 @@ export function wrapAuthStorageWithApiKeyProviders(
     Saving or clearing the separated `anthropic-api-key` provider overwrites the raw `anthropic` storage slot used by model execution.
     Read the primary auth storage directly and migrate legacy subscription OAuth from `anthropic` to `anthropic-subscription` before that write, because merged Anthropic reads intentionally expose `anthropic` as API-key-only.
     */
-    mergedAuthStorage.set(ANTHROPIC_SUBSCRIPTION_STORAGE_PROVIDER_ID, legacySubscription as StoredCredential);
+    await mergedAuthStorage.set(ANTHROPIC_SUBSCRIPTION_STORAGE_PROVIDER_ID, legacySubscription as StoredCredential);
     return legacySubscription;
   };
 
@@ -157,20 +157,20 @@ export function wrapAuthStorageWithApiKeyProviders(
         Anthropic subscription OAuth and raw Anthropic API-key auth must be separate UI providers: OAuth stays `anthropic`, while the UI/API key card uses `anthropic-api-key` and maps back to the `anthropic` model credential.
         Store subscription OAuth under an internal key after upstream login because the OAuth library writes through the same `anthropic` id used by model API-key execution.
         */
-        mergedAuthStorage.set(ANTHROPIC_SUBSCRIPTION_STORAGE_PROVIDER_ID, oauthCredential as StoredCredential);
+        await mergedAuthStorage.set(ANTHROPIC_SUBSCRIPTION_STORAGE_PROVIDER_ID, oauthCredential as StoredCredential);
         if (existingApiKey?.type === "api_key") {
-          mergedAuthStorage.set(ANTHROPIC_STORAGE_PROVIDER_ID, existingApiKey as StoredCredential);
+          await mergedAuthStorage.set(ANTHROPIC_STORAGE_PROVIDER_ID, existingApiKey as StoredCredential);
         } else {
-          authStorage.remove(ANTHROPIC_STORAGE_PROVIDER_ID);
+          await authStorage.remove(ANTHROPIC_STORAGE_PROVIDER_ID);
         }
       }
     },
-    logout: (provider) => {
+    logout: async (provider) => {
       if (provider !== ANTHROPIC_STORAGE_PROVIDER_ID && provider !== ANTHROPIC_SUBSCRIPTION_STORAGE_PROVIDER_ID) {
-        mergedAuthStorage.logout(provider);
+        await mergedAuthStorage.logout(provider);
         return;
       }
-      mergedAuthStorage.logout(ANTHROPIC_SUBSCRIPTION_STORAGE_PROVIDER_ID);
+      await mergedAuthStorage.logout(ANTHROPIC_SUBSCRIPTION_STORAGE_PROVIDER_ID);
       /*
       FNXC:ProviderAuth 2026-06-29-23:59:
       Logging out Anthropic subscription auth must also remove pre-split OAuth credentials still stored under `anthropic`.
@@ -178,7 +178,7 @@ export function wrapAuthStorageWithApiKeyProviders(
       */
       const legacyAnthropicCredential = authStorage.get(ANTHROPIC_STORAGE_PROVIDER_ID) as StoredCredential | undefined;
       if (legacyAnthropicCredential?.type === "oauth") {
-        mergedAuthStorage.logout(ANTHROPIC_STORAGE_PROVIDER_ID);
+        await mergedAuthStorage.logout(ANTHROPIC_STORAGE_PROVIDER_ID);
       }
     },
     getApiKeyProviders: () => {
@@ -215,19 +215,19 @@ export function wrapAuthStorageWithApiKeyProviders(
         a.name.localeCompare(b.name),
       );
     },
-    setApiKey: (providerId, apiKey) => {
+    setApiKey: async (providerId, apiKey) => {
       const storageProviderId = toApiKeyStorageProviderId(providerId);
       if (storageProviderId === ANTHROPIC_STORAGE_PROVIDER_ID) {
-        migrateStoredAnthropicSubscriptionCredential();
+        await migrateStoredAnthropicSubscriptionCredential();
       }
-      mergedAuthStorage.set(storageProviderId, { type: "api_key", key: apiKey });
+      await mergedAuthStorage.set(storageProviderId, { type: "api_key", key: apiKey });
     },
-    clearApiKey: (providerId) => {
+    clearApiKey: async (providerId) => {
       const storageProviderId = toApiKeyStorageProviderId(providerId);
       if (storageProviderId === ANTHROPIC_STORAGE_PROVIDER_ID) {
-        migrateStoredAnthropicSubscriptionCredential();
+        await migrateStoredAnthropicSubscriptionCredential();
       }
-      mergedAuthStorage.remove(storageProviderId);
+      await mergedAuthStorage.remove(storageProviderId);
     },
     hasApiKey: (providerId) => {
       const credential = mergedAuthStorage.get(toApiKeyStorageProviderId(providerId));
@@ -303,7 +303,7 @@ export function mergeAuthStorageReads(
     return selectCredential(providerId, readAuthStorages);
   };
 
-  const syncFallbackOauthCredentials = () => {
+  const syncFallbackOauthCredentials = async (): Promise<void> => {
     const providerIds = new Set(readFallbackAuthStorages.flatMap((storage) => storage.list()));
     for (const providerId of providerIds) {
       const storageProviderId = providerId === ANTHROPIC_STORAGE_PROVIDER_ID
@@ -322,32 +322,32 @@ export function mergeAuthStorageReads(
         FNXC:ProviderAuth 2026-06-29-23:48:
         Legacy Anthropic OAuth files may still store subscription credentials under `anthropic`; hydrate those as `anthropic-subscription` so Anthropic model/API-key reads only trust `api_key` credentials under `anthropic`.
         */
-        authStorage.set(storageProviderId, candidate as StoredCredential);
+        await authStorage.set(storageProviderId, candidate as StoredCredential);
       }
     }
   };
 
-  syncFallbackOauthCredentials();
+  void syncFallbackOauthCredentials();
 
   return new Proxy(authStorage, {
     get(target, prop, receiver) {
       if (prop === "logout") {
-        return (provider: string) => {
-          target.logout(provider);
+        return async (provider: string): Promise<void> => {
+          await target.logout(provider);
           loggedOutProviders.add(provider);
         };
       }
 
       if (prop === "remove") {
-        return (provider: string) => {
-          target.remove(provider);
+        return async (provider: string): Promise<void> => {
+          await target.remove(provider);
           loggedOutProviders.add(provider);
         };
       }
 
       if (prop === "set") {
-        return (provider: string, credential: StoredCredential) => {
-          target.set(provider, credential);
+        return async (provider: string, credential: StoredCredential): Promise<void> => {
+          await target.set(provider, credential);
           loggedOutProviders.delete(provider);
         };
       }
@@ -357,7 +357,7 @@ export function mergeAuthStorageReads(
           for (const storage of readAuthStorages) {
             storage.reload();
           }
-          syncFallbackOauthCredentials();
+          void syncFallbackOauthCredentials();
         };
       }
 

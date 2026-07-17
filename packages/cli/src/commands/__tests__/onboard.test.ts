@@ -154,6 +154,23 @@ describe("onboard", () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Central DB already exists"));
   });
 
+  it("waits for API-key persistence before reporting onboarding success", async () => {
+    const providerAuth = makeProviderAuth();
+    let persisted = false;
+    providerAuth.setApiKey.mockImplementation(async () => {
+      await Promise.resolve();
+      persisted = true;
+    });
+    mockProviderAuthFactory.mockReturnValue(providerAuth);
+    const logSpy = vi.spyOn(console, "log").mockImplementation((message: string) => {
+      if (message.includes("Stored API key")) expect(persisted).toBe(true);
+    });
+
+    await runOnboard({ input: inputFrom(["y", "y", "1", "test-key", "y", "y", "n", "y"]) });
+    expect(providerAuth.setApiKey).toHaveBeenCalledWith("openrouter", "test-key");
+    expect(logSpy).toHaveBeenCalledWith("✓ Stored API key for openrouter");
+  });
+
   it("stores API key, runs init, persists global testMode and completion marker", async () => {
     const providerAuth = makeProviderAuth();
     mockProviderAuthFactory.mockReturnValue(providerAuth);

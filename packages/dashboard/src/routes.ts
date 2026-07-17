@@ -249,13 +249,13 @@ export interface AuthStorageLike {
       signal?: AbortSignal;
     },
   ): Promise<void>;
-  logout(provider: string): void;
+  logout(provider: string): Promise<void>;
   /** Get providers that accept API keys (non-OAuth). Returns provider id and name. */
   getApiKeyProviders?(): Array<{ id: string; name: string }>;
   /** Save an API key for a provider. Creates or overwrites the existing key. */
-  setApiKey?(providerId: string, apiKey: string): void;
+  setApiKey?(providerId: string, apiKey: string): Promise<void>;
   /** Remove the stored API key for a provider. No-op if not set. */
-  clearApiKey?(providerId: string): void;
+  clearApiKey?(providerId: string): Promise<void>;
   /** Check if a provider has an API key configured. */
   hasApiKey?(providerId: string): boolean;
   /** Get the configured API key for usage providers. */

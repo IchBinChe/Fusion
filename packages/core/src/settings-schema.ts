@@ -94,6 +94,11 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   autoBackupDir: ".fusion/backups",
   backupSettingsMigrationConflicts: undefined,
   /*
+  FNXC:NodeDiscovery 2026-07-17-12:00:
+  LAN discovery remains automatic for existing operators, while FN-8202 provides a global opt-out from dashboard and serve mDNS/DNS-SD auto-start.
+  */
+  localNetworkDiscoveryEnabled: true,
+  /*
   FNXC:DashboardShortcuts 2026-07-04-00:00:
   Global dashboard shortcuts must hydrate with documented safe defaults even when old settings files are missing the object. Space opens Quick Chat; Ctrl+` opens Terminal without colliding with common browser find/search accelerators. FN-7553 adds openFiles (Ctrl+E), openSettings (Ctrl+,), openCommandCenter (Ctrl+K), and newTask (Ctrl+Shift+N) — chosen to avoid colliding with the base two or each other. Empty strings are preserved so operators can disable an action.
   */

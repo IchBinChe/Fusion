@@ -1786,6 +1786,18 @@ describe("runServe — Peer exchange and discovery", () => {
     await triggerSignal("SIGINT");
   });
 
+  it("skips automatic discovery when local network discovery is disabled", async () => {
+    mocks.globalSettingsGetSettings.mockResolvedValue({ localNetworkDiscoveryEnabled: false });
+
+    await runServe(4040, {});
+
+    const nodeCentral = mocks.centralInstances.find((instance) => instance.listNodes.mock.calls.length > 0);
+    expect(nodeCentral).toBeDefined();
+    expect(nodeCentral.startDiscovery).not.toHaveBeenCalled();
+
+    await triggerSignal("SIGINT");
+  });
+
   it("starts discovery with port 5050 when port 0 is requested", async () => {
     await runServe(0, {});
 

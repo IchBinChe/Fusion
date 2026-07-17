@@ -2454,6 +2454,8 @@ export interface GlobalSettings {
   autoBackupDir?: string;
   /** Durable candidates requiring an operator choice after project-to-global backup migration. */
   backupSettingsMigrationConflicts?: BackupSettingsMigrationConflict[];
+  /** When false, fn dashboard and fn serve skip automatic mDNS/DNS-SD LAN discovery. Default: true (FN-8202 opt-out). */
+  localNetworkDiscoveryEnabled?: boolean;
   /**
    * FNXC:DashboardShortcuts 2026-07-04-00:00:
    * Dashboard keyboard shortcuts are global operator preferences because they control browser UI affordances, not project execution policy. Defaults keep Space for Quick Chat and Ctrl+` for Terminal; blank values intentionally disable an action.

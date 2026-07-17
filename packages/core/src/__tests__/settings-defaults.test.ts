@@ -28,6 +28,14 @@ describe("settings defaults invariants", () => {
     expect(DEFAULT_PROJECT_SETTINGS.worktreesDir).toBeUndefined();
   });
 
+  it("defaults local network discovery on and keeps its opt-out global-only", () => {
+    expect(DEFAULT_GLOBAL_SETTINGS.localNetworkDiscoveryEnabled).toBe(true);
+    expect(GLOBAL_SETTINGS_KEYS).toContain("localNetworkDiscoveryEnabled");
+    expect(PROJECT_SETTINGS_KEYS).not.toContain("localNetworkDiscoveryEnabled");
+    expect("localNetworkDiscoveryEnabled" in DEFAULT_PROJECT_SETTINGS).toBe(false);
+    expect(isGlobalOnlySettingsKey("localNetworkDiscoveryEnabled")).toBe(true);
+  });
+
   it("defaults dashboard keyboard shortcuts globally", () => {
     expect(DEFAULT_GLOBAL_SETTINGS.dashboardKeyboardShortcuts).toEqual({
       quickChat: "Space",

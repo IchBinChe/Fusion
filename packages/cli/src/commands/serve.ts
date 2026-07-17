@@ -1075,13 +1075,23 @@ export async function runServe(
   //
   if (sharedCentralCore) {
     try {
-      await sharedCentralCore.startDiscovery({
-        broadcast: true,
-        listen: true,
-        serviceType: "_fusion._tcp",
-        port: actualPort,
-        staleTimeoutMs: 300_000,
-      });
+      const globalSettings = await store.getGlobalSettingsStore().getSettings();
+      /*
+       * FNXC:NodeDiscovery 2026-07-17-12:00:
+       * FN-8202 makes automatic LAN discovery opt-outable at daemon boot;
+       * explicit POST /api/discovery/start requests intentionally still work.
+       */
+      if (globalSettings.localNetworkDiscoveryEnabled === false) {
+        console.warn("[serve] LAN discovery disabled by localNetworkDiscoveryEnabled setting");
+      } else {
+        await sharedCentralCore.startDiscovery({
+          broadcast: true,
+          listen: true,
+          serviceType: "_fusion._tcp",
+          port: actualPort,
+          staleTimeoutMs: 300_000,
+        });
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.warn(`[serve] Failed to start mDNS discovery: ${message}`);

@@ -82,7 +82,7 @@ Still useful under shared Postgres:
 | `POST /api/mesh/sync` | Peer gossip: `knownPeers` (+ optional `authMaterial` only) |
 | `POST/GET /api/mesh/task-ids/*` | Local allocator against shared ID tables (no remote coordinator hop) |
 | Auth sync routes | Optional credential fan-out for file-local auth |
-| mDNS discovery | Join convenience, not task SoT |
+| mDNS discovery | Join convenience, not task SoT. `_fusion._tcp` advertises a Fusion-owned `fusion-<nodeId8>` host rather than the OS hostname; set global `localNetworkDiscoveryEnabled: false` to disable dashboard/serve auto-start. |
 | Docker mesh config generator | Provision managed peers |
 
 Removed / disabled:

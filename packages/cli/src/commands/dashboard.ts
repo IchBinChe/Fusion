@@ -2738,13 +2738,23 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     //
     if (centralCoreForMesh) {
       try {
-        await centralCoreForMesh.startDiscovery({
-          broadcast: true,
-          listen: true,
-          serviceType: "_fusion._tcp",
-          port: actualPort,
-          staleTimeoutMs: 300_000,
-        });
+        const globalSettings = await store.getGlobalSettingsStore().getSettings();
+        /*
+         * FNXC:NodeDiscovery 2026-07-17-12:00:
+         * FN-8202 requires dashboard boot to respect the global LAN discovery
+         * opt-out. The explicit discovery API remains an operator override.
+         */
+        if (globalSettings.localNetworkDiscoveryEnabled === false) {
+          logSink.warn("LAN discovery disabled by localNetworkDiscoveryEnabled setting", "dashboard");
+        } else {
+          await centralCoreForMesh.startDiscovery({
+            broadcast: true,
+            listen: true,
+            serviceType: "_fusion._tcp",
+            port: actualPort,
+            staleTimeoutMs: 300_000,
+          });
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         logSink.warn(`Failed to start mDNS discovery: ${message}`, "dashboard");

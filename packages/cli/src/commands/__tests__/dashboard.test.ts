@@ -3002,6 +3002,30 @@ describe("runDashboard — mesh lifecycle ownership", () => {
     dispose();
   });
 
+  it("skips automatic discovery when local network discovery is disabled", async () => {
+    const { CentralCore } = await import("@fusion/core");
+    const startDiscovery = vi.fn().mockResolvedValue(undefined);
+    mockGlobalSettingsGetSettings.mockResolvedValue({ localNetworkDiscoveryEnabled: false });
+
+    (CentralCore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
+      init: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+      getProjectByPath: vi.fn().mockResolvedValue({ id: "project-1" }),
+      listProjects: vi.fn().mockResolvedValue([{ id: "project-1", path: process.cwd() }]),
+      listNodes: vi.fn().mockResolvedValue([{ id: "node-local", type: "local", status: "offline" }]),
+      updateNode: vi.fn().mockResolvedValue(undefined),
+      startDiscovery,
+      stopDiscovery: vi.fn(),
+    }));
+
+    const { dispose } = await runDashboard(0, { open: false });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(startDiscovery).not.toHaveBeenCalled();
+    dispose();
+  });
+
   it("stops peer exchange and discovery during shutdown", async () => {
     const { CentralCore } = await import("@fusion/core");
     const { PeerExchangeService } = await import("@fusion/engine");

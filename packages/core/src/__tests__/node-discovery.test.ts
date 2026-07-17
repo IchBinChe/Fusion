@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import os from "node:os";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import type { DiscoveryConfig, DiscoveredNode } from "../types.js";
 
@@ -97,6 +98,7 @@ describe("NodeDiscovery", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("starts and stops broadcast mode", () => {
@@ -128,8 +130,36 @@ describe("NodeDiscovery", () => {
 
     expect(publishMock).toHaveBeenCalledWith(
       expect.objectContaining({
-      name: expect.stringMatching(/-_local_1$/),
+        name: expect.stringMatching(/-_local_1$/),
       }),
+    );
+  });
+
+  it.each([
+    ["   ", "node_local_1", "fusion-delocal1"],
+    ["A very long local node name that is not used as the mDNS host", "node_abcdefghijk", "fusion-defghijk"],
+    ["Local", "id", "fusion-id"],
+  ])("publishes a Fusion-owned host for nodeName %j and nodeId %j", (nodeName, nodeId, expectedHost) => {
+    const discovery = new NodeDiscovery(defaultConfig({ broadcast: true }));
+    discovery.start(nodeId, nodeName);
+
+    const config = publishMock.mock.calls[0]?.[0] as { host?: string };
+    expect(config.host).toBe(expectedHost);
+    expect(config.host).toMatch(/^fusion-[a-z0-9-]+$/);
+    expect(config.host?.replace(/\.local\.?$/i, "").toLowerCase()).not.toBe(
+      os.hostname().replace(/\.local\.?$/i, "").toLowerCase(),
+    );
+  });
+
+  it("never publishes the OS hostname when it matches the naïve Fusion host", () => {
+    vi.spyOn(os, "hostname").mockReturnValue("fusion-delocal1.local");
+    const discovery = new NodeDiscovery(defaultConfig({ broadcast: true }));
+    discovery.start("node_local_1", "Local");
+
+    const config = publishMock.mock.calls[0]?.[0] as { host?: string };
+    expect(config.host).toBe("fusion-delocal1-service");
+    expect(config.host?.replace(/\.local\.?$/i, "").toLowerCase()).not.toBe(
+      os.hostname().replace(/\.local\.?$/i, "").toLowerCase(),
     );
   });
 

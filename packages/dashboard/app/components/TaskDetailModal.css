@@ -382,7 +382,7 @@ The task-detail modal metadata must keep priority, execution mode, provenance, P
   low/high/urgent, oversight observe/steer/autonomous/off, execution-mode
   fast) are untouched.
   */
-  --detail-priority-control-min-height: 30px;
+  --detail-priority-control-min-height: calc(var(--space-lg) + var(--space-lg) + var(--space-xs));
   --detail-control-border-radius: var(--radius-md);
 
   display: flex;
@@ -391,122 +391,68 @@ The task-detail modal metadata must keep priority, execution mode, provenance, P
   gap: var(--space-xs);
 }
 
-.detail-priority-chip {
+/*
+FNXC:QuickAddActionRow 2026-07-17-12:00:
+FN-8209: Task Detail uses the same compact icon-only priority affordance as
+Quick Add. Keep the picker anchored to its trigger so it remains usable when
+the metadata row wraps at mobile widths.
+*/
+.detail-priority-picker {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.detail-priority-picker-dropdown {
+  position: absolute;
+  top: calc(100% + var(--space-xs));
+  right: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  min-width: calc(var(--space-2xl) + var(--space-2xl) + var(--space-md));
+  background: var(--surface);
+  border: var(--btn-border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+
+.detail-priority-picker-heading,
+.detail-priority-picker-option {
+  display: flex;
+  align-items: center;
   gap: var(--space-xs);
-  /*
-  FNXC:TaskDetail 2026-07-07-15:40:
-  FN-7633 — Priority, Execution-mode, and the Oversight trigger must all
-  resolve the exact SAME box height, not merely the same floor. FN-7618 gave
-  the Oversight trigger `align-self: stretch` inside its own `inline-flex`
-  wrapper, so it fills the cluster row height, while this control (and
-  Execution-mode) were only floored via `min-height` and could resolve
-  shorter once their content/line-height differed from the trigger's. Pin an
-  explicit `height` (not just `min-height`) from the SAME
-  `--detail-priority-control-min-height` token used everywhere else in this
-  cluster so no control can outgrow or undershoot the others regardless of
-  flex stretch behavior. `min-height` stays as a floor for any context where
-  content needs more room (e.g. unexpected font scaling).
-  */
-  height: var(--detail-priority-control-min-height);
-  min-height: var(--detail-priority-control-min-height);
-  padding-block: var(--space-xs);
-  box-sizing: border-box;
-  /*
-  FNXC:TaskDetail 2026-07-05-00:00:
-  FN-7585 — override `.card-priority-badge`'s transparent border with a real,
-  visible border so the `normal` level (no `--low/--high/--urgent` tint) still
-  renders as a bordered box instead of borderless text, matching the
-  Execution-mode toggle and Oversight chip/trigger.
-  */
-  border-width: var(--btn-border-width);
-  border-color: var(--border);
-  border-radius: var(--detail-control-border-radius);
+  padding: var(--space-sm);
 }
 
-.detail-priority-chip--saving {
-  opacity: 0.75;
-}
-
-/*
-FNXC:TaskDetail 2026-07-05-12:00:
-FN-7597 — the untinted `normal` priority level has no `--low/--high/--urgent`
-tint, so without this rule it renders as a bordered-but-empty shell while the
-Oversight chip's `--off` level always gets a neutral, token-based background
-(`.card-oversight-badge--off` in TaskCard.css). Give `.detail-priority-chip`'s
-`normal` state the SAME neutral `color-mix(... var(--text-muted) ...)`
-treatment so the two dropdowns read as one consistent control style. Scoped
-to the detail chip (not a global `.card-priority-badge--normal` rule) so the
-read-only TaskCard priority badge (out of scope) is untouched.
-*/
-.detail-priority-chip.card-priority-badge--normal {
-  background: color-mix(in srgb, var(--text-muted) 12%, transparent);
+.detail-priority-picker-heading {
   color: var(--text-muted);
+  font-size: var(--font-size-xs);
 }
 
-/*
-FNXC:TaskDetail 2026-07-05-13:30:
-FN-7601 — the FN-7585 base `.detail-priority-chip` rule pins `border-color:
-var(--border)` for every level, so once the chip shrank to a compact 30px box
-the only remaining differentiator (the ~15-18% tint backgrounds inherited
-from `.card-priority-badge--{low,high,urgent}`) reads as the same washed-out
-box for low vs high. Give each non-neutral level its own tinted border AND a
-stronger background on top of the shared base/normal rules above (higher
-specificity via the `.detail-priority-chip.card-priority-badge--X` compound
-selector) so low/high/urgent are unmistakably distinct colors at a glance,
-while normal keeps the FN-7597 neutral treatment and the FN-7585 shared
-border-width/radius/min-height stay untouched. Scoped to `.detail-priority-chip`
-so the read-only `.card-priority-badge--{low,high,urgent}` tints in
-TaskCard.css (out of scope) are unaffected.
-*/
-.detail-priority-chip.card-priority-badge--low {
-  background: color-mix(in srgb, var(--color-info) 22%, transparent);
-  border-color: color-mix(in srgb, var(--color-info) 65%, var(--border));
-  color: var(--color-info);
-}
-
-.detail-priority-chip.card-priority-badge--high {
-  background: color-mix(in srgb, var(--color-warning) 28%, transparent);
-  border-color: color-mix(in srgb, var(--color-warning) 65%, var(--border));
-  color: var(--color-warning);
-}
-
-.detail-priority-chip.card-priority-badge--urgent {
-  background: color-mix(in srgb, var(--color-error) 30%, transparent);
-  border-color: color-mix(in srgb, var(--color-error) 65%, var(--border));
-  color: var(--color-error-dark);
-}
-
-.detail-priority-select {
+.detail-priority-picker-option {
+  width: 100%;
   border: 0;
   background: transparent;
-  color: inherit;
-  font: inherit;
+  color: var(--text);
   cursor: pointer;
-  padding: 0;
-  min-height: inherit;
+  font: inherit;
+  text-align: left;
 }
 
-.detail-priority-select:focus-visible {
+.detail-priority-picker-option:hover,
+.detail-priority-picker-option.selected {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.detail-priority-picker-option:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring-strong);
-  border-radius: var(--radius-sm);
 }
 
-.detail-priority-select:disabled {
+.detail-priority-picker-option:disabled {
   cursor: wait;
-}
-
-/*
-FNXC:TaskDetail 2026-07-05-12:00:
-FN-7597 — drop the Priority-only forced uppercase on the select/option so its
-typography matches `.detail-oversight-select` exactly (which relies on the
-ancestor `.card-*-badge` label's own `text-transform: uppercase` instead of
-redeclaring it here). Visual case is unchanged since the label already
-uppercases its content; this only removes a duplicated, drift-prone override.
-*/
-.detail-priority-select option {
-  color: var(--text);
-  background: var(--surface);
 }
 
 .detail-execution-mode-toggle {
@@ -536,21 +482,8 @@ uppercases its content; this only removes a duplicated, drift-prone override.
   border-radius: var(--detail-control-border-radius);
 }
 
-.detail-execution-mode-toggle svg {
-  width: 1em;
-  height: 1em;
-}
-
 .detail-execution-mode-toggle--fast {
   color: var(--color-warning);
-}
-
-.detail-execution-mode-toggle--fast svg {
-  color: var(--color-warning);
-  background: color-mix(in srgb, var(--color-warning) 20%, transparent);
-  border-radius: var(--radius-pill);
-  padding: var(--space-xs);
-  box-shadow: var(--glow-warning);
 }
 
 .detail-execution-mode-toggle--saving {
@@ -732,9 +665,6 @@ affect its size or anchoring — only the trigger's box height changes.
 }
 
 .detail-oversight-menu-trigger {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-xs);
   padding-block: var(--space-xs);
   box-sizing: border-box;
   /*
@@ -772,10 +702,6 @@ affect its size or anchoring — only the trigger's box height changes.
   border-radius: var(--detail-control-border-radius);
 }
 
-.detail-oversight-menu-trigger svg {
-  width: 1em;
-  height: 1em;
-}
 
 .detail-oversight-menu {
   position: absolute;

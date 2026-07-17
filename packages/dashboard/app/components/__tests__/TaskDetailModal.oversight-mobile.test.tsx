@@ -88,6 +88,10 @@ describe("TaskDetailModal oversight controls — mobile overflow menu", () => {
     const trigger = await screen.findByTestId("detail-oversight-menu-trigger");
     expect(trigger).toHaveAttribute("aria-haspopup", "menu");
     expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(trigger).toHaveClass("btn", "btn-icon", "btn-sm");
+    expect(trigger).toHaveAccessibleName("Oversight actions");
+    expect(trigger).toHaveAttribute("title", "Oversight actions");
+    expect(trigger).not.toHaveTextContent("Oversight");
     // Actions are not directly in the DOM until the menu opens.
     expect(screen.queryByTestId("detail-overseer-nudge")).not.toBeInTheDocument();
     expect(screen.queryByTestId("detail-overseer-stop")).not.toBeInTheDocument();

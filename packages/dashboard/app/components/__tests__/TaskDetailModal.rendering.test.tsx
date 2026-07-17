@@ -1379,86 +1379,23 @@ describe("TaskDetailModal", () => {
     expect(screen.getByText(/No review items yet\./i)).toBeTruthy();
   });
 
-  describe("inline execution mode toggle", () => {
-    it("keeps inline priority and execution controls aligned with shared sizing and gap", () => {
-      render(
-        <TaskDetailModal
-          initialTab="definition"
-          task={makeTask({ column: "todo", priority: "high", executionMode: "fast" })}
-          onClose={noop}
-          onMoveTask={noopMove}
-          onDeleteTask={noopDelete}
-          onMergeTask={noopMerge}
-          onOpenDetail={noopOpenDetail}
-          addToast={noop}
-        />,
-      );
-
-      const controls = screen.getByTestId("detail-meta-inline-controls");
-      const priorityControl = screen.getByRole("combobox", { name: "Task priority" });
-      const priorityChip = priorityControl.closest(".detail-priority-chip") as HTMLElement;
-      const modeToggle = screen.getByRole("button", { name: "Execution mode: fast" });
-
-      const controlsStyle = getComputedStyle(controls);
-      const priorityStyle = getComputedStyle(priorityChip);
-      const modeStyle = getComputedStyle(modeToggle);
-
-      expect(controlsStyle.gap).not.toBe("");
-      expect(controlsStyle.gap).not.toBe("normal");
-      expect(priorityStyle.minHeight).toBe(modeStyle.minHeight);
-      expect(priorityStyle.minHeight).not.toBe("0px");
+  describe("inline action row icon-only controls", () => {
+    it("renders priority and Fast controls as accessible icon-only Quick Add buttons", () => {
+      render(<TaskDetailModal initialTab="definition" task={makeTask({ column: "todo", priority: "high", executionMode: "fast" })} onClose={noop} onMoveTask={noopMove} onDeleteTask={noopDelete} onMergeTask={noopMerge} onOpenDetail={noopOpenDetail} addToast={noop} />);
+      const priority = screen.getByTestId("detail-priority-trigger");
+      const fast = screen.getByRole("button", { name: "Execution mode: fast" });
+      expect(priority).toHaveClass("btn", "btn-icon", "btn-sm");
+      expect(priority).toHaveAttribute("title", "Priority: High");
+      expect(fast).toHaveClass("btn", "btn-icon", "btn-sm", "btn-primary");
+      expect(fast).toHaveAttribute("title", "Execution mode: fast");
+      expect(fast).not.toHaveTextContent("Fast");
     });
 
-    it("renders standard mode as an unpressed toggle", () => {
-      render(
-        <TaskDetailModal
-          initialTab="definition"
-          task={makeTask({ column: "triage", executionMode: "standard" })}
-          onClose={noop}
-          onMoveTask={noopMove}
-          onDeleteTask={noopDelete}
-          onMergeTask={noopMerge}
-          onOpenDetail={noopOpenDetail}
-          addToast={noop}
-        />,
-      );
-
-      const toggle = screen.getByRole("button", { name: "Execution mode: standard" });
-      expect(toggle).toHaveAttribute("aria-pressed", "false");
-      expect(toggle).toHaveTextContent("Standard");
-      expect(toggle).not.toHaveClass("detail-execution-mode-toggle--fast");
+    it("removes bespoke toolbar SVG sizing rules", () => {
+      const css = readDashboardStylesSource();
+      expect(css).not.toMatch(/\.detail-oversight-menu-trigger svg\s*\{[^}]*width:\s*1em/);
+      expect(css).not.toMatch(/\.detail-execution-mode-toggle svg\s*\{[^}]*width:\s*1em/);
     });
-
-    it("renders fast mode as a pressed toggle", () => {
-      render(
-        <TaskDetailModal
-          initialTab="definition"
-          task={makeTask({ column: "todo", executionMode: "fast" })}
-          onClose={noop}
-          onMoveTask={noopMove}
-          onDeleteTask={noopDelete}
-          onMergeTask={noopMerge}
-          onOpenDetail={noopOpenDetail}
-          addToast={noop}
-        />,
-      );
-
-      const toggle = screen.getByRole("button", { name: "Execution mode: fast" });
-      expect(toggle).toHaveAttribute("aria-pressed", "true");
-      expect(toggle).toHaveTextContent("Fast");
-      expect(toggle).toHaveClass("detail-execution-mode-toggle--fast");
-    });
-  });
-
-  it("defines fast execution mode svg highlight styles with warning tokens", () => {
-    const css = readDashboardStylesSource();
-
-    expectBaseRule(css, ".detail-execution-mode-toggle--fast svg", "color: var(--color-warning);");
-    expectBaseRule(
-      css,
-      ".detail-execution-mode-toggle--fast svg",
-      "background: color-mix(in srgb, var(--color-warning) 20%, transparent);",
-    );
   });
 
   it("appends daemon token query to attachment href/src URLs for direct browser loads", () => {

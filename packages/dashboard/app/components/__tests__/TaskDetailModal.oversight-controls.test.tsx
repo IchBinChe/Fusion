@@ -73,7 +73,10 @@ describe("TaskDetailModal oversight controls", () => {
     );
 
     const trigger = await screen.findByTestId("detail-oversight-menu-trigger");
-    expect(trigger).toHaveTextContent("Oversight");
+    expect(trigger).toHaveClass("btn", "btn-icon", "btn-sm");
+    expect(trigger).toHaveAccessibleName("Oversight actions");
+    expect(trigger).toHaveAttribute("title", "Oversight actions");
+    expect(trigger).not.toHaveTextContent("Oversight");
     expect(trigger.querySelector('[data-testid="eye-icon"]')).toBeInTheDocument();
     expect(trigger.querySelector('[data-testid="more-vertical-icon"]')).not.toBeInTheDocument();
   });

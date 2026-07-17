@@ -68,6 +68,7 @@ import { getInReviewStallCopy, shouldShowInReviewStallBadge } from "../utils/inR
 import { getUnifiedTaskProgress } from "../utils/taskProgress";
 import { getStalePausedReviewCopy, shouldShowStalePausedReviewBadge } from "../utils/stalePausedReviewCopy";
 import { getTaskAgeStalenessCopy } from "../utils/taskAgeStalenessCopy";
+import { getPriorityColorVar, getPriorityIcon, getPriorityLabel } from "../utils/priorityIndicator";
 import { hasPendingAutomaticRecovery, isTaskManuallyRetryable } from "../utils/taskRecovery";
 import { findInReviewStallLogEntry, IN_REVIEW_STALL_LOG_REGEX } from "../utils/findInReviewStallLogEntry";
 import { getTaskLogEntryAction, getTaskLogEntryOutcome } from "../utils/taskLogEntryDisplay";
@@ -1074,6 +1075,8 @@ export function TaskDetailContent({
   const [isSummarizingTitle, setIsSummarizingTitle] = useState(false);
   const [inlinePriority, setInlinePriority] = useState<TaskPriority>(normalizeTaskPriorityValue(task.priority));
   const [isSavingInlinePriority, setIsSavingInlinePriority] = useState(false);
+  const [showInlinePriorityPicker, setShowInlinePriorityPicker] = useState(false);
+  const inlinePriorityPickerRef = useRef<HTMLDivElement>(null);
   const [inlineExecutionMode, setInlineExecutionMode] = useState<"standard" | "fast">(normalizeExecutionModeValue(task.executionMode));
   const [isSavingInlineExecutionMode, setIsSavingInlineExecutionMode] = useState(false);
   const [inlineNoCommitsExpected, setInlineNoCommitsExpected] = useState<boolean>(task.noCommitsExpected === true);
@@ -1475,7 +1478,7 @@ export function TaskDetailContent({
 
   // Close task-detail dropdown menus on outside click
   useEffect(() => {
-    const hasOpenMenu = showMoveMenu || showActionsMenu || showActivityViewMenu || showOversightMenu;
+    const hasOpenMenu = showMoveMenu || showActionsMenu || showActivityViewMenu || showOversightMenu || showInlinePriorityPicker;
     if (!hasOpenMenu) return;
 
     const handleClick = (e: MouseEvent) => {
@@ -1484,6 +1487,7 @@ export function TaskDetailContent({
       const inActionsMenu = actionsMenuRef.current?.contains(target);
       const inActivityViewMenu = activityViewMenuRef.current?.contains(target) || activityViewButtonRef.current?.contains(target);
       const inOversightMenu = oversightMenuRef.current?.contains(target) || oversightMenuButtonRef.current?.contains(target);
+      const inInlinePriorityPicker = inlinePriorityPickerRef.current?.contains(target);
 
       if (!inMoveMenu && showMoveMenu) {
         setShowMoveMenu(false);
@@ -1499,15 +1503,18 @@ export function TaskDetailContent({
       if (!inOversightMenu && showOversightMenu) {
         setShowOversightMenu(false);
       }
+      if (!inInlinePriorityPicker && showInlinePriorityPicker) {
+        setShowInlinePriorityPicker(false);
+      }
     };
 
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
-  }, [showMoveMenu, showActionsMenu, showActivityViewMenu, showOversightMenu]);
+  }, [showMoveMenu, showActionsMenu, showActivityViewMenu, showOversightMenu, showInlinePriorityPicker]);
 
   // Close task-detail dropdown menus on Escape key (before modal Escape handler)
   useEffect(() => {
-    const hasOpenMenu = showMoveMenu || showActionsMenu || showActivityViewMenu || showOversightMenu;
+    const hasOpenMenu = showMoveMenu || showActionsMenu || showActivityViewMenu || showOversightMenu || showInlinePriorityPicker;
     if (!hasOpenMenu) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1523,12 +1530,15 @@ export function TaskDetailContent({
         if (showOversightMenu) {
           setShowOversightMenu(false);
         }
+        if (showInlinePriorityPicker) {
+          setShowInlinePriorityPicker(false);
+        }
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [showMoveMenu, showActionsMenu, showActivityViewMenu, showOversightMenu]);
+  }, [showMoveMenu, showActionsMenu, showActivityViewMenu, showOversightMenu, showInlinePriorityPicker]);
 
   // Reset spec edit state when task changes
   useEffect(() => {
@@ -4197,7 +4207,7 @@ export function TaskDetailContent({
                     aria-label={t("taskDetail.attachments.attachInline", "Attach file")}
                     title={t("taskDetail.attachments.attachInline", "Attach file")}
                   >
-                    <Paperclip aria-hidden="true" />
+                    <Paperclip size={12} aria-hidden="true" />
                   </button>
                   {canEditGithubTracking && !gitlabTrackedItem && (
                     <button
@@ -4243,22 +4253,27 @@ export function TaskDetailContent({
                   FN-8194: use Eye for the Oversight overflow trigger so task detail
                   matches Quick Add's planner-advisor affordance without changing
                   the labeled menu's accessibility or behavior.
+
+                  FNXC:PlannerOversight 2026-07-17-12:00:
+                  FN-8209: the Oversight trigger is icon-only and uses `btn-icon`,
+                  so its Eye resolves through the shared `--icon-size-sm` sizing on
+                  mobile and stays visually aligned with Quick Add.
                   */}
                   {(hasTaskOversightOverride || workflowOversightResolved) && (
                       <div className="detail-oversight-menu-dropdown" ref={oversightMenuRef}>
                         <button
                           type="button"
                           ref={oversightMenuButtonRef}
-                          className="btn btn-sm detail-oversight-menu-trigger"
+                          className="btn btn-icon btn-sm detail-oversight-menu-trigger"
                           data-testid="detail-oversight-menu-trigger"
                           onClick={handleOversightMenuButtonClick}
                           onKeyDown={handleOversightMenuButtonKeyDown}
                           aria-haspopup="menu"
                           aria-expanded={showOversightMenu}
                           aria-label={t("taskDetail.oversight.menuAriaLabel", "Oversight actions")}
+                          title={t("taskDetail.oversight.menuAriaLabel", "Oversight actions")}
                         >
                           <Eye aria-hidden="true" />
-                          <span>{t("taskDetail.oversight.menuLabel", "Oversight")}</span>
                         </button>
                         {showOversightMenu && (
                           <div className="detail-oversight-menu" role="menu" onKeyDown={handleOversightMenuKeyDown}>
@@ -4407,38 +4422,72 @@ export function TaskDetailContent({
                         )}
                       </div>
                     )}
-                  <label
-                    className={`card-priority-badge card-priority-badge--${inlinePriority} detail-priority-chip ${isSavingInlinePriority ? "detail-priority-chip--saving" : ""}`}
-                  >
-                    <span>{t("taskDetail.priority.label", "Priority:")}</span>
-                    <select
-                      className="detail-priority-select"
-                      value={inlinePriority}
-                      onChange={(event) => {
-                        void handleInlinePriorityChange(event.target.value);
-                      }}
-                      disabled={isSavingInlinePriority}
-                      aria-label={t("taskDetail.priority.ariaLabel", "Task priority")}
-                    >
-                      {TASK_PRIORITIES.map((priorityOption) => (
-                        <option key={priorityOption} value={priorityOption}>
-                          {priorityOption}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  {(() => {
+                    const PriorityIcon = getPriorityIcon(inlinePriority);
+                    const priorityLabel = t("taskDetail.priority.triggerLabel", "Priority: {{priority}}", {
+                      priority: getPriorityLabel(inlinePriority),
+                    });
+                    return (
+                      <div className="detail-priority-picker" ref={inlinePriorityPickerRef}>
+                        {/*
+                        FNXC:QuickAddActionRow 2026-07-17-12:00:
+                        FN-8209: Task Detail mirrors Quick Add's icon-only flag
+                        priority control and picker, while retaining the existing
+                        `handleInlinePriorityChange` persistence path.
+                        */}
+                        <button
+                          type="button"
+                          className="btn btn-icon btn-sm"
+                          data-testid="detail-priority-trigger"
+                          onClick={() => setShowInlinePriorityPicker((isOpen) => !isOpen)}
+                          disabled={isSavingInlinePriority}
+                          aria-haspopup="menu"
+                          aria-expanded={showInlinePriorityPicker}
+                          aria-label={priorityLabel}
+                          title={priorityLabel}
+                        >
+                          <PriorityIcon size={14} aria-hidden="true" style={{ color: getPriorityColorVar(inlinePriority) }} />
+                        </button>
+                        {showInlinePriorityPicker && (
+                          <div className="detail-priority-picker-dropdown priority-picker-dropdown" role="menu">
+                            <div className="detail-priority-picker-heading">{t("tasks.selectPriority", "Select priority")}</div>
+                            {TASK_PRIORITIES.map((priorityOption) => {
+                              const OptionPriorityIcon = getPriorityIcon(priorityOption);
+                              return (
+                                <button
+                                  key={priorityOption}
+                                  type="button"
+                                  className={`detail-priority-picker-option${inlinePriority === priorityOption ? " selected" : ""}`}
+                                  data-testid={`detail-priority-option-${priorityOption}`}
+                                  role="menuitem"
+                                  onClick={() => {
+                                    setShowInlinePriorityPicker(false);
+                                    void handleInlinePriorityChange(priorityOption);
+                                  }}
+                                  disabled={isSavingInlinePriority}
+                                >
+                                  <OptionPriorityIcon size={12} aria-hidden="true" style={{ color: getPriorityColorVar(priorityOption) }} />
+                                  <span>{getPriorityLabel(priorityOption)}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <button
                     type="button"
-                    className={`btn btn-sm detail-execution-mode-toggle ${inlineExecutionMode === "fast" ? "detail-execution-mode-toggle--fast" : ""} ${isSavingInlineExecutionMode ? "detail-execution-mode-toggle--saving" : ""}`}
+                    className={`btn btn-icon btn-sm detail-execution-mode-toggle ${inlineExecutionMode === "fast" ? "btn-primary detail-execution-mode-toggle--fast" : ""} ${isSavingInlineExecutionMode ? "detail-execution-mode-toggle--saving" : ""}`}
                     onClick={() => {
                       void handleInlineExecutionModeToggle();
                     }}
                     disabled={isSavingInlineExecutionMode}
                     aria-label={t("taskDetail.executionMode.ariaLabel", "Execution mode: {{mode}}", { mode: inlineExecutionMode })}
+                    title={t("taskDetail.executionMode.ariaLabel", "Execution mode: {{mode}}", { mode: inlineExecutionMode })}
                     aria-pressed={inlineExecutionMode === "fast"}
                   >
-                    <Zap aria-hidden="true" />
-                    <span>{inlineExecutionMode === "fast" ? t("taskDetail.executionMode.fast", "Fast") : t("taskDetail.executionMode.standard", "Standard")}</span>
+                    <Zap size={14} aria-hidden="true" />
                   </button>
                 </div>
                 {overseerExplainOpen && (

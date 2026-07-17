@@ -527,6 +527,10 @@ describe("TaskDetailModal", () => {
   });
 
   describe("inline editing", () => {
+    const chooseInlinePriority = (priority: TaskPriority) => {
+      fireEvent.click(screen.getByTestId("detail-priority-trigger"));
+      fireEvent.click(screen.getByTestId(`detail-priority-option-${priority}`));
+    };
     beforeEach(() => {
       vi.clearAllMocks();
     });
@@ -1179,8 +1183,8 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      const prioritySelect = screen.getByRole("combobox", { name: "Task priority" }) as HTMLSelectElement;
-      expect(prioritySelect.value).toBe("normal");
+      const priorityTrigger = screen.getByTestId("detail-priority-trigger");
+      expect(priorityTrigger).toHaveAccessibleName("Priority: Normal");
     });
 
     it("renders priority select and execution mode toggle together and keeps both interactive", async () => {
@@ -1204,7 +1208,7 @@ describe("TaskDetailModal", () => {
       );
 
       const controls = screen.getByTestId("detail-meta-inline-controls");
-      const prioritySelect = screen.getByRole("combobox", { name: "Task priority" });
+      const priorityTrigger = screen.getByTestId("detail-priority-trigger");
       const executionModeToggle = screen.getByRole("button", { name: "Execution mode: standard" });
 
       /*
@@ -1212,12 +1216,10 @@ describe("TaskDetailModal", () => {
       FN-8194: attach, GitHub, and Oversight precede the Quick Add-matched
       Priority/Fast controls; both controls remain direct interactive children.
       */
-      expect(controls).toContainElement(prioritySelect.parentElement);
+      expect(controls).toContainElement(priorityTrigger.parentElement);
       expect(executionModeToggle.parentElement).toBe(controls);
 
-      fireEvent.change(prioritySelect, {
-        target: { value: "urgent" },
-      });
+      chooseInlinePriority("urgent");
       fireEvent.click(executionModeToggle);
 
       await waitFor(() => {
@@ -1259,9 +1261,7 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.change(screen.getByRole("combobox", { name: "Task priority" }), {
-        target: { value: "urgent" },
-      });
+      chooseInlinePriority("urgent");
 
       await waitFor(() => {
         expect(mockUpdate).toHaveBeenCalledWith("FN-001", { priority: "urgent" }, undefined);
@@ -1292,9 +1292,7 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      fireEvent.change(screen.getByRole("combobox", { name: "Task priority" }), {
-        target: { value: "high" },
-      });
+      chooseInlinePriority("high");
 
       await waitFor(() => {
         expect(mockUpdate).not.toHaveBeenCalled();
@@ -1320,14 +1318,13 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      const prioritySelect = screen.getByRole("combobox", { name: "Task priority" }) as HTMLSelectElement;
-      fireEvent.change(prioritySelect, { target: { value: "urgent" } });
+      chooseInlinePriority("urgent");
 
       await waitFor(() => {
         expect(mockUpdate).toHaveBeenCalledWith("FN-001", { priority: "urgent" }, undefined);
       });
       await waitFor(() => {
-        expect(prioritySelect.value).toBe("low");
+        expect(screen.getByTestId("detail-priority-trigger")).toHaveAccessibleName("Priority: Low");
       });
       expect(addToast).toHaveBeenCalledWith("Failed to update FN-001: Request failed", "error");
     });
@@ -3365,7 +3362,7 @@ describe("TaskDetailModal inline action row parity (FN-8194)", () => {
     const attach = screen.getByTestId("detail-inline-attach");
     const github = screen.getByTestId("detail-inline-github-toggle");
     const oversight = await screen.findByTestId("detail-oversight-menu-trigger");
-    const priority = screen.getByRole("combobox", { name: "Task priority" }).parentElement!;
+    const priority = screen.getByTestId("detail-priority-trigger").parentElement!;
     const fast = screen.getByRole("button", { name: "Execution mode: standard" });
     const fileInput = document.querySelector<HTMLInputElement>('input[type="file"]')!;
     const fileInputClick = vi.spyOn(fileInput, "click");

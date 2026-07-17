@@ -1698,6 +1698,23 @@ function TaskCardComponent({
     !isInheritedDefaultOversightLevel;
 
   /*
+   * FNXC:PlannerOversight 2026-07-18-00:00:
+   * FN-8239 requires the transient Eye badge and its header-wrapper gate to
+   * share the freshly-resolved effective level used by the level badge and
+   * Task Detail trigger. An inherited task with an unresolved workflow tier
+   * must wait for that fetch; a stale non-off snapshot must not guess a level,
+   * show an icon, or leave an empty header-badge shell in that window.
+   */
+  const plannerOverseerState = task.plannerOverseerState;
+  const showPlannerOverseerStateBadge = Boolean(
+    plannerOverseerState
+    && plannerOverseerState.state !== "idle"
+    && plannerOverseerState.oversightLevel !== "off"
+    && (hasTaskOversightOverride || workflowOversightResolved)
+    && effectiveOversightLevel !== "off",
+  );
+
+  /*
    * FNXC:PlannerOversight 2026-07-04-HH:MM:
    * FN-7542 removed the active-overseer-state ("Executor") chip that used to
    * render here as unwanted per-card noise — it fired on nearly every
@@ -2886,7 +2903,7 @@ function TaskCardComponent({
     || Boolean(hasTaskAgeStaleness && taskAgeStalenessCopy)
     || Boolean(isStuck && (isPaused || !task.status || task.status === "queued"))
     || Boolean(Array.isArray((task as TaskWithBranchProgress).branchProgress) && (task as TaskWithBranchProgress).branchProgress!.length > 0)
-    || Boolean(task.plannerOverseerState && task.plannerOverseerState.state !== "idle")
+    || showPlannerOverseerStateBadge
     || Boolean(showStalledReview && stalledReview)
     || Boolean(livePrInfo || liveIssueInfo)
     || Boolean(task.gitlabTracking?.item)
@@ -3150,15 +3167,13 @@ function TaskCardComponent({
           The engine clears this runtime at the source, but a client payload must never leak
           the Eye badge for an oversight-off in-progress or in-review task.
         */}
-        {task.plannerOverseerState
-          && task.plannerOverseerState.state !== "idle"
-          && task.plannerOverseerState.oversightLevel !== "off" && (
+        {showPlannerOverseerStateBadge && plannerOverseerState && (
           <span
             className="card-status-badge card-planner-overseer-state"
-            title={plannerOverseerBadgeTooltip(task.plannerOverseerState, t)}
-            aria-label={plannerOverseerStateLabel(task.plannerOverseerState.state, t)}
+            title={plannerOverseerBadgeTooltip(plannerOverseerState, t)}
+            aria-label={plannerOverseerStateLabel(plannerOverseerState.state, t)}
             data-testid="planner-overseer-state-badge"
-            data-planner-overseer-state={task.plannerOverseerState.state}
+            data-planner-overseer-state={plannerOverseerState.state}
           >
             <Eye aria-hidden="true" />
           </span>

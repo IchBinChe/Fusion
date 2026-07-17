@@ -231,6 +231,46 @@ describe("TaskCard overseer-state badge removed (FN-7542)", () => {
 });
 
 describe("TaskCard workflow-effective oversight level (FN-7516 code-review fix)", () => {
+  it.each(["in-progress", "in-review"] as const)("hides the stale non-off overseer snapshot and header wrapper when workflow-effective oversight resolves off in %s", async (column) => {
+    vi.mocked(fetchWorkflowSettingValues).mockResolvedValueOnce({
+      stored: { plannerOversightLevel: "off" },
+      effective: { plannerOversightLevel: "off" },
+      orphaned: [],
+    });
+
+    renderCard(
+      {
+        column,
+        status: undefined,
+        plannerOverseerState: {
+          state: "watching",
+          oversightLevel: "autonomous",
+          watchedStage: column === "in-review" ? "reviewer" : "executor",
+          signal: "progressing",
+          attemptCount: 0,
+          attemptLimit: 3,
+          pendingConfirmation: false,
+          observedAt: 1700000000000,
+        },
+      },
+      { workflowBadge: { workflowId: `wf-stale-snapshot-off-${column}`, workflowName: "Configured Off" } },
+    );
+
+    // FNXC:PlannerOversight 2026-07-18-00:00: An inherited workflow's tier is
+    // unresolved on first render. The stale runtime snapshot must not leak an
+    // Eye badge or header wrapper before the configured-off response arrives.
+    expect(screen.queryByTestId("planner-overseer-state-badge")).toBeNull();
+    expect(screen.queryByTestId("card-header-badges")).toBeNull();
+
+    await waitFor(() => {
+      expect(fetchWorkflowSettingValues).toHaveBeenCalledWith(`wf-stale-snapshot-off-${column}`, undefined);
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("planner-overseer-state-badge")).toBeNull();
+      expect(screen.queryByTestId("card-header-badges")).toBeNull();
+    });
+  });
+
   it("resolves the workflow's effective plannerOversightLevel (not the schema default) when no per-task override is set", async () => {
     vi.mocked(fetchWorkflowSettingValues).mockResolvedValueOnce({
       stored: { plannerOversightLevel: "off" },

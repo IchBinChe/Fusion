@@ -1539,6 +1539,38 @@ describe("ChatView core interactions", () => {
         expect(renameSession).toHaveBeenCalledWith("session-context", "Context Renamed");
       });
     });
+
+    it("anchors the desktop three-dot menu's right edge under its trigger", async () => {
+      const savedInnerWidth = window.innerWidth;
+      Object.defineProperty(window, "innerWidth", { value: 1280, configurable: true });
+      const session: ChatSessionInfo = {
+        id: "session-menu-position",
+        agentId: "agent-001",
+        status: "active",
+        title: "Desktop menu position",
+        createdAt: "2026-04-08T00:00:00.000Z",
+        updatedAt: "2026-04-08T00:00:00.000Z",
+      };
+
+      try {
+        setupMockChat({ sessions: [session], filteredSessions: [session], activeSession: session });
+        await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+        const menuButton = within(screen.getByTestId("chat-session-session-menu-position")).getByTestId("chat-session-menu-btn");
+        vi.spyOn(menuButton, "getBoundingClientRect").mockReturnValue({
+          x: 1168, y: 48, width: 32, height: 36, top: 48, right: 1200, bottom: 84, left: 1168, toJSON: () => ({}),
+        });
+        await userEvent.click(menuButton);
+
+        const menu = document.querySelector(".chat-session-context-menu") as HTMLElement;
+        const left = Number.parseFloat(menu.style.left);
+        expect(left).toBe(1000);
+        expect(Number.parseFloat(menu.style.top)).toBe(84);
+        expect(left + 200).toBeLessThanOrEqual(window.innerWidth - 8);
+      } finally {
+        Object.defineProperty(window, "innerWidth", { value: savedInnerWidth, configurable: true });
+      }
+    });
   });
 
 });

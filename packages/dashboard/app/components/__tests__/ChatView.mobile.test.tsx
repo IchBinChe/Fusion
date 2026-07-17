@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
-import { ChatView } from "../ChatView";
+import { ChatView, resolveChatContextMenuPosition } from "../ChatView";
 import { loadAllAppCss } from "../../test/cssFixture";
 import * as mobileScrollLock from "../../hooks/useMobileScrollLock";
 import { _resetInitialViewportHeight } from "../../hooks/useMobileKeyboard";
@@ -533,6 +533,45 @@ describe("ChatView mobile behavior", () => {
       await userEvent.click(within(menu!).getByTestId("chat-context-rename"));
       expect(screen.getByRole("dialog", { name: /rename conversation/i })).toBeInTheDocument();
     } finally {
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
+  it("mobile mode: clamps conversation action menus using their rendered size", async () => {
+    const restoreMatchMedia = mockMobileViewport();
+    const savedInnerWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { value: 390, configurable: true });
+    const sessions = [
+      { id: "session-menu-viewport", agentId: "agent-001", status: "active" as const, title: "Viewport menu", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+    ];
+
+    try {
+      setupMockChat({ sessions, filteredSessions: sessions, activeSession: null });
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const row = screen.getByTestId("chat-session-session-menu-viewport");
+      const menuButton = within(row).getByTestId("chat-session-menu-btn");
+      vi.spyOn(menuButton, "getBoundingClientRect").mockReturnValue({
+        x: 358, y: 40, width: 32, height: 36, top: 40, right: 390, bottom: 76, left: 358, toJSON: () => ({}),
+      });
+
+      await userEvent.click(menuButton);
+      let menu = document.querySelector(".chat-session-context-menu") as HTMLElement;
+      let left = Number.parseFloat(menu.style.left);
+      expect(left).toBeGreaterThanOrEqual(0);
+      expect(left + 200).toBeLessThanOrEqual(window.innerWidth - 8);
+
+      fireEvent.contextMenu(row, { clientX: 388, clientY: 96 });
+      menu = document.querySelector(".chat-session-context-menu") as HTMLElement;
+      left = Number.parseFloat(menu.style.left);
+      expect(left).toBeGreaterThanOrEqual(0);
+      expect(left + 200).toBeLessThanOrEqual(window.innerWidth - 8);
+      expect(Number.parseFloat(menu.style.top)).toBe(96);
+
+      const factoryMenuPosition = resolveChatContextMenuPosition(390, 790, true, 132, 168, 390, 800);
+      expect(factoryMenuPosition).toEqual({ x: 250, y: 624 });
+    } finally {
+      Object.defineProperty(window, "innerWidth", { value: savedInnerWidth, configurable: true });
       restoreMatchMedia.mockRestore();
     }
   });

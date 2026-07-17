@@ -436,9 +436,15 @@ FN-8173 replaces the inline Pin/Rename/Delete cluster with one overflow trigger.
 }
 
 
+/*
+FNXC:ChatSidebar 2026-07-16-23:55:
+FN-8191 gives the conversation action menu a token-composed border-box width. ChatView measures that rendered width before clamping, so alternate themes keep the mobile menu's right edge aligned without raw CSS dimensions.
+*/
 /* Context menu for session items */
 .chat-session-context-menu {
   position: fixed;
+  box-sizing: border-box;
+  width: calc(var(--space-xl) * 8 + var(--space-xs) * 2);
   background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);

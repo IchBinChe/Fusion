@@ -105,6 +105,26 @@ export interface ChatViewProps {
 // still preventing the composer from overtaking the message pane on short viewports.
 const CHAT_INPUT_MAX_HEIGHT_PX = 640;
 const TABLET_INPUT_MAX_HEIGHT_PX = 200;
+const CHAT_CONTEXT_MENU_FALLBACK_WIDTH_PX = 200;
+const CHAT_CONTEXT_MENU_VIEWPORT_MARGIN_PX = 8;
+
+export function resolveChatContextMenuPosition(
+  anchorX: number,
+  anchorY: number,
+  anchorRight: boolean,
+  menuWidth: number,
+  menuHeight: number,
+  viewportWidth: number,
+  viewportHeight: number,
+) {
+  const maximumLeft = Math.max(CHAT_CONTEXT_MENU_VIEWPORT_MARGIN_PX, viewportWidth - menuWidth - CHAT_CONTEXT_MENU_VIEWPORT_MARGIN_PX);
+  const maximumTop = Math.max(CHAT_CONTEXT_MENU_VIEWPORT_MARGIN_PX, viewportHeight - menuHeight - CHAT_CONTEXT_MENU_VIEWPORT_MARGIN_PX);
+  const proposedLeft = anchorRight ? anchorX - menuWidth : anchorX;
+  return {
+    x: Math.min(Math.max(CHAT_CONTEXT_MENU_VIEWPORT_MARGIN_PX, proposedLeft), maximumLeft),
+    y: Math.min(Math.max(CHAT_CONTEXT_MENU_VIEWPORT_MARGIN_PX, anchorY), maximumTop),
+  };
+}
 /** Canonical definition lives in packages/dashboard/src/chat.ts (ROOM_SKIP_SENTINEL). */
 const ROOM_SKIP_SENTINEL = "__SKIP__";
 let chatViewWasPreviouslyInactive = false;
@@ -627,7 +647,52 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
     );
     return getPersistedChatDraft(initialDraftKey);
   });
-  const [contextMenu, setContextMenu] = useState<{ sessionId: string; x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ sessionId: string; anchorX: number; anchorY: number; anchorRight: boolean; x: number; y: number } | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
+  /*
+  FNXC:ChatSidebar 2026-07-17-00:12:
+  FN-8191 positions each conversation-row action menu from its rendered dimensions, rather than a width derived from the default theme. This keeps the trigger edge aligned under alternate spacing themes and clamps all four actions inside both viewport axes.
+  */
+  const openSessionMenu = (
+    sessionId: string,
+    anchorX: number,
+    anchorY: number,
+    options?: { anchorRight?: boolean },
+  ) => {
+    if (typeof window === "undefined") return;
+
+    setContextMenu({
+      sessionId,
+      anchorX,
+      anchorY,
+      anchorRight: options?.anchorRight ?? false,
+      x: anchorX,
+      y: anchorY,
+    });
+  };
+
+  useLayoutEffect(() => {
+    if (!contextMenu || !contextMenuRef.current || typeof window === "undefined") return;
+
+    const menu = contextMenuRef.current;
+    const bounds = menu.getBoundingClientRect();
+    /* FNXC:ChatSidebar 2026-07-17-00:12: JSDOM has no layout, so its non-visual test fallback preserves the default-theme menu width while browsers always use rendered dimensions. */
+    const width = bounds.width || menu.offsetWidth || CHAT_CONTEXT_MENU_FALLBACK_WIDTH_PX;
+    const height = bounds.height || menu.offsetHeight;
+    const position = resolveChatContextMenuPosition(
+      contextMenu.anchorX,
+      contextMenu.anchorY,
+      contextMenu.anchorRight,
+      width,
+      height,
+      window.innerWidth,
+      window.innerHeight,
+    );
+
+    if (position.x !== contextMenu.x || position.y !== contextMenu.y) {
+      setContextMenu({ ...contextMenu, ...position });
+    }
+  }, [contextMenu]);
   const [renameDialog, setRenameDialog] = useState<{ sessionId: string; title: string } | null>(null);
   const [renameTitle, setRenameTitle] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -3202,7 +3267,7 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
                       onClick={() => handleSessionClick(session.id)}
                       onContextMenu={(e) => {
                         e.preventDefault();
-                        setContextMenu({ sessionId: session.id, x: e.clientX, y: e.clientY });
+                        openSessionMenu(session.id, e.clientX, e.clientY);
                       }}
                       data-testid={`chat-session-${session.id}`}
                     >
@@ -3224,7 +3289,7 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
                             return;
                           }
                           const bounds = e.currentTarget.getBoundingClientRect();
-                          setContextMenu({ sessionId: session.id, x: bounds.right, y: bounds.bottom });
+                          openSessionMenu(session.id, bounds.right, bounds.bottom, { anchorRight: true });
                         }}
                       >
                         <MoreHorizontal size={14} />
@@ -3399,6 +3464,7 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
       {contextMenu && (
         <div
           className="chat-session-context-menu"
+          ref={contextMenuRef}
           role="menu"
           style={{ top: contextMenu.y, left: contextMenu.x }}
           onClick={(e) => e.stopPropagation()}

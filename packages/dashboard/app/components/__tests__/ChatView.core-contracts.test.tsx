@@ -653,7 +653,15 @@ describe("ChatView CSS — mobile thread switcher", () => {
     expect(optionMatch?.[1]).toContain("min-height: calc(var(--space-lg) * 2.25)");
     expect(optionMatch?.[1]).toContain("align-items: flex-start");
     expect(optionMatch?.[1]).toContain("line-height: normal");
-    expect(optionTitleMatch?.[1]).toContain("display: block");
+    /*
+     * FNXC:ChatMobileSessionSwitcher 2026-07-16-18:54:
+     * FN-8054 intentionally uses inline flex to keep a pinned session's Pin indicator beside its title.
+     * Retain the width and wrapping contracts from FN-4061 so long titles remain readable.
+     */
+    expect(optionTitleMatch?.[1]).toContain("width: 100%");
+    expect(optionTitleMatch?.[1]).toContain("display: inline-flex");
+    expect(optionTitleMatch?.[1]).toContain("align-items: center");
+    expect(optionTitleMatch?.[1]).toContain("gap: var(--space-xs)");
     expect(optionTitleMatch?.[1]).toContain("line-height: normal");
     expect(optionTitleMatch?.[1]).toContain("white-space: normal");
     expect(optionTitleMatch?.[1]).toContain("overflow-wrap: anywhere");

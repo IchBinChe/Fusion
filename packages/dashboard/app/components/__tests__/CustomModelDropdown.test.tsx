@@ -15,9 +15,17 @@ const MOCK_MODELS = [
   { provider: "openai", id: "gpt-4o", name: "GPT-4o", reasoning: false, contextWindow: 128000 },
 ];
 
+const COLLAPSIBLE_MODELS = [
+  { provider: "anthropic", id: "claude-sonnet", name: "Claude Sonnet", reasoning: true, contextWindow: 200000 },
+  { provider: "anthropic", id: "claude-haiku", name: "Claude Haiku", reasoning: false, contextWindow: 200000 },
+  { provider: "openai", id: "gpt-4o", name: "GPT-4o", reasoning: false, contextWindow: 128000 },
+  { provider: "openai", id: "gpt-4o-mini", name: "GPT-4o mini", reasoning: false, contextWindow: 128000 },
+];
+
 describe("CustomModelDropdown", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    window.localStorage.clear();
     document.body.innerHTML = "";
     vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
       matches: false,
@@ -36,6 +44,127 @@ describe("CustomModelDropdown", () => {
     const wrapperRuleMatch = css.match(/\.model-combobox-search-wrapper\s*\{[^}]*\}/);
     expect(wrapperRuleMatch).toBeTruthy();
     expect(wrapperRuleMatch![0]).toContain("background: var(--surface);");
+  });
+
+  it("renders provider headers inside the list with sticky positioning", async () => {
+    const user = userEvent.setup();
+    const css = loadAllAppCss();
+    const optgroupRule = css.match(/\.model-combobox-optgroup\s*\{[^}]*\}/)?.[0] ?? "";
+
+    expect(optgroupRule).toContain("position: sticky;");
+    expect(optgroupRule).toContain("top: 0;");
+    expect(optgroupRule).toContain("z-index: 1;");
+    expect(optgroupRule).toContain("background: var(--bg);");
+
+    render(<CustomModelDropdown label="Model" value="" onChange={vi.fn()} models={MOCK_MODELS} />);
+    await user.click(screen.getByRole("button", { name: "Model" }));
+
+    const list = screen.getByTestId("model-combobox-portal").querySelector(".model-combobox-list");
+    expect(list).not.toBeNull();
+    expect(within(list!).getByText("anthropic").closest(".model-combobox-optgroup")).not.toBeNull();
+    expect(within(list!).getByText("openai").closest(".model-combobox-optgroup")).not.toBeNull();
+  });
+
+  it("collapses provider rows, preserves special rows, and persists the preference", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <CustomModelDropdown
+        label="Model"
+        value=""
+        onChange={vi.fn()}
+        models={COLLAPSIBLE_MODELS}
+        favoriteModels={["anthropic/claude-haiku"]}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Model" }));
+
+    expect(screen.getByRole("button", { name: "Collapse anthropic" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Claude Sonnet")).toBeTruthy();
+    expect(screen.getByText("Claude Haiku")).toBeTruthy();
+    expect(screen.getAllByText("Use default")).toHaveLength(2);
+
+    await user.click(screen.getByRole("button", { name: "Collapse anthropic" }));
+
+    expect(screen.getByRole("button", { name: "Expand anthropic" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Claude Sonnet")).toBeNull();
+    expect(screen.getByText("Claude Haiku")).toBeTruthy();
+    expect(screen.getAllByText("Use default")).toHaveLength(2);
+    expect(window.localStorage.getItem("fusion-dashboard-model-dropdown-collapsed-providers")).toBe('["anthropic"]');
+
+    await user.click(screen.getByRole("button", { name: "Expand anthropic" }));
+    expect(screen.getByText("Claude Sonnet")).toBeTruthy();
+  });
+
+  it("restores collapsed providers, tolerates malformed storage, and surfaces matches while filtering", async () => {
+    window.localStorage.setItem("fusion-dashboard-model-dropdown-collapsed-providers", '["anthropic"]');
+    const user = userEvent.setup();
+    const view = render(<CustomModelDropdown label="Model" value="" onChange={vi.fn()} models={COLLAPSIBLE_MODELS} />);
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    expect(screen.queryByText("Claude Sonnet")).toBeNull();
+    expect(screen.getByRole("button", { name: "Expand anthropic" })).toBeTruthy();
+
+    await user.type(screen.getByPlaceholderText("Filter models…"), "sonnet");
+    expect(screen.getByText("Claude Sonnet")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Collapse anthropic" })).toHaveAttribute("aria-expanded", "true");
+
+    view.unmount();
+    window.localStorage.setItem("fusion-dashboard-model-dropdown-collapsed-providers", "not-json");
+    render(<CustomModelDropdown label="Other model" value="" onChange={vi.fn()} models={MOCK_MODELS} />);
+    await user.click(screen.getByRole("button", { name: "Other model" }));
+    expect(screen.getByText("Claude Sonnet 4.5")).toBeTruthy();
+  });
+
+  it("omits collapsed rows from keyboard navigation", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+
+    render(<CustomModelDropdown label="Model" value="" onChange={onChange} models={COLLAPSIBLE_MODELS} />);
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Collapse anthropic" }));
+
+    expect(screen.queryByText("Claude Sonnet")).toBeNull();
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(onChange).toHaveBeenCalledWith("openai/gpt-4o");
+  });
+
+  it("skips collapsed provider rows when navigating upward", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+
+    render(<CustomModelDropdown label="Model" value="" onChange={onChange} models={COLLAPSIBLE_MODELS} />);
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    await user.click(screen.getByRole("button", { name: "Collapse anthropic" }));
+
+    await user.keyboard("{ArrowDown}{ArrowUp}{Enter}");
+    expect(onChange).toHaveBeenCalledWith("");
+  });
+
+  it("hides toggles for fully favorited provider groups", async () => {
+    const user = userEvent.setup();
+    render(
+      <CustomModelDropdown
+        label="Model"
+        value=""
+        onChange={vi.fn()}
+        models={COLLAPSIBLE_MODELS}
+        favoriteModels={["anthropic/claude-sonnet", "anthropic/claude-haiku"]}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Model" }));
+
+    expect(screen.queryByTestId("model-combobox-provider-toggle-anthropic")).toBeNull();
+    expect(screen.getByText("Claude Sonnet")).toBeTruthy();
+  });
+
+  it("keeps empty model lists free of provider toggles", async () => {
+    const user = userEvent.setup();
+    render(<CustomModelDropdown label="Model" value="" onChange={vi.fn()} models={[]} />);
+
+    await user.click(screen.getByRole("button", { name: "Model" }));
+    expect(screen.queryByTestId(/model-combobox-provider-toggle-/)).toBeNull();
+    expect(screen.getAllByText("Use default")).toHaveLength(2);
   });
 
   it("keeps CustomModelDropdown.css scoped to .model-combobox selectors", () => {

@@ -160,6 +160,7 @@ import { promisify } from "node:util";
 import {
   createAgentTask,
   createDelegateTaskTool,
+  createTaskAssignTool,
   createListAgentsTool,
   createMemoryTools,
   createGoalRetrievalTools,
@@ -1110,6 +1111,7 @@ export class TriageProcessor {
           ...(this.options.agentStore ? [
             createListAgentsTool(this.options.agentStore),
             createDelegateTaskTool(this.options.agentStore, this.store, { rootDir: this.rootDir }),
+            createTaskAssignTool(this.options.agentStore, this.store),
           ] : []),
         ];
 

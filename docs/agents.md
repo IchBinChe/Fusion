@@ -1226,6 +1226,12 @@ Delete a non-ephemeral direct-report agent. Deletion is blocked when the target 
 - `"ERROR: Cannot delete ephemeral/runtime agent {agent_id}"`
 - Underlying store errors (for example, an active checkout lease) are returned as `"ERROR: {message}"`; provide `force: true` to bypass lease-related blocking.
 
+### Engine-session task reassignment
+
+Engine-managed agent sessions (executor, heartbeat, triage, workflow-step, and dashboard chat) expose `fn_task_assign(task_id, agent_id, override?)` to retarget an existing task by ID. It uses the same durable-agent and role/assignment-policy checks as `fn_delegate_task`; ephemeral agents and `assignmentPolicy: "none"` cannot be selected, and `override` only bypasses the role check.
+
+`fn_task_update` in engine sessions remains lifecycle-only. In the CLI/pi extension, use the existing `fn_task_update(id, agentId)` reassignment field instead; there is no redundant CLI `fn_task_assign` alias. If engine `fn_delegate_task` finds a deterministic duplicate, it updates the canonical task's requested owner and column before returning and reports the actual owner rather than promising an incorrect heartbeat pickup.
+
 ### Role-based assignment policy
 
 Implementation-task routing distinguishes explicit specialist assignment from generic backlog pickup:

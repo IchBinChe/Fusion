@@ -5831,6 +5831,7 @@ export const AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES: Record<
     "fn_spawn_agent",
     "fn_update_agent_config",
     "fn_task_update",
+    "fn_task_assign",
     "fn_workflow_create",
     "fn_workflow_update",
     "fn_workflow_delete",

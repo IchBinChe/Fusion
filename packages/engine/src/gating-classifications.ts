@@ -11,6 +11,7 @@ export const FILE_WRITE_BUILTIN_TOOLS: ReadonlySet<string> = new Set(["write", "
 const SHARED_TASK_AGENT_TOOLS = [
   "fn_task_add_dep",
   "fn_task_update",
+  "fn_task_assign",
   "fn_spawn_agent",
   "fn_update_agent_config",
   "fn_agent_create",

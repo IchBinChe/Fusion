@@ -227,6 +227,7 @@ import {
   createAgentCreateTool,
   createAgentDeleteTool,
   createDelegateTaskTool,
+  createTaskAssignTool,
   createGetAgentConfigTool,
   createListAgentsTool,
   createMemoryTools,
@@ -278,6 +279,7 @@ export {
   createAgentCreateTool,
   createAgentDeleteTool,
   createDelegateTaskTool,
+  createTaskAssignTool,
   createGetAgentConfigTool,
   createListAgentsTool,
   createReadMessagesTool,
@@ -11665,6 +11667,7 @@ export class TaskExecutor {
         ...(this.options.agentStore ? [
           createListAgentsTool(this.options.agentStore),
           createDelegateTaskTool(this.options.agentStore, this.store, { rootDir: this.rootDir }),
+          createTaskAssignTool(this.options.agentStore, this.store),
           ...(assignedAgentId ? [
             createGetAgentConfigTool(this.options.agentStore, assignedAgentId),
             createUpdateAgentConfigTool(this.options.agentStore, assignedAgentId),

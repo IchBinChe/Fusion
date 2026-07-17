@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import * as fusionCore from "@fusion/core";
-import type { AgentState, AgentCapability, AgentUpdateInput, AgentLogEntry, Artifact, ArtifactCreateInput, ArtifactWithTask, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore, WorkflowSettingDefinition, GoalStatus, WorkflowIrNode } from "@fusion/core";
+import type { AgentState, AgentCapability, AgentUpdateInput, AgentLogEntry, Artifact, ArtifactCreateInput, ArtifactWithTask, Task, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore, WorkflowSettingDefinition, GoalStatus, WorkflowIrNode } from "@fusion/core";
 import { listTraits, isBuiltinWorkflowId, AgentStore, validateColumnAgentBindings, ColumnAgentBindingError, stripApprovalBypassFlags, WorkflowSettingRejectionError, resolveEffectiveSettingsById, resolveWorkflowIrById, findOrphanedSettingValues, BUILTIN_WORKFLOW_SETTINGS, MAX_TASK_LIST_TEXT_CHARS, formatCurrentTaskLine, normalizeWorkflowIcon, parseWorkflowIr, WorkflowIrError, assertColumnTraitsValid, ColumnTraitValidationError } from "@fusion/core";
 import { promoteHeldTask } from "./hold-release.js";
 import { DASHBOARD_USER_ID, dailyMemoryPath, ensureOpenClawMemoryFiles, evaluateImplementationTaskBind, extractAgentProvisioningRequest, getMemoryBackendCapabilities, getProjectMemory, isEphemeralAgent, memoryLongTermPath, normalizeMessageParticipant, reconcileDeterministicDuplicate, resolveAgentProvisioningPolicy, resolveMemoryBackend, resolveResearchSettings, resolveTaskGithubTracking, runDeterministicDuplicateGuard, scheduleQmdProjectMemoryRefresh, searchProjectMemory, shouldSkipBackgroundQmdRefresh } from "@fusion/core";
@@ -384,6 +384,12 @@ export const delegateTaskParams = Type.Object({
         "Omit to inherit the project default workflow. Use fn_workflow_list to discover valid IDs.",
     }),
   ),
+  override: Type.Optional(Type.Boolean({ description: "Set true to bypass executor-role assignment policy" })),
+});
+
+export const taskAssignParams = Type.Object({
+  task_id: Type.String({ description: "Task ID to assign (e.g. FN-001)" }),
+  agent_id: Type.String({ description: "Durable agent ID to assign to the task" }),
   override: Type.Optional(Type.Boolean({ description: "Set true to bypass executor-role assignment policy" })),
 });
 
@@ -933,6 +939,28 @@ type AgentTaskCreationOptions = {
   callerIsEphemeral?: boolean;
 };
 
+/*
+FNXC:AgentRouting 2026-07-29-00:00:
+FN-8207 requires deterministic-duplicate canonical tasks to honor an explicit delegate's owner and todo-column request. Carry both mutations in the engine task-creation seam so every canonical return path is truthful without changing the shared core duplicate-guard API.
+*/
+async function carryCanonicalTaskRouting(
+  store: TaskStore,
+  canonical: Task,
+  input: TaskCreateInput,
+): Promise<Task> {
+  // Task creation without an explicit assignee must not mutate an existing duplicate.
+  if (input.assignedAgentId === undefined) return canonical;
+
+  let task = canonical;
+  if (input.assignedAgentId !== canonical.assignedAgentId) {
+    task = await store.updateTask(canonical.id, { assignedAgentId: input.assignedAgentId });
+  }
+  if (input.column !== undefined && input.column !== task.column) {
+    task = await store.moveTask(task.id, input.column);
+  }
+  return task;
+}
+
 export async function createAgentTask(
   store: TaskStore,
   input: TaskCreateInput,
@@ -954,7 +982,10 @@ export async function createAgentTask(
 
   try {
     if (guard.action === "duplicate" && guard.existing) {
-      return { task: guard.existing, wasDuplicate: true };
+      return {
+        task: await carryCanonicalTaskRouting(store, guard.existing, input),
+        wasDuplicate: true,
+      };
     }
 
     const sourceMetadata = {
@@ -1003,7 +1034,12 @@ export async function createAgentTask(
       logger: log,
     });
 
-    return { task: reconcile.canonical, wasDuplicate: reconcile.outcome === "archived" };
+    return {
+      task: reconcile.outcome === "archived"
+        ? await carryCanonicalTaskRouting(store, reconcile.canonical, input)
+        : reconcile.canonical,
+      wasDuplicate: reconcile.outcome === "archived",
+    };
   } finally {
     guard.releaseLock();
   }
@@ -4122,11 +4158,24 @@ export function createDelegateTaskTool(
 
         const deps = task.dependencies.length ? ` (depends on: ${task.dependencies.join(", ")})` : "";
         const workflow = workflowId ? ` (workflow: ${workflowId})` : "";
+        /*
+        FNXC:AgentRouting 2026-07-29-00:00:
+        FN-8207 requires delegation confirmation to reflect the canonical task's actual owner. Never promise a heartbeat pickup by the requested agent when a duplicate canonical task remains owned by someone else.
+        */
+        const assignedToRequestedAgent = !wasDuplicate || task.assignedAgentId === agent.id;
+        const actualOwner = task.assignedAgentId ? `agent ${task.assignedAgentId}` : "no agent";
+        const action = wasDuplicate
+          ? assignedToRequestedAgent
+            ? `Linked existing ${task.id} and assigned it to ${agent.name}`
+            : `Linked existing ${task.id}; it remains assigned to ${actualOwner}`
+          : `Created ${task.id}`;
+        const pickup = assignedToRequestedAgent
+          ? ` The task will be picked up by ${agent.name} on their next heartbeat cycle.`
+          : "";
         return {
           content: [{
             type: "text" as const,
-            text: `Delegated to ${agent.name} (${agent.id}): ${wasDuplicate ? "Linked existing" : "Created"} ${task.id}${deps}${workflow}. ` +
-              `The task will be picked up by ${agent.name} on their next heartbeat cycle.`,
+            text: `${assignedToRequestedAgent ? `Delegated to ${agent.name} (${agent.id})` : "Delegation linked"}: ${action}${deps}${workflow}.${pickup}`,
           }],
           details: { taskId: task.id, agentId: agent.id, agentName: agent.name },
         };
@@ -4140,6 +4189,52 @@ export function createDelegateTaskTool(
         }
         throw err;
       }
+    },
+  };
+}
+
+/*
+FNXC:AgentRouting 2026-07-29-00:00:
+FN-8207 adds an engine-session reassignment tool because executor fn_task_update is lifecycle-only. Bind checks match delegation: ephemeral agents and assignmentPolicy "none" are never assignable, while override bypasses only role eligibility.
+*/
+export function createTaskAssignTool(
+  agentStore: AgentStore,
+  taskStore: TaskStore,
+): ToolDefinition {
+  return {
+    name: "fn_task_assign",
+    label: "Assign Task",
+    description: "Assign an existing task to a durable agent by task ID. Use this to correct or change task ownership.",
+    parameters: taskAssignParams,
+    execute: async (_id: string, params: Static<typeof taskAssignParams>) => {
+      const agent = await agentStore.getAgent(params.agent_id);
+      if (!agent) {
+        return { content: [{ type: "text" as const, text: `ERROR: Agent ${params.agent_id} not found` }], details: {} };
+      }
+      if (isEphemeralAgent(agent)) {
+        return { content: [{ type: "text" as const, text: `ERROR: Cannot assign to ephemeral/runtime agent ${params.agent_id}` }], details: {} };
+      }
+
+      let task: Task;
+      try {
+        task = await taskStore.getTask(params.task_id);
+      } catch {
+        return { content: [{ type: "text" as const, text: `ERROR: Task ${params.task_id} not found` }], details: {} };
+      }
+
+      const verdict = evaluateImplementationTaskBind(agent, task, {
+        explicitRouting: true,
+        executorRoleOverride: params.override === true,
+      });
+      if (!verdict.allowed) {
+        return { content: [{ type: "text" as const, text: `ERROR: ${verdict.reason}` }], details: {} };
+      }
+
+      const assigned = await taskStore.updateTask(task.id, { assignedAgentId: agent.id });
+      return {
+        content: [{ type: "text" as const, text: `Assigned ${assigned.id} to ${agent.name} (${agent.id}).` }],
+        details: { taskId: assigned.id, agentId: agent.id, agentName: agent.name },
+      };
     },
   };
 }

@@ -6840,7 +6840,7 @@ describe("TriageProcessor skillSelection regression (FN-1511)", () => {
   }
 
   describe("skillSelection context propagation", () => {
-    it("passes skillSelection to createFnAgent with correct projectRootDir", async () => {
+    it("passes skillSelection and delegation reassignment tools to createFnAgent", async () => {
       const args = await captureCreateFnAgentArgs({
         assignedAgentId: "agent-001",
         assignedAgentSkills: ["triage"],
@@ -6849,6 +6849,9 @@ describe("TriageProcessor skillSelection regression (FN-1511)", () => {
       expect(args).not.toBeNull();
       expect(args).toHaveProperty("skillSelection");
       expect(args.skillSelection.projectRootDir).toBe(projectRoot);
+      const toolNames = args.customTools.map((tool: { name: string }) => tool.name);
+      expect(toolNames).toContain("fn_delegate_task");
+      expect(toolNames).toContain("fn_task_assign");
     });
 
     it("uses 'triage' as sessionPurpose for triage sessions", async () => {

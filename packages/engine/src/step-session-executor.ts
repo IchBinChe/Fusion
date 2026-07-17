@@ -44,6 +44,7 @@ import { isContextLimitError } from "./context-limit-detector.js";
 import { checkSessionError } from "./usage-limit-detector.js";
 import {
   createDelegateTaskTool,
+  createTaskAssignTool,
   createListAgentsTool,
   createMemoryTools,
   createWebFetchTool,
@@ -1314,6 +1315,7 @@ export class StepSessionExecutor {
             ? [
                 createListAgentsTool(this.options.agentStore),
                 createDelegateTaskTool(this.options.agentStore, this.options.store!, { rootDir: this.options.rootDir }),
+                createTaskAssignTool(this.options.agentStore, this.options.store!),
               ]
             : [];
 

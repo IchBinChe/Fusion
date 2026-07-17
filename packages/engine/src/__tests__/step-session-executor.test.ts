@@ -3062,7 +3062,7 @@ describe("StepSessionExecutor tool availability", () => {
     return captured;
   }
 
-  it("includes fn_list_agents and fn_delegate_task when agentStore is available", async () => {
+  it("includes fn_list_agents, fn_delegate_task, and fn_task_assign when agentStore is available", async () => {
     const mockAgentStore = {
       listAgents: vi.fn().mockResolvedValue([]),
       getAgent: vi.fn().mockResolvedValue(null),
@@ -3075,6 +3075,7 @@ describe("StepSessionExecutor tool availability", () => {
     const toolNames = tools.map((t: any) => t.name);
     expect(toolNames).toContain("fn_list_agents");
     expect(toolNames).toContain("fn_delegate_task");
+    expect(toolNames).toContain("fn_task_assign");
   });
 
   it("excludes delegation tools when agentStore is not provided", async () => {
@@ -3083,6 +3084,7 @@ describe("StepSessionExecutor tool availability", () => {
     const toolNames = tools.map((t: any) => t.name);
     expect(toolNames).not.toContain("fn_list_agents");
     expect(toolNames).not.toContain("fn_delegate_task");
+    expect(toolNames).not.toContain("fn_task_assign");
   });
 
   it("includes fn_send_message and fn_read_messages when messageStore and assignedAgentId are available", async () => {

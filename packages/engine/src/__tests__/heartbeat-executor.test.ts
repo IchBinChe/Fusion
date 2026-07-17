@@ -1616,7 +1616,7 @@ describe("executeHeartbeat", () => {
       expect(result.resultJson).toEqual({ reason: "no_assignment" });
     });
 
-    it("identity agent without task receives correct tools (fn_task_create, fn_list_agents, fn_delegate_task, fn_heartbeat_done)", async () => {
+    it("identity agent without task receives delegation and task assignment tools", async () => {
       const store = createStoreWithAgentForExec({ taskId: undefined, soul: "I am a coordinator" });
       const mockSession = createMockAgentSession();
       mockedCreateFnAgent.mockResolvedValue({ session: mockSession as any });
@@ -1630,10 +1630,11 @@ describe("executeHeartbeat", () => {
       expect(callArgs.tools).toBe("coding");
       const toolNames = callArgs.customTools!.map((tool: any) => tool.name);
 
-      // Should have fn_task_create, fn_list_agents, fn_delegate_task
+      // Delegation and direct reassignment must remain available together.
       expect(toolNames).toContain("fn_task_create");
       expect(toolNames).toContain("fn_list_agents");
       expect(toolNames).toContain("fn_delegate_task");
+      expect(toolNames).toContain("fn_task_assign");
       // Should have fn_heartbeat_done
       expect(toolNames).toContain("fn_heartbeat_done");
       // Should have memory tools
@@ -3274,7 +3275,7 @@ describe("executeHeartbeat", () => {
       */
       // fn_artifact_register/list/view, agent config/provisioning, goals/evaluations/identity,
       // task read discovery (incl. logs_read), workflow discovery/authoring, task promotion, bounded research, clarification, web fetch, memory, and fn_heartbeat_done.
-      expect(callArgs.customTools).toHaveLength(42);
+      expect(callArgs.customTools).toHaveLength(43);
       expect(callArgs.customTools!.map((tool) => tool.name)).toEqual([
         "fn_task_create",
         "fn_task_log",
@@ -3286,6 +3287,7 @@ describe("executeHeartbeat", () => {
         "fn_artifact_view",
         "fn_list_agents",
         "fn_delegate_task",
+        "fn_task_assign",
         "fn_get_agent_config",
         "fn_update_agent_config",
         "fn_agent_create",

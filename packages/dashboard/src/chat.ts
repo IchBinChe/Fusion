@@ -64,6 +64,7 @@ import {
   createTaskSearchTool,
   createListAgentsTool,
   createDelegateTaskTool,
+  createTaskAssignTool,
   createGetAgentConfigTool,
   createWebFetchTool,
   createGoalRetrievalTools,
@@ -378,6 +379,7 @@ export async function createChatFusionToolset(options: ChatFusionToolsetOptions)
     tools.push(createListAgentsTool(agentStore));
     if (taskStore) {
       tools.push(createDelegateTaskTool(agentStore, taskStore, { rootDir }));
+      tools.push(createTaskAssignTool(agentStore, taskStore));
     }
     if (agentId) {
       tools.push(createGetAgentConfigTool(agentStore, agentId));

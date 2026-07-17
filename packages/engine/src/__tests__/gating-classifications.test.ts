@@ -63,6 +63,7 @@ const FN_7111_GOVERNED_TOOLS = [
   ["fn_workflow_delete", "task_agent_mutation"],
   ["fn_workflow_settings", "task_agent_mutation"],
   ["fn_task_update", "task_agent_mutation"],
+  ["fn_task_assign", "task_agent_mutation"],
   ["fn_task_promote", "task_agent_mutation"],
   ["fn_task_refine", "task_agent_mutation"],
   ["fn_run_verification", "command_execution"],

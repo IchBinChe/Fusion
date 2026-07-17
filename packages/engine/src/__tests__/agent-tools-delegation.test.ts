@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { Agent, AgentStore, TaskStore, Task } from "@fusion/core";
-import { createListAgentsTool, createDelegateTaskTool } from "../agent-tools.js";
+import { createAgentTask, createListAgentsTool, createDelegateTaskTool } from "../agent-tools.js";
 
 function createMockAgentStore(overrides: Partial<AgentStore> = {}): AgentStore {
   return {
@@ -14,6 +14,9 @@ function createMockAgentStore(overrides: Partial<AgentStore> = {}): AgentStore {
 function createMockTaskStore(overrides: Partial<TaskStore> = {}): TaskStore {
   return {
     getSettings: vi.fn().mockResolvedValue({ autoSummarizeTitles: false }),
+    findRecentTasksByContentFingerprint: vi.fn().mockResolvedValue([]),
+    updateTask: vi.fn(),
+    moveTask: vi.fn(),
     createTask: vi.fn().mockResolvedValue({
       id: "FN-001",
       description: "",
@@ -237,6 +240,100 @@ describe("createDelegateTaskTool", () => {
     expect(text).toContain("Delegated to Bob (agent-001)");
     expect(text).toContain("Created FN-050");
     expect(text).toContain("picked up by Bob on their next heartbeat cycle");
+  });
+
+  it("reassigns and moves a duplicate canonical task before reporting delegation", async () => {
+    const agent = createAgent({ id: "agent-002", name: "Rita" });
+    const existing = {
+      id: "FN-duplicate",
+      description: "Write tests",
+      dependencies: [],
+      column: "triage" as const,
+      assignedAgentId: "agent-001",
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    const reassigned = { ...existing, assignedAgentId: "agent-002" };
+    const moved = { ...reassigned, column: "todo" as const };
+    vi.mocked(agentStore.getAgent).mockResolvedValue(agent);
+    vi.mocked(taskStore.findRecentTasksByContentFingerprint).mockResolvedValue([existing]);
+    vi.mocked(taskStore.updateTask).mockResolvedValue(reassigned);
+    vi.mocked(taskStore.moveTask).mockResolvedValue(moved);
+
+    const result = await createDelegateTaskTool(agentStore, taskStore).execute("session-1", {
+      agent_id: "agent-002",
+      description: "Write tests",
+    }, undefined as any, undefined as any, undefined as any);
+
+    expect(taskStore.updateTask).toHaveBeenCalledWith("FN-duplicate", { assignedAgentId: "agent-002" });
+    expect(taskStore.moveTask).toHaveBeenCalledWith("FN-duplicate", "todo");
+    const text = (result.content[0] as { text: string }).text;
+    expect(text).toContain("Delegated to Rita (agent-002): Linked existing FN-duplicate");
+    expect(text).toContain("picked up by Rita on their next heartbeat cycle");
+  });
+
+  it("does not mutate a same-owner duplicate canonical task", async () => {
+    const existing = {
+      id: "FN-duplicate",
+      description: "Write tests",
+      dependencies: [],
+      column: "todo" as const,
+      assignedAgentId: "agent-001",
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    vi.mocked(taskStore.findRecentTasksByContentFingerprint).mockResolvedValue([existing]);
+
+    const result = await createAgentTask(taskStore, {
+      description: "Write tests",
+      column: "todo",
+      assignedAgentId: "agent-001",
+    });
+
+    expect(result.task).toBe(existing);
+    expect(taskStore.updateTask).not.toHaveBeenCalled();
+    expect(taskStore.moveTask).not.toHaveBeenCalled();
+  });
+
+  it("carries delegation routing onto the reconcile canonical task", async () => {
+    const created = {
+      id: "FN-new",
+      description: "Write tests",
+      dependencies: [],
+      column: "todo" as const,
+      steps: [], currentStep: 0, log: [],
+      createdAt: "2026-01-02T00:00:00.000Z", updatedAt: "2026-01-02T00:00:00.000Z",
+    };
+    const canonical = { ...created, id: "FN-old", assignedAgentId: "agent-old", column: "triage" as const, createdAt: "2026-01-01T00:00:00.000Z" };
+    const reassigned = { ...canonical, assignedAgentId: "agent-002" };
+    const moved = { ...reassigned, column: "todo" as const };
+    vi.mocked(taskStore.createTask).mockResolvedValue(created);
+    vi.mocked(taskStore.findRecentTasksByContentFingerprint)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([canonical, created]);
+    vi.mocked(taskStore.updateTask).mockImplementation(async (id, updates) =>
+      id === "FN-old" ? reassigned : { ...created, ...updates },
+    );
+    vi.mocked(taskStore.moveTask).mockImplementation(async (id, column) =>
+      id === "FN-old" ? moved : { ...created, id, column },
+    );
+
+    const result = await createAgentTask(taskStore, {
+      description: "Write tests",
+      column: "todo",
+      assignedAgentId: "agent-002",
+    });
+
+    expect(result.wasDuplicate).toBe(true);
+    expect(result.task).toBe(moved);
+    expect(taskStore.updateTask).toHaveBeenCalledWith("FN-old", { assignedAgentId: "agent-002" });
+    expect(taskStore.moveTask).toHaveBeenCalledWith("FN-old", "todo");
   });
 
   it("returns success message with task ID and agent name", async () => {

@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { useEffect, type ReactNode } from "react";
 import { loadAllAppCss } from "../../test/cssFixture";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { MailboxView } from "../MailboxView";
+import { NavigationHistoryProvider, useNavigationHistory, type UseNavigationHistoryResult } from "../../hooks/useNavigationHistory";
 import * as apiModule from "../../api";
 import * as viewportModule from "../../hooks/useViewportMode";
 import * as mobileKeyboardModule from "../../hooks/useMobileKeyboard";
@@ -173,6 +175,14 @@ function makeInboxResponse(messages: Message[], unreadCount = 0) {
 /** Build a valid OutboxResponse shape (no unreadCount) */
 function makeOutboxResponse(messages: Message[]) {
   return { messages, total: messages.length };
+}
+
+function HistoryHarness({ children, historyRef }: { children: ReactNode; historyRef?: { current: UseNavigationHistoryResult | null } }) {
+  const history = useNavigationHistory({ enabled: true });
+  useEffect(() => {
+    if (historyRef) historyRef.current = history;
+  }, [history, historyRef]);
+  return <NavigationHistoryProvider value={history}>{children}</NavigationHistoryProvider>;
 }
 
 describe("MailboxView", () => {
@@ -1005,6 +1015,144 @@ describe("MailboxView", () => {
     const mailboxView = await screen.findByTestId("mailbox-view");
     expect(mailboxView.getAttribute("style")).toContain("--vv-offset-top: 32px");
     expect(mailboxView.getAttribute("style")).toContain("--vv-height: 480px");
+  });
+
+  it("dismisses a mobile message detail on browser popstate and drains its nav entry", async () => {
+    mockUseViewportMode.mockReturnValue("mobile");
+    mockFetchInbox.mockResolvedValue(makeInboxResponse([mockMessage], 1));
+    mockFetchConversation.mockResolvedValue([mockMessage]);
+    mockMarkMessageRead.mockResolvedValue({ ...mockMessage, read: true });
+
+    render(<HistoryHarness><MailboxView {...defaultProps} /></HistoryHarness>);
+    await screen.findByTestId("mailbox-item-msg-001");
+    fireEvent.click(screen.getByTestId("mailbox-item-msg-001"));
+    await screen.findByTestId("mailbox-message-detail");
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: { navIndex: 0 } }));
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("mailbox-message-detail")).toBeNull();
+      expect(screen.getByTestId("mailbox-item-msg-001")).toBeDefined();
+    });
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate", { state: { navIndex: 0 } }));
+    });
+    expect(screen.queryByTestId("mailbox-message-detail")).toBeNull();
+  });
+
+  it("routes Android native Back through popstate before dismissing a mobile message", async () => {
+    mockUseViewportMode.mockReturnValue("mobile");
+    mockFetchInbox.mockResolvedValue(makeInboxResponse([mockMessage], 1));
+    mockFetchConversation.mockResolvedValue([mockMessage]);
+    mockMarkMessageRead.mockResolvedValue({ ...mockMessage, read: true });
+    const backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {});
+
+    try {
+      render(<HistoryHarness><MailboxView {...defaultProps} /></HistoryHarness>);
+      await screen.findByTestId("mailbox-item-msg-001");
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-001"));
+      await screen.findByTestId("mailbox-message-detail");
+
+      const nativeBack = new CustomEvent("fusion:native-back", { cancelable: true });
+      expect(window.dispatchEvent(nativeBack)).toBe(false);
+      expect(backSpy).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId("mailbox-message-detail")).toBeDefined();
+
+      act(() => {
+        window.dispatchEvent(new PopStateEvent("popstate", { state: { navIndex: 0 } }));
+      });
+      await waitFor(() => expect(screen.queryByTestId("mailbox-message-detail")).toBeNull());
+    } finally {
+      backSpy.mockRestore();
+    }
+  });
+
+  it.each([
+    ["the in-pane Back button", async () => fireEvent.click(screen.getByTestId("mailbox-back-to-list"))],
+    ["delete", async () => fireEvent.click(screen.getByTestId("mailbox-delete"))],
+    ["an agent tab switch", async () => fireEvent.click(screen.getByTestId("mailbox-tab-outbox"))],
+  ])("consumes the message entry before %s", async (_label, close) => {
+    mockUseViewportMode.mockReturnValue("mobile");
+    mockFetchInbox.mockResolvedValue(makeInboxResponse([mockMessage], 1));
+    mockFetchConversation.mockResolvedValue([mockMessage]);
+    mockMarkMessageRead.mockResolvedValue({ ...mockMessage, read: true });
+    mockDeleteMessage.mockResolvedValue(undefined);
+    const historyRef: { current: UseNavigationHistoryResult | null } = { current: null };
+    const sentinel = vi.fn();
+    const backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {});
+
+    try {
+      render(<HistoryHarness historyRef={historyRef}><MailboxView {...defaultProps} /></HistoryHarness>);
+      await screen.findByTestId("mailbox-item-msg-001");
+      await waitFor(() => expect(historyRef.current).not.toBeNull());
+      historyRef.current?.pushNav({ type: "modal", close: sentinel });
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-001"));
+      await screen.findByTestId("mailbox-message-detail");
+
+      await close();
+      await waitFor(() => expect(screen.queryByTestId("mailbox-message-detail")).toBeNull());
+      expect(backSpy).toHaveBeenCalledTimes(1);
+
+      act(() => {
+        window.dispatchEvent(new PopStateEvent("popstate", { state: { navIndex: 1 } }));
+        window.dispatchEvent(new PopStateEvent("popstate", { state: { navIndex: 0 } }));
+      });
+      expect(sentinel).toHaveBeenCalledTimes(1);
+    } finally {
+      backSpy.mockRestore();
+    }
+  });
+
+  it("consumes the message entry before reply replaces it with the composer", async () => {
+    mockUseViewportMode.mockReturnValue("mobile");
+    mockFetchInbox.mockResolvedValue(makeInboxResponse([mockMessage], 1));
+    mockFetchConversation.mockResolvedValue([mockMessage]);
+    mockMarkMessageRead.mockResolvedValue({ ...mockMessage, read: true });
+    const historyRef: { current: UseNavigationHistoryResult | null } = { current: null };
+    const sentinel = vi.fn();
+    const backSpy = vi.spyOn(window.history, "back").mockImplementation(() => {});
+
+    try {
+      render(<HistoryHarness historyRef={historyRef}><MailboxView {...defaultProps} /></HistoryHarness>);
+      await screen.findByTestId("mailbox-item-msg-001");
+      await waitFor(() => expect(historyRef.current).not.toBeNull());
+      historyRef.current?.pushNav({ type: "modal", close: sentinel });
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-001"));
+      await screen.findByTestId("mailbox-message-detail");
+      fireEvent.click(screen.getByTestId("mailbox-reply"));
+      await screen.findByTestId("message-composer");
+      fireEvent.click(screen.getByTestId("message-composer-cancel"));
+      await waitFor(() => expect(screen.queryByTestId("message-composer")).toBeNull());
+
+      act(() => {
+        window.dispatchEvent(new PopStateEvent("popstate", { state: { navIndex: 1 } }));
+        window.dispatchEvent(new PopStateEvent("popstate", { state: { navIndex: 0 } }));
+      });
+      expect(sentinel).toHaveBeenCalledTimes(1);
+    } finally {
+      backSpy.mockRestore();
+    }
+  });
+
+  it("does not push a nav entry for desktop split-pane message selection", async () => {
+    mockUseViewportMode.mockReturnValue("desktop");
+    mockFetchInbox.mockResolvedValue(makeInboxResponse([mockMessage], 1));
+    mockFetchConversation.mockResolvedValue([mockMessage]);
+    mockMarkMessageRead.mockResolvedValue({ ...mockMessage, read: true });
+    const pushStateSpy = vi.spyOn(window.history, "pushState");
+
+    try {
+      render(<HistoryHarness><MailboxView {...defaultProps} /></HistoryHarness>);
+      await screen.findByTestId("mailbox-item-msg-001");
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-001"));
+      await screen.findByTestId("mailbox-message-detail");
+      expect(pushStateSpy).not.toHaveBeenCalled();
+    } finally {
+      pushStateSpy.mockRestore();
+    }
   });
 
   it("keeps mobile single-pane flow for detail open and back navigation", async () => {

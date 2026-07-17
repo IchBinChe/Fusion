@@ -74,8 +74,9 @@ The installed mobile/PWA home-screen icons are generated from `packages/dashboar
 
 The dashboard now handles browser back navigation consistently on desktop and mobile.
 Using Back will first dismiss open modals and then step back through in-app view changes before leaving the app.
-On mobile, an open navigation-bar **More** sheet is dismissed by one browser Back action, iOS edge-swipe, or Android Back action before the current dashboard view changes.
+On mobile, an open navigation-bar **More** sheet or mailbox message detail is dismissed by one browser Back action, iOS edge-swipe, or Android Back action before the current dashboard view changes.
 <!-- FNXC:MobileNavBackDocs 2026-07-16-14:45: The mobile More sheet registers as a navigation modal, so every Back delivery mechanism dismisses it before navigating away. -->
+<!-- FNXC:MailboxMobileBackDocs 2026-07-16-16:15: A mobile mailbox message detail registers as a navigation modal, so Back returns to the message list instead of navigating away. -->
 When task detail is open from a board card, task popup, mobile list row, right-dock/activity/onboarding link, deep link, or another task detail link, one browser, iOS edge-swipe, or Android Back action closes the current detail first and restores the prior dashboard context (for example, nested task detail → previous task detail, or task detail → board/list).
 <!-- FNXC:TaskDetailSwipeBackDocs 2026-07-15-10:36: Mobile task popups now register the same navigation entry as modal and full-panel task detail, so every Back delivery mechanism dismisses the popup before it can leave the originating Board or List. -->
 On mobile board-card detail, **Back to board** also restores the prior board/card scroll position so the same lane context remains visible.

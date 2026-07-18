@@ -79,7 +79,8 @@
     "node-pty": "npm:@homebridge/node-pty-prebuilt-multiarch@^0.13.1",
     "react": "^19.2.0",
     "react-i18next": "^17.0.8",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "playwright-core": "^1.60.0"
   },
   "peerDependencies": {
     "typebox": "*"

@@ -412,6 +412,13 @@ const cliBuildConfig = {
     "cpu-features",
     "embedded-postgres",
     /^@embedded-postgres\//,
+    /*
+    FNXC:ReviewArtifacts 2026-07-19-10:00:
+    The engine lazy-loads playwright-core only for a gated local feature-video.
+    Keep it external because Playwright has optional Chromium BiDi internals that
+    esbuild cannot resolve, while the published CLI installs this direct runtime dep.
+    */
+    "playwright-core",
   ],
   splitting: false,
   // Keep clean disabled so the dedicated plugin-sdk tsup config can emit into

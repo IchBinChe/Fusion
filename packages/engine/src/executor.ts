@@ -17,6 +17,7 @@ import { getUnmetSchedulingDependencies } from "./scheduler.js";
 import { RetryStormError, serializeRetryStormError, isExperimentalFeatureEnabled, evaluateCompletedPromotionFailureProvenance, evaluateSkipBypassTaint, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker, allowsAutoMergeProcessing, resolveEffectiveAutoMerge, isLiveSharedBranchGroupMemberIntegration, resolveMaxAutoMergeRetries, resolveMaxConsecutiveToolFailureRetries, resolveConsecutiveToolFailureRetryBackoffMs, resolveConsecutiveToolFailureThreshold, resolveExecutorEscalationTarget, resolveOptionalStepRevisionBudget, resolveOptionalReviewRevisionBudget, COMPLETION_SUMMARY_NODE_ID, upsertWorkflowStepResult, AWAITING_APPROVAL_PAUSE_REASON, THINKING_LEVELS, AgentStore, resolveExecutorFallbackModel } from "@fusion/core";
 import { finalizeProvenAutoMergeTask } from "./auto-merge-finalization.js";
 import { mergeEffectiveSettings } from "./effective-settings.js";
+import { generateFeatureVideo, type GenerateFeatureVideoOptions } from "./review-artifacts/feature-video.js";
 import { moveTaskToReplanColumn, resolveReplanTargetColumn } from "./replan-target.js";
 import type { TaskStep, WorkflowIr, WorkflowFieldDefinition, WorkflowColumnAgent, EffectiveAgentInput, WorkflowWorkEngineDispatchResult } from "@fusion/core";
 import {
@@ -1634,6 +1635,8 @@ export interface TaskExecutorOptions {
   onStart?: (task: Task, worktreePath: string) => void;
   onComplete?: (task: Task) => void;
   onError?: (task: Task, error: Error) => void;
+  /** Testable, best-effort completion-deliverable seam; production uses generateFeatureVideo. */
+  reviewArtifactGenerator?: (options: GenerateFeatureVideoOptions) => Promise<import("./review-artifacts/feature-video.js").FeatureVideoResult>;
   /** Optional runtime-owned dispatch seam that lets a flag-gated workflow
    * interpreter own the authoritative lifecycle for default coding tasks.
    * Return true when the task was fully handled and legacy execute() should stop. */
@@ -2235,6 +2238,7 @@ export class TaskExecutor {
    */
   private async handoffTaskToReview(task: Task, reason: string, runId = this.getRunContextFor(task.id)?.runId): Promise<Task> {
     const agentId = this.getRunContextFor(task.id)?.agentId;
+    await this.generateCompletionFeatureVideo(task);
     if (reason.startsWith("workflow-")) {
       await ensureWorkflowCompletionSummary(this.store, task as TaskDetail, {
         reason,
@@ -2267,6 +2271,35 @@ export class TaskExecutor {
     await this.maybeObserveWorkflowParity(task.id, settings);
 
     return handedOff;
+  }
+
+  /*
+  FNXC:ReviewArtifacts 2026-07-19-10:00:
+  A successful executor handoff may offer reviewers a short local feature-video, but
+  capture is strictly best-effort. Bound and swallow this optional work before the
+  review transition so browser, scenario, and artifact failures never delay or fail it.
+  */
+  private async generateCompletionFeatureVideo(task: Task): Promise<void> {
+    try {
+      const [settings, detail] = await Promise.all([this.store.getSettings(), this.store.getTask(task.id)]);
+      const generator = this.options.reviewArtifactGenerator ?? generateFeatureVideo;
+      const result = await this.awaitFeatureVideoBounded(generator({ store: this.store, task: detail ?? task, settings }));
+      executorLog.log(`${task.id}: feature-video ${result.status}${"reason" in result ? ` (${result.reason})` : ""}`);
+    } catch (error) {
+      executorLog.warn(`${task.id}: feature-video capture ignored: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async awaitFeatureVideoBounded(result: Promise<import("./review-artifacts/feature-video.js").FeatureVideoResult>): Promise<import("./review-artifacts/feature-video.js").FeatureVideoResult> {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        result,
+        new Promise<never>((_, reject) => { timeout = setTimeout(() => reject(new Error("feature-video timeout")), 20_000); }),
+      ]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
   }
 
   private getModelRegistry(): Promise<ModelRegistry> {

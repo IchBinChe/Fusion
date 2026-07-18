@@ -94,6 +94,7 @@ vi.mock("@fusion/engine", () => ({
   createGetAgentConfigTool: vi.fn(() => ({})),
   createWebFetchTool: vi.fn(() => ({})),
   createGoalRetrievalTools: vi.fn(() => []),
+  createIdeationTools: vi.fn(() => []),
   createMemoryTools: vi.fn(() => []),
   createResearchTools: vi.fn(() => []),
 }));

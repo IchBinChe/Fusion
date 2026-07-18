@@ -33,6 +33,7 @@ export {
   createWebFetchTool,
   createGoalRetrievalTools,
   createMissionTools,
+  createIdeationTools,
   createMemoryTools,
   createResearchTools,
   createArtifactListTool,

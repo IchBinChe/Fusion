@@ -81,6 +81,10 @@ const PERMANENT_TASK_AGENT_ONLY_TOOLS = [
   "fn_feature_link_task",
   "fn_feature_update",
   "fn_milestone_update",
+  /* FNXC:Ideation 2026-07-30-15:30: Persisted divergence/convergence writes require both action and permanent-agent policy recognition. */
+  "fn_ideation_start",
+  "fn_ideation_diverge",
+  "fn_ideation_converge",
   "fn_agent_stop",
   "fn_agent_start",
 ] as const;
@@ -177,6 +181,8 @@ export const READONLY_FN_TOOLS: ReadonlySet<string> = new Set([
   "fn_trait_list",
   "fn_mission_list",
   "fn_mission_show",
+  "fn_ideation_list",
+  "fn_ideation_show",
   "fn_list_agents",
   "fn_agent_show",
   "fn_agent_org_chart",
@@ -235,6 +241,8 @@ export const COORDINATION_EXEMPT_TOOLS = [
   // FNXC:MissionToolGating 2026-07-30-10:31: Mission reads are safe coordination, but must be registered here as well as READONLY_FN_TOOLS so the action gate recognizes rather than silently defaulting them.
   "fn_mission_list",
   "fn_mission_show",
+  "fn_ideation_list",
+  "fn_ideation_show",
   "fn_list_agents",
   "fn_agent_show",
   "fn_agent_org_chart",

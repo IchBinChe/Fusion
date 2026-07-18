@@ -140,6 +140,8 @@ describe("gating-classifications parity", () => {
         "fn_goal_list",
         "fn_goal_show",
         "fn_heartbeat_done",
+        "fn_ideation_list",
+        "fn_ideation_show",
         "fn_list_agents",
         "fn_memory_append",
         "fn_memory_get",
@@ -200,6 +202,20 @@ describe("gating-classifications parity", () => {
       disposition: "allow",
       recognized: true,
     });
+  });
+
+  it("classifies ideation reads and mutations in both policy paths", () => {
+    for (const toolName of ["fn_ideation_list", "fn_ideation_show"]) {
+      expect(READONLY_FN_TOOLS.has(toolName)).toBe(true);
+      expect((COORDINATION_EXEMPT_TOOLS as readonly string[]).includes(toolName)).toBe(true);
+      expect(classifyPermanentAgentToolCall(toolName)).toEqual({ category: "none", recognized: true });
+    }
+    for (const toolName of ["fn_ideation_start", "fn_ideation_diverge", "fn_ideation_converge"]) {
+      expect(ACTION_GATE_TASK_AGENT_MANAGEMENT_TOOLS.has(toolName)).toBe(true);
+      expect(PERMANENT_AGENT_TASK_MUTATION_TOOLS.has(toolName)).toBe(true);
+      expect(evaluateAgentActionGate({ agentId: "a1", toolName, args: {}, permissionPolicy: blockedPolicy })).toMatchObject({ category: "task_agent_mutation", disposition: "block" });
+      expect(resolvePermanentAgentToolDecision({ toolName, args: {}, gating: { permissionPolicy: blockedPolicy } })).toMatchObject({ category: "task_agent_mutation", disposition: "block", recognized: true });
+    }
   });
 
   it("governs fn_task_create as task_agent_mutation in both gate paths", () => {

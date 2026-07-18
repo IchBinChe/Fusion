@@ -1404,6 +1404,53 @@ export const missionFeatures = projectSchema.table("mission_features", {
   foreignKey({ columns: [t.projectId, t.taskId], foreignColumns: [tasks.projectId, tasks.id] }).onDelete("set null"),
 ]);
 
+/*
+FNXC:Ideation 2026-07-30-15:30:
+Persist sessions and candidates under the same project partition as Missions.
+Composite project FKs make it impossible for convergence linkage to point into a
+foreign project's roadmap, while candidate cascade deletion keeps a deleted
+session from leaving unbounded brainstorm artifacts behind.
+*/
+export const ideationSessions = projectSchema.table("ideation_sessions", {
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
+  title: text("title").notNull(),
+  prompt: text("prompt"),
+  status: text("status").notNull().default("open"),
+  targetMissionId: text("target_mission_id"),
+  targetFeatureId: text("target_feature_id"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+  convergedAt: text("converged_at"),
+}, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
+  foreignKey({ columns: [t.projectId, t.targetMissionId], foreignColumns: [missions.projectId, missions.id] }).onDelete("restrict"),
+  foreignKey({ columns: [t.projectId, t.targetFeatureId], foreignColumns: [missionFeatures.projectId, missionFeatures.id] }).onDelete("restrict"),
+  check("ideation_sessions_status_check", sql`${t.status} IN ('open','converged','archived')`),
+]);
+
+export const ideationCandidates = projectSchema.table("ideation_candidates", {
+  projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
+  id: text("id").notNull(),
+  sessionId: text("session_id").notNull(),
+  content: text("content").notNull(),
+  origin: text("origin").notNull(),
+  sourceRef: text("source_ref"),
+  selected: integer("selected").notNull().default(0),
+  linkedMissionId: text("linked_mission_id"),
+  linkedFeatureId: text("linked_feature_id"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
+  foreignKey({ columns: [t.projectId, t.sessionId], foreignColumns: [ideationSessions.projectId, ideationSessions.id] }).onDelete("cascade"),
+  foreignKey({ columns: [t.projectId, t.linkedMissionId], foreignColumns: [missions.projectId, missions.id] }).onDelete("restrict"),
+  foreignKey({ columns: [t.projectId, t.linkedFeatureId], foreignColumns: [missionFeatures.projectId, missionFeatures.id] }).onDelete("restrict"),
+  check("ideation_candidates_origin_check", sql`${t.origin} IN ('agent','human','research')`),
+  check("ideation_candidates_selected_check", sql`${t.selected} IN (0, 1)`),
+  index("idxIdeationCandidatesSession").on(t.projectId, t.sessionId),
+]);
+
 export const missionEvents = projectSchema.table("mission_events", {
   projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),
   id: text("id").notNull(),
@@ -2089,7 +2136,7 @@ export const projectTableNames = [
   "experiment_session_records", "eval_runs", "eval_task_results", "eval_run_events",
   "secrets", "__meta", "missions", "branch_groups", "pull_requests",
   "pull_request_thread_state", "goals", "mission_goals", "goal_citations",
-  "milestones", "slices", "mission_features", "mission_events", "plugins",
+  "milestones", "slices", "mission_features", "ideation_sessions", "ideation_candidates", "mission_events", "plugins",
   "routines", "project_insights", "project_insight_runs", "project_insight_run_events",
   "todo_lists", "todo_items", "usage_events", "plugin_activations",
   "knowledge_pages", "deployments", "incidents", "ai_sessions", "messages",

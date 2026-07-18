@@ -674,3 +674,7 @@ Mission hierarchy operations are available with the same project-scoped `Mission
 `fn_mission_list` and `fn_mission_show` are positively classified read-only. All other hierarchy operations mutate persisted project data and remain subject to the engine action gate and permanent-agent permission policy; they are never treated as unknown or exempt tools.
 
 For example, activate a ready work unit with `fn_slice_activate({ id: "SL-…" })`. Link it to live work with `fn_feature_link_task({ featureId: "F-…", taskId: "FN-…" })`. Linking delegates to `MissionStore.linkFeatureToTask()`: it verifies the task is a live row in the same project, changes the feature to `triaged`, and records the mission/slice linkage on the task. Archived, deleted, missing, and other-project tasks are rejected.
+
+## Ideation handoff
+
+[Persisted ideation](./ideation/persisted-diverge-converge.md) converges a selected candidate into this canonical hierarchy. It atomically creates or attaches a Mission and persists that linkage, rather than maintaining a parallel roadmap document.

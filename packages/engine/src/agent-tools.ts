@@ -3495,6 +3495,73 @@ export function createMissionTools(store: TaskStore): ToolDefinition[] {
   ];
 }
 
+/*
+FNXC:Ideation 2026-07-30-15:30:
+These tools are the single agent-facing contract for bounded divergence and
+atomic convergence. The store owns the shared transaction with MissionStore;
+tools never recreate a Mission or persist a parallel prose handoff themselves.
+*/
+export const ideationStartParams = Type.Object({
+  title: Type.String({ minLength: 1, description: "Short title for this bounded ideation session" }),
+  prompt: Type.Optional(Type.String({ description: "Optional problem statement or framing prompt" })),
+});
+export const ideationDivergeParams = Type.Object({
+  sessionId: Type.String({ description: "Ideation session ID" }),
+  candidates: Type.Array(Type.Object({
+    content: Type.String({ minLength: 1, description: "Candidate idea content" }),
+    origin: Type.Union([Type.Literal("agent"), Type.Literal("human"), Type.Literal("research")]),
+    sourceRef: Type.Optional(Type.String({ description: "Optional provenance reference" })),
+  }), { minItems: 1, description: "One or more divergent candidates" }),
+});
+export const ideationShowParams = Type.Object({ id: Type.String({ description: "Ideation session ID" }) });
+export const ideationConvergeParams = Type.Object({
+  sessionId: Type.String({ description: "Open ideation session ID" }),
+  candidateId: Type.String({ description: "Explicitly selected candidate ID" }),
+  targetMissionId: Type.Optional(Type.String({ description: "Existing Mission to attach to; omit to create one" })),
+  targetFeatureId: Type.Optional(Type.String({ description: "Optional Feature in the target Mission" })),
+});
+
+const ideationToolResult = (text: string, details: Record<string, unknown>, isError = false) => ({
+  content: [{ type: "text" as const, text }], details, ...(isError ? { isError: true } : {}),
+});
+
+/** Create the persisted ideation surface shared by executor, triage, heartbeat, and chat. */
+export function createIdeationTools(store: TaskStore): ToolDefinition[] {
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const tool = (name: string, label: string, description: string, parameters: any, execute: (params: any) => Promise<ReturnType<typeof ideationToolResult>>): ToolDefinition => ({
+    name, label, description, parameters,
+    execute: async (_id, params: any) => {
+      try { return await execute(params); }
+      catch (error) { const message = error instanceof Error ? error.message : String(error); return ideationToolResult(`ERROR: ${message}`, { error: message }, true); }
+    },
+  });
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+  return [
+    tool("fn_ideation_list", "List Ideation Sessions", "List persisted ideation sessions.", Type.Object({}), async () => {
+      const sessions = await store.getIdeationStore().listSessions();
+      return ideationToolResult(sessions.length ? `Ideation sessions (${sessions.length})\n${sessions.map((session) => `- ${session.id}: ${session.title} (${session.status})`).join("\n")}` : "No ideation sessions yet.", { sessions, count: sessions.length });
+    }),
+    tool("fn_ideation_show", "Show Ideation Session", "Show one ideation session and its divergent candidates.", ideationShowParams, async ({ id }) => {
+      const session = await store.getIdeationStore().getSessionWithCandidates(id);
+      return session ? ideationToolResult(`${session.id}: ${session.title}`, { session }) : ideationToolResult(`Ideation session ${id} not found`, { code: "IDEATION_SESSION_NOT_FOUND", sessionId: id }, true);
+    }),
+    tool("fn_ideation_start", "Start Ideation", "Create a bounded persisted ideation session.", ideationStartParams, async ({ title, prompt }) => {
+      const session = await store.getIdeationStore().createSession({ title, prompt });
+      return ideationToolResult(`Started ${session.id}: ${session.title}`, { session });
+    }),
+    tool("fn_ideation_diverge", "Record Divergent Candidates", "Record one or more divergent candidates with provenance.", ideationDivergeParams, async ({ sessionId, candidates }) => {
+      const ideation = store.getIdeationStore();
+      const created = [];
+      for (const candidate of candidates) created.push(await ideation.addCandidate(sessionId, candidate));
+      return ideationToolResult(`Recorded ${created.length} candidate${created.length === 1 ? "" : "s"}`, { candidates: created });
+    }),
+    tool("fn_ideation_converge", "Converge Ideation", "Select a candidate and atomically create or attach its canonical Mission handoff.", ideationConvergeParams, async ({ sessionId, candidateId, targetMissionId, targetFeatureId }) => {
+      const session = await store.getIdeationStore().convergeSession(sessionId, candidateId, { targetMissionId, targetFeatureId });
+      return ideationToolResult(`Converged ${session.id} into Mission ${session.targetMissionId}`, { session, targetMissionId: session.targetMissionId, targetFeatureId: session.targetFeatureId });
+    }),
+  ];
+}
+
 /**
  * Create a `fn_reflect_on_performance` tool that asks the reflection service to
  * analyze recent agent performance and return actionable insights.

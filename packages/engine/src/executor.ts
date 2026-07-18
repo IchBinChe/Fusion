@@ -230,6 +230,7 @@ import {
   createMemoryTools,
   createGoalRetrievalTools,
   createMissionTools,
+  createIdeationTools,
   createWebFetchTool,
   createReadMessagesTool,
   createReflectOnPerformanceTool,
@@ -11670,6 +11671,7 @@ export class TaskExecutor {
           })
           : []),
         ...createMissionTools(this.store),
+        ...createIdeationTools(this.store),
         ...createGoalRetrievalTools(this.store, {
           runContext: {
             runId: engineRunContext.runId,

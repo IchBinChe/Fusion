@@ -879,6 +879,7 @@ describe("ChatManager.sendMessage", () => {
       permissionPolicy: { rules: { task_agent_mutation: "block" } },
     });
     expect(createOptions.customTools.map((tool: { name: string }) => tool.name)).toContain("fn_mission_create");
+    expect(createOptions.customTools.map((tool: { name: string }) => tool.name)).toContain("fn_ideation_converge");
   });
 
   it("exposes fn_task_document_* tools to the chat agent when a task store is present", async () => {

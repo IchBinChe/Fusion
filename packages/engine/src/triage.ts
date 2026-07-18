@@ -172,6 +172,7 @@ import {
   createMemoryTools,
   createGoalRetrievalTools,
   createMissionTools,
+  createIdeationTools,
   createResearchTools,
   createWebFetchTool,
   createTaskDocumentReadTool,
@@ -1199,6 +1200,7 @@ export class TriageProcessor {
             })
             : []),
           ...createMissionTools(this.store),
+          ...createIdeationTools(this.store),
           ...createGoalRetrievalTools(this.store, {
             runContext: {
               runId: triageRunContext.runId,

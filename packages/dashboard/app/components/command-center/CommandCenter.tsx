@@ -21,6 +21,7 @@ import { SystemStatsArea } from "./areas/SystemStatsArea";
 import { SystemControlsArea } from "./areas/SystemControlsArea";
 import { PluginManager } from "../PluginManager";
 import { MissionControlPanel } from "./MissionControlPanel";
+import { IdeationPanel } from "./IdeationPanel";
 import { CommandCenterControls } from "./CommandCenterControls";
 import { ReliabilityView } from "../ReliabilityView";
 import { NodesView } from "../NodesView";
@@ -52,7 +53,8 @@ type SubViewId =
   | "plugins"
   | "nodes"
   | "reliability"
-  | "mission-control";
+  | "mission-control"
+  | "ideation";
 
 interface SubView {
   id: SubViewId;
@@ -98,6 +100,7 @@ function useSubViews(nodesEnabled: boolean): SubView[] {
     ...(nodesEnabled ? [{ id: "nodes" as const, label: t("commandCenter.tabs.nodes", "Nodes") }] : []),
     { id: "reliability", label: t("commandCenter.tabs.reliability", "Reliability") },
     { id: "mission-control", label: t("commandCenter.tabs.missionControl", "Mission Control") },
+    { id: "ideation", label: t("commandCenter.tabs.ideation", "Ideation") },
   ];
 }
 
@@ -669,6 +672,8 @@ export function CommandCenter({
         return <ReliabilityView projectId={projectId} />;
       case "mission-control":
         return <MissionControlPanel projectId={projectId} />;
+      case "ideation":
+        return <IdeationPanel projectId={projectId} />;
       default:
         return <PlaceholderTab tabId={activeTab} />;
     }

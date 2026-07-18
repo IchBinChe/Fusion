@@ -76,6 +76,7 @@ import {
   createWebFetchTool,
   createGoalRetrievalTools,
   createMissionTools,
+  createIdeationTools,
   createMemoryTools,
   createResearchTools,
   resolveMcpServersForStore,
@@ -360,6 +361,7 @@ export interface ChatFusionToolsetOptions {
 }
 
 const CHAT_MISSION_READ_TOOL_NAMES = new Set(["fn_mission_list", "fn_mission_show"]);
+const CHAT_IDEATION_READ_TOOL_NAMES = new Set(["fn_ideation_list", "fn_ideation_show"]);
 
 async function createChatMissionGateContexts(
   taskStore: TaskStore | undefined,
@@ -463,6 +465,8 @@ export async function createChatFusionToolset(options: ChatFusionToolsetOptions)
       createTaskCreateTool(taskStore, { sourceType: "api" }, { rootDir }),
       /* FNXC:MissionToolParity 2026-07-29-15:30: Dashboard chat uses the engine factory, but only bound permanent-agent sessions with both policy contexts receive hierarchy mutations. */
       ...createMissionTools(taskStore).filter((tool) => missionMutationGated || CHAT_MISSION_READ_TOOL_NAMES.has(tool.name)),
+      /* FNXC:Ideation 2026-07-30-15:30: Unbound or ephemeral chat exposes only positive ideation reads; mutations require the same durable gate context as Mission writes. */
+      ...createIdeationTools(taskStore).filter((tool) => missionMutationGated || CHAT_IDEATION_READ_TOOL_NAMES.has(tool.name)),
       ...createGoalRetrievalTools(taskStore),
       /* FNXC:ChatAgentTools 2026-07-15-00:00: Chat exposes memory retrieval only and respects the workspace memory-enabled setting; prompt-triggered persistent writes stay excluded without an action-gate context. */
       ...createMemoryTools(rootDir, settings).filter((tool) => tool.name !== "fn_memory_append"),

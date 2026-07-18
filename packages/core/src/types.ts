@@ -3089,6 +3089,9 @@ export type SecretsEnvConfig = SecretsEnvSettings;
  * Runtime state fields (globalPause, enginePaused) also live here because
  * different projects may need independent pause control.
  */
+export type ReportMode = "draft-review" | "auto-file";
+export type ReportActionType = "bug" | "feedback" | "idea" | "help";
+
 export interface ProjectSettings {
   /** Hard stop: when true, all automated agent activity is **immediately**
    *  terminated — active triage, execution, and merge agent sessions are
@@ -3995,6 +3998,13 @@ export interface ProjectSettings {
   /** Project default GitHub tracking repo in `owner/repo` format (FN-3868).
    *  Falls back to global githubTrackingDefaultRepo when unset. */
   githubTrackingDefaultRepo?: string;
+  /**
+   * FNXC:ReportPipeline 2026-07-16-12:00:
+   * In-app reports default to review before egress; operators can opt into
+   * direct filing globally or for one of the four guided report actions.
+   */
+  reportMode?: ReportMode;
+  reportModeByAction?: Partial<Record<ReportActionType, ReportMode>>;
   /**
    * FNXC:GitLabConfiguration 2026-07-02-00:00:
    * FN-7422 adds durable GitLab instance/API URL settings for GitLab.com and self-managed hosts. FN-7423 layers token settings onto the same project-over-global configuration contract without adding runtime GitLab imports or tracking.

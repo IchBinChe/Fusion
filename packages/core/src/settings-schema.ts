@@ -634,6 +634,8 @@ export const DEFAULT_PROJECT_SETTINGS = {
   sessionAdvisorEnabledByDefault: false,
   githubLinkImportedIssuesToTracking: false,
   githubTrackingDefaultRepo: undefined,
+  reportMode: "draft-review" as const,
+  reportModeByAction: undefined,
   gitlabEnabled: undefined,
   gitlabInstanceUrl: undefined,
   gitlabApiBaseUrl: undefined,

@@ -2078,3 +2078,11 @@ When enabled, a proactive question holds the planner at `awaiting_input`, sends 
 ### Mobile footer quick actions
 
 In **Settings → General**, choose up to six Mobile footer quick actions from the add dropdown. The selected list is ordered: use its earlier/later controls or remove actions to adjust the footer, and see each change immediately while Settings remains open. Eligible sidebar and More-sheet destinations can be promoted; unselected available destinations stay reachable in More. Feature-gated views remain hidden until enabled, and the trailing More tab is always present.
+
+## In-app reports
+
+The Header **Report** menu is available on desktop and mobile and offers **Bug**, **Feedback**, **Idea**, and **Help**. Each action begins with a short, guided prompt rather than a raw GitHub issue form.
+
+Fusion gathers available task/agent context, structures the prompt into a report, scrubs secrets, local paths, project names, home-directory identities, email addresses, and likely personal names, then checks **open** GitHub issues or Discussions for duplicates. Scrubbing is mandatory for every route and is repeated on the server when a reviewed draft is edited before filing. A strong duplicate receives a visible 👍 reaction and one scrubbed data-point comment instead of a new issue or Discussion. Bug and Idea reports use issues; Feedback and unresolved Help reports use repository Discussions. If preparation or filing cannot reach GitHub, Fusion preserves the draft and shows a retryable error.
+
+In **Settings → General**, choose **Review draft before filing** (the default) or **File automatically**. Both paths show the resulting issue, Discussion, or endorsement link. Help checks Fusion's local knowledge index on every server report path first and only escalates when it cannot find an answer.

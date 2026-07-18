@@ -1302,6 +1302,21 @@ describe("SettingsModal", () => {
       await expectSettingPersists(input);
     });
 
+    it("persists report default and per-action filing mode overrides", async () => {
+      renderModal({ initialSection: "general" });
+      await waitForSettingsModalReady();
+
+      fireEvent.change(screen.getByLabelText("In-app report mode"), { target: { value: "auto-file" } });
+      fireEvent.change(screen.getByLabelText("Bug report override"), { target: { value: "draft-review" } });
+      fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(mockUpdateSettings).toHaveBeenCalled());
+      expect(mockUpdateSettings.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+        reportMode: "auto-file",
+        reportModeByAction: { bug: "draft-review" },
+      }));
+    });
+
     it("saves ephemeral agent toggle in project settings payload", async () => {
       renderModal({ initialSection: "general" });
       await waitForSettingsModalReady();

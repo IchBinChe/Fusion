@@ -181,6 +181,7 @@ import { registerCustomProviderRoutes } from "./routes/register-custom-provider-
 import { registerUsageRoutes } from "./routes/register-usage-routes.js";
 import { registerCommandCenterRoutes } from "./routes/register-command-center-routes.js";
 import { registerKnowledgeRoutes } from "./routes/register-knowledge-routes.js";
+import { registerReportRoutes } from "./routes/register-report-routes.js";
 import { registerSignalRoutes } from "./routes/register-signal-routes.js";
 import { registerMonitorRoutes } from "./routes/monitor-routes.js";
 import { registerAuthRoutes } from "./routes/register-auth-routes.js";
@@ -2255,6 +2256,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // index holds sensitive repo/PR content so no endpoint is unauthenticated or
   // cross-project readable.
   registerKnowledgeRoutes(routeContext);
+  registerReportRoutes(routeContext);
   // U11 — inbound external signal webhooks (Sentry/Datadog/PagerDuty/generic).
   // Each route HMAC-verifies against a per-provider secret; never an
   // unauthenticated task-creation endpoint.

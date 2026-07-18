@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { DEPRECATED_BUILTIN_WORKFLOW_IDS, isLocale, SUPPORTED_LOCALES, type WorkflowDefinition } from "@fusion/core";
+import { DEPRECATED_BUILTIN_WORKFLOW_IDS, isLocale, SUPPORTED_LOCALES, type ReportActionType, type WorkflowDefinition } from "@fusion/core";
 import { DEFAULT_MOBILE_NAV_PRIMARY_ITEMS, MAX_MOBILE_NAV_PRIMARY_ITEMS, MOBILE_NAV_SELECTABLE_ITEMS, MOBILE_NAV_SELECTABLE_ITEM_LABEL_KEYS } from "../../../../../core/src/mobile-nav-primary-items";
 import { SettingsFieldRow } from "../SettingsFieldRow";
 import { SettingsToggleRow } from "../SettingsToggleRow";
@@ -272,6 +272,35 @@ export function GeneralSection({ form, setForm, projectId, addToast, prefixError
           <option value="changeset">{t("settings.general.requireChangesetChangesetMd", "Require changeset (.changeset/*.md)")}</option>
           <option value="changelog">{t("settings.general.requireChangelogUpdateExistingChangelog", "Require changelog update (existing changelog)")}</option>
         </select>
+      </div>
+      <div className="form-group">
+        {/*
+        FNXC:ReportPipeline 2026-07-16-19:15:
+        A privacy-safe draft review remains the project default, while each of
+        the four guided report actions can explicitly opt into direct filing.
+        Persist overrides as one map so the pipeline resolves them consistently.
+        */}
+        <label htmlFor="reportMode">In-app report mode</label>
+        <select id="reportMode" value={form.reportMode ?? "draft-review"} onChange={(e) => setForm((f) => ({ ...f, reportMode: e.target.value as "draft-review" | "auto-file" }))}>
+          <option value="draft-review">Review draft before filing</option>
+          <option value="auto-file">File automatically</option>
+        </select>
+        {(["bug", "feedback", "idea", "help"] as const).map((action) => (
+          <label key={action} htmlFor={`reportMode-${action}`}>
+            {`${action[0].toUpperCase()}${action.slice(1)} report override`}
+            <select id={`reportMode-${action}`} value={form.reportModeByAction?.[action] ?? ""} onChange={(e) => setForm((current) => {
+              const reportModeByAction = { ...current.reportModeByAction };
+              const selected = e.target.value as "" | "draft-review" | "auto-file";
+              if (selected) reportModeByAction[action as ReportActionType] = selected;
+              else delete reportModeByAction[action as ReportActionType];
+              return { ...current, reportModeByAction: Object.keys(reportModeByAction).length ? reportModeByAction : undefined };
+            })}>
+              <option value="">Use project default</option>
+              <option value="draft-review">Review draft before filing</option>
+              <option value="auto-file">File automatically</option>
+            </select>
+          </label>
+        ))}
       </div>
       {/*
         FNXC:SettingsGeneral 2026-07-15-17:35:

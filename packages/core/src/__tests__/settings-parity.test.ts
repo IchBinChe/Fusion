@@ -163,6 +163,15 @@ describe("settings key parity", () => {
     expect(GLOBAL_SETTINGS_KEYS).not.toContain("allowAbsoluteFileBrowserPaths");
   });
 
+  it("defaults in-app reports to draft review and keeps mode settings project-scoped", () => {
+    expect(DEFAULT_PROJECT_SETTINGS.reportMode).toBe("draft-review");
+    expect(DEFAULT_PROJECT_SETTINGS.reportModeByAction).toBeUndefined();
+    expect(isProjectSettingsKey("reportMode")).toBe(true);
+    expect(isProjectSettingsKey("reportModeByAction")).toBe(true);
+    expect(isGlobalSettingsKey("reportMode")).toBe(false);
+    expect(isGlobalSettingsKey("reportModeByAction")).toBe(false);
+  });
+
   it("defaults autoClaimCandidatesInPrompt to 5 and keeps it project-scoped", () => {
     expect(DEFAULT_PROJECT_SETTINGS.autoClaimCandidatesInPrompt).toBe(5);
     expect(isProjectSettingsKey("autoClaimCandidatesInPrompt")).toBe(true);

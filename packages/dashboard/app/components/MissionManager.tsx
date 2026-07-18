@@ -286,11 +286,15 @@ interface MissionBranchStrategy {
   branchName?: string;
 }
 
+type MissionAutoMergeOverride = "inherit" | "on" | "off";
+
 interface MissionFormData {
   title: string;
   description: string;
   status: MissionStatus;
   autopilotEnabled: boolean;
+  /** FNXC:MissionAutoMerge 2026-07-18-12:00: Preserve inherited project behavior until an operator explicitly selects an override. */
+  autoMergeOverride: MissionAutoMergeOverride;
   baseBranch: string;
   branchStrategy: MissionBranchStrategy;
 }
@@ -321,6 +325,7 @@ const EMPTY_MISSION_FORM: MissionFormData = {
   description: "",
   status: "planning",
   autopilotEnabled: false,
+  autoMergeOverride: "inherit",
   baseBranch: "",
   branchStrategy: {
     mode: "project-default",
@@ -347,6 +352,14 @@ const EMPTY_FEATURE_FORM: FeatureFormData = {
   acceptanceCriteria: "",
   status: "defined",
 };
+
+function missionAutoMergeOverride(autoMerge?: boolean): MissionAutoMergeOverride {
+  return autoMerge === true ? "on" : autoMerge === false ? "off" : "inherit";
+}
+
+function resolveMissionAutoMerge(override: MissionAutoMergeOverride): boolean | undefined {
+  return override === "on" ? true : override === "off" ? false : undefined;
+}
 
 function normalizeMissionBranchStrategy(strategy?: Mission["branchStrategy"]): MissionBranchStrategy {
   if (!strategy) {
@@ -1607,6 +1620,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       description: mission.description || "",
       status: mission.status,
       autopilotEnabled: mission.autopilotEnabled ?? false,
+      autoMergeOverride: missionAutoMergeOverride(mission.autoMerge),
       baseBranch: mission.baseBranch ?? "",
       branchStrategy: normalizeMissionBranchStrategy(mission.branchStrategy),
     });
@@ -1644,6 +1658,9 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
           title: missionForm.title.trim(),
           description: missionForm.description.trim() || undefined,
           autopilotEnabled: missionForm.autopilotEnabled,
+          ...(resolveMissionAutoMerge(missionForm.autoMergeOverride) !== undefined
+            ? { autoMerge: resolveMissionAutoMerge(missionForm.autoMergeOverride) }
+            : {}),
           baseBranch: missionForm.baseBranch.trim() || undefined,
           branchStrategy,
         }, projectId);
@@ -1656,6 +1673,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
           description: missionForm.description.trim() || undefined,
           status: missionForm.status,
           autopilotEnabled: missionForm.autopilotEnabled,
+          // FNXC:MissionAutoMerge 2026-07-18-12:00: JSON drops undefined, so edit inheritance must use null to clear a saved override.
+          autoMerge: resolveMissionAutoMerge(missionForm.autoMergeOverride) ?? null,
           baseBranch: missionForm.baseBranch.trim() || "",
           branchStrategy,
         };
@@ -2827,6 +2846,18 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                       <option value="auto-per-task">{t("missions.branchStrategyAutoPerTask", "Auto-name a branch per task (from details)")}</option>
                       <option value="existing">{t("missions.branchStrategyExisting", "Use existing branch")}</option>
                       <option value="custom-new">{t("missions.branchStrategyCustomNew", "Create custom branch")}</option>
+                    </select>
+                  </label>
+                  <label>
+                    {t("missions.autoMergeOverride", "Merge behavior")}
+                    <select
+                      value={missionForm.autoMergeOverride}
+                      onChange={(e) => setMissionForm({ ...missionForm, autoMergeOverride: e.target.value as MissionAutoMergeOverride })}
+                      aria-label={t("missions.autoMergeOverrideAriaLabel", "Mission auto-merge override")}
+                    >
+                      <option value="inherit">{t("missions.autoMergeInherited", "Use project default")}</option>
+                      <option value="on">{t("missions.autoMergeOn", "Auto-merge")}</option>
+                      <option value="off">{t("missions.singlePullRequest", "Single pull request")}</option>
                     </select>
                   </label>
                   {(missionForm.branchStrategy.mode === "existing" || missionForm.branchStrategy.mode === "custom-new") && (
@@ -4554,6 +4585,18 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                       <option value="custom-new">{t("missions.branchStrategyCustomNew", "Create custom branch")}</option>
                     </select>
                   </label>
+                  <label>
+                    {t("missions.autoMergeOverride", "Merge behavior")}
+                    <select
+                      value={missionForm.autoMergeOverride}
+                      onChange={(e) => setMissionForm({ ...missionForm, autoMergeOverride: e.target.value as MissionAutoMergeOverride })}
+                      aria-label={t("missions.autoMergeOverrideAriaLabel", "Mission auto-merge override")}
+                    >
+                      <option value="inherit">{t("missions.autoMergeInherited", "Use project default")}</option>
+                      <option value="on">{t("missions.autoMergeOn", "Auto-merge")}</option>
+                      <option value="off">{t("missions.singlePullRequest", "Single pull request")}</option>
+                    </select>
+                  </label>
                   {(missionForm.branchStrategy.mode === "existing" || missionForm.branchStrategy.mode === "custom-new") && (
                     <label>
                       {t("missions.branchName", "Branch name")}
@@ -4646,6 +4689,18 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                       <option value="auto-per-task">{t("missions.branchStrategyAutoPerTask", "Auto-name a branch per task (from details)")}</option>
                       <option value="existing">{t("missions.branchStrategyExisting", "Use existing branch")}</option>
                       <option value="custom-new">{t("missions.branchStrategyCustomNew", "Create custom branch")}</option>
+                    </select>
+                  </label>
+                  <label>
+                    {t("missions.autoMergeOverride", "Merge behavior")}
+                    <select
+                      value={missionForm.autoMergeOverride}
+                      onChange={(e) => setMissionForm({ ...missionForm, autoMergeOverride: e.target.value as MissionAutoMergeOverride })}
+                      aria-label={t("missions.autoMergeOverrideAriaLabel", "Mission auto-merge override")}
+                    >
+                      <option value="inherit">{t("missions.autoMergeInherited", "Use project default")}</option>
+                      <option value="on">{t("missions.autoMergeOn", "Auto-merge")}</option>
+                      <option value="off">{t("missions.singlePullRequest", "Single pull request")}</option>
                     </select>
                   </label>
                   {(missionForm.branchStrategy.mode === "existing" || missionForm.branchStrategy.mode === "custom-new") && (

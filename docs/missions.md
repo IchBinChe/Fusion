@@ -97,6 +97,10 @@ Supported modes:
 
 The Mission Manager create/edit form exposes this as **Branch strategy** plus a conditional **Branch name** field for `existing` and `custom-new`.
 
+### Mission auto-merge override
+
+The **Merge behavior** control can inherit the project default, explicitly enable auto-merge, or select **Single pull request**. The latter persists `autoMerge: false` on the mission and stamps newly triaged feature tasks with the same false override, while preserving the mission's shared branch group. Returning the control to inherited clears the mission override.
+
 ### Shared branch-group invariant across entry points
 
 Across all branch entry points (planning/subtask creation, mission triage, and New Task `shared-group` creation), Fusion enforces one rule:

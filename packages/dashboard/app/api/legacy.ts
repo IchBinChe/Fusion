@@ -7249,7 +7249,7 @@ export function fetchMissions(projectId?: string): Promise<MissionWithSummary[]>
 }
 
 /** Create a new mission */
-export function createMission(input: { title: string; description?: string; autoAdvance?: boolean; autopilotEnabled?: boolean; baseBranch?: string; branchStrategy?: Mission["branchStrategy"] }, projectId?: string): Promise<Mission> {
+export function createMission(input: { title: string; description?: string; autoAdvance?: boolean; autopilotEnabled?: boolean; autoMerge?: boolean; baseBranch?: string; branchStrategy?: Mission["branchStrategy"] }, projectId?: string): Promise<Mission> {
   return api<Mission>(withProjectId("/missions", projectId), {
     method: "POST",
     body: JSON.stringify(input),
@@ -7262,7 +7262,7 @@ export function fetchMission(missionId: string, projectId?: string): Promise<Mis
 }
 
 /** Update mission */
-export function updateMission(missionId: string, updates: Partial<Mission>, projectId?: string): Promise<Mission> {
+export function updateMission(missionId: string, updates: Partial<Mission> & { autoMerge?: boolean | null }, projectId?: string): Promise<Mission> {
   return api<Mission>(withProjectId(`/missions/${encodeURIComponent(missionId)}`, projectId), {
     method: "PATCH",
     body: JSON.stringify(updates),

@@ -1653,6 +1653,11 @@ export class AsyncMissionStore extends EventEmitter<MissionStoreEvents> {
                 },
               }
             : {}),
+          /*
+          FNXC:MissionAutoMerge 2026-07-18-12:00:
+          An autoMerge:false mission stamps each newly triaged task so its shared branch produces one PR instead of per-task auto-merges. Duplicate reuse intentionally bypasses this create-only override.
+          */
+          ...(mission?.autoMerge === false ? { autoMerge: false } : {}),
           ...(branchOptions?.workflowId !== undefined ? { workflowId: branchOptions.workflowId } : {}),
         });
         if (guard.fingerprint) {

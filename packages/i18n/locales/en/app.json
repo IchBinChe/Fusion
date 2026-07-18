@@ -1590,6 +1590,43 @@
       },
       "title": "Operator controls"
     },
+    "portability": {
+      "title": "Org export / import",
+      "description": "Download or preview a secret-scrubbed organization bundle.",
+      "export": {
+        "action": "Export org bundle",
+        "working": "Exporting…",
+        "success": "Export ready",
+        "error": "Export failed"
+      },
+      "import": {
+        "label": "Org bundle JSON",
+        "placeholder": "Paste a secret-scrubbed org bundle",
+        "preview": "Preview import",
+        "previewing": "Previewing…",
+        "previewReady": "Preview ready. Confirm to apply this bundle.",
+        "apply": "Apply import",
+        "importing": "Importing…",
+        "invalid": "Paste a valid org bundle JSON document",
+        "error": "Unable to preview or import bundle",
+        "confirmTitle": "Import organization bundle?",
+        "confirmMessage": "This applies the previewed configuration to this project.",
+        "confirmApply": "Import bundle"
+      },
+      "versions": {
+        "title": "Configuration versions",
+        "description": "Restore any recorded project configuration version.",
+        "loading": "Loading versions…",
+        "loadError": "Unable to load configuration versions",
+        "rollbackError": "Unable to roll back configuration",
+        "empty": "No configuration versions yet.",
+        "rollback": "Roll back",
+        "rollingBack": "Rolling back…",
+        "confirmTitle": "Roll back configuration?",
+        "confirmMessage": "Restore this version? The rollback is recorded as a new version.",
+        "confirmRollback": "Roll back"
+      }
+    },
     "ecosystem": {
       "breadthTitle": "Ecosystem breadth",
       "empty": "No models or plugins active in the selected range.",

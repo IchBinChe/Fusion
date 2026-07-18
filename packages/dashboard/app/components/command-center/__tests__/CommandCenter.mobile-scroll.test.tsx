@@ -381,6 +381,8 @@ describe("CommandCenter mobile scroll regression (FN-6595)", () => {
     await screen.findByTestId("command-center-empty");
     expect(screen.getByTestId("command-center-controls")).toBeTruthy();
     expect(screen.getByTestId("cc-controls-concurrency")).toBeTruthy();
+    expect(screen.getByTestId("cc-controls-org-portability")).toBeTruthy();
+    expect(screen.getByTestId("cc-controls-config-versions")).toBeTruthy();
     expect(screen.queryByTestId("cc-controls-org-chart")).toBeNull();
     expect(screen.queryByTestId("cc-controls-heartbeat")).toBeNull();
     assertScrollOwnerContract(overviewPanel);

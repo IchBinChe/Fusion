@@ -173,6 +173,7 @@ import { registerAgentCoreListCreateRoutes, registerAgentCoreRoutes } from "./ro
 import { registerAgentRuntimeRoutes } from "./routes/register-agent-runtime-routes.js";
 import { registerAgentReflectionRatingRoutes } from "./routes/register-agent-reflection-rating-routes.js";
 import { registerAgentImportExportRoutes, registerAgentGenerationRoutes } from "./routes/register-agent-import-export-generation-routes.js";
+import { registerOrgPortabilityRoutes } from "./routes/register-org-portability-routes.js";
 import { registerAgentSkillsRoutes } from "./routes/register-agent-skills-routes.js";
 import { registerPluginsAutomationRoutes } from "./routes/register-plugins-automation.js";
 import { registerProxyRoutes } from "./routes/register-proxy-routes.js";
@@ -3390,6 +3391,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   });
 
   registerAgentImportExportRoutes(routeContext);
+  registerOrgPortabilityRoutes(routeContext);
 
   registerAgentCoreRoutes(routeContext, {
     sanitizeAgentTaskLinks,

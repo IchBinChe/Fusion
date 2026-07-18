@@ -52,6 +52,12 @@ interface GitHubImportModalProps {
   onImport: (task: Task) => void;
   /** Optional because callers without Planning Mode retain the direct-import-only surface. */
   onPlanningMode?: (initialPlan: string, workflowId?: string | null) => void;
+  /*
+  FNXC:GitHubImport 2026-07-30-12:00:
+  Chat is deliberately separate from direct import: it seeds a GitHub issue/PR link in the composer,
+  without creating a task or establishing GitHub sourceIssue tracking.
+  */
+  onOpenChatWithPrefill?: (prefillText: string) => void;
   tasks: Task[];
   projectId?: string;
   /*
@@ -410,7 +416,7 @@ export function buildCheckFixTaskPrompt(
   };
 }
 
-export function GitHubImportModal({ isOpen, onClose, onImport, onPlanningMode, tasks, projectId, presentation = "modal" }: GitHubImportModalProps) {
+export function GitHubImportModal({ isOpen, onClose, onImport, onPlanningMode, onOpenChatWithPrefill, tasks, projectId, presentation = "modal" }: GitHubImportModalProps) {
   const { isEmbedded, scrollLockEnabled, resizePersistEnabled, escapeEnabled } = useEmbeddedPresentation(presentation);
   useMobileScrollLock(isOpen && scrollLockEnabled);
   const { t, i18n } = useTranslation("app");
@@ -1374,6 +1380,16 @@ export function GitHubImportModal({ isOpen, onClose, onImport, onPlanningMode, t
   const selectedPull = pulls.find((p) => p.number === selectedPullNumber);
   const detailIsOpen = Boolean(selectedIssue || selectedPull || selectedGitlabItem);
 
+  const handleChatAboutSelection = useCallback(() => {
+    if (provider !== "github" || !onOpenChatWithPrefill) return;
+    const url = activeTab === "issues" ? selectedIssue?.html_url : selectedPull?.html_url;
+    const trimmedUrl = url?.trim();
+    if (!trimmedUrl) return;
+
+    onOpenChatWithPrefill(`${trimmedUrl}\n\n`);
+    onClose();
+  }, [activeTab, onClose, onOpenChatWithPrefill, provider, selectedIssue?.html_url, selectedPull?.html_url]);
+
   /*
   FNXC:GitHubImportSwipeBack 2026-07-28-12:00:
   The import modal already owns the lower mobile Back entry. Register this nested detail entry only while an issue, pull, or GitLab sheet is visible, so one Back returns to the candidate list and a second can dismiss the import form. Optional context preserves provider-less and embedded renders.
@@ -2320,6 +2336,16 @@ export function GitHubImportModal({ isOpen, onClose, onImport, onPlanningMode, t
                     disabled={importing || isUrlImported(selectedIssue.html_url)}
                   >
                     {t("git.planIssue", "Plan")}
+                  </button>
+                )}
+                {onOpenChatWithPrefill && (activeTab === "issues" ? selectedIssue?.html_url?.trim() : selectedPull?.html_url?.trim()) && (
+                  <button
+                    type="button"
+                    className="btn github-import-action"
+                    data-testid="github-import-action-chat"
+                    onClick={handleChatAboutSelection}
+                  >
+                    {t("git.chatAboutIssue", "Chat")}
                   </button>
                 )}
                 <button

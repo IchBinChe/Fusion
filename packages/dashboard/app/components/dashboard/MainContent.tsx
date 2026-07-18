@@ -81,6 +81,8 @@ export function MainContent({
   skillsEnabled,
   experimentalFeatures,
   setQuickChatOpen,
+  chatComposerPrefill,
+  onOpenChatWithPrefill,
   setMailboxUnreadCount,
   setMissionTargetId,
   setMissionResumeSessionId,
@@ -349,6 +351,8 @@ export function MainContent({
             addToast={addToast}
             projectId={currentProject?.id}
             experimentalFeatures={experimentalFeatures}
+            initialComposerDraft={chatComposerPrefill?.text}
+            initialComposerDraftNonce={chatComposerPrefill?.nonce}
             onPopOut={() => setQuickChatOpen(true)}
           />
         </Suspense>
@@ -663,6 +667,7 @@ export function MainContent({
             onClose={() => handleChangeTaskView("board")}
             onImport={handleGitHubImport}
             onPlanningMode={openPlanningWithInitialPlanWithNav}
+            onOpenChatWithPrefill={onOpenChatWithPrefill}
             tasks={tasks}
             projectId={currentProject?.id}
             presentation="embedded"

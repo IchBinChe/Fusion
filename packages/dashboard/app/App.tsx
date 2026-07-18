@@ -568,6 +568,7 @@ function AppInner() {
   }, [initialLoadComplete]);
 
   const [quickChatOpen, setQuickChatOpen] = useState(false);
+  const [chatComposerPrefill, setChatComposerPrefill] = useState<{ text: string; nonce: number } | null>(null);
   const [quickChatEverOpenedProjectId, setQuickChatEverOpenedProjectId] = useState<string | null>(null);
   const quickChatProjectIdRef = useRef<string | undefined>(undefined);
 
@@ -589,6 +590,16 @@ function AppInner() {
       setQuickChatEverOpenedProjectId(projectId);
     }
   }, [currentProject?.id, quickChatOpen]);
+
+  /*
+  FNXC:GitHubImportChat 2026-07-30-12:00:
+  Import Tasks can hand a selected GitHub link to Quick Chat without creating a task. Keep the
+  value and nonce at App scope so both modal and embedded imports seed every Chat presentation.
+  */
+  const openChatWithPrefill = useCallback((text: string) => {
+    setChatComposerPrefill({ text, nonce: Date.now() });
+    setQuickChatOpen(true);
+  }, []);
 
   const { keyboardOpen } = useMobileKeyboard({ enabled: isMobile });
   // Keyboard visibility controls both MobileNavBar rendering and whether
@@ -1466,6 +1477,8 @@ function AppInner() {
     skillsEnabled,
     experimentalFeatures,
     setQuickChatOpen,
+    chatComposerPrefill,
+    onOpenChatWithPrefill: openChatWithPrefill,
     setMailboxUnreadCount,
     setMissionTargetId,
     setMissionResumeSessionId,
@@ -1884,6 +1897,8 @@ function AppInner() {
               projectId={currentProject.id}
               experimentalFeatures={experimentalFeatures}
               floating
+              initialComposerDraft={chatComposerPrefill?.text}
+              initialComposerDraftNonce={chatComposerPrefill?.nonce}
               onMaximize={() => {
                 handleTaskViewChange("chat");
                 setQuickChatOpen(false);
@@ -1970,6 +1985,7 @@ function AppInner() {
           handleGitHubImport,
         }}
         onPlanningMode={openPlanningWithInitialPlanWithNav}
+        onOpenChatWithPrefill={openChatWithPrefill}
         onSubtaskBreakdown={subtaskBreakdownEnabled ? openSubtaskBreakdownWithNav : undefined}
         taskOperations={{ moveTask, deleteTask, mergeTask, archiveTask, revertTask, retryTask, bypassReview, resetTask, duplicateTask }}
         deepLink={{ handleDetailClose }}

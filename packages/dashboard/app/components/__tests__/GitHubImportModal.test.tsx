@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useEffect, type ReactNode } from "react";
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { buildIssuePlanningSeed, GitHubImportModal } from "../GitHubImportModal";
+import { buildIssueChatPrefill } from "../ChatView";
 import { ConfirmDialogProvider } from "../../hooks/useConfirm";
 import { NavigationHistoryProvider, useNavigationHistory } from "../../hooks/useNavigationHistory";
 import {
@@ -307,6 +308,54 @@ describe("GitHubImportModal", () => {
       labels: [],
       state: "open",
     })).toContain("https://github.com/owner/repo/issues/42");
+  });
+
+  it("builds a standalone Chat composer prefill from a GitHub URL", () => {
+    expect(buildIssueChatPrefill(" https://github.com/owner/repo/issues/42 ")).toBe("https://github.com/owner/repo/issues/42\n\n");
+    expect(buildIssueChatPrefill("  ")).toBe("");
+  });
+
+  it("opens Chat with a selected GitHub issue link without importing", async () => {
+    const issue = { number: 44, title: "Chat import", body: "Issue body", html_url: "https://github.com/owner/repo/issues/44", labels: [], state: "open" };
+    const onOpenChatWithPrefill = vi.fn();
+    vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+    vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce([issue]);
+
+    const view = render(<GitHubImportModal isOpen onClose={onClose} onImport={onImport} onOpenChatWithPrefill={onOpenChatWithPrefill} tasks={[]} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Select issue #44/i }));
+    fireEvent.click(screen.getByTestId("github-import-action-chat"));
+
+    expect(onOpenChatWithPrefill).toHaveBeenCalledWith("https://github.com/owner/repo/issues/44\n\n");
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(apiImportGitHubIssue).not.toHaveBeenCalled();
+
+    view.unmount();
+    vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+    vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce([issue]);
+    render(<GitHubImportModal isOpen onClose={onClose} onImport={onImport} tasks={[]} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Select issue #44/i }));
+    expect(screen.queryByTestId("github-import-action-chat")).toBeNull();
+  });
+
+  it("renders Chat for GitHub pulls but not GitLab detail actions", async () => {
+    const onOpenChatWithPrefill = vi.fn();
+    vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+    vi.mocked(apiFetchGitHubPulls).mockResolvedValueOnce(mockPulls);
+    render(<GitHubImportModal isOpen onClose={onClose} onImport={onImport} onOpenChatWithPrefill={onOpenChatWithPrefill} tasks={[]} />);
+
+    fireEvent.click(await screen.findByRole("tab", { name: /Pull Requests/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Select pull request #1/i }));
+    fireEvent.click(screen.getByTestId("github-import-action-chat"));
+    expect(onOpenChatWithPrefill).toHaveBeenCalledWith(`${mockPulls[0].html_url}\n\n`);
+
+    vi.mocked(apiFetchGitLabProjectIssues).mockResolvedValueOnce([
+      { resourceKind: "project_issue", id: 1, iid: 1, projectId: 1, projectPath: "group/project", title: "GitLab issue", description: "", webUrl: "https://gitlab.example.com/group/project/-/issues/1", state: "opened", labels: [] },
+    ]);
+    fireEvent.click(await screen.findByRole("button", { name: "GitLab" }));
+    fireEvent.change(screen.getByLabelText(/GitLab project path/i), { target: { value: "group/project" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Load$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /GitLab issue/i }));
+    expect(screen.queryByTestId("github-import-action-chat")).toBeNull();
   });
 
   it("plans a selected issue after closing the embedded import surface", async () => {

@@ -51,6 +51,7 @@ interface AppModalsProps {
   projectActions: Pick<UseProjectActionsResult, "handleAddProject" | "handleSetupComplete" | "handleModelOnboardingComplete">;
   taskHandlers: Pick<UseTaskHandlersResult, "handleModalCreate" | "handlePlanningTaskCreated" | "handlePlanningTasksCreated" | "handleSubtaskTasksCreated" | "handleGitHubImport">;
   onPlanningMode?: (initialPlan: string, workflowId?: string | null) => void;
+  onOpenChatWithPrefill?: (prefillText: string) => void;
   onSubtaskBreakdown?: (description: string, workflowId?: string | null) => void;
   taskOperations: {
     moveTask: (taskId: string, column: Column, optionsOrPosition?: { preserveProgress?: boolean } | number) => Promise<Task>;
@@ -111,6 +112,7 @@ export function AppModals({
   projectActions,
   taskHandlers,
   onPlanningMode,
+  onOpenChatWithPrefill,
   onSubtaskBreakdown,
   taskOperations,
   deepLink,
@@ -394,6 +396,7 @@ export function AppModals({
         onClose={closeGitHubImportWithNav}
         onImport={taskHandlers.handleGitHubImport}
         onPlanningMode={onPlanningMode}
+        onOpenChatWithPrefill={onOpenChatWithPrefill}
         tasks={tasks}
         projectId={projectId}
       />

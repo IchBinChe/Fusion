@@ -6492,6 +6492,42 @@ export interface RevisionFieldDiff {
   newValue: unknown;
 }
 
+/*
+FNXC:ConfigVersioning 2026-07-18-00:00:
+FN-8282 requires every durable configuration mutation to retain an immutable
+before/after snapshot. Targets stay structured JSON; target keys are derived
+from canonical JSON rather than delimiter-concatenated identifiers.
+
+FNXC:ConfigVersioning 2026-07-18-10:30:
+Every provenance variant carries a stable ID. This makes agent and authenticated
+human writes auditable and makes intentional internal writes explicit as the
+system actor instead of allowing anonymous history rows.
+*/
+export type ConfigKind = "project-settings" | "global-settings" | "workflow-settings" | "routine" | "automation";
+export type ConfigChangedBy =
+  | { kind: "human"; id: string }
+  | { kind: "agent"; id: string }
+  | { kind: "system"; id: string }
+  | { kind: "rollback"; id: string };
+export type ConfigurationOwnerScope = "project" | "global";
+export type ConfigurationTarget = Readonly<Record<string, string>>;
+export interface ConfigurationRevision {
+  id: string;
+  projectId: string;
+  ownerScope: ConfigurationOwnerScope;
+  configKind: ConfigKind;
+  configTarget: ConfigurationTarget;
+  /** Canonical JSON representation used only for exact target indexing. */
+  configTargetKey: string;
+  before: unknown;
+  after: unknown;
+  diffs: RevisionFieldDiff[];
+  changedBy: ConfigChangedBy;
+  createdAt: string;
+  source: "mutation" | "rollback";
+  rollbackToRevisionId?: string;
+}
+
 /** A revision entry recording a configuration change to an agent */
 export interface AgentConfigRevision {
   /** Unique revision identifier */

@@ -46,6 +46,7 @@ import {
   IMPORT_TRANSLATION_CACHE_SCOPE_FIX_VERSION,
   IMPORT_TRANSLATION_CACHE_LEGACY_PARTITION_BACKFILL_VERSION,
   TASK_PROPOSAL_CLAIM_VERSION,
+  CONFIGURATION_REVISIONS_VERSION,
   OWNER_PROJECT_ID_SPLIT_VERSION,
   /*
   FNXC:PostgresSchema 2026-07-16-08:00:
@@ -518,7 +519,7 @@ pgDescribe("schema-applier: VAL-SCHEMA-001 final-schema parity (table counts)", 
     ctx = null;
   });
 
-  it("creates all 90 project tables, 18 central tables, 1 archive table", async () => {
+  it("creates all 91 project tables, 18 central tables, 1 archive table", async () => {
     ctx = await setupFreshDb();
     // FNXC:PostgresCutover 2026-07-05-15:55: apply the BASELINE only.
     // applySchemaBaseline now runs the plugin schema-init hooks by default,
@@ -534,9 +535,10 @@ pgDescribe("schema-applier: VAL-SCHEMA-001 final-schema parity (table counts)", 
     `)) as unknown as Array<{ table_schema: string; n: number }>;
     const bySchema = Object.fromEntries(rows.map((r) => [r.table_schema, r.n]));
     // Project: 87 typed core tables + 2 lossless legacy preservation tables
-    // + 1 import_translation_cache (FNXC:GitHubImportTranslate 2026-07-15-09:30).
+    // + 1 import_translation_cache (FNXC:GitHubImportTranslate 2026-07-15-09:30)
+    // + 1 configuration_revisions (FNXC:ConfigVersioning 2026-07-18-14:00).
     // Plugin tables are added separately by the hook.
-    expect(bySchema.project).toBe(90);
+    expect(bySchema.project).toBe(91);
     expect(bySchema.central).toBe(18);
     expect(bySchema.archive).toBe(1);
   });
@@ -1151,6 +1153,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       BULK_COMPLETION_REFUSAL_AT_VERSION,
       IMPORT_TRANSLATION_CACHE_LEGACY_PARTITION_BACKFILL_VERSION,
       TASK_PROPOSAL_CLAIM_VERSION,
+      CONFIGURATION_REVISIONS_VERSION,
     ]);
     expect((await applySchemaBaseline(ctx.db, { pluginHooks: [] })).applied).toBe(false);
   });
@@ -1197,6 +1200,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       BULK_COMPLETION_REFUSAL_AT_VERSION,
       IMPORT_TRANSLATION_CACHE_LEGACY_PARTITION_BACKFILL_VERSION,
       TASK_PROPOSAL_CLAIM_VERSION,
+      CONFIGURATION_REVISIONS_VERSION,
     ]);
   });
 
@@ -1332,6 +1336,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       BULK_COMPLETION_REFUSAL_AT_VERSION,
       IMPORT_TRANSLATION_CACHE_LEGACY_PARTITION_BACKFILL_VERSION,
       TASK_PROPOSAL_CLAIM_VERSION,
+      CONFIGURATION_REVISIONS_VERSION,
     ]);
   });
 
@@ -1392,6 +1397,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       BULK_COMPLETION_REFUSAL_AT_VERSION,
       IMPORT_TRANSLATION_CACHE_LEGACY_PARTITION_BACKFILL_VERSION,
       TASK_PROPOSAL_CLAIM_VERSION,
+      CONFIGURATION_REVISIONS_VERSION,
     ]);
   });
 
@@ -1452,6 +1458,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       BULK_COMPLETION_REFUSAL_AT_VERSION,
       IMPORT_TRANSLATION_CACHE_LEGACY_PARTITION_BACKFILL_VERSION,
       TASK_PROPOSAL_CLAIM_VERSION,
+      CONFIGURATION_REVISIONS_VERSION,
     ]);
   });
 });
@@ -1490,7 +1497,7 @@ pgDescribe("schema-applier: VAL-SCHEMA-006 AUTOINCREMENT → identity with seque
         "incidents",
       ]),
     );
-    expect(rows.length).toBe(8);
+    expect(rows.length).toBe(9);
   });
 
   it("sequence continuity: consecutive inserts produce increasing IDs without collision", async () => {

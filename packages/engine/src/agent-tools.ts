@@ -2864,7 +2864,7 @@ export function createWorkflowSettingsTool(store: TaskStore): ToolDefinition {
       "DECLARATIONS are not — declarations are authored in the workflow IR's `settings` array via " +
       "fn_workflow_create/update. An invalid value returns the typed rejection list and persists nothing.",
     parameters: workflowSettingsParams,
-    execute: async (_id: string, params: Static<typeof workflowSettingsParams>) => {
+    execute: async (_id: string, params: Static<typeof workflowSettingsParams>, _signal, _onUpdate, context) => {
       const workflowId = params.workflow_id?.trim();
       if (!workflowId) {
         return {
@@ -2920,7 +2920,10 @@ export function createWorkflowSettingsTool(store: TaskStore): ToolDefinition {
         };
       }
       try {
-        const next = await store.updateWorkflowSettingValues(workflowId, projectId, values);
+        /* FNXC:ConfigVersioning 2026-07-18-00:00: preserve the acting agent identity in workflow-value history. */
+        const agentContext = context as unknown as { agentId?: unknown } | undefined;
+        const agentId = typeof agentContext?.agentId === "string" ? agentContext.agentId : undefined;
+        const next = await store.updateWorkflowSettingValues(workflowId, projectId, values, agentId ? { kind: "agent", id: agentId } : { kind: "system", id: "system" });
         const effective = await resolveEffectiveSettingsById(store, workflowId, projectId);
         const declarations = await resolveWorkflowSettingDeclarationsForTool(store, workflowId);
         const orphaned = findOrphanedSettingValues(declarations, next);

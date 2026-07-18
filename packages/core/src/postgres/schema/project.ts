@@ -878,6 +878,33 @@ export const workflowPromptOverrides = projectSchema.table("workflow_prompt_over
   index("idx_workflow_prompt_overrides_project").on(t.projectId),
 ]);
 
+/*
+FNXC:ConfigVersioning 2026-07-18-00:00:
+Configuration history is project-partitioned even for central/global settings:
+the reserved owner identity prevents a write initiated by one project from being
+misattributed to that incidental project's history.
+*/
+export const configurationRevisions = projectSchema.table("configuration_revisions", {
+  projectId: text("project_id").notNull(),
+  id: text("id").notNull(),
+  /* FNXC:ConfigVersioning 2026-07-18-14:00: a database-assigned sequence breaks same-millisecond timestamp ties so newest-first history remains chronological. */
+  sequence: bigint("sequence", { mode: "number" }).generatedAlwaysAsIdentity().notNull(),
+  ownerScope: text("owner_scope").notNull(),
+  configKind: text("config_kind").notNull(),
+  configTarget: jsonb("config_target").notNull(),
+  configTargetKey: text("config_target_key").notNull(),
+  before: jsonb("before"),
+  after: jsonb("after"),
+  diffs: jsonb("diffs").notNull().default([]),
+  changedBy: jsonb("changed_by").notNull(),
+  source: text("source").notNull(),
+  rollbackToRevisionId: text("rollback_to_revision_id"),
+  createdAt: text("created_at").notNull(),
+}, (t) => [
+  primaryKey({ columns: [t.projectId, t.id] }),
+  index("idx_configuration_revisions_target_newest").on(t.projectId, t.configKind, t.configTargetKey, t.createdAt, t.sequence),
+]);
+
 // ── Task documents + revisions ───────────────────────────────────────
 export const taskDocuments = projectSchema.table("task_documents", {
   projectId: text("project_id").notNull().default(sql`current_setting('fusion.project_id', true)`),

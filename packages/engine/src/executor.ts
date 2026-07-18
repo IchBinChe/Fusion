@@ -134,7 +134,7 @@ import { deriveRepoScopeSubset, normalizeRepoRelPath } from "./workspace-paths.j
 import { RemovalReason, classifyTaskWorktree, describeRegisteredWorktrees, detectGitRepository, detectNestedWorktreeRoot, getRegisteredWorktreePaths, isInsideWorktreesDir, isRegisteredGitWorktree, removeWorktree, type GitRepoDetection, type WorktreePool } from "./worktree-pool.js";
 import { attemptBranchAutocorrect } from "./branch-autocorrect.js";
 import { ActiveSessionWorktreeRemovalError } from "./worktree-backend.js";
-import {canonicalizeWorktreePath, registerArchiveWorkspaceWorktreeDisposer, registerArchiveWorktreeDisposer} from "@fusion/core";
+import {canonicalizeWorktreePath, registerArchiveWorkspaceWorktreeDisposer, registerArchiveWorktreeDisposer, registerTaskMoveDisposer} from "@fusion/core";
 import {
   activeSessionRegistry,
   executingTaskLock,
@@ -1749,6 +1749,7 @@ export class TaskExecutor {
    *  this so a fast re-dispatch (task:moved → in-progress) awaits the prior
    *  session being fully reaped before creating/acquiring a new worktree. */
   private pendingTaskDisposals = new Map<string, Promise<void>>();
+  private unregisterTaskMoveDisposer: (() => void) | undefined;
   private unregisterArchiveWorktreeDisposer: (() => void) | undefined;
   private unregisterArchiveWorkspaceWorktreeDisposer: (() => void) | undefined;
   /** Active agent sessions per task, used to terminate on pause and inject steering. */
@@ -3026,6 +3027,16 @@ export class TaskExecutor {
     private options: TaskExecutorOptions = {},
   ) {
     executorLog.log(`TaskExecutor constructed (rootDir=${rootDir}, hasSemaphore=${!!options.semaphore}, hasStuckDetector=${!!options.stuckTaskDetector})`);
+    this.unregisterTaskMoveDisposer = registerTaskMoveDisposer(store, async (task) => {
+      // Start both paths without awaiting between them. Each synchronously
+      // detaches its current targets before its first await, fencing late
+      // cleanup from a replacement execution after the move timeout expires.
+      const children = this.terminateAllChildren(task.id);
+      const activeWork = this.awaitAbortInFlightTaskWork(task.id, "user moved task from in-progress to todo", {
+        userCanceled: true,
+      });
+      await Promise.all([children, activeWork]);
+    });
     /* FNXC:WorkflowLifecycle 2026-07-16-10:00: Executor replaces the baseline only for its own TaskStore, so archive awaits abort/sweep/removal before branch deletion without cross-store coupling. */
     this.unregisterArchiveWorktreeDisposer = registerArchiveWorktreeDisposer(store, async (task) => {
       if (!task.worktree || await canonicalizeWorktreePath(task.worktree) === await canonicalizeWorktreePath(this.rootDir)) return;
@@ -18500,8 +18511,10 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
     }
   }
 
-  /** Remove only this executor's store-scoped archive disposer registration. */
-  disposeArchiveWorktreeDisposer(): void {
+  /** Remove only this executor's store-scoped lifecycle disposer registrations. */
+  disposeStoreLifecycleDisposers(): void {
+    this.unregisterTaskMoveDisposer?.();
+    this.unregisterTaskMoveDisposer = undefined;
     this.unregisterArchiveWorktreeDisposer?.();
     this.unregisterArchiveWorktreeDisposer = undefined;
     this.unregisterArchiveWorkspaceWorktreeDisposer?.();
@@ -19444,11 +19457,11 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
     if (!childIds || childIds.size === 0) return;
 
     executorLog.log(`Terminating ${childIds.size} child agents for parent ${parentTaskId}`);
-
-    for (const childId of childIds) {
-      await this.terminateChildAgent(childId);
-    }
+    // Detach the parent generation before any agent-store await. A replacement
+    // execution may register a new set for the same task ID while cleanup is
+    // still settling; the old generation must never delete that new set.
     this.spawnedAgents.delete(parentTaskId);
+    await Promise.all([...childIds].map((childId) => this.terminateChildAgent(childId)));
   }
 
   /**

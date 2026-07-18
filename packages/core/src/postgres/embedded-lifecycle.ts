@@ -927,16 +927,18 @@ const runningInstances = new Map<string, { port: number; database: string }>();
  * Read the port from a postmaster.pid file. The standard PostgreSQL format is:
  *   Line 1 (index 0): PID
  *   Line 2 (index 1): Data directory path
- *   Line 3 (index 2): Unix socket directory
- *   Line 4 (index 3): Listen address (e.g. localhost or *)
- *   Line 5 (index 4): Port number
- *   Line 6 (index 5): Shared memory key
- *   Line 7 (index 6): Postmaster start timestamp
+ *   Line 3 (index 2): Postmaster start timestamp
+ *   Line 4 (index 3): Port number
+ *   Line 5 (index 4): Unix socket directory
+ *   Line 6 (index 5): Listen address (e.g. localhost or *)
+ *   Line 7 (index 6): Shared memory key and id
+ *   Line 8 (index 7): Status
  *
  * FNXC:PostgresCutover 2026-06-27-14:30 (fix code-review P1):
- * Previously read line 3 (index 2, the socket dir) which is never a port
- * number, so singleton detection via postmaster.pid ALWAYS failed. Fixed to
- * read line 5 (index 4, the TCP port).
+ * The earlier correction still encoded the wrong field order and read line 5
+ * (the socket directory). Read PostgreSQL's actual line 4 port field so a
+ * second Fusion process joins the running postmaster instead of attempting a
+ * colliding start that can wedge extension TaskStore boot.
  *
  * Returns null if the file cannot be read or parsed.
  */
@@ -944,8 +946,8 @@ export function readPortFromPostmasterPid(dataDir: string): number | null {
   try {
     const content = readFileSync(join(dataDir, "postmaster.pid"), "utf-8");
     const lines = content.split("\n");
-    // Line 5 (index 4) is the TCP port in standard PostgreSQL postmaster.pid
-    const portStr = lines[4]?.trim();
+    // Line 4 (index 3) is the TCP port in standard PostgreSQL postmaster.pid.
+    const portStr = lines[3]?.trim();
     if (portStr) {
       const port = parseInt(portStr, 10);
       if (!isNaN(port) && port > 0) return port;

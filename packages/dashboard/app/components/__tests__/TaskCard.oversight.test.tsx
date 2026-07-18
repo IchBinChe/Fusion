@@ -430,6 +430,55 @@ describe("TaskCard selected-workflow oversight identity (FN-8251)", () => {
     });
   });
 
+  it.each(["in-progress", "in-review"] as const)("suppresses inherited-default autonomous stale eyes before and after selected-workflow resolution in %s (FN-8255)", async (column) => {
+    vi.mocked(fetchWorkflowSettingValues).mockResolvedValueOnce({
+      stored: {},
+      effective: { plannerOversightLevel: "autonomous" },
+      orphaned: [],
+    });
+
+    renderCard(staleSnapshot(column), { planningWorkflowId: `selected-inherited-default-${column}`, projectId: "project-8255" });
+
+    // The selected workflow's declaration default is not a meaningful oversight
+    // configuration, so a stale runtime snapshot cannot create an eye or shell.
+    expect(screen.queryByTestId("planner-overseer-state-badge")).toBeNull();
+    expect(screen.queryByTestId("card-header-badges")).toBeNull();
+    await waitFor(() => {
+      expect(fetchWorkflowSettingValues).toHaveBeenCalledWith(`selected-inherited-default-${column}`, "project-8255");
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("planner-overseer-state-badge")).toBeNull();
+      expect(screen.queryByTestId("card-header-badges")).toBeNull();
+    });
+  });
+
+  /*
+   * FNXC:PlannerOversight 2026-07-18-01:32:
+   * FN-8255 requires every TaskCard provider to suppress a stale Eye for an
+   * autonomous workflow declaration default without a task override. The
+   * aggregate workflow-badge path must match selected-workflow board behavior
+   * and leave no eye element with a title or aria-label behind.
+   */
+  it("suppresses the inherited-default autonomous stale eye for the aggregate workflow-badge provider (FN-8255)", async () => {
+    vi.mocked(fetchWorkflowSettingValues).mockResolvedValueOnce({
+      stored: {},
+      effective: { plannerOversightLevel: "autonomous" },
+      orphaned: [],
+    });
+    const { container } = renderCard(staleSnapshot("in-progress"), {
+      workflowBadge: { workflowId: "aggregate-inherited-default", workflowName: "All workflows" },
+    });
+
+    expect(screen.queryByTestId("planner-overseer-state-badge")).toBeNull();
+    expect(screen.queryByTestId("card-header-badges")).toBeNull();
+    await waitFor(() => {
+      expect(fetchWorkflowSettingValues).toHaveBeenCalledWith("aggregate-inherited-default", undefined);
+    });
+    expect(screen.queryByTestId("planner-overseer-state-badge")).toBeNull();
+    expect(screen.queryByTestId("card-header-badges")).toBeNull();
+    expect(container.querySelector(".card-planner-overseer-state[title][aria-label]")).toBeNull();
+  });
+
   it.each([
     ["rejected", () => vi.mocked(fetchWorkflowSettingValues).mockRejectedValueOnce(new Error("unavailable"))],
     ["missing", () => vi.mocked(fetchWorkflowSettingValues).mockResolvedValueOnce({ stored: {}, effective: {}, orphaned: [] })],
@@ -461,13 +510,20 @@ describe("TaskCard selected-workflow oversight identity (FN-8251)", () => {
     expect(screen.getByTestId("planner-overseer-state-badge")).toBeTruthy();
   });
 
+  it("keeps an explicit per-task autonomous override authoritative for the stale eye", () => {
+    renderCard({ ...staleSnapshot("in-progress"), plannerOversightLevel: "autonomous" });
+
+    expect(screen.getByTestId("planner-overseer-state-badge")).toBeTruthy();
+  });
+
   it.each([
-    ["aggregate", { workflowBadge: { workflowId: "aggregate-active", workflowName: "Aggregate active" } }],
-    ["selected workflow", { planningWorkflowId: "selected-active" }],
-  ])("renders the eye only after positively resolved active oversight for %s cards", async (_surface, props) => {
+    ["aggregate observe", "observe", { workflowBadge: { workflowId: "aggregate-observe", workflowName: "Aggregate observe" } }],
+    ["aggregate steer", "steer", { workflowBadge: { workflowId: "aggregate-steer", workflowName: "Aggregate steer" } }],
+    ["selected workflow steer", "steer", { planningWorkflowId: "selected-steer" }],
+  ] as const)("renders the eye only after positively resolved active %s oversight", async (_surface, level, props) => {
     vi.mocked(fetchWorkflowSettingValues).mockResolvedValueOnce({
-      stored: { plannerOversightLevel: "steer" },
-      effective: { plannerOversightLevel: "steer" },
+      stored: { plannerOversightLevel: level },
+      effective: { plannerOversightLevel: level },
       orphaned: [],
     });
     renderCard(staleSnapshot("in-progress"), props);
@@ -513,18 +569,20 @@ describe("TaskCard selected-workflow oversight identity (FN-8251)", () => {
     expect(screen.queryByTestId("planner-overseer-state-badge")).toBeNull();
   });
 
-  it("keeps selected-workflow suppression at the 375px mobile viewport", async () => {
+  it("keeps selected-workflow inherited-default suppression at the 375px mobile viewport", async () => {
     Object.defineProperty(window, "innerWidth", { value: 375, configurable: true });
     vi.mocked(fetchWorkflowSettingValues).mockResolvedValueOnce({
-      stored: { plannerOversightLevel: "off" },
-      effective: { plannerOversightLevel: "off" },
+      stored: {},
+      effective: { plannerOversightLevel: "autonomous" },
       orphaned: [],
     });
-    renderCard(staleSnapshot("in-review"), { planningWorkflowId: "mobile-off" });
+    const { container } = renderCard(staleSnapshot("in-review"), { planningWorkflowId: "mobile-inherited-default" });
 
-    await waitFor(() => expect(fetchWorkflowSettingValues).toHaveBeenCalledWith("mobile-off", undefined));
+    expect(screen.queryByTestId("planner-overseer-state-badge")).toBeNull();
+    await waitFor(() => expect(fetchWorkflowSettingValues).toHaveBeenCalledWith("mobile-inherited-default", undefined));
     expect(screen.queryByTestId("planner-overseer-state-badge")).toBeNull();
     expect(screen.queryByTestId("card-header-badges")).toBeNull();
+    expect(container.querySelector(".card-planner-overseer-state[title][aria-label]")).toBeNull();
   });
 });
 

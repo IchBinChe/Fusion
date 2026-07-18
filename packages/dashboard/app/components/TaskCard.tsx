@@ -1702,20 +1702,21 @@ function TaskCardComponent({
     !isInheritedDefaultOversightLevel;
 
   /*
-   * FNXC:PlannerOversight 2026-07-18-00:00:
-   * FN-8239 requires the transient Eye badge and its header-wrapper gate to
-   * share the freshly-resolved effective level used by the level badge and
-   * Task Detail trigger. An inherited task with an unresolved workflow tier
-   * must wait for that fetch; a stale non-off snapshot must not guess a level,
-   * show an icon, or leave an empty header-badge shell in that window.
+   * FNXC:PlannerOversight 2026-07-18-01:30:
+   * FN-8255 requires the transient Eye badge and its header-wrapper gate to
+   * reuse the same meaningfully-configured gate as the level badge. A workflow
+   * declaration-default autonomous tier with no explicit task override is not
+   * active card oversight, so a stale non-idle snapshot must not show an icon
+   * or leave an empty header-badge shell; `showOversightBadge` preserves the
+   * FN-7539 inherited-default suppression and the FN-8239/FN-8251 fail-closed
+   * resolution guards.
    */
   const plannerOverseerState = task.plannerOverseerState;
   const showPlannerOverseerStateBadge = Boolean(
-    plannerOverseerState
+    showOversightBadge
+    && plannerOverseerState
     && plannerOverseerState.state !== "idle"
-    && plannerOverseerState.oversightLevel !== "off"
-    && (hasTaskOversightOverride || workflowOversightResolved)
-    && effectiveOversightLevel !== "off",
+    && plannerOverseerState.oversightLevel !== "off",
   );
 
   /*

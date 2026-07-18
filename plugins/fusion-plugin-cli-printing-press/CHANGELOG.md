@@ -1,5 +1,13 @@
 # @fusion-plugin-examples/cli-printing-press
 
+## 0.1.43
+
+### Patch Changes
+
+- Updated dependencies [be55d0a]
+  - @fusion/core@0.61.0
+  - @fusion/plugin-sdk@0.61.0
+
 ## 0.1.42
 
 ### Patch Changes

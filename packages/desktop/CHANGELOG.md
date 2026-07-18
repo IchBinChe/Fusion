@@ -1,5 +1,14 @@
 # @fusion/desktop
 
+## 0.70.0
+
+### Patch Changes
+
+- Updated dependencies [be55d0a]
+  - @fusion/core@0.61.0
+  - @fusion/dashboard@0.61.0
+  - @fusion/engine@0.61.0
+
 ## 0.60.0
 
 ### Patch Changes

@@ -2440,6 +2440,8 @@ export interface BackupSettingsMigrationConflict {
 }
 
 export interface GlobalSettings {
+  /** Maximum PostgreSQL server connections for Fusion's embedded database. Applied on the next Fusion restart. */
+  embeddedPostgresMaxConnections?: number;
   /** Theme mode preference: dark, light, or system (follows OS). Default: "dark". */
   themeMode?: ThemeMode;
   /** Color theme preference for accent colors and styling. Default: "shadcn-ember"; "default" and "ocean" remain valid explicit legacy selections. */

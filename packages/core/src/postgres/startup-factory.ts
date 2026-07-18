@@ -308,7 +308,7 @@ async function isEmptyNonUtf8Cluster(db: PostgresJsDatabase<Record<string, never
 }
 
 async function bootSchemaBackend(
-  options: Pick<CreateTaskStoreForBackendOptions, "env" | "backend" | "embeddedPgRequested" | "embeddedDataDir" | "poolMax">,
+  options: Pick<CreateTaskStoreForBackendOptions, "env" | "backend" | "embeddedPgRequested" | "embeddedDataDir" | "poolMax" | "globalSettingsDir">,
   bypassProjectIsolation = false,
 ): Promise<SchemaBackendBootResult> {
   try {
@@ -326,7 +326,7 @@ async function bootSchemaBackend(
 }
 
 async function bootSchemaBackendOnce(
-  options: Pick<CreateTaskStoreForBackendOptions, "env" | "backend" | "embeddedPgRequested" | "embeddedDataDir" | "poolMax">,
+  options: Pick<CreateTaskStoreForBackendOptions, "env" | "backend" | "embeddedPgRequested" | "embeddedDataDir" | "poolMax" | "globalSettingsDir">,
   bypassProjectIsolation = false,
 ): Promise<SchemaBackendBootResult> {
   const env = options.env ?? process.env;
@@ -347,12 +347,23 @@ async function bootSchemaBackendOnce(
   if (backend.mode === "embedded") {
     const { EmbeddedPostgresLifecycle, defaultEmbeddedDataDir, DEFAULT_EMBEDDED_DATABASE } =
       await import("./embedded-lifecycle.js");
+    const { GlobalSettingsStore } = await import("../global-settings.js");
+    // Tests that boot an embedded backend intentionally do not have an
+    // operator global-settings directory. Production always reads the shared
+    // global preference before it starts the server.
+    const configuredMaxConnections = process.env.VITEST === "true" && !options.globalSettingsDir
+      ? undefined
+      : (await new GlobalSettingsStore(options.globalSettingsDir).getSettings()).embeddedPostgresMaxConnections;
+    const maxConnections = Number.isInteger(configuredMaxConnections)
+      ? Math.min(2_000, Math.max(32, configuredMaxConnections!))
+      : 500;
     const dataDir = resolve(options.embeddedDataDir ?? defaultEmbeddedDataDir());
     embeddedDataDir = dataDir;
     log.log(`startup-factory: starting embedded PostgreSQL (data dir ${dataDir})`);
     embeddedLifecycle = new EmbeddedPostgresLifecycle({
       dataDir,
       database: DEFAULT_EMBEDDED_DATABASE,
+      postgresFlags: ["-c", `max_connections=${maxConnections}`],
       onLog: (message) => log.log(message),
       onError: (error) => log.error(String(error)),
     });

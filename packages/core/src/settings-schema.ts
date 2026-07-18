@@ -72,6 +72,10 @@ type ProjectSettingsSchema = Omit<ProjectSettings, MovedProjectSettingsKey | Non
 
 /** Default values for global (user-level) settings. */
 export const DEFAULT_GLOBAL_SETTINGS = {
+  // Embedded PostgreSQL is shared by all local Fusion projects and processes.
+  // Keep this well above the conservative external-pool budget while still
+  // bounded for a local machine.
+  embeddedPostgresMaxConnections: 500,
   /*
   FNXC:DashboardTheming 2026-07-03-00:00:
   Fresh installs must follow the operating system theme until the user explicitly chooses Light, Dark, or System. Keep this global default aligned with dashboard and desktop pre-hydration fallbacks.

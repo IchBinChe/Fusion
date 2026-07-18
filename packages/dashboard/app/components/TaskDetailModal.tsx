@@ -813,14 +813,28 @@ export function TaskDetailContent({
    */
   const openUndoTask = findOpenUndoTaskForSource(tasks, workingTask.id);
 
-  // Sync activeTab when the caller changes initialTab (e.g. opening a different tab)
+  const previousInitialTabRef = useRef<TabId | undefined>(initialTab);
+  const taskColumnRef = useRef(task.column);
+  const taskDetailChatFirstRef = useRef(taskDetailChatFirst);
+  taskColumnRef.current = task.column;
+  taskDetailChatFirstRef.current = taskDetailChatFirst;
+
+  /*
+  FNXC:TaskDetailTabPersistence 2026-07-17-17:46:
+  FN-8256 / issue #2282 requires live column updates to preserve the modal's selected
+  tab, Activity segment, and retry expansion. This sync exists only for caller-driven
+  `initialTab` changes; dedicated guards below own column-invalidated PR and Summary tabs.
+  */
   useEffect(() => {
-    setActiveTab(resolveDefaultTab(initialTab, task.column, taskDetailChatFirst));
+    if (initialTab === previousInitialTabRef.current) return;
+
+    previousInitialTabRef.current = initialTab;
+    setActiveTab(resolveDefaultTab(initialTab, taskColumnRef.current, taskDetailChatFirstRef.current));
     setActivitySegment(resolveDefaultActivitySegment(initialTab));
     if (initialTab === "retries") {
       setRetriesExpanded(true);
     }
-  }, [initialTab, task.column, taskDetailChatFirst]);
+  }, [initialTab]);
 
   useEffect(() => {
     if (activeTab === "pr" && task.column !== "in-review") {

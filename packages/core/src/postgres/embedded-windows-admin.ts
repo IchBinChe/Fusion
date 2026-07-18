@@ -343,6 +343,41 @@ function resolvePowerShell(): string {
 }
 
 /**
+ * Content of the parametrized launcher .ps1 that boots the wrapper bat under
+ * the non-admin credential. Exported for tests (win32-only at runtime).
+ *
+ * FNXC:WindowsDesktopPackaging 2026-07-17-21:20:
+ * Start-Process -Credential goes through CreateProcessWithLogonW, which
+ * validates the working directory AS THE TARGET USER. Without an explicit
+ * -WorkingDirectory it inherits the launching process's cwd — for the desktop
+ * app that is under the admin user's profile (or the install dir), which
+ * 'fusion-pg' cannot read, and Windows fails the launch with "The directory
+ * name is invalid" (GitHub issue with desktop boot on end-user boxes; CI
+ * runners masked it because their cwd was world-traversable). Pass the
+ * .pgrunner run dir explicitly: it lives inside the data dir the user was just
+ * granted (OI)(CI)F on, so it is always accessible to the credential.
+ */
+export function buildNonAdminLauncherPs1(): string {
+  return [
+    "param([string]$User,[string]$Password,[string]$DomainUser,[string]$Bat,[string]$RunDir)",
+    "$ErrorActionPreference='Stop'",
+    // FNXC:WindowsDesktopPackaging 2026-07-14-22:15:
+    // Build the SecureString char-by-char instead of ConvertTo-SecureString,
+    // which lives in Microsoft.PowerShell.Security — a module that fails to
+    // load under Windows PowerShell 5.1 Constrained Language Mode. System.
+    // Security.SecureString + PSCredential are core SMA/.NET types available
+    // without that module.
+    "$s = New-Object System.Security.SecureString",
+    "foreach ($ch in $Password.ToCharArray()) { [void]$s.AppendChar($ch) }",
+    "$s.MakeReadOnly()",
+    "$c = New-Object System.Management.Automation.PSCredential($DomainUser,$s)",
+    "$p = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c',$Bat -Credential $c -WorkingDirectory $RunDir -WindowStyle Hidden -PassThru",
+    "Write-Output $p.Id",
+    "",
+  ].join("\r\n");
+}
+
+/**
  * Start postgres.exe under the dedicated non-admin user and resolve once it is
  * accepting connections. Rejects with a clear error (including the postgres log
  * tail) on timeout or early exit. The returned handle's stop() kills the server.
@@ -412,27 +447,7 @@ export async function startServerAsNonAdminUser(
   // password contains ! and #; passing each as a discrete argv token via -File
   // params is robust across Node's Windows arg escaping and PowerShell parsing.
   const launcherPs1 = join(runDir, "launch.ps1");
-  writeFileSync(
-    launcherPs1,
-    [
-      "param([string]$User,[string]$Password,[string]$DomainUser,[string]$Bat)",
-      "$ErrorActionPreference='Stop'",
-      // FNXC:WindowsDesktopPackaging 2026-07-14-22:15:
-      // Build the SecureString char-by-char instead of ConvertTo-SecureString,
-      // which lives in Microsoft.PowerShell.Security — a module that fails to
-      // load under Windows PowerShell 5.1 Constrained Language Mode. System.
-      // Security.SecureString + PSCredential are core SMA/.NET types available
-      // without that module.
-      "$s = New-Object System.Security.SecureString",
-      "foreach ($ch in $Password.ToCharArray()) { [void]$s.AppendChar($ch) }",
-      "$s.MakeReadOnly()",
-      "$c = New-Object System.Management.Automation.PSCredential($DomainUser,$s)",
-      "$p = Start-Process -FilePath 'cmd.exe' -ArgumentList '/c',$Bat -Credential $c -WindowStyle Hidden -PassThru",
-      "Write-Output $p.Id",
-      "",
-    ].join("\r\n"),
-    "utf8",
-  );
+  writeFileSync(launcherPs1, buildNonAdminLauncherPs1(), "utf8");
   const powerShell = resolvePowerShell();
   const launch = spawnSync(
     powerShell,
@@ -450,6 +465,8 @@ export async function startServerAsNonAdminUser(
       domainUser,
       "-Bat",
       bat,
+      "-RunDir",
+      runDir,
     ],
     { encoding: "utf8" },
   );

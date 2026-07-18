@@ -1,6 +1,8 @@
 import * as fsPromises from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 import {
+  invalidateGitBinaryCache,
+  isSpawnGitEnoent,
   resolveGitBinary,
   countRunningAgentTasks,
   ensureMemoryFileWithBackend,
@@ -382,11 +384,28 @@ export const registerProjectRoutes: ApiRouteRegistrar = (ctx) => {
         }
 
         try {
-          await execFileAsync(await resolveGitBinary(), ["clone", cloneSource, normalizedPath], {
-            timeout: 90_000,
-            maxBuffer: 10 * 1024 * 1024,
-            encoding: "utf-8",
-          });
+          /*
+          FNXC:ProjectSetup 2026-07-18-06:00:
+          Review finding: match runGitCommand's ENOENT invalidate-and-retry so
+          a stale cached absolute git path (moved/uninstalled mid-session)
+          re-resolves once instead of failing every clone until restart.
+          */
+          const runClone = (binary: string) =>
+            execFileAsync(binary, ["clone", cloneSource, normalizedPath], {
+              timeout: 90_000,
+              maxBuffer: 10 * 1024 * 1024,
+              encoding: "utf-8",
+            });
+          const cloneGit = await resolveGitBinary();
+          try {
+            await runClone(cloneGit);
+          } catch (firstError) {
+            if (!isSpawnGitEnoent(firstError)) throw firstError;
+            invalidateGitBinaryCache();
+            const retryGit = await resolveGitBinary();
+            if (retryGit === cloneGit) throw firstError;
+            await runClone(retryGit);
+          }
         } catch (cloneError) {
           if (destinationCreatedForClone) {
             try {

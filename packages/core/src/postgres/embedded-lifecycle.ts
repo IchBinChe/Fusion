@@ -1605,6 +1605,23 @@ export class EmbeddedPostgresLifecycle {
    * After stop, the data directory is preserved (persistent), so a subsequent
    * `start()` reuses it.
    */
+  /*
+  FNXC:DesktopClosePolicy 2026-07-18-06:00:
+  Operator chose "leave the embedded PostgreSQL running" at desktop quit.
+  Review finding: skipping only the stop call left this lifecycle's
+  process-level shutdown hook (SIGTERM/SIGINT/beforeExit -> stop()) armed, so
+  Electron teardown killed the postmaster anyway. Detach = disarm the hook and
+  forget the process WITHOUT stopping it; a later stop() becomes a no-op.
+  */
+  detachWithoutStop(): void {
+    this.uninstallShutdownHook();
+    this.pg = null;
+    this.nonAdminHandle = null;
+    this.running = false;
+    this.ownsProcess = false;
+    runningInstances.delete(this.options.dataDir);
+  }
+
   async stop(): Promise<void> {
     this.uninstallShutdownHook();
 

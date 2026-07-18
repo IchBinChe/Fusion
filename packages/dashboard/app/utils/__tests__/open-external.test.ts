@@ -29,16 +29,24 @@ describe("openExternalUrl", () => {
     expect(windowOpen).not.toHaveBeenCalled();
   });
 
-  it("falls back to window.open when the bridge declines the URL", async () => {
+  /*
+  FNXC:DesktopOAuth 2026-07-18-06:00:
+  Review finding: a window.open fallback from the async continuation runs
+  without user activation and is always popup-blocked — the desktop path must
+  NOT pretend it helps. A declined/failed bridge is logged, never window.open'd.
+  */
+  it("does not window.open from the async continuation when the bridge declines", async () => {
     const openExternal = vi.fn().mockResolvedValue(false);
     w.fusionAPI = { openExternal };
     const windowOpen = vi.spyOn(window, "open").mockReturnValue(null);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
     openExternalUrl("https://example.com/auth");
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(windowOpen).toHaveBeenCalledWith("https://example.com/auth", "_blank");
+    expect(windowOpen).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalled();
   });
 
   it("uses window.open when no desktop bridge exists", () => {

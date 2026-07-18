@@ -183,6 +183,14 @@ export interface BackendBootResult {
    * process if one was started. Best-effort; errors are logged, not thrown.
    */
   shutdown(): Promise<void>;
+  /**
+   * FNXC:DesktopClosePolicy 2026-07-18-06:00:
+   * Close the TaskStore/pools and release the runtime lease but LEAVE an
+   * embedded postmaster running (disarming its process shutdown hook), for the
+   * desktop "leave PostgreSQL running" quit choice. No-op difference from
+   * shutdown() on external backends.
+   */
+  detachKeepingEmbedded(): Promise<void>;
 }
 
 /** PostgreSQL resources used by CentralCore before a project TaskStore exists. */
@@ -1086,6 +1094,26 @@ export async function createTaskStoreForBackend(
           );
         } catch (err) {
           log.warn(`startup-factory: embedded PostgreSQL stop failed during shutdown: ${
+            err instanceof Error ? err.message : String(err)
+          }`);
+        }
+      }
+    },
+  
+    async detachKeepingEmbedded() {
+      try {
+        await taskStore.close();
+      } catch (err) {
+        log.warn(`startup-factory: TaskStore.close() failed during detach: ${
+          err instanceof Error ? err.message : String(err)
+        }`);
+      }
+      if (shutdownEmbedded) {
+        try {
+          (shutdownEmbedded as unknown as { detachWithoutStop?: () => void }).detachWithoutStop?.();
+          if (embeddedRuntimeLease) releaseEmbeddedRuntimeLease(embeddedRuntimeLease);
+        } catch (err) {
+          log.warn(`startup-factory: embedded PostgreSQL detach failed: ${
             err instanceof Error ? err.message : String(err)
           }`);
         }

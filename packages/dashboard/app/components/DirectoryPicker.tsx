@@ -155,6 +155,15 @@ export function DirectoryPicker({ value, onChange, placeholder, onInputKeyDown, 
       if (selectCreatedDirectory) {
         onChange(result.path);
         await fetchEntries(result.path, browser.showHidden);
+        /*
+        FNXC:DirectoryPicker 2026-07-18-06:00:
+        Review finding: if listing the just-created folder fails, the panel
+        silently stays on the PARENT while the input shows the child — and the
+        footer Select would re-commit the parent (the exact bug this feature
+        fixed). Close the panel on that error; the input already holds the
+        correct created path.
+        */
+        setBrowser((prev) => (prev.error ? { ...prev, isOpen: false, error: null } : prev));
       } else {
         // Refresh entries to show the new folder
         await fetchEntries(browser.currentPath, browser.showHidden);

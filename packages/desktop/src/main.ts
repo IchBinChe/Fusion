@@ -137,6 +137,13 @@ false (default) = full stop including the embedded PostgreSQL cluster.
 */
 let keepEmbeddedPostgresOnQuit = false;
 
+/*
+FNXC:DesktopClosePolicy 2026-07-18-06:00:
+Set by Electron's win32 "session-end" event: the OS is logging off or shutting
+down, so the close prompt must be skipped (see close handler).
+*/
+let osSessionEnding = false;
+
 async function resetLaunchModeAndReload(window: BrowserWindow): Promise<void> {
   try {
     const settings = await readShellSettings();
@@ -255,7 +262,17 @@ export function createMainWindow(state?: WindowState, launchTargetUrl?: string):
       event cannot await, and the answer must exist before before-quit tears the
       runtime down.
       */
-      if (localRuntimeManager?.getStatus().state === "running") {
+      /*
+      FNXC:DesktopClosePolicy 2026-07-18-06:00:
+      Review findings: (a) only the EMBEDDED local runtime is ours to stop —
+      an attached external `fn serve` runtime ignores both answers, so never
+      prompt for it; (b) never prompt during OS session end (logoff/shutdown):
+      the sync dialog would block Windows shutdown until the process is
+      force-killed, skipping all teardown. Electron's app "session-end" event
+      flags that case; the default (full stop) then applies.
+      */
+      const runtimeStatus = localRuntimeManager?.getStatus();
+      if (!osSessionEnding && runtimeStatus?.state === "running" && runtimeStatus.source === "embedded-local") {
         const choice = dialog.showMessageBoxSync(window, {
           type: "question",
           title: "Fusion",
@@ -497,6 +514,10 @@ export function run(): void {
     if (process.platform !== "darwin") {
       app.quit();
     }
+  });
+
+  (app as unknown as { on(event: "session-end", listener: () => void): void }).on("session-end", () => {
+    osSessionEnding = true;
   });
 
   app.on("before-quit", () => {

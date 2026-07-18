@@ -151,6 +151,8 @@ export function SetupWizardModal({
   }, [state.agentError]);
 
   const detectWorkspaceRequestId = useRef(0);
+  // FNXC:ProjectSetup 2026-07-18-06:00: same-render double-clicks see stale state.isRegistering; the ref closes that window.
+  const registerInFlightRef = useRef(false);
 
   const handlePathChange = useCallback((path: string) => {
     setState((prev) => {
@@ -213,6 +215,20 @@ export function SetupWizardModal({
 
     if (!trimmedPath || !trimmedName) return;
     if (state.manualMode === "clone" && !trimmedCloneUrl) return;
+    if (registerInFlightRef.current || state.isRegistering) return;
+    registerInFlightRef.current = true;
+
+    /*
+    FNXC:ProjectSetup 2026-07-18-06:00:
+    isRegistering is set BEFORE the async git probe/dialog below (review
+    finding: setting it only after the awaits left a double-click window that
+    fired two concurrent registrations), and cleared on every abort path.
+    */
+    setState((prev) => ({ ...prev, isRegistering: true, error: null }));
+    const abortRegistration = () => {
+      registerInFlightRef.current = false;
+      setState((prev) => ({ ...prev, isRegistering: false }));
+    };
 
     /*
     FNXC:ProjectSetup 2026-07-18-04:30:
@@ -235,8 +251,10 @@ export function SetupWizardModal({
             ),
             confirmLabel: t("setup.gitMissingOpenDownloads", "Open Git downloads"),
             cancelLabel: t("setup.cancel", "Cancel"),
+            alwaysAsk: true,
           });
           if (choice === "primary") openExternalUrl(gitCli.installUrl ?? "https://git-scm.com/downloads");
+          abortRegistration();
           return;
         }
         const choice = await confirmWithChoice({
@@ -248,19 +266,22 @@ export function SetupWizardModal({
           confirmLabel: t("setup.gitMissingCreateAnyway", "Create anyway without Git"),
           tertiaryLabel: t("setup.gitMissingOpenDownloads", "Open Git downloads"),
           cancelLabel: t("setup.cancel", "Cancel"),
+          alwaysAsk: true,
         });
         if (choice === "tertiary") {
           openExternalUrl(gitCli.installUrl ?? "https://git-scm.com/downloads");
+          abortRegistration();
           return;
         }
-        if (choice !== "primary") return;
+        if (choice !== "primary") {
+          abortRegistration();
+          return;
+        }
         skipGitInit = true;
       }
     } catch {
       // Probe failure must not block registration.
     }
-
-    setState((prev) => ({ ...prev, isRegistering: true, error: null }));
 
     try {
       const input: ProjectCreateInput = {
@@ -298,6 +319,8 @@ export function SetupWizardModal({
         isRegistering: false,
         error: err instanceof Error ? err.message : "Failed to register project",
       }));
+    } finally {
+      registerInFlightRef.current = false;
     }
   }, [includeAgentStep, onProjectRegistered, state.manualPath, state.manualName, state.manualCloneUrl, state.manualMode, state.manualIsolationMode, state.manualNodeId, state.workspaceMode, state.manualTaskPrefix, confirmWithChoice, t]);
 

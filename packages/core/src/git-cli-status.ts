@@ -78,8 +78,16 @@ export async function probeGitCliStatus(options: ProbeGitCliStatusOptions = {}):
   const first = await attemptGitVersion("git", timeoutMs);
   if (typeof first === "object") return first.status;
   if (first === "enoent") {
+    /*
+    FNXC:Onboarding 2026-07-18-06:00:
+    Review finding: probing EVERY existing candidate could take (1+N) x
+    timeoutMs on hosts littered with leftover git installs. Keep the probe
+    bounded at two spawns: PATH plus the FIRST existing well-known location
+    (if that one exists but cannot run, git is broken regardless).
+    */
     const candidates = options.fallbackGitPaths ?? wellKnownGitBinaryPaths().filter((p) => existsSync(p));
-    for (const candidate of candidates) {
+    const candidate = candidates[0];
+    if (candidate !== undefined) {
       const attempt = await attemptGitVersion(candidate, timeoutMs);
       if (typeof attempt === "object") return attempt.status;
     }

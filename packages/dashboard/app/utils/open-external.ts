@@ -17,14 +17,22 @@ function desktopShellApi(): DesktopShellApi | undefined {
   return w.fusionAPI ?? w.electronAPI;
 }
 
+/*
+FNXC:DesktopOAuth 2026-07-18-06:00:
+Review finding: the old "fall back to window.open when the IPC declines" ran
+window.open from an async continuation — exactly the activation-less context
+this module exists to avoid, so the fallback was always popup-blocked. On
+desktop the IPC is the ONLY viable opener; a failure is logged instead of
+pretending a blocked fallback helped.
+*/
 /** Open a URL in the user's browser: desktop IPC when available, window.open otherwise. */
 export function openExternalUrl(url: string): void {
   const api = desktopShellApi();
   if (typeof api?.openExternal === "function") {
     void api.openExternal(url).then((opened) => {
-      if (!opened) window.open(url, "_blank");
-    }).catch(() => {
-      window.open(url, "_blank");
+      if (!opened) console.error(`openExternalUrl: desktop shell declined to open ${url}`);
+    }).catch((error: unknown) => {
+      console.error(`openExternalUrl: desktop shell failed to open ${url}`, error);
     });
     return;
   }

@@ -134,6 +134,9 @@ async function createStoreDefault(
   // Attach the backend shutdown so LocalRuntimeManager can invoke it on stop.
   (store as TaskStoreLike & { __backendShutdown?: () => Promise<void> }).__backendShutdown =
     backendBoot.shutdown;
+  // FNXC:DesktopClosePolicy 2026-07-18-06:00: detach variant for the "leave PostgreSQL running" quit answer.
+  (store as TaskStoreLike & { __backendDetach?: () => Promise<void> }).__backendDetach =
+    backendBoot.detachKeepingEmbedded;
   return store;
 }
 
@@ -602,9 +605,21 @@ export class LocalRuntimeManager {
       running for other Fusion processes. Default (false) preserves the full
       teardown for programmatic restarts and every non-prompted path.
       */
-      const backendShutdown = (runtime.store as TaskStoreLike & { __backendShutdown?: () => Promise<void> }).__backendShutdown;
-      if (backendShutdown && !options.keepEmbeddedPostgres) {
-        await backendShutdown().catch(() => undefined);
+      const storeWithBackend = runtime.store as TaskStoreLike & {
+        __backendShutdown?: () => Promise<void>;
+        __backendDetach?: () => Promise<void>;
+      };
+      if (options.keepEmbeddedPostgres && storeWithBackend.__backendDetach) {
+        /*
+        FNXC:DesktopClosePolicy 2026-07-18-06:00:
+        Review finding: skipping the backend shutdown alone left the embedded
+        lifecycle's process shutdown hook armed, so Electron exit stopped the
+        postmaster despite the operator's "leave it running" answer. Detach
+        closes pools and DISARMS that hook without stopping the server.
+        */
+        await storeWithBackend.__backendDetach().catch(() => undefined);
+      } else if (storeWithBackend.__backendShutdown) {
+        await storeWithBackend.__backendShutdown().catch(() => undefined);
       } else {
         runtime.store.close();
       }

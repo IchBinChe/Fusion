@@ -2,15 +2,84 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
-## 0.70.1
+## 0.70.2
 
 ### Highlights
-- Fixed packaged desktop app crashing on first launch due to missing PostgreSQL migrations
-- Fixed PR-mode auto-merge failures in centrally-installed multi-project setups
+- Fixed npm-installed CLI crashing at startup from missing PostgreSQL migrations
+- Plugin registry and llama.cpp extension now ship correctly in published npm installs
+- Fixed child-process isolation mode failing on npm installs
+- Fixed the standalone fn binary failing to boot in embedded-Postgres and DATABASE_URL modes
+- Fixed embedded PostgreSQL refusing to start on Windows
 
 ### Fixed
-- Packaged desktop builds no longer crash on first boot — the PostgreSQL migration files that power Local mode schema setup are now correctly bundled into the app.
-- PR-mode auto-merge no longer fails with a "Could not determine repository" error when running centrally-installed, multi-project deployments; repository resolution now uses the correct per-project context instead of falling back to the wrong working directory.
+- Fixed npm-installed CLI crashing at startup because PostgreSQL migrations were missing from the published package.
+- Shipped the plugin registry manifest and llama.cpp extension in the published npm package, fixing silently missing plugins and a broken llama.cpp integration status.
+- Shipped the child-process runtime worker so isolationMode "child-process" works correctly from npm installs.
+- Fixed the standalone fn binary failing to boot in both embedded-Postgres and DATABASE_URL modes, and added self-contained release binaries.
+- Fixed embedded PostgreSQL failing to start on Windows after a recent shared-memory default change.
+
+## 0.70.1
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- @fusion/core@0.70.1
+- @fusion/engine@0.70.1
+- @fusion/i18n@0.39.27
+- @fusion-plugin-examples/claude-runtime@0.1.2
+- @fusion-plugin-examples/cli-printing-press@0.1.44
+- @fusion-plugin-examples/compound-engineering@0.1.27
+- @fusion-plugin-examples/dependency-graph@0.1.58
+- @fusion-plugin-examples/grok-runtime@0.2.5
+- @fusion-plugin-examples/omp-runtime@0.1.2
+- @fusion-plugin-examples/quality@0.1.2
+- @fusion-plugin-examples/roadmap@0.1.46
+- @fusion-plugin-examples/cursor-runtime@0.1.46
+- @fusion-plugin-examples/droid-runtime@0.1.53
+- @fusion-plugin-examples/hermes-runtime@0.2.77
+- @fusion-plugin-examples/openclaw-runtime@0.2.77
+- @fusion-plugin-examples/paperclip-runtime@0.2.77
+
+### @fusion/desktop
+
+#### Patch Changes
+
+- @fusion/core@0.70.1
+- @fusion/dashboard@0.70.1
+- @fusion/engine@0.70.1
+
+### @fusion/engine
+
+#### Patch Changes
+
+- @fusion/core@0.70.1
+- @fusion/pi-claude-cli@0.70.1
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- @fusion/core@0.70.1
+
+### @runfusion/fusion
+
+#### Patch Changes
+
+- 09e519e: summary: Fix packaged desktop app crashing on first boot because PostgreSQL migrations were missing from the build.
+  category: fix
+  dev: "@fusion/core's bare tsc build never copies src/postgres/migrations/\*.sql into dist; the CLI compensates in packages/cli/tsup.config.ts but the desktop staging did not, so packaged Local mode crashed schema init (ENOENT dist/postgres/migrations/0000_initial.sql) after embedded Postgres started. packages/desktop/scripts/workspace-tools.ts now stages the migrations in buildCore(), re-stages them into the pnpm-deploy closure in stageDesktopDeploy(), and fails the build via verifyCoreMigrationsStaged() if the baseline migration is absent. Fixed in 6e5bb5d3d."
+- 9cafa04: summary: Fix PR-mode auto-merge failing with "Could not determine repository" in centrally-installed multi-project deployments.
+  category: fix
+  dev: processPullRequestMergeTask, createGroupPrCallback, and createPrNodeGithubOps now pass explicit owner/repo (resolved from the per-project cwd / task worktree) into findPrForBranch/createPr/mergePr instead of relying on GitHubClient.resolveRepo's process.cwd() fallback; the engine's buildRespondCallback resolves the review-response run cwd from the task's recorded worktree. Fixes Tchori-Labs/Fusion#4; non-workspace sibling of upstream #1924/FN-7610.
+
+### runfusion.ai
+
+#### Patch Changes
+
+- Updated dependencies [09e519e]
+- Updated dependencies [9cafa04]
+  - @runfusion/fusion@0.70.1
 
 ## 0.70.0
 

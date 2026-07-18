@@ -1,5 +1,12 @@
 # @fusion-plugin-examples/roadmap
 
+## 0.1.47
+
+### Patch Changes
+
+- @fusion/core@0.70.2
+- @fusion/plugin-sdk@0.70.2
+
 ## 0.1.46
 
 ### Patch Changes

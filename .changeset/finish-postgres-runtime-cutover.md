@@ -1,5 +1,5 @@
 ---
-"@runfusion/fusion": major
+"@runfusion/fusion": minor
 ---
 
 summary: Require PostgreSQL storage and complete runtime parity across projects, archives, missions, plugins, and maintenance.

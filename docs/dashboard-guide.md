@@ -2075,7 +2075,7 @@ If the endpoint is unavailable on the running dashboard build, the response will
 
 ### Planner clarification notifications
 
-In **Settings → Notifications**, enable **Agent clarification** to let Planning Mode pause when the planner needs an answer. The Planning Mode advanced settings include a per-session override, initialized from that global preference. With clarification disabled, proactive questions are redirected to a final plan summary instead of holding the session; the final summary deepening checkpoint is unchanged.
+Planning Mode always asks and waits for at least one clarifying question before producing a plan. The advanced **follow-up clarification questions** setting is a per-session override initialized from the global preference: when disabled, Planning Mode still asks one mandatory question, then requests a final summary after the answer; when enabled, it may ask further proactive questions. The final summary deepening checkpoint is unchanged.
 
 When enabled, a proactive question holds the planner at `awaiting_input`, sends the configured `planning-awaiting-input` ntfy event, and delivers a dashboard mailbox message that links the operator back to planner chat. Mailbox delivery does not depend on ntfy configuration and is deduplicated by session/question across restarts.
 

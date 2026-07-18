@@ -478,7 +478,7 @@ describe("PlanningModeModal", () => {
         expect(mockStartPlanningStreaming).toHaveBeenCalledWith("Build auth system", undefined, undefined, {
           planningDepth: "medium",
           customQuestionCount: undefined,
-          clarificationEnabled: false,
+          clarificationEnabled: true,
         }, undefined);
       });
 
@@ -2253,7 +2253,7 @@ describe("PlanningModeModal", () => {
           "Plan that needs a specific model",
           undefined,
           { planningModelProvider: "anthropic", planningModelId: "claude-sonnet-4-5", thinkingLevel: undefined },
-          { planningDepth: "medium", customQuestionCount: undefined, clarificationEnabled: false },
+          { planningDepth: "medium", customQuestionCount: undefined, clarificationEnabled: true },
           "session-draft-with-model",
         );
       });

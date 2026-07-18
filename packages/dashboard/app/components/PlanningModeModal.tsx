@@ -438,7 +438,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const [planningThinkingLevel, setPlanningThinkingLevel] = useState<ThinkingLevel | "">("");
   const [planningDepth, setPlanningDepth] = useState<"small" | "medium" | "large">("medium");
   const [customQuestionCount, setCustomQuestionCount] = useState("");
-  const [clarificationEnabled, setClarificationEnabled] = useState(false);
+  const [clarificationEnabled, setClarificationEnabled] = useState(true);
   const [clarificationSettingsLoading, setClarificationSettingsLoading] = useState(true);
   const [loadedModels, setLoadedModels] = useState<ModelInfo[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
@@ -1171,9 +1171,9 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     let active = true;
     setClarificationSettingsLoading(true);
     void fetchGlobalSettings()
-      .then((settings) => { if (active) setClarificationEnabled(settings.agentClarificationEnabled === true); })
-      // Safe fallback keeps automatic/manual starts from unexpectedly pausing.
-      .catch(() => { if (active) setClarificationEnabled(false); })
+      .then((settings) => { if (active) setClarificationEnabled(settings.agentClarificationEnabled !== false); })
+      // A missing settings response keeps the default full interview; disabled only limits follow-ups.
+      .catch(() => { if (active) setClarificationEnabled(true); })
       .finally(() => { if (active) setClarificationSettingsLoading(false); });
     return () => { active = false; };
   }, [isOpen]);
@@ -2400,7 +2400,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
                     <div className="planning-advanced-section planning-depth-selector">
                       <label className="checkbox-label" htmlFor="planning-clarification-enabled">
                         <input id="planning-clarification-enabled" type="checkbox" checked={clarificationEnabled} disabled={clarificationSettingsLoading} onChange={(event) => setClarificationEnabled(event.target.checked)} />
-                        {t("planning.agentClarification", " Allow agent clarification questions")}
+                        {t("planning.agentClarification", " Allow follow-up clarification questions")}
                       </label>
                       <p className="planning-advanced-blurb">
                         {t("planning.depthBlurb", "Plan size sets default interview depth. Questions lets you override with an exact count.")}

@@ -2191,6 +2191,23 @@ export type {
   ExportResult,
 } from "./agent-companies-exporter.js";
 
+// ── Organization portability ──────────────────────────────
+export {
+  ORG_BUNDLE_VERSION,
+  assembleOrgBundle,
+  materializeOrgBundle,
+  scrubOrgBundleSecrets,
+} from "./org-bundle.js";
+export type {
+  OrgBundle,
+  OrgBundleAgent,
+  OrgBundleSkill,
+  OrgBundleRoutine,
+  OrgBundleStores,
+  OrgBundleMaterializeOptions,
+  OrgBundleMaterializeResult,
+} from "./org-bundle.js";
+
 // ── Chat System ───────────────────────────────────────────
 
 export type {

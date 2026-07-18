@@ -20,6 +20,7 @@
  */
 
 import { readFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { PostgresJsDatabase } from "drizzle-orm/postgres-js";
@@ -107,94 +108,107 @@ export const BULK_COMPLETION_REFUSAL_AT_VERSION = "0018";
 export const MIGRATION_BOOKKEEPING_TABLE = "fusion_schema_migrations";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASELINE_MIGRATION_PATH = join(__dirname, "migrations", "0000_initial.sql");
+
+/*
+FNXC:StandaloneExeMigrations 2026-07-17-13:30:
+The bun-compiled standalone `fn` binary runs its bundled code from the virtual
+/$bunfs/root filesystem, so the historical `join(__dirname, "migrations")`
+resolution points at a path that does not exist on disk (bun --compile does not
+embed readFile assets) and every DATABASE_URL boot died with
+ENOENT /$bunfs/root/migrations/0000_initial.sql. Resolution order:
+  1. FUSION_MIGRATIONS_DIR env override — always wins when set (operator escape hatch).
+  2. join(__dirname, "migrations") — the npm/tsup and desktop layout; kept first
+     among the probes so nothing changes for existing installs.
+  3. join(dirname(process.execPath), "migrations") — the standalone-exe layout,
+     where build.ts / the release tarball stage migrations/ next to the binary.
+The existsSync probe (not a runtime-detection heuristic) picks between (2) and
+(3): inside the compiled binary the module-relative dir simply does not exist,
+while for node-based installs it always does, so npm/desktop behavior is untouched.
+*/
+function resolveMigrationsDir(): string {
+  const envDir = process.env.FUSION_MIGRATIONS_DIR;
+  if (envDir) return envDir;
+  const moduleDir = join(__dirname, "migrations");
+  if (existsSync(join(moduleDir, "0000_initial.sql"))) return moduleDir;
+  const execDir = join(dirname(process.execPath), "migrations");
+  if (existsSync(join(execDir, "0000_initial.sql"))) return execDir;
+  // Preserve the historical default (and its historical error message) when
+  // neither location exists — the readFile ENOENT remains the diagnostic.
+  return moduleDir;
+}
+
+const MIGRATIONS_DIR = resolveMigrationsDir();
+const BASELINE_MIGRATION_PATH = join(MIGRATIONS_DIR, "0000_initial.sql");
 const AUTOMATION_ISOLATION_MIGRATION_PATH = join(
-  __dirname,
-  "migrations",
+  MIGRATIONS_DIR,
   "0001_automation_project_isolation.sql",
 );
 const ANALYTICS_ISOLATION_MIGRATION_PATH = join(
-  __dirname,
-  "migrations",
+  MIGRATIONS_DIR,
   "0002_analytics_project_isolation.sql",
 );
 const MONITOR_APPROVAL_ISOLATION_MIGRATION_PATH = join(
-  __dirname,
-  "migrations",
+  MIGRATIONS_DIR,
   "0003_monitor_approval_project_isolation.sql",
 );
 const LEGACY_CUTOVER_PRESERVATION_MIGRATION_PATH = join(
-  __dirname,
-  "migrations",
+  MIGRATIONS_DIR,
   "0004_legacy_cutover_preservation.sql",
 );
 const MULTI_PROJECT_CUTOVER_MIGRATION_PATH = join(
-  __dirname,
-  "migrations",
+  MIGRATIONS_DIR,
   "0005_multi_project_cutover.sql",
 );
 const PROJECT_OWNERSHIP_MIGRATION_PATH = join(
-  __dirname,
-  "migrations",
+  MIGRATIONS_DIR,
   "0006_project_ownership.sql",
 );
 const SQLITE_SCHEMA_PARITY_MIGRATION_PATH = join(
-  __dirname,
-  "migrations",
+  MIGRATIONS_DIR,
   "0007_sqlite_schema_parity.sql",
 );
 const SESSION_ADVISOR_ENABLED_MIGRATION_PATH = join(
-  __dirname,
-  "migrations",
+  MIGRATIONS_DIR,
   "0008_session_advisor_enabled.sql",
 );
 const MISSION_FIX_IDEMPOTENCY_MIGRATION_PATH = join(
-  __dirname,
-  "migrations",
+  MIGRATIONS_DIR,
   "0009_mission_fix_idempotency.sql",
 );
 const IMPORT_TRANSLATION_CACHE_MIGRATION_PATH = join(
-  __dirname,
-  "migrations",
+  MIGRATIONS_DIR,
   "0010_import_translation_cache.sql",
 );
 const IMPORT_TRANSLATION_CACHE_SCOPE_FIX_MIGRATION_PATH = join(
-  __dirname,
-  "migrations",
+  MIGRATIONS_DIR,
   "0016_import_translation_cache_scope_fix.sql",
 );
 const IMPORT_TRANSLATION_CACHE_LEGACY_PARTITION_BACKFILL_MIGRATION_PATH = join(
-  __dirname,
-  "migrations",
+  MIGRATIONS_DIR,
   "0019_import_translation_cache_legacy_partition_backfill.sql",
 );
 const OWNER_PROJECT_ID_SPLIT_MIGRATION_PATH = join(
-  __dirname,
-  "migrations",
+  MIGRATIONS_DIR,
   "0011_owner_project_id.sql",
 );
 const CHAT_SESSION_PINS_MIGRATION_PATH = join(
-  __dirname,
-  "migrations",
+  MIGRATIONS_DIR,
   "0012_chat_session_pins.sql",
 );
 const EXECUTOR_TOOL_FAILURE_RETRY_MIGRATION_PATH = join(
-  __dirname,
-  "migrations",
+  MIGRATIONS_DIR,
   "0013_executor_tool_failure_retry.sql",
 );
 const EXECUTOR_ESCALATION_ATTEMPT_MIGRATION_PATH = join(
-  __dirname,
-  "migrations",
+  MIGRATIONS_DIR,
   "0014_executor_escalation_attempt.sql",
 );
 const GLOBAL_ROUTINES_MIGRATION_PATH = join(
-  __dirname,
-  "migrations",
+  MIGRATIONS_DIR,
   "0015_global_routines.sql",
 );
-const TASK_MERGER_MODEL_LANE_MIGRATION_PATH = join(__dirname, "migrations", "0017_task_merger_model_lane.sql");
-const BULK_COMPLETION_REFUSAL_AT_MIGRATION_PATH = join(__dirname, "migrations", "0018_bulk_completion_refusal_at.sql");
+const TASK_MERGER_MODEL_LANE_MIGRATION_PATH = join(MIGRATIONS_DIR, "0017_task_merger_model_lane.sql");
+const BULK_COMPLETION_REFUSAL_AT_MIGRATION_PATH = join(MIGRATIONS_DIR, "0018_bulk_completion_refusal_at.sql");
 
 /**
  * Ensure the migration bookkeeping table exists. Lives in the public schema so

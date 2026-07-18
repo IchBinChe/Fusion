@@ -5948,7 +5948,9 @@
       "reportModeHelp": "인앱 버그/피드백/아이디어/도움말 리포트 제출 방식. 기본값: draft-review(제출 전 운영자가 초안 검토).",
       "reportModeByActionHelp": "버그·피드백·아이디어·도움말 등 작업별 프로젝트 리포트 모드 선택 재정의. 기본값 없음 — 미설정 작업은 reportMode를 상속합니다.",
       "reviewArtifacts": "리뷰 산출물",
-      "reviewArtifactsHint": "적격한 향후 작업이 리뷰 산출물을 생성할지 제어합니다. 사용자 보고와 활동 캡처는 별도로 유지됩니다. 기본값: 꺼짐."
+      "reviewArtifactsHint": "적격한 향후 작업이 리뷰 산출물을 생성할지 제어합니다. 사용자 보고와 활동 캡처는 별도로 유지됩니다. 기본값: 꺼짐.",
+      "reportRoadmapDedup": "보고서를 제출하기 전에 로드맵 확인",
+      "reportRoadmapDedupHelp": "활성화하면 일치하는 로드맵 기능이 다른 GitHub 이슈나 토론을 만들지 않고 인라인으로 표시됩니다. 기본값: 꺼짐."
     },
     "globalGeneral": {
       "andShowsUpdateNoticesInTheCLIAnd": "",
@@ -9135,5 +9137,11 @@
     "startCta": "Start engine",
     "starting": "Starting…",
     "title": "Project engine is not connected"
+  },
+  "report": {
+    "roadmapMatch": {
+      "title": "이미 로드맵에 있습니다",
+      "message": "이 보고서는 이미 계획된 기능과 일치합니다."
+    }
   }
 }

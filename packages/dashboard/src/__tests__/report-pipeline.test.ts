@@ -45,6 +45,37 @@ describe("report pipeline", () => {
     expect(result.kind).toBe("draft-ready");
   });
 
+  it.each(["bug", "feedback", "idea", "help"] as const)("short-circuits %s reports that strongly match the roadmap without egress", async (actionType) => {
+    const roadmapSource = vi.fn().mockResolvedValue([{ featureId: "RF-1", title: "Dashboard rendering controls", body: "Add dashboard rendering controls" }]);
+    const context = deps({ projectSettings: { ...settings, reportMode: "auto-file", reportRoadmapDedup: true }, roadmapSource });
+    const result = await runReportPipeline({ actionType, userPrompt: "Add dashboard rendering controls" }, context);
+    expect(result).toMatchObject({ kind: "roadmap-match", roadmap: { featureId: "RF-1", title: "Dashboard rendering controls", description: "Add dashboard rendering controls" } });
+    expect(roadmapSource).toHaveBeenCalledOnce();
+    expect(context.client!.createIssue).not.toHaveBeenCalled();
+    expect(context.client!.createDiscussion).not.toHaveBeenCalled();
+    expect(context.client!.commentOnIssue).not.toHaveBeenCalled();
+    expect(context.client!.commentOnDiscussion).not.toHaveBeenCalled();
+  });
+
+  it("does not read the roadmap source when its opt-in setting is off", async () => {
+    const roadmapSource = vi.fn().mockResolvedValue([{ featureId: "RF-1", title: "Dashboard rendering controls", body: "Add dashboard rendering controls" }]);
+    const context = deps({ projectSettings: { ...settings, reportMode: "auto-file", reportRoadmapDedup: false }, roadmapSource });
+    const result = await runReportPipeline({ actionType: "idea", userPrompt: "Add dashboard rendering controls" }, context);
+    expect(result.kind).toBe("filed");
+    expect(roadmapSource).not.toHaveBeenCalled();
+    expect(context.client!.createIssue).toHaveBeenCalledOnce();
+  });
+
+  it("falls through to existing GitHub routing when roadmap candidates do not match", async () => {
+    const context = deps({
+      projectSettings: { ...settings, reportMode: "auto-file", reportRoadmapDedup: true },
+      roadmapSource: vi.fn().mockResolvedValue([{ featureId: "RF-1", title: "Unrelated access controls", body: "Manage permissions" }]),
+    });
+    const result = await runReportPipeline({ actionType: "idea", userPrompt: "Add dashboard rendering controls" }, context);
+    expect(result.kind).toBe("filed");
+    expect(context.client!.createIssue).toHaveBeenCalledOnce();
+  });
+
   it("files in auto-file mode", async () => {
     const context = deps({ projectSettings: { ...settings, reportMode: "auto-file" } });
     const result = await runReportPipeline({ actionType: "idea", userPrompt: "Add dashboard rendering controls" }, context);

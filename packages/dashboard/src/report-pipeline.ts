@@ -4,6 +4,7 @@ import { GitHubClient } from "./github.js";
 import { resolveGithubTrackingAuth } from "./github-auth.js";
 import { buildIssueSearchQueries, DEDUP_MATCH_THRESHOLD, scoreCandidateIssue } from "./github-tracking-dedup.js";
 import { scrubReportPayload, type ReportScrubContext } from "./report-scrub.js";
+import type { RoadmapDedupSource } from "./report-roadmap-source.js";
 
 export type { ReportActionType, ReportMode };
 
@@ -34,16 +35,18 @@ export interface StructuredReport {
 export type ReportResult =
   | { kind: "draft-ready"; report: StructuredReport; mode: ReportMode }
   | { kind: "duplicate-found"; report: StructuredReport; mode: ReportMode; issue: { number: number; url: string; title: string; discussionId?: string } }
+  | { kind: "roadmap-match"; report: StructuredReport; mode: ReportMode; roadmap: { featureId: string; title: string; description: string } }
   | { kind: "filed"; url: string; report: StructuredReport }
   | { kind: "endorsed"; url: string; issueNumber: number; report: StructuredReport }
   | { kind: "unavailable"; reason: string; message: string };
 
 export interface ReportPipelineDeps {
-  projectSettings: Pick<ProjectSettings, "reportMode" | "reportModeByAction" | "githubTrackingDefaultRepo" | "githubAuthMode" | "githubAuthToken">;
+  projectSettings: Pick<ProjectSettings, "reportMode" | "reportModeByAction" | "reportRoadmapDedup" | "githubTrackingDefaultRepo" | "githubAuthMode" | "githubAuthToken">;
   globalSettings?: Partial<GlobalSettings>;
   client?: Pick<GitHubClient, "createIssue" | "searchIssues" | "commentOnIssue" | "addIssueReaction"> & Partial<Pick<GitHubClient, "searchDiscussions" | "createDiscussion" | "commentOnDiscussion" | "addDiscussionReaction">>;
   scrubContext?: ReportScrubContext;
   gatherContext?: (input: ReportInput) => Promise<Record<string, unknown>>;
+  roadmapSource?: RoadmapDedupSource;
 }
 
 const MAX_PROMPT_LENGTH = 4_000;
@@ -116,8 +119,12 @@ function destinationFor(actionType: ReportActionType): ReportDestination {
   return actionType === "feedback" || actionType === "help" ? "discussion" : "issue";
 }
 
+function reportKeywords(report: StructuredReport): string[] {
+  return report.summary.replace(/[^\w ]/g, " ").split(/\s+/).filter((word) => word.length > 3).slice(0, 6);
+}
+
 async function findDuplicate(client: NonNullable<ReportPipelineDeps["client"]>, owner: string, repo: string, report: StructuredReport, destination: ReportDestination) {
-  const keywords = report.summary.replace(/[^\w ]/g, " ").split(/\s+/).filter((word) => word.length > 3).slice(0, 6);
+  const keywords = reportKeywords(report);
   for (const query of buildIssueSearchQueries([], keywords)) {
     const candidates: DuplicateCandidate[] = destination === "discussion"
       ? (client.searchDiscussions ? await client.searchDiscussions(owner, repo, query, { limit: 1000 }) : []).map((discussion) => ({ number: discussion.number, title: discussion.title, body: discussion.body, html_url: discussion.url, state: discussion.state, discussionId: discussion.id }))
@@ -128,6 +135,16 @@ async function findDuplicate(client: NonNullable<ReportPipelineDeps["client"]>, 
     if (match) return match.candidate;
   }
   return undefined;
+}
+
+export async function findRoadmapMatch(roadmapSource: RoadmapDedupSource, report: StructuredReport) {
+  const keywords = reportKeywords(report);
+  const candidates = await roadmapSource(keywords);
+  const match = candidates
+    .map((candidate) => ({ candidate, score: scoreCandidateIssue(candidate, [], keywords).score }))
+    .filter(({ score }) => score >= DEDUP_MATCH_THRESHOLD)
+    .sort((left, right) => right.score - left.score)[0];
+  return match?.candidate;
 }
 
 async function endorseDiscussionDuplicate(args: { issueNumber: number; discussionId: string; report: StructuredReport; client: NonNullable<ReportPipelineDeps["client"]> & Pick<GitHubClient, "commentOnDiscussion" | "addDiscussionReaction">; scrubContext?: ReportScrubContext }): Promise<Extract<ReportResult, { kind: "endorsed" }>> {
@@ -202,6 +219,21 @@ export async function runReportPipeline(input: ReportInput, deps: ReportPipeline
     if (!report.body.includes(note)) report = { ...report, body: `${report.body}\n\n${note}` };
   }
   const mode = resolveReportMode(input.actionType, deps.projectSettings);
+  /*
+  FNXC:ReportPipeline 2026-07-18-12:30:
+  An opted-in roadmap hit takes deterministic precedence over GitHub matching
+  and filing. It returns local roadmap context only, so no issue, discussion,
+  comment, reaction, or other external egress can occur in either report mode.
+  */
+  if (deps.projectSettings.reportRoadmapDedup && deps.roadmapSource) {
+    const roadmap = await findRoadmapMatch(deps.roadmapSource, report);
+    if (roadmap) return {
+      kind: "roadmap-match",
+      report,
+      mode,
+      roadmap: { featureId: roadmap.featureId, title: roadmap.title, description: roadmap.body ?? "" },
+    };
+  }
   const clientResult = createClient(deps);
   if (clientResult.unavailable) return clientResult.unavailable;
   const repo = resolveRepo(deps);

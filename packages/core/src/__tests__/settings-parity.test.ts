@@ -169,10 +169,13 @@ describe("settings key parity", () => {
   it("defaults in-app reports to draft review and keeps mode settings project-scoped", () => {
     expect(DEFAULT_PROJECT_SETTINGS.reportMode).toBe("draft-review");
     expect(DEFAULT_PROJECT_SETTINGS.reportModeByAction).toBeUndefined();
+    expect(DEFAULT_PROJECT_SETTINGS.reportRoadmapDedup).toBe(false);
     expect(isProjectSettingsKey("reportMode")).toBe(true);
     expect(isProjectSettingsKey("reportModeByAction")).toBe(true);
+    expect(isProjectSettingsKey("reportRoadmapDedup")).toBe(true);
     expect(isGlobalSettingsKey("reportMode")).toBe(false);
     expect(isGlobalSettingsKey("reportModeByAction")).toBe(false);
+    expect(isGlobalSettingsKey("reportRoadmapDedup")).toBe(false);
   });
 
   it("defaults autoClaimCandidatesInPrompt to 5 and keeps it project-scoped", () => {

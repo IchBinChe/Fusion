@@ -1336,12 +1336,14 @@ describe("SettingsModal", () => {
 
       fireEvent.change(screen.getByLabelText("In-app report mode"), { target: { value: "auto-file" } });
       fireEvent.change(screen.getByLabelText("Bug report override"), { target: { value: "draft-review" } });
+      fireEvent.click(screen.getByLabelText("Check roadmap before filing reports"));
       fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
       await waitFor(() => expect(mockUpdateSettings).toHaveBeenCalled());
       expect(mockUpdateSettings.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
         reportMode: "auto-file",
         reportModeByAction: { bug: "draft-review" },
+        reportRoadmapDedup: true,
       }));
     });
 

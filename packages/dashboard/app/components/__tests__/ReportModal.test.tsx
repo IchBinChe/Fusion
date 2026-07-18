@@ -62,6 +62,20 @@ describe("ReportModal", () => {
     })));
   });
 
+  it("shows a roadmap match inline without a filing or dead-link affordance", async () => {
+    reportDraft.mockResolvedValueOnce({ kind: "roadmap-match", roadmap: { featureId: "RF-1", title: "Offline report queue", description: "Keep reports available while offline" } });
+    render(<ReportModal actionType="idea" onClose={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("What would you like Fusion to do?"), { target: { value: "Keep reports while offline" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    expect(await screen.findByText("Already on the roadmap")).toBeInTheDocument();
+    expect(screen.getByText("Offline report queue")).toBeInTheDocument();
+    expect(screen.getByText("Keep reports available while offline")).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /file/i })).not.toBeInTheDocument();
+  });
+
   it("lets people return to the guided prompt after an unavailable response", async () => {
     reportDraft.mockResolvedValueOnce({ kind: "unavailable", message: "GitHub is not connected" });
     render(<ReportModal actionType="feedback" onClose={vi.fn()} />);

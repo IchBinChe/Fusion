@@ -328,6 +328,16 @@ export function GeneralSection({ form, setForm, projectId, addToast, prefixError
           </label>
         ))}
         <p className="form-help">{t("settings.general.reportModeByActionHelp", "Optional per-action override of the project report mode for bug, feedback, idea, or help. No default — unset actions inherit reportMode.")}</p>
+        <SettingsToggleRow
+          descriptor={{
+            key: "reportRoadmapDedup",
+            label: t("settings.general.reportRoadmapDedup", "Check roadmap before filing reports"),
+            help: t("settings.general.reportRoadmapDedupHelp", "When enabled, matching roadmap features are shown inline instead of filing another GitHub Issue or Discussion. Default: off."),
+            scope: "project",
+          }}
+          value={form.reportRoadmapDedup === true}
+          onChange={(value) => setForm((current) => ({ ...current, reportRoadmapDedup: value ?? false }))}
+        />
       </div>
       {/*
         FNXC:SettingsGeneral 2026-07-15-17:35:

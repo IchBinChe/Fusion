@@ -270,6 +270,7 @@ const SETTING_DESCRIPTION_KEYS: Record<string, string> = {
   */
   reportMode: "general.reportModeHelp",
   reportModeByAction: "general.reportModeByActionHelp",
+  reportRoadmapDedup: "general.reportRoadmapDedupHelp",
   githubTrackingDedupEnabled: "general.whenEnabledFusionChecksOpenAndClosedIssues",
   githubTrackingEnabledByDefault: "general.offDefault",
   sessionAdvisorEnabledByDefault: "general.offDefault",

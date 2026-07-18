@@ -640,6 +640,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   githubTrackingDefaultRepo: undefined,
   reportMode: "draft-review" as const,
   reportModeByAction: undefined,
+  reportRoadmapDedup: false,
   gitlabEnabled: undefined,
   gitlabInstanceUrl: undefined,
   gitlabApiBaseUrl: undefined,

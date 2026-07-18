@@ -2,6 +2,7 @@ import { ApiError } from "../api-error.js";
 import { queryKnowledgePagesAsync } from "../knowledge-index.js";
 import { requireAsyncLayer } from "../require-async-layer.js";
 import { runReportPipeline, type ReportInput, type StructuredReport } from "../report-pipeline.js";
+import { createRoadmapDedupSourceForTaskStore } from "../report-roadmap-source.js";
 import { scrubReportPayload } from "../report-scrub.js";
 import { selfCheckHelp } from "../report-help-selfcheck.js";
 import type { Request, Response } from "express";
@@ -133,6 +134,7 @@ export const registerReportRoutes: ApiRouteRegistrar = ({ router, getScopedStore
         globalSettings: scopes.global,
         scrubContext: { rootDir: store.getRootDir(), projectName: store.getRootDir().split(/[\\/]/).pop() },
         gatherContext: (reportInput) => gatherReportContext(store, reportInput, scopes.project as Record<string, unknown>),
+        roadmapSource: scopes.project.reportRoadmapDedup ? createRoadmapDedupSourceForTaskStore(store) : undefined,
       });
       res.json(result);
     } catch (error) {
@@ -170,6 +172,7 @@ export const registerReportRoutes: ApiRouteRegistrar = ({ router, getScopedStore
         globalSettings: scopes.global,
         scrubContext: { rootDir: store.getRootDir(), projectName: store.getRootDir().split(/[\\/]/).pop() },
         gatherContext: (reportInput) => gatherReportContext(store, reportInput, scopes.project as Record<string, unknown>),
+        roadmapSource: scopes.project.reportRoadmapDedup ? createRoadmapDedupSourceForTaskStore(store) : undefined,
       }, { file: true, endorseIssueNumber, endorseDiscussionId, report: untrusted });
       res.json(result);
     } catch (error) {

@@ -5948,7 +5948,9 @@
       "reportModeHelp": "Comment les rapports in-app (bug, feedback, idée, aide) sont déposés. Par défaut : draft-review (l'opérateur revoit un brouillon avant dépôt).",
       "reportModeByActionHelp": "Surcharge optionnelle par action du mode de rapport du projet (bug, feedback, idée ou aide). Aucune valeur par défaut — les actions non définies héritent de reportMode.",
       "reviewArtifacts": "Artefacts de revue",
-      "reviewArtifactsHint": "Contrôle si les futures tâches éligibles génèrent des livrables de revue. Les rapports utilisateur et la capture d'activité restent séparés. Par défaut : désactivé."
+      "reviewArtifactsHint": "Contrôle si les futures tâches éligibles génèrent des livrables de revue. Les rapports utilisateur et la capture d'activité restent séparés. Par défaut : désactivé.",
+      "reportRoadmapDedup": "Vérifier la feuille de route avant d’envoyer les rapports",
+      "reportRoadmapDedupHelp": "Lorsqu’elle est activée, les fonctionnalités correspondantes sont affichées en ligne au lieu de créer un autre problème ou une autre discussion GitHub. Par défaut : désactivé."
     },
     "globalGeneral": {
       "andShowsUpdateNoticesInTheCLIAnd": "",
@@ -9135,5 +9137,11 @@
     "startCta": "Start engine",
     "starting": "Starting…",
     "title": "Project engine is not connected"
+  },
+  "report": {
+    "roadmapMatch": {
+      "title": "Déjà sur la feuille de route",
+      "message": "Ce signalement correspond à une fonctionnalité déjà planifiée."
+    }
   }
 }

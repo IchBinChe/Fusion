@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { ReportActionType } from "@fusion/core";
 import { reportDraft, reportFile, reportHelp, uploadReportScreenshot } from "../api";
 import { captureAppScreenshot, type CapturedScreenshot } from "../utils/capture-screenshot";
@@ -6,7 +7,7 @@ import { recordActivity, snapshotActivityTrace } from "../utils/activity-trace";
 import "./ReportModal.css";
 
 const prompts: Record<ReportActionType, string> = { bug: "What went wrong?", feedback: "What would you like to share?", idea: "What would you like Fusion to do?", help: "What would you like help with?" };
-type ModalResult = { kind: string; report?: { userPrompt: string; sourcePrompt?: string; summary?: string; body?: string; context?: Record<string, unknown>; sessionToken?: string }; issue?: { number: number; url: string; title: string; discussionId?: string }; url?: string; answer?: { summary?: string; content?: string }; message?: string };
+type ModalResult = { kind: string; report?: { userPrompt: string; sourcePrompt?: string; summary?: string; body?: string; context?: Record<string, unknown>; sessionToken?: string }; issue?: { number: number; url: string; title: string; discussionId?: string }; roadmap?: { featureId: string; title: string; description: string }; url?: string; answer?: { summary?: string; content?: string }; message?: string };
 
 /**
  * FNXC:ReportPipeline 2026-07-16-12:00:
@@ -14,6 +15,7 @@ type ModalResult = { kind: string; report?: { userPrompt: string; sourcePrompt?:
  * final filed or endorsed link remains visible after the selected mode acts.
  */
 export function ReportModal({ actionType, onClose, contextRefs }: { actionType: ReportActionType; onClose: () => void; contextRefs?: { taskId?: string; agentId?: string } }) {
+  const { t } = useTranslation("app");
   const [prompt, setPrompt] = useState("");
   const [result, setResult] = useState<ModalResult>();
   const [busy, setBusy] = useState(false);
@@ -106,6 +108,13 @@ export function ReportModal({ actionType, onClose, contextRefs }: { actionType: 
       <label htmlFor="report-duplicate-body">Structured data point</label>
       <textarea id="report-duplicate-body" className="input" value={result.report.body ?? ""} onChange={(event) => setResult({ ...result, report: { ...result.report!, body: event.target.value } })} />
       <button className="btn btn-primary" type="button" disabled={busy} onClick={() => void file(result.issue!.discussionId ? undefined : result.issue!.number, result.issue!.discussionId)}>Confirm and add data point</button>
+    </>}
+    {result?.kind === "roadmap-match" && result.roadmap && <>
+      {/* FNXC:ReportPipeline 2026-07-18-12:45: A roadmap match stays inline because the roadmap view is intentionally not a dashboard destination; it informs the reporter and offers no dead deep-link or filing control. */}
+      <h2>{t("report.roadmapMatch.title", "Already on the roadmap")}</h2>
+      <p>{t("report.roadmapMatch.message", "This report matches a feature that is already planned.")}</p>
+      <h3>{result.roadmap.title}</h3>
+      {result.roadmap.description && <p>{result.roadmap.description}</p>}
     </>}
     {(result?.kind === "filed" || result?.kind === "endorsed") && <><h2>Report sent</h2><a href={result.url} target="_blank" rel="noreferrer">View on GitHub</a>{result.report?.body && <><label htmlFor="filed-report">Final report</label><textarea id="filed-report" className="input" value={result.report.body} readOnly /></>}</>}
     {result?.kind === "help" && <><h2>Suggested help</h2><p>{result.answer?.summary ?? result.answer?.content}</p></>}

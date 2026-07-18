@@ -5972,7 +5972,9 @@
       "aiUndoTaskWorkflowInherit": "Inherit project default workflow",
       "aiUndoTaskWorkflowHelp": "Workflow assigned to AI-undo (revert) tasks, which reverse already-shipped code and warrant stricter review. Choose \"Inherit project default workflow\" to leave them on the project default. Default: review-heavy.",
       "reportModeHelp": "How in-app bug/feedback/idea/help reports are filed. Default: draft-review (operator reviews a draft before filing).",
-      "reportModeByActionHelp": "Optional per-action override of the project report mode for bug, feedback, idea, or help. No default — unset actions inherit reportMode."
+      "reportModeByActionHelp": "Optional per-action override of the project report mode for bug, feedback, idea, or help. No default — unset actions inherit reportMode.",
+      "reportRoadmapDedup": "Check roadmap before filing reports",
+      "reportRoadmapDedupHelp": "When enabled, matching roadmap features are shown inline instead of filing another GitHub Issue or Discussion. Default: off."
     },
     "globalGeneral": {
       "andShowsUpdateNoticesInTheCLIAnd": " and shows update notices in the CLI and dashboard. Cadence is governed by the frequency below. Default: enabled. ",
@@ -9135,5 +9137,11 @@
     "toolResult": "Tool result",
     "you": "You",
     "youMessage": "You message"
+  },
+  "report": {
+    "roadmapMatch": {
+      "title": "Already on the roadmap",
+      "message": "This report matches a feature that is already planned."
+    }
   }
 }

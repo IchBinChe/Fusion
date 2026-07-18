@@ -4089,6 +4089,12 @@ export interface ProjectSettings {
   reportMode?: ReportMode;
   reportModeByAction?: Partial<Record<ReportActionType, ReportMode>>;
   /**
+   * FNXC:ReportPipeline 2026-07-18-12:00:
+   * Roadmap deduplication is opt-in because projects without a roadmap must
+   * retain the existing Issues-and-Discussions-only report behavior.
+   */
+  reportRoadmapDedup?: boolean;
+  /**
    * FNXC:GitLabConfiguration 2026-07-02-00:00:
    * FN-7422 adds durable GitLab instance/API URL settings for GitLab.com and self-managed hosts. FN-7423 layers token settings onto the same project-over-global configuration contract without adding runtime GitLab imports or tracking.
    */

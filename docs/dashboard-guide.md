@@ -1903,6 +1903,12 @@ The dashboard's CSS is split into a global stylesheet (`packages/dashboard/app/s
 
 **Rule:** New CSS for a component goes in `app/components/ComponentName.css`, NOT `styles.css`. Only design tokens, primitives (`.btn`, `.card`, `.modal`, `.form-input`), and cross-component `@media` overrides belong in the global file.
 
+### Browser-safe core imports
+
+Dashboard browser code may value-import only browser-safe `@fusion/core` leaf modules. Vite aliases the package root to `packages/core/src/types.ts`; do not bypass that boundary with a relative `core/src` import unless the leaf is listed in [`scripts/lib/dashboard-browser-safe-core-modules.json`](../scripts/lib/dashboard-browser-safe-core-modules.json). In particular, use `near-duplicate-canonical.ts`, not `near-duplicate.ts`, because the latter reaches Node-only duplicate detection dependencies.
+
+The `check-no-node-only-core-imports-in-dashboard.mjs` guard runs before tests and in the gate. Before adding a browser-safe leaf, review its complete transitive dependency graph for Node builtins, database/store modules, filesystem, and child-process imports, then add a dated reason to the allowlist. Type-only imports remain allowed because they are erased from the browser bundle.
+
 ### Native structure previews
 
 `NativeStructurePreview` is the shared compact card for mission, milestone, roadmap item, research-finding, eval-result, and goal references. It resolves `GET /api/native-structures/:kind/:id/preview` to a typed available or unavailable payload and uses a required consumer-supplied `onOpen(ref, payload)` callback. Chat is a consumer: it parses strict `fusion://<kind>/<id>` tokens/assistant Markdown links and dispatches the callback into its owning dashboard view. `openTarget` is a view-state descriptor, not a URL, because dashboard navigation is callback based. Until its plugin provides a backend-safe reader and dashboard destination, a `roadmap-item` uses the shared unavailable card.

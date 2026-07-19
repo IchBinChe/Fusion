@@ -254,6 +254,7 @@ export {
   artifactMediaUrl,
   artifactMediaUrlWithToken,
   fetchArtifact,
+  fetchNativeStructurePreview,
   updateArtifact,
   fetchAllDocuments,
   fetchProjectMarkdownFiles,

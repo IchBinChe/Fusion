@@ -28,7 +28,7 @@ export type {
   MissionLineageApprovalResult,
   MissionLineageSnapshot,
 } from "./symbol-lock-lineage-approval.js";
-export { AGENT_VALID_TRANSITIONS, DUPLICATE_OF_METADATA_KEY, assertNotWorkspaceTaskMerge, isWorkspaceTask, WorkspaceTaskMergeError } from "./types.js";
+export { AGENT_VALID_TRANSITIONS, DUPLICATE_OF_METADATA_KEY, REPORT_ATTACHMENT_SOURCE, assertNotWorkspaceTaskMerge, isWorkspaceTask, WorkspaceTaskMergeError } from "./types.js";
 export {
   resolveEntryPointBranchAssignment,
   sanitizeBranchSegment,

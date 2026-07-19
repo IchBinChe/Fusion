@@ -2127,7 +2127,7 @@ In **Settings → General**, choose **Review draft before filing** (the default)
 
 Reports can include a short activity trace of recent built-in view names (up to 20 entries). The trace is ordinary text and receives the same mandatory server-side scrub as every other report field on every egress path, including edited drafts and duplicate endorsements.
 
-Choose **Attach a screenshot** to request the browser's screen-capture permission and capture one PNG frame. The modal shows the image for review and lets you remove it before continuing. Screenshot pixels are binary and cannot be text-scrubbed, so Fusion never captures or files one automatically: it is included only after this explicit per-report choice, including in automatic filing mode. Fusion first validates and files the scrubbed text report, then hosts and posts the reviewed image as a follow-up only when an approved GitHub image host is available. If that follow-up fails after hosting, Fusion compensates by deleting the uploaded image; it never inserts an unhosted data URL into report text.
+Choose **Store a screenshot locally** to request browser screen-capture permission. Fusion captures and uploads one PNG frame to its local artifact registry, then requires confirmation that the screenshot may be retained before a report can reference it. The report carries only `screenshotArtifactId` and a text note that the locally stored artifact exists; pixels never leave Fusion or enter report text, including automatic filing.
 
 ## Chat-requested task verification
 

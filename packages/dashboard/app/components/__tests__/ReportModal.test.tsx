@@ -2,18 +2,60 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ReportModal } from "../ReportModal";
 import * as api from "../../api";
+import * as capture from "../../utils/report-capture";
 
 vi.mock("../../api", () => ({
+  reportAttachment: vi.fn(),
   reportDraft: vi.fn(),
   reportFile: vi.fn(),
   reportHelp: vi.fn(),
 }));
+vi.mock("../../utils/report-capture", () => ({
+  captureScreenshot: vi.fn(),
+  getRecentActivity: vi.fn(() => []),
+  recordActivity: vi.fn(),
+}));
 
+const reportAttachment = vi.mocked(api.reportAttachment);
 const reportDraft = vi.mocked(api.reportDraft);
 const reportFile = vi.mocked(api.reportFile);
+const captureScreenshot = vi.mocked(capture.captureScreenshot);
 
 describe("ReportModal", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    captureScreenshot.mockResolvedValue(new Blob(["png"], { type: "image/png" }));
+  });
+
+  it("uploads an opted-in screenshot and sends its reference only after retention confirmation", async () => {
+    reportAttachment.mockResolvedValueOnce({ artifactId: "123e4567-e89b-42d3-a456-426614174000" });
+    reportDraft.mockResolvedValueOnce({ kind: "draft-ready", report: { userPrompt: "It crashes", body: "## Summary\nIt crashes", context: {} } });
+    render(<ReportModal actionType="bug" onClose={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText("What went wrong?"), { target: { value: "It crashes" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Store a screenshot locally" }));
+    const confirmation = await screen.findByRole("checkbox", { name: /I confirm Fusion may retain/ });
+    fireEvent.click(confirmation);
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+
+    await waitFor(() => expect(reportDraft).toHaveBeenCalledWith(expect.objectContaining({
+      screenshotArtifactId: "123e4567-e89b-42d3-a456-426614174000",
+    })));
+  });
+
+  it("clears a pending capture when the reporter opts out", async () => {
+    let resolveUpload!: (value: { artifactId: string }) => void;
+    reportAttachment.mockReturnValueOnce(new Promise((resolve) => { resolveUpload = resolve; }));
+    render(<ReportModal actionType="bug" onClose={vi.fn()} />);
+
+    const option = screen.getByRole("checkbox", { name: "Store a screenshot locally" });
+    fireEvent.click(option);
+    fireEvent.click(option);
+    resolveUpload({ artifactId: "123e4567-e89b-42d3-a456-426614174000" });
+
+    await waitFor(() => expect(screen.queryByRole("checkbox", { name: /I confirm Fusion may retain/ })).not.toBeInTheDocument());
+    expect(option).not.toBeChecked();
+  });
 
   it("shows an actionable error and retry affordance when preparing a report fails", async () => {
     reportDraft.mockRejectedValueOnce(new Error("offline"));
@@ -83,20 +125,6 @@ describe("ReportModal", () => {
     await screen.findByRole("alert");
     fireEvent.click(screen.getByRole("button", { name: "Return to prompt" }));
     expect(screen.getByLabelText("What would you like to share?")).toBeInTheDocument();
-  });
-
-  it("warns when a reviewed screenshot could not be attached", async () => {
-    reportDraft.mockResolvedValueOnce({ kind: "draft-ready", report: { userPrompt: "It crashes", body: "## Summary\nIt crashes", context: {} } });
-    reportFile.mockResolvedValueOnce({ kind: "filed", url: "https://example.test/1", screenshotNotAttached: true });
-    render(<ReportModal actionType="bug" onClose={vi.fn()} />);
-
-    fireEvent.change(screen.getByLabelText("What went wrong?"), { target: { value: "It crashes" } });
-    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
-    await screen.findByText("Review your report");
-    fireEvent.click(screen.getByRole("button", { name: "File report" }));
-
-    expect(await screen.findByText("Report sent without screenshot")).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("No screenshot pixels were shared");
   });
 
   it("keeps the original derivation marker when the review prompt is edited", async () => {

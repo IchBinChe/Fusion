@@ -731,6 +731,13 @@ export interface TaskDocumentWithTask extends TaskDocument {
 export type ArtifactType = "document" | "image" | "video" | "audio" | "other";
 
 /**
+ * FNXC:ReportPipeline 2026-07-19-10:00:
+ * Report screenshots are local image artifacts with this explicit provenance.
+ * Only the reference may reach report egress; screenshot pixels never do.
+ */
+export const REPORT_ATTACHMENT_SOURCE = "report-attachment";
+
+/**
  * FNXC:ArtifactRegistry 2026-06-19-22:04:
  * Agents need a first-class registry for multi-type artifacts that are visible across agents and tasks. Store binary media on disk and persist only metadata plus relative URIs in SQLite so query paths stay lightweight and never inline binary bytes.
  */

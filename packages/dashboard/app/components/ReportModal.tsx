@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ReportActionType } from "@fusion/core";
-import { reportDraft, reportFile, reportHelp } from "../api";
-import { captureScreenshot as captureScreen, getRecentActivity, recordActivity, type ReportScreenshot } from "../utils/report-capture";
+import { reportAttachment, reportDraft, reportFile, reportHelp } from "../api";
+import { captureScreenshot as captureScreen, getRecentActivity, recordActivity } from "../utils/report-capture";
 import "./ReportModal.css";
 
 const prompts: Record<ReportActionType, string> = { bug: "What went wrong?", feedback: "What would you like to share?", idea: "What would you like Fusion to do?", help: "What would you like help with?" };
@@ -23,23 +23,30 @@ export function ReportModal({ actionType, onClose, contextRefs }: { actionType: 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const [screenshotEnabled, setScreenshotEnabled] = useState(false);
-  const [capturedScreenshot, setCapturedScreenshot] = useState<ReportScreenshot>();
-  const captureScreenshot = async () => {
+  const [screenshotArtifactId, setScreenshotArtifactId] = useState<string>();
+  const [retentionConfirmed, setRetentionConfirmed] = useState(false);
+  const captureGeneration = useRef(0);
+  const captureScreenshot = async (generation: number) => {
     setBusy(true);
     setError(undefined);
     try {
       const captured = await captureScreen();
       if (!captured) throw new Error("Screen capture was unavailable or denied.");
-      setCapturedScreenshot(captured);
+      const { artifactId } = await reportAttachment(captured);
+      if (captureGeneration.current !== generation) return;
+      setScreenshotArtifactId(artifactId);
     } catch (captureError) {
+      if (captureGeneration.current !== generation) return;
       setScreenshotEnabled(false);
       setError(captureError instanceof Error ? captureError.message : "We could not capture the current screen.");
-    } finally { setBusy(false); }
+    } finally {
+      if (captureGeneration.current === generation) setBusy(false);
+    }
   };
   const submit = async () => {
     if (!prompt.trim()) return;
-    if (screenshotEnabled && !capturedScreenshot) {
-      setError("Capture a screenshot before continuing, or turn attachment off.");
+    if (screenshotEnabled && (!screenshotArtifactId || !retentionConfirmed)) {
+      setError("Capture and confirm local screenshot retention before continuing, or turn attachment off.");
       return;
     }
     setBusy(true);
@@ -50,7 +57,7 @@ export function ReportModal({ actionType, onClose, contextRefs }: { actionType: 
         const help = await reportHelp(prompt);
         if (help.answered) { setResult({ kind: "help", answer: help.answer }); return; }
       }
-      setResult(await reportDraft({ actionType, userPrompt: prompt, contextRefs, activityTrace: getRecentActivity(), screenshot: screenshotEnabled ? capturedScreenshot : undefined }));
+      setResult(await reportDraft({ actionType, userPrompt: prompt, contextRefs, activityTrace: getRecentActivity(), screenshotArtifactId: screenshotEnabled && retentionConfirmed ? screenshotArtifactId : undefined }));
     } catch {
       setError("We could not prepare your report. Check your connection and try again.");
     } finally { setBusy(false); }
@@ -61,7 +68,7 @@ export function ReportModal({ actionType, onClose, contextRefs }: { actionType: 
     setError(undefined);
     try {
       recordActivity("report");
-setResult(await reportFile({ actionType, report: result.report, endorseIssueNumber, endorseDiscussionId, endorseRoadmapIssueNumber, activityTrace: getRecentActivity(), screenshot: screenshotEnabled ? capturedScreenshot : undefined }));
+setResult(await reportFile({ actionType, report: result.report, endorseIssueNumber, endorseDiscussionId, endorseRoadmapIssueNumber, activityTrace: getRecentActivity(), screenshotArtifactId: screenshotEnabled && retentionConfirmed ? screenshotArtifactId : undefined }));
 
     } catch {
       setError("We could not send your report. Your draft is still here; try again.");
@@ -71,12 +78,12 @@ setResult(await reportFile({ actionType, report: result.report, endorseIssueNumb
     <button className="btn-icon report-modal__close" type="button" aria-label="Close report" onClick={onClose}>×</button>
     {error && <p className="report-modal__error" role="alert">{error}</p>}
     {!result && <><h2>{actionType[0].toUpperCase() + actionType.slice(1)}</h2><label htmlFor="report-prompt">{prompts[actionType]}</label><textarea id="report-prompt" className="input" value={prompt} onChange={(event) => setPrompt(event.target.value)} maxLength={4000} />
-      {/* FNXC:ReportPipeline 2026-07-18-12:45: Screenshots are opt-in and
-      user-reviewable. They are sent only after this explicit per-report choice,
-      never silently by auto-file; traces remain scrubbed text on server egress. */}
-      <label className="report-modal__screenshot-option"><input type="checkbox" checked={screenshotEnabled} onChange={(event) => { setScreenshotEnabled(event.target.checked); if (event.target.checked) void captureScreenshot(); else setCapturedScreenshot(undefined); }} /> Attach a screenshot</label>
+      {/* FNXC:ReportPipeline 2026-07-19-10:00: Screenshot storage is opt-in and
+      requires retention confirmation before its artifact reference is sent. A
+      capture that finishes after opt-out is discarded rather than restoring it. */}
+      <label className="report-modal__screenshot-option"><input type="checkbox" checked={screenshotEnabled} onChange={(event) => { const enabled = event.target.checked; const generation = ++captureGeneration.current; setScreenshotEnabled(enabled); setScreenshotArtifactId(undefined); setRetentionConfirmed(false); if (enabled) void captureScreenshot(generation); else setBusy(false); }} /> Store a screenshot locally</label>
       {screenshotEnabled && <div className="report-modal__screenshot-preview">
-        {capturedScreenshot ? <><img src={capturedScreenshot.dataUrl} alt="Review screenshot before it is attached" /><button className="btn btn-secondary" type="button" onClick={() => { setCapturedScreenshot(undefined); setScreenshotEnabled(false); }}>Remove screenshot</button></> : <p>Capturing a preview…</p>}
+        {screenshotArtifactId ? <label className="report-modal__screenshot-option"><input type="checkbox" checked={retentionConfirmed} onChange={(event) => setRetentionConfirmed(event.target.checked)} /> I confirm Fusion may retain this screenshot locally for this report.</label> : <p>Capturing and storing locally…</p>}
       </div>}
       <details className="report-modal__activity-trace"><summary>Activity trace to send</summary><ul>{getRecentActivity().map((entry, index) => <li key={`${entry}-${index}`}>{entry}</li>)}</ul></details>
       <button className="btn btn-primary" type="button" disabled={!prompt.trim() || busy} onClick={() => void submit()}>{error ? "Retry" : "Continue"}</button></>}
@@ -109,7 +116,7 @@ setResult(await reportFile({ actionType, report: result.report, endorseIssueNumb
       <button className="btn btn-primary" type="button" disabled={busy} onClick={() => void file(result.issue!.discussionId ? undefined : result.issue!.roadmap ? undefined : result.issue!.number, result.issue!.discussionId, result.issue!.roadmap ? result.issue!.number : undefined)}>Confirm and add data point</button>
     </>}
 
-{(result?.kind === "filed" || result?.kind === "endorsed") && <><h2>{result.screenshotNotAttached ? "Report sent without screenshot" : "Report sent"}</h2>{result.screenshotNotAttached && <p className="report-modal__warning" role="status">Your report was sent, but the screenshot could not be attached. No screenshot pixels were shared.</p>}<a href={result.url} target="_blank" rel="noreferrer">View on GitHub</a>{result.report?.body && <><label htmlFor="filed-report">Final report</label><textarea id="filed-report" className="input" value={result.report.body} readOnly /></>}</>}
+{(result?.kind === "filed" || result?.kind === "endorsed") && <><h2>Report sent</h2><a href={result.url} target="_blank" rel="noreferrer">View on GitHub</a>{result.report?.body && <><label htmlFor="filed-report">Final report</label><textarea id="filed-report" className="input" value={result.report.body} readOnly /></>}</>}
 
     {result?.kind === "help" && <><h2>Suggested help</h2><p>{result.answer?.summary ?? result.answer?.content}</p></>}
     {result?.kind === "unavailable" && <>

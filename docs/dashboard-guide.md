@@ -705,6 +705,9 @@ Quick Chat is an optional fast, project-scoped assistant surface for conversatio
 
 Mailbox view shows inbox/outbox communication threads and unread state. When an ephemeral worker is configured for follow-up validation, its task proposals include a **Create task** action; created proposals link directly to the resulting task.
 
+- Mail composers can attach a native mission, milestone, goal, persisted insight, or eval result by dragging it from its owning view, or through the keyboard/mobile **Attach structure** picker. The shared `nativeStructureDrag` payload is copied into the same first-class mail embed metadata as picker attachments.
+- **Draft with AI** opens a compact compose-chat scratch session that uses attached structures as context. **Use draft** replaces an empty message body; replacing typed text requires confirmation, and attached embeds remain in place.
+
 - Inbox renders one row per message (no sender-based collapsing)
 - clicking a message in the Mail tab opens the task detail pane with full message content and conversation context
 - reply rows in the mailbox modal can expand inline to show the replied-to message context for easier thread reading

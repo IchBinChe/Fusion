@@ -3,10 +3,16 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MessageComposer } from "../MessageComposer";
 import * as apiModule from "../../api";
 import type { Agent } from "../../api";
+import { NATIVE_STRUCTURE_DRAG_MIME } from "../../utils/nativeStructureDrag";
 
 // Mock the API module
 vi.mock("../../api", () => ({
   sendMessage: vi.fn(),
+  fetchNativeStructurePreview: vi.fn().mockResolvedValue({ available: false, kind: "mission", id: "M-1", reason: "missing" }),
+}));
+
+vi.mock("../NativeStructurePreview", () => ({
+  NativeStructurePreview: ({ capturedLabel }: { capturedLabel?: string }) => <span>{capturedLabel ?? "Structure"}</span>,
 }));
 
 // Mock lucide-react icons
@@ -114,6 +120,25 @@ describe("MessageComposer", () => {
     await waitFor(() => expect(mockSendMessage).toHaveBeenCalledWith(expect.objectContaining({
       metadata: { nativeStructures: [{ kind: "goal", id: "G-1", label: "Ship" }] },
     }), undefined));
+  });
+
+  it("attaches a native structure dropped on the composer once and ignores unrelated drops", () => {
+    render(<MessageComposer {...defaultProps} />);
+    const composer = screen.getByTestId("message-composer");
+    const nativeTransfer = {
+      types: [NATIVE_STRUCTURE_DRAG_MIME],
+      dropEffect: "none",
+      getData: (type: string) => type === NATIVE_STRUCTURE_DRAG_MIME ? JSON.stringify({ kind: "mission", id: "M-drop" }) : "",
+    } as unknown as DataTransfer;
+    fireEvent.dragOver(composer, { dataTransfer: nativeTransfer });
+    expect(composer).toHaveClass("message-composer--native-structure-drag-over");
+    fireEvent.drop(composer, { dataTransfer: nativeTransfer });
+    fireEvent.drop(composer, { dataTransfer: nativeTransfer });
+    expect(screen.getByTestId("message-composer-attached-structures").querySelectorAll("li")).toHaveLength(1);
+
+    const fileTransfer = { types: ["Files"], getData: () => "" } as unknown as DataTransfer;
+    fireEvent.dragOver(composer, { dataTransfer: fileTransfer });
+    expect(composer).not.toHaveClass("message-composer--native-structure-drag-over");
   });
 
   it("disables structural attachment selection when no candidates are available", () => {

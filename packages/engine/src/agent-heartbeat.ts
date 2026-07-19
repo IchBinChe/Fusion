@@ -246,26 +246,31 @@ export interface HeartbeatExecutionOptions {
   contextSnapshot?: Record<string, unknown>;
 }
 
+/*
+FNXC:AgentLifecyclePause 2026-07-19-00:00:
+FN-8362: Agent lifecycle is not task lifecycle. Pausing, sleeping, or stopping
+an agent (including CLI and pi-extension stop/start bridges) must never pause
+its assigned tasks, even when legacy callers supply cascadeToTasks. Ordinary
+pauses are user-owned; approval, token-budget, worktrunk, and dispatch guards
+are separate reason-specific task safety pauses.
+*/
 export interface PauseAgentOptions {
   pauseReason?: string;
   stopActiveRun?: boolean;
-  /**
-   * Deprecated/ignored for pause: pausing or sleeping an agent never pauses
-   * assigned tasks. Tasks remain in their current column so the scheduler can
-   * re-dispatch them.
-   */
+  /** Deprecated/ignored for pause; retained only for source compatibility. */
   cascadeToTasks?: boolean;
 }
 
+/*
+FNXC:AgentLifecyclePause 2026-07-19-00:00:
+Ordinary agent resume is non-cascading. The explicit legacy cleanup escape
+hatch may unpause only a task marked pausedByAgentId for this same agent, and
+must never clear userPaused task intent.
+*/
 export interface ResumeAgentOptions {
   triggerDetail?: string;
   triggerSource?: string;
   clearPauseReason?: boolean;
-  /**
-   * When true, unpauses tasks paused by this agent. Defaults to false; this is
-   * legacy cleanup only and correctness must not depend on cascade-unpause.
-   * User-paused tasks are never cascade-unpaused.
-   */
   cascadeToTasks?: boolean;
 }
 
@@ -377,6 +382,12 @@ function resolveAutoClaimCandidatesInPromptLimit(agent: Agent, settings?: Settin
   return Math.max(0, Math.min(10, integer));
 }
 
+/*
+FNXC:AutoClaim 2026-07-19-00:00:
+FN-8362 keeps automatic backlog pickup executor-only by default. An engineer
+may opt in per-agent (runtimeConfig.engineerBacklogAutoClaim), which overrides
+the project setting; neither value changes explicit assignment/delegation.
+*/
 function resolveEngineerBacklogAutoClaim(agent: Agent, settings?: Settings): boolean {
   const runtimeConfig = (agent.runtimeConfig ?? {}) as AgentHeartbeatConfig;
   const perAgent = runtimeConfig.engineerBacklogAutoClaim;
@@ -1690,6 +1701,12 @@ export class HeartbeatMonitor {
     this.clearRunState(agentId);
   }
 
+  /*
+  FNXC:AgentLifecyclePause 2026-07-19-00:00:
+  This intentionally mutates only the agent row. Do not cascade a pause to
+  assigned tasks: agent stop/sleep is scheduling control, while task pause
+  ownership and system safety reasons are independent.
+  */
   async pauseAgent(agentId: string, options: PauseAgentOptions = {}): Promise<Agent> {
     const { pauseReason, stopActiveRun = false } = options;
 
@@ -1718,6 +1735,11 @@ export class HeartbeatMonitor {
     return updated;
   }
 
+  /*
+  FNXC:AgentLifecyclePause 2026-07-19-00:00:
+  Normal resume must leave assigned tasks untouched. The compatibility-only
+  cascade below is deliberately narrow: same-agent non-user pauses only.
+  */
   async resumeAgent(agentId: string, options: ResumeAgentOptions = {}): Promise<Agent> {
     const {
       triggerDetail = "Triggered from state resume",

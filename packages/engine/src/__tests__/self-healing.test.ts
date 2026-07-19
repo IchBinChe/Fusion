@@ -1055,6 +1055,8 @@ describe("SelfHealingManager", () => {
       ]));
       expect(recordRunAuditEvent.mock.calls.map(([event]) => event.mutationType).filter((type) => type === "agent:auto-recover-error-state")).toHaveLength(0);
       expect(agentStore.updateAgentState).toHaveBeenCalledTimes(4);
+      // Startup error reset is also agent-only; it cannot clear a task pause.
+      expect(storeWithSettings.updateTask).not.toHaveBeenCalled();
 
       for (const untouchedId of ["operator-actionable", "stale-module", "error-unrecoverable", "user-paused", "ephemeral", "disabled", "live-agent", "healthy-active", "healthy-idle"]) {
         expect(agentStore.updateAgentState).not.toHaveBeenCalledWith(untouchedId, expect.anything());
@@ -1079,6 +1081,34 @@ describe("SelfHealingManager", () => {
     it("returns 0 when no agentStore", async () => {
       const result = await manager.recoverOrphanedAgents();
       expect(result).toBe(0);
+    });
+
+    it("leaves assigned task pause states untouched across recovery, exhaustion, and unrecoverable parks", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const assignedTasks = [
+        { id: "FN-user", paused: true, userPaused: true, pausedByAgentId: undefined, pausedReason: "manual" },
+        { id: "FN-agent", paused: true, userPaused: false, pausedByAgentId: "agent-recover", pausedReason: "legacy-agent-pause" },
+        { id: "FN-live", paused: false, userPaused: false, pausedByAgentId: undefined, pausedReason: undefined },
+      ];
+      const before = structuredClone(assignedTasks);
+      const agentStore = createMockAgentStore([
+        { id: "agent-recover", taskId: "FN-user", state: "error", lastError: "socket hang up", metadata: {}, updatedAt: new Date(now - 120_000).toISOString() } as Agent,
+        { id: "agent-exhaust", taskId: "FN-agent", state: "error", lastError: "socket hang up", metadata: { durableErrorRecovery: { attempts: 4 } }, updatedAt: new Date(now - 120_000).toISOString() } as Agent,
+        { id: "agent-park", taskId: "FN-live", state: "error", lastError: "invalid api key", metadata: {}, updatedAt: new Date(now - 120_000).toISOString() } as Agent,
+      ]);
+      const managerWithAgents = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+
+      await managerWithAgents.recoverOrphanedAgents();
+
+      // FNXC:AgentLifecyclePause 2026-07-19-00:00: These three agent-only
+      // outcomes must never invoke TaskStore pause/update mutation APIs.
+      expect(store.updateTask).not.toHaveBeenCalled();
+      expect(assignedTasks).toEqual(before);
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("agent-recover", "active");
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("agent-exhaust", "paused");
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("agent-park", "paused");
+      managerWithAgents.stop();
     });
 
     it("recovers a manager-present error-state agent whose lastError is absent", async () => {

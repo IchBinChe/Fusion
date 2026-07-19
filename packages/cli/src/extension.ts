@@ -4383,7 +4383,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     name: "fn_agent_stop",
     label: "fn: Stop Agent",
     description:
-      "Stop a running agent — pauses its execution. " +
+      "Stop a running agent — pauses its execution without changing assigned task pause state. " +
       "Transitions the agent from running/active to paused state.",
     promptSnippet: "Stop (pause) a running Fusion agent",
     promptGuidelines: [
@@ -4431,6 +4431,8 @@ export default function kbExtension(pi: ExtensionAPI) {
         };
       }
 
+      // FNXC:AgentLifecyclePause 2026-07-19-00:00: fn_agent_stop changes
+      // only the agent row. Assigned task pause state remains user/system-owned.
       await agentStore.updateAgentState(params.id, "paused");
 
       return {
@@ -4446,7 +4448,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     name: "fn_agent_start",
     label: "fn: Start Agent",
     description:
-      "Start a stopped agent — resumes its execution. " +
+      "Start a stopped agent — resumes its execution without changing assigned task pause state. " +
       "Transitions the agent from paused to active state.",
     promptSnippet: "Start (resume) a stopped Fusion agent",
     promptGuidelines: [
@@ -4494,6 +4496,8 @@ export default function kbExtension(pi: ExtensionAPI) {
         };
       }
 
+      // FNXC:AgentLifecyclePause 2026-07-19-00:00: fn_agent_start is not a
+      // task resume operation, including for a task already assigned to agent.
       await agentStore.updateAgentState(params.id, "active");
 
       return {

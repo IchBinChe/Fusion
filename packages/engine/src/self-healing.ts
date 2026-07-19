@@ -10991,6 +10991,12 @@ export class SelfHealingManager {
   }
 
   /*
+  FNXC:AgentLifecyclePause 2026-07-19-00:00:
+  FN-8362: Startup heartbeat recovery changes only durable agent state and
+  metadata. It must never read or mutate an assigned task's paused, userPaused,
+  pausedByAgentId, or pausedReason fields; task safety parks remain separately
+  owned by their reason-specific writers.
+
   FNXC:AgentHeartbeat 2026-07-12-17:26:
   FN-7884: Engine restart is an explicit operator retry boundary for durable heartbeat agents. Startup recovery must immediately clear recoverable `error` and `error-retry-exhausted` parks, reset shared heartbeatErrorRecovery/durableErrorRecovery budget state, and re-arm heartbeats without steady-state staleness/cooldown/exhaustion gates; operator-actionable, stale-module, user-paused, error-unrecoverable, disabled, ephemeral, and actively executing agents remain suppressed.
 
@@ -11073,6 +11079,12 @@ export class SelfHealingManager {
     return resetCount;
   }
 
+  /*
+  FNXC:AgentLifecyclePause 2026-07-19-00:00:
+  Error auto-recovery, retry-exhaustion, and unrecoverable-error parking are
+  agent-only transitions. Assigned task pause state is never cascaded or
+  cleared by this sweep, including when a heartbeat is re-armed.
+  */
   async recoverOrphanedAgents(): Promise<number> {
     const agentStore = this.options.agentStore;
     if (!agentStore) {

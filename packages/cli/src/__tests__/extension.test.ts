@@ -193,6 +193,19 @@ pgTest("fn pi extension tool copy guardrails", () => {
     expect(guidelines).toMatch(/idle.*already-paused/i);
     expect(guidelines).not.toMatch(/idle, 'error', or already-paused/i);
   });
+
+  it("keeps pi agent stop/start bridges task-pause non-cascading (FN-8362)", () => {
+    const api = createMockApi();
+    registerExtension(api);
+
+    const stop = requireTool(api, "fn_agent_stop") as unknown as ToolMeta;
+    const start = requireTool(api, "fn_agent_start") as unknown as ToolMeta;
+
+    // The bridge exposes an agent-state transition only; it intentionally has
+    // no task pause/resume behavior even when the agent has an assignment.
+    expect(stop.description).toMatch(/without changing assigned task pause state/i);
+    expect(start.description).toMatch(/without changing assigned task pause state/i);
+  });
 });
 
 // Audited in FN-3189: this exhaustive suite is expensive (~62s) and stale

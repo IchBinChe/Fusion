@@ -25,7 +25,6 @@ import { ApiError, sendErrorResponse } from "./api-error.js";
 import {
   countRunningAgentsInRegisteredProjectStores,
   countRunningAgentsInStore,
-  getOrCreateProjectStore,
   evictAllProjectStores,
   setOnProjectFirstCreated,
 } from "./project-store-resolver.js";
@@ -1188,21 +1187,26 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
       // Prefer the engine's store when available — this ensures SSE listeners
       // attach to the same EventEmitter instance that the engine writes to,
       // rather than a separate store created by getOrCreateProjectStore.
-      let scopedStore: TaskStore;
+      const scopedStore: TaskStore = await resolveProjectScopedStore(projectId);
       let agentStore: AgentStore | undefined;
       let messageStore: MessageStore | undefined;
       let automationStore: AutomationStore | undefined;
       let scopedChatStore = chatStore;
+      /*
+      FNXC:ProjectScoping 2026-07-15-20:10:
+      A project-scoped SSE stream must attach to the same canonical TaskStore as
+      request handlers and the launch engine. Reimplementing the resolver here
+      created a second store for the launch project when its engine was not
+      immediately available, which separated its EventEmitter from mutations.
+      */
       if (engineManager) {
         const engine = engineManager.getEngine(projectId);
-        scopedStore = engine?.getTaskStore() ?? await getOrCreateProjectStore(projectId);
         scopedChatStore = getOrCreateScopedChatStore(scopedStore, engine?.getChatStore?.());
-        // Use the engine's stores if available
+        // Use the engine's auxiliary stores when available.
         agentStore = engine?.getAgentStore();
         messageStore = engine?.getMessageStore();
         automationStore = engine?.getAutomationStore();
       } else {
-        scopedStore = await getOrCreateProjectStore(projectId);
         scopedChatStore = getOrCreateScopedChatStore(scopedStore);
       }
       // Fallback: create AgentStore if engine doesn't have one
@@ -2553,7 +2557,12 @@ export function setupBadgeWebSocket(
       return scopedStore;
     }
     
-    // Create scoped store
+    /*
+    FNXC:ProjectScoping 2026-07-15-20:10:
+    Badge WebSocket listeners use the canonical scoped resolver, including for
+    the launch project, so an explicit `projectId` cannot bind a duplicate
+    TaskStore/EventEmitter and leak or miss cross-project badge updates.
+    */
     scopedStore = await resolveScopedStore(projectId, store, options?.engineManager, options?.engine?.getProjectId?.(), options);
     scopedStores.set(projectId, scopedStore);
     return scopedStore;

@@ -959,6 +959,13 @@ Key server capabilities:
   - companion endpoints: `/api/dev-server/detect`, `/config`, `/status`, `/start`, `/stop`, `/restart`, `/preview-url`
 - **Badge WebSocket**: `/api/ws` (`server.ts`, `websocket.ts`)
   - Scope-keyed channels (`badge:{scopeKey}:{taskId}`) prevent cross-project collisions
+
+#### End-to-end project-scoping invariant
+
+- Every task-data route resolves its request project once through `getProjectContext`/`getScopedStore` (or the canonical resolver used by real-time providers) and uses that resolved store for the whole handler. A supplied `projectId` never falls back to the injected/default store; unscoped launches retain the resolver's single-project fallback.
+- `/api/events` and `/api/ws` bind their listeners to that same request-scoped store. Their project-scoped channel keys and listeners prevent events from one project's task IDs from reaching another project, including when IDs overlap.
+- Project-scoped client hooks capture the active project context/version before starting fetches, SSE subscriptions, WebSocket callbacks, or reconnect work. Before applying an async result or event they reject work whose captured context is stale, emit the shared `dropped-stale-event` dashboard trace where applicable, and leave the newly active project's state untouched.
+- The canonical client implementation is `useProjectContextGuard`, as used alongside the established `useTasks` and badge-WebSocket guards. New project-scoped hooks must reuse this capture-at-start and stale-drop pattern rather than independently comparing mutable current-project state.
 - **Terminal WebSocket**: `/api/terminal/ws` (`server.ts`, `terminal-service.ts`)
   - Project-scoped terminal session validation + safe unscoped fallback
 

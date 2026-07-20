@@ -31,6 +31,8 @@ import {
   compareTaskIdNumeric,
   resolveAgentMemoryInclusionMode,
   resolvePlanApprovalRequired,
+  resolveWorkflowIrForTask,
+  getStepParser,
   computePlanApprovalFingerprint,
   extractIntentSignature,
   findNearDuplicates,
@@ -805,6 +807,31 @@ export class TriageProcessor {
     if (deterministicSpecFailure) {
       planLog.warn(`${task.id} planning recovery skipped — PROMPT.md failed deterministic validation (${deterministicSpecFailure})`);
       return false;
+    }
+
+    /*
+    FNXC:TriageStuckRecovery 2026-07-20:
+    A stuck planner may leave a partially edited seed that no longer matches the
+    byte-exact unplanned-seed detector. For step-heading workflows, non-empty prose
+    is not executable proof: require parsed steps unless the plan explicitly opts
+    into the legitimate zero-work contract. Otherwise recovery would release the
+    task to parse-steps, whose empty foreach could advance toward merge.
+    */
+    const workflow = await resolveWorkflowIrForTask(this.store, task.id).catch(() => undefined);
+    const requiresPromptImplementationSteps = workflow?.nodes.some((node) =>
+      node.kind === "parse-steps"
+      && (node.config?.artifact === undefined || node.config.artifact === "PROMPT.md")
+      && node.config?.parser === "step-headings"
+      && node.config?.requireStepsUnlessNoCommits === true
+    ) === true;
+    if (requiresPromptImplementationSteps && !promptDeclaresNoCommitsExpected(written)) {
+      const parsedSteps = getStepParser("step-headings")?.parse(written).steps ?? [];
+      if (parsedSteps.length === 0) {
+        const message = "Planning recovery withheld: PROMPT.md has no executable steps and does not declare no commits expected";
+        planLog.warn(`${task.id} ${message}`);
+        await this.store.logEntry(task.id, message);
+        return false;
+      }
     }
 
     await this.finalizeApprovedTask(task, written, settings, {
@@ -2638,8 +2665,7 @@ export class TriageProcessor {
     the row's reviewLevel from the specified prompt.
     */
 
-    const noCommitsExpectedMatch = written.match(/^\*\*No commits expected:\*\*\s*(true|yes)\b/im);
-    if (noCommitsExpectedMatch) {
+    if (promptDeclaresNoCommitsExpected(written)) {
       taskUpdates.noCommitsExpected = true;
     }
 
@@ -3064,6 +3090,10 @@ export class TriageProcessor {
 
 function parseFileScopeFromPrompt(text: string): string[] {
   return extractEffectiveWriteScopeFromPrompt(text);
+}
+
+function promptDeclaresNoCommitsExpected(text: string): boolean {
+  return /^\*\*No commits expected:\*\*\s*(true|yes)\b/im.test(text);
 }
 
 function extractPromptDeclaredTitle(prompt: string, taskId: string): string | null {

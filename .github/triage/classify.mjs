@@ -28,6 +28,7 @@ const MODEL = process.env.TRIAGE_MODEL || 'llama-3.3-70b-versatile';
 const CONFIDENCE_THRESHOLD = Number(process.env.TRIAGE_THRESHOLD || 0.6);
 const MAX_AREA_LABELS = 2;
 const BODY_CHAR_LIMIT = 4000;
+const WRITE_INTERVAL_MS = 1100;
 
 const args = process.argv.slice(2);
 const flag = (name) => args.includes(name);
@@ -68,12 +69,22 @@ async function fetchUnlabelledIssues(limit) {
   return res.items.filter((i) => !i.pull_request);
 }
 
-/** addLabels — never setLabels. setLabels replaces the whole set and would wipe human work. */
+/**
+ * addLabels — never setLabels. setLabels replaces the whole set and would wipe human work.
+ *
+ * Paced deliberately. GitHub's secondary rate limits allow 80 content-creating requests per
+ * minute and 500 per hour, they are shared with anything the same account does in the web UI,
+ * there is no header or endpoint to check remaining budget, and the documented consequence of
+ * ignoring them is having the integration banned. The docs ask for at least one second between
+ * write requests, so that is what we do.
+ */
 async function addLabels(issueNumber, labels) {
-  return gh(`/repos/${TARGET}/issues/${issueNumber}/labels`, {
+  const res = await gh(`/repos/${TARGET}/issues/${issueNumber}/labels`, {
     method: 'POST',
     body: JSON.stringify({ labels }),
   });
+  await new Promise((r) => setTimeout(r, WRITE_INTERVAL_MS));
+  return res;
 }
 
 // ---------------------------------------------------------------- sanitising

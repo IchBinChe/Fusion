@@ -5,6 +5,11 @@ name: Issue triage
 #     target is a repo we do not control;
 #  2. an untrusted trigger carrying write permission is the shape behind the 2026
 #     prompt-injection incidents. A schedule has no attacker-controlled trigger.
+#
+# Two documented behaviours to keep in mind:
+#  - forking a public repo disables scheduled workflows until they are re-enabled;
+#  - a public repo with no activity for 60 days has its scheduled workflows auto-disabled.
+# Both fail silently, so treat "no runs" as a symptom to check, not as "no issues to triage".
 on:
   schedule:
     - cron: '*/30 * * * *'
@@ -26,15 +31,19 @@ concurrency:
 jobs:
   triage:
     runs-on: ubuntu-latest
+    # Specifying any permission sets every unspecified one to none.
     permissions:
-      issues: write        # the only write this needs
+      issues: write
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      # Pinned to full commit SHAs: a tag can be moved by anyone who compromises the
+      # action's repository. Immutable releases do not replace this — floating major
+      # tags remain mutable by design.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
 
@@ -43,7 +52,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           TARGET_REPO: ${{ github.repository }}
+          # Passed through the environment rather than interpolated into the shell
+          # command: `${{ }}` is substituted before the script runs, which is the
+          # documented script-injection vector.
+          TRIAGE_LIMIT: ${{ inputs.limit || '50' }}
+          TRIAGE_DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          node .github/triage/classify.mjs \
-            --limit "${{ inputs.limit || '50' }}" \
-            ${{ (inputs.dry_run == true) && '--dry-run' || '' }}
+          # Anything other than an explicit "false" means dry run. On a schedule the
+          # input is empty, so scheduled runs write nothing until someone deliberately
+          # changes this. Deliberate: the classifier should be measured before it is
+          # trusted to label unattended.
+          args=(--limit "$TRIAGE_LIMIT")
+          if [ "$TRIAGE_DRY_RUN" != "false" ]; then args+=(--dry-run); fi
+          node .github/triage/classify.mjs "${args[@]}"

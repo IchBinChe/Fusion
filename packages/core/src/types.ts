@@ -1670,6 +1670,8 @@ export interface Task {
    * metadata fallback when live stats are unavailable.
    */
   modifiedFiles?: string[];
+  /** Durable normalized symbol declarations used by scheduler admission. */
+  declaredSymbols?: string[];
   /** Opt out of the squash file-scope invariant for this task. */
   scopeOverride?: boolean;
   /** Optional justification for bypassing the squash file-scope invariant. */
@@ -2334,6 +2336,8 @@ export interface TaskCreateInput {
   scopeOverrideReason?: string;
   /** Append-only list of file paths auto-widened into `## File Scope` by merger safety checks. */
   scopeAutoWiden?: string[];
+  /** Optional declared symbols; own-property undefined is an explicit runtime clear. */
+  declaredSymbols?: string[];
   /** Per-task GitHub issue tracking overrides for Fusion-created linked issues. */
   githubTracking?: Pick<TaskGithubTracking, "enabled" | "repoOverride">;
   /** Review level for task execution — controls review rigor: 0=None, 1=Plan Only, 2=Plan and Code, 3=Full */
@@ -4944,6 +4948,7 @@ export interface ArchivedTaskEntry {
   baseCommitSha?: string;
   /** List of files modified by this task */
   modifiedFiles?: string[];
+  declaredSymbols?: string[];
   /** Mission ID this task is linked to */
   missionId?: string;
   /** Slice ID this task is linked to */

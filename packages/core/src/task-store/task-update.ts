@@ -22,6 +22,7 @@ import {validateFileScopeInPromptContent} from "../task-store/file-scope.js";
 import {__setTaskActivityLogLimitsForTesting, isBootstrapPromptStub, rewriteHeadingLine, rewriteMissionSection} from "../task-store/comments.js";
 import {applyOriginalDescription} from "../original-description-policy.js";
 import {normalizeTaskReviewState} from "../task-store/review-state.js";
+import {hasOwnDeclaredSymbols, normalizeDeclaredSymbols, extractDeclaredSymbolsFromPrompt} from "../task-symbol-resolution.js";
 
 export async function updateTaskUnlockedImpl(store: TaskStore, id: string, updates: Parameters<TaskStore["updateTask"]>[1], runContext?: RunMutationContext,): Promise<Task> {
     {
@@ -703,6 +704,14 @@ export async function updateTaskUnlockedImpl(store: TaskStore, id: string, updat
         task.modifiedFiles = undefined;
       } else if (updates.modifiedFiles !== undefined) {
         task.modifiedFiles = updates.modifiedFiles;
+      }
+      /* FNXC:SymbolLock 2026-07-31-10:00: present undefined is an explicit clear; only absent declarations may hydrate from a prompt write. */
+      if (hasOwnDeclaredSymbols(updates)) {
+        const normalized = normalizeDeclaredSymbols(Array.isArray(updates.declaredSymbols) ? updates.declaredSymbols : []);
+        task.declaredSymbols = normalized.length ? normalized : undefined;
+      } else if (updates.prompt !== undefined) {
+        const normalized = normalizeDeclaredSymbols(extractDeclaredSymbolsFromPrompt(updates.prompt));
+        task.declaredSymbols = normalized.length ? normalized : undefined;
       }
       if (updates.missionId === null) {
         task.missionId = undefined;

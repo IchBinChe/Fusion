@@ -26,6 +26,7 @@ import {buildBootstrapPrompt} from "../mesh-task-replication.js";
 import {validateFileScopeInPromptContent} from "../task-store/file-scope.js";
 import {__setTaskActivityLogLimitsForTesting} from "../task-store/comments.js";
 import {withTaskBranchContextInSourceMetadata} from "../task-store/branch-context.js";
+import {resolveCreateDeclaredSymbols} from "../task-symbol-resolution.js";
 import {softDeleteTaskRow as softDeleteTaskRowAsync, insertTaskRowInTransaction, isTaskIdConflictError} from "../task-store/async-persistence.js";
 
 function ensureSqliteProposalClaimUniqueness(store: TaskStore): void {
@@ -296,6 +297,7 @@ export async function _createTaskInternalBackendImpl(store: TaskStore, input: Ta
     const layer = store.asyncLayer!;
     const now = options?.createdAt ?? new Date().toISOString();
     const normalizedTitle = normalizeTitleForTaskId(title, id);
+    const declaredSymbols = resolveCreateDeclaredSymbols(input, options?.promptOverride);
     const task: Task = {
       id,
       lineageId: input.lineageId ?? generateTaskLineageId(),
@@ -304,6 +306,7 @@ export async function _createTaskInternalBackendImpl(store: TaskStore, input: Ta
       description: input.description,
       priority: normalizeTaskPriority(input.priority),
       tokenUsage: input.tokenUsage,
+      declaredSymbols,
       sourceIssue: input.sourceIssue,
       githubTracking: input.githubTracking,
       gitlabTracking: input.gitlabTracking,
@@ -889,6 +892,7 @@ export async function _createTaskInternalImpl(store: TaskStore, input: TaskCreat
     const now = options?.createdAt ?? new Date().toISOString();
     // FN-5077: null normalized titles are treated as "no title" and allow standard fallback/summarization behavior.
     const normalizedTitle = normalizeTitleForTaskId(title, id);
+    const declaredSymbols = resolveCreateDeclaredSymbols(input, options?.promptOverride);
     const task: Task = {
       id,
       lineageId: input.lineageId ?? generateTaskLineageId(),
@@ -897,6 +901,7 @@ export async function _createTaskInternalImpl(store: TaskStore, input: TaskCreat
       description: input.description,
       priority: normalizeTaskPriority(input.priority),
       tokenUsage: input.tokenUsage,
+      declaredSymbols,
       sourceIssue: input.sourceIssue,
       githubTracking: input.githubTracking,
       gitlabTracking: input.gitlabTracking,

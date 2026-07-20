@@ -37,7 +37,9 @@ FNXC:PostgresBigintCounters 2026-07-19-12:00:
 SCHEMA_BASELINE_VERSION advances to 0026 for the bigint counters migration.
 Per-migration identities above stay fixed; only this latest-version marker moves.
 */
-export const SCHEMA_BASELINE_VERSION = "0027";
+export const SCHEMA_BASELINE_VERSION = "0028";
+/** FNXC:SymbolLock 2026-07-31-10:00: upgrades need durable task declarations before admission resolves symbols. */
+export const TASK_DECLARED_SYMBOLS_VERSION = "0028";
 const INITIAL_SCHEMA_VERSION = "0000";
 const AUTOMATION_ISOLATION_SCHEMA_VERSION = "0001";
 const ANALYTICS_ISOLATION_SCHEMA_VERSION = "0002";
@@ -310,6 +312,7 @@ const WORKFLOW_IR_PIN_AND_LEGACY_ADOPTION_MIGRATION_PATH = join(
   MIGRATIONS_DIR,
   "0027_workflow_ir_pin_and_legacy_adoption.sql",
 );
+const TASK_DECLARED_SYMBOLS_MIGRATION_PATH = join(MIGRATIONS_DIR, "0028_task_declared_symbols.sql");
 
 /**
  * Ensure the migration bookkeeping table exists. Lives in the public schema so
@@ -831,6 +834,13 @@ export async function applySchemaBaseline(
       const migrationSql = await readFile(WORKFLOW_IR_PIN_AND_LEGACY_ADOPTION_MIGRATION_PATH, "utf8");
       await tx.execute(sql.raw(migrationSql));
       await tx.execute(sql`INSERT INTO public.${sql.identifier(MIGRATION_BOOKKEEPING_TABLE)} (version) VALUES (${WORKFLOW_IR_PIN_AND_LEGACY_ADOPTION_VERSION}) ON CONFLICT (version) DO NOTHING`);
+      schemaChanged = true;
+    }
+
+    if (!applied.includes(TASK_DECLARED_SYMBOLS_VERSION)) {
+      const migrationSql = await readFile(TASK_DECLARED_SYMBOLS_MIGRATION_PATH, "utf8");
+      await tx.execute(sql.raw(migrationSql));
+      await tx.execute(sql`INSERT INTO public.${sql.identifier(MIGRATION_BOOKKEEPING_TABLE)} (version) VALUES (${TASK_DECLARED_SYMBOLS_VERSION}) ON CONFLICT (version) DO NOTHING`);
       schemaChanged = true;
     }
 

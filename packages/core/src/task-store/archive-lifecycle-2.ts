@@ -93,6 +93,7 @@ export async function taskToArchiveEntryImpl(store: TaskStore, task: Task, archi
       mergeRetries: task.mergeRetries,
       error: task.error,
       modifiedFiles: task.modifiedFiles,
+      declaredSymbols: task.declaredSymbols,
       missionId: task.missionId,
       sliceId: task.sliceId,
       assigneeUserId: task.assigneeUserId,
@@ -514,6 +515,7 @@ export async function restoreFromArchiveImpl(store: TaskStore, entry: import("..
       breakIntoSubtasks: entry.breakIntoSubtasks,
       noCommitsExpected: entry.noCommitsExpected,
       modifiedFiles: entry.modifiedFiles,
+      declaredSymbols: entry.declaredSymbols,
       // Intentionally NOT restoring: worktree, status, blockedBy, paused, executionStartBranch, baseCommitSha, error
     };
 

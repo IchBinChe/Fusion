@@ -19,6 +19,16 @@ export {
   symbolLocksConflict,
 } from "./task-store/symbol-locks.js";
 export {
+  hasOwnDeclaredSymbols,
+  normalizeDeclaredSymbols,
+  extractDeclaredSymbolsFromPrompt,
+  resolveCreateDeclaredSymbols,
+  resolveTaskSymbolsFromSources,
+  resolveTaskSymbolsForTask,
+  type TaskSymbolResolution,
+  type TaskSymbolResolutionSource,
+} from "./task-symbol-resolution.js";
+export {
   MISSION_LINEAGE_APPROVAL_REQUIRED,
   evaluateMissionLineageApproval,
   isMissionLineageApproved,

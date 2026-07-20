@@ -71,6 +71,7 @@ import {
   SYMBOL_LOCKS_SCHEMA_VERSION,
   BIGINT_COUNTERS_VERSION,
   TASK_VERIFICATION_REQUEST_VERSION,
+  TASK_DECLARED_SYMBOLS_VERSION,
 } from "../../postgres/schema-applier.js";
 import { rekeyFallbackProjectPartition } from "../../postgres/migration-stamping.js";
 import type { PluginSchemaInitHook } from "../../postgres/plugin-schema-hook.js";
@@ -809,6 +810,37 @@ pgDescribe("schema-applier: VAL-SCHEMA-001 final-schema parity (table counts)", 
   failure mode, where a pre-fix binary re-ran the Ideas evacuation against a shared DB and
   the audit trail showed an unidentifiable writer).
   */
+  /*
+  FNXC:SymbolLock 2026-07-31-10:00:
+  Existing databases recorded through 0027 must receive the durable declaration
+  column before scheduler admission can resolve task-owned symbol keys.
+  */
+  it("upgrades an existing DB missing declared_symbols (0028)", async () => {
+    ctx = await setupFreshDb();
+    await applySchemaBaseline(ctx.db, { pluginHooks: [] });
+    await ctx.db.execute(sql.raw(`
+      DELETE FROM public.fusion_schema_migrations WHERE version = '0028';
+      ALTER TABLE project.tasks DROP COLUMN declared_symbols;
+    `));
+
+    expect((await applySchemaBaseline(ctx.db, { pluginHooks: [] })).applied).toBe(true);
+    const columns = (await ctx.db.execute(sql`
+      SELECT data_type, is_nullable, column_default
+      FROM information_schema.columns
+      WHERE table_schema = 'project'
+        AND table_name = 'tasks'
+        AND column_name = 'declared_symbols'
+    `)) as unknown as Array<{
+      data_type: string;
+      is_nullable: string;
+      column_default: string | null;
+    }>;
+    expect(columns).toHaveLength(1);
+    expect(columns[0]).toMatchObject({ data_type: "jsonb", is_nullable: "NO" });
+    expect(columns[0].column_default).toContain("[]");
+    expect(await getAppliedMigrations(ctx.db)).toContain(TASK_DECLARED_SYMBOLS_VERSION);
+  });
+
   it("refuses to open a database migrated by a newer binary (stale-binary guard)", () => {
     const future = String(Number(SCHEMA_BASELINE_VERSION) + 1).padStart(4, "0");
     expect(() => assertBinaryNotOlderThanDatabase([SCHEMA_BASELINE_VERSION, future]))
@@ -830,7 +862,7 @@ pgDescribe("schema-applier: VAL-SCHEMA-001 final-schema parity (table counts)", 
     expect(() => assertBinaryNotOlderThanDatabase(["9"])).not.toThrow();
     expect(() => assertBinaryNotOlderThanDatabase(["0009"])).not.toThrow();
     // A genuinely newer version still throws regardless of padding.
-    expect(() => assertBinaryNotOlderThanDatabase(["0028"])).toThrow(StaleBinarySchemaError);
+    expect(() => assertBinaryNotOlderThanDatabase([String(Number(SCHEMA_BASELINE_VERSION) + 1).padStart(4, "0")])).toThrow(StaleBinarySchemaError);
   });
 
 
@@ -1367,6 +1399,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       SYMBOL_LOCKS_SCHEMA_VERSION,
       BIGINT_COUNTERS_VERSION,
       WORKFLOW_IR_PIN_AND_LEGACY_ADOPTION_VERSION,
+      TASK_DECLARED_SYMBOLS_VERSION,
     ]);
     expect((await applySchemaBaseline(ctx.db, { pluginHooks: [] })).applied).toBe(false);
   });
@@ -1420,6 +1453,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       SYMBOL_LOCKS_SCHEMA_VERSION,
       BIGINT_COUNTERS_VERSION,
       WORKFLOW_IR_PIN_AND_LEGACY_ADOPTION_VERSION,
+      TASK_DECLARED_SYMBOLS_VERSION,
     ]);
   });
 
@@ -1606,6 +1640,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       SYMBOL_LOCKS_SCHEMA_VERSION,
       BIGINT_COUNTERS_VERSION,
       WORKFLOW_IR_PIN_AND_LEGACY_ADOPTION_VERSION,
+      TASK_DECLARED_SYMBOLS_VERSION,
     ]);
   });
 
@@ -1673,6 +1708,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       SYMBOL_LOCKS_SCHEMA_VERSION,
       BIGINT_COUNTERS_VERSION,
       WORKFLOW_IR_PIN_AND_LEGACY_ADOPTION_VERSION,
+      TASK_DECLARED_SYMBOLS_VERSION,
     ]);
   });
 
@@ -1740,6 +1776,7 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       SYMBOL_LOCKS_SCHEMA_VERSION,
       BIGINT_COUNTERS_VERSION,
       WORKFLOW_IR_PIN_AND_LEGACY_ADOPTION_VERSION,
+      TASK_DECLARED_SYMBOLS_VERSION,
     ]);
   });
 });

@@ -38,7 +38,11 @@ function payload(data: Record<string, unknown>): string {
 function completePayload(): string {
   return JSON.stringify({
     type: "complete",
-    data: { title: "The model tried to end the interview", description: "must be ignored" },
+    data: {
+      title: "Secure account recovery delivery",
+      description: "Build a reviewed recovery workflow with audit coverage.",
+      keyDeliverables: ["Implement recovery workflow", "Verify audit coverage"],
+    },
   });
 }
 
@@ -177,7 +181,10 @@ describe("reactive Planning Mode question contract", () => {
 
     // The streamed processAgentTurn seam must coerce generic complete output into a question.
     expect(fallbackQuestion.id).not.toBe("complete");
-    expect((await getSession(sessionId))?.summary?.description).toContain("Build secure account recovery");
+    expect((await getSession(sessionId))?.summary).toMatchObject({
+      title: "Secure account recovery delivery",
+      keyDeliverables: ["Implement recovery workflow", "Verify audit coverage"],
+    });
     expect((await getSession(sessionId))?.validated).toBe(false);
 
     const next = await submitResponse(sessionId, {
@@ -217,7 +224,10 @@ describe("reactive Planning Mode question contract", () => {
     const afterCompletion = await getSession(created.sessionId);
     expect(afterCompletion?.validated).toBe(false);
     expect(afterCompletion).not.toHaveProperty("pendingSummary");
-    expect(afterCompletion?.summary?.description).toContain("audit logging security");
+    expect(afterCompletion?.summary).toMatchObject({
+      title: "Secure account recovery delivery",
+      keyDeliverables: ["Implement recovery workflow", "Verify audit coverage"],
+    });
     expect(afterCompletion?.currentQuestion).toBeDefined();
 
     const secondQuestion = afterCompletion!.currentQuestion!;
@@ -227,8 +237,79 @@ describe("reactive Planning Mode question contract", () => {
     expect((await getSession(created.sessionId))?.validated).toBe(false);
 
     const finalPlan = await validateSession(created.sessionId);
-    expect(finalPlan.description).toContain("Build secure account recovery");
+    expect(finalPlan.description).toContain("Build a reviewed recovery workflow with audit coverage.");
     expect(await getSession(created.sessionId)).toMatchObject({ validated: true, currentQuestion: undefined });
+  });
+
+  it("uses a model runningPlan attached to a continuing question", async () => {
+    installScriptedAgent([payload({
+      ...FIRST_QUESTION,
+      runningPlan: {
+        title: "Account recovery implementation plan",
+        description: "Deliver a secure, observable recovery experience.",
+        keyDeliverables: ["Add recovery token flow", "Test recovery audit events"],
+      },
+    })]);
+
+    const created = await createSession("127.0.0.13", "Build secure account recovery", MOCK_TASK_STORE, "/tmp/project");
+    expect(created.validated).toBe(false);
+    expect(created.summary).toMatchObject({
+      title: "Account recovery implementation plan",
+      description: "Deliver a secure, observable recovery experience.",
+      keyDeliverables: ["Add recovery token flow", "Test recovery audit events"],
+    });
+  });
+
+  it("merges a partial model running-plan update with the prior work product", async () => {
+    installScriptedAgent([
+      payload({
+        ...FIRST_QUESTION,
+        runningPlan: {
+          title: "Account recovery implementation plan",
+          description: "Deliver a secure, observable recovery experience.",
+          suggestedSize: "L",
+          priority: "high",
+          suggestedDependencies: ["Identity service"],
+          keyDeliverables: ["Add recovery token flow", "Test recovery audit events"],
+        },
+      }),
+      payload({
+        ...SECOND_QUESTION,
+        runningPlan: { description: "Deliver a secure recovery experience with a gradual rollout." },
+      }),
+    ]);
+
+    const created = await createSession("127.0.0.14", "Build secure account recovery", MOCK_TASK_STORE, "/tmp/project");
+    await submitResponse(created.sessionId, { scope: "secure" }, "/tmp/project", undefined, MOCK_TASK_STORE);
+
+    expect((await getSession(created.sessionId))?.summary).toEqual({
+      title: "Account recovery implementation plan",
+      description: "Deliver a secure recovery experience with a gradual rollout.",
+      suggestedSize: "L",
+      priority: "high",
+      suggestedDependencies: ["Identity service"],
+      keyDeliverables: ["Add recovery token flow", "Test recovery audit events"],
+    });
+  });
+
+  it("keeps fallback running plans answer-aware without turning questions into deliverables", async () => {
+    installScriptedAgent([payload(FIRST_QUESTION), payload(SECOND_QUESTION)]);
+    const created = await createSession("127.0.0.12", "Build secure account recovery", MOCK_TASK_STORE, "/tmp/project");
+
+    expect(created.summary).toMatchObject({
+      title: "Build secure account recovery",
+      description: "Build secure account recovery",
+      keyDeliverables: [],
+    });
+
+    await submitResponse(created.sessionId, { scope: "secure" }, "/tmp/project", undefined, MOCK_TASK_STORE);
+    const session = await getSession(created.sessionId);
+    const askedQuestions = session!.history.map((entry) => entry.question.question);
+    expect(session?.summary?.description).toContain("Secure defaults");
+    expect(session?.summary?.description).not.toBe(session?.currentQuestion?.question);
+    expect(session?.summary?.keyDeliverables).toEqual([]);
+    expect(session?.summary?.keyDeliverables).not.toEqual(askedQuestions);
+    expect(session?.validated).toBe(false);
   });
 
   it("replays an edited historical answer while retaining later answers and appending a fresh question", async () => {
@@ -253,6 +334,6 @@ describe("reactive Planning Mode question contract", () => {
     expect(edited?.history[0]?.response).toEqual({ scope: "fast" });
     expect(edited?.history[1]?.response).toEqual({ [second.id]: "gradual" });
     expect(edited?.currentQuestion?.id).toBe("fresh-after-edit");
-    expect(edited?.summary?.description).toContain("fast");
+    expect(edited?.summary?.description).toContain("Fast delivery");
   });
 });

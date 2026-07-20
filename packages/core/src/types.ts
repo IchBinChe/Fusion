@@ -5639,6 +5639,12 @@ export interface PlanningQuestion {
   question: string;
   description?: string;
   options?: Array<{ id: string; label: string; description?: string; pros?: string[]; cons?: string[]; isOther?: boolean; customText?: string }>;
+  /*
+  FNXC:PlanningMode 2026-07-20-00:00:
+  FN-8434 carries the evolving plan beside the next interview question. This field is additive:
+  it must never be interpreted as model authority to complete a user-controlled Planning Mode session.
+  */
+  runningPlan?: PlanningSummary;
 }
 
 /** The final summary generated after planning conversation completes */

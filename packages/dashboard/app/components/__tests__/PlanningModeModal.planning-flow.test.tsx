@@ -344,7 +344,11 @@ describe("PlanningModeModal", () => {
       fireEvent.click(screen.getByText("Start Planning"));
 
       expect(await screen.findByText(mockQuestion.question)).toBeDefined();
-      expect(screen.getByText("Before question running plan")).toBeDefined();
+      const runningPlan = screen.getByRole("complementary", { name: "Running plan" });
+      expect(within(runningPlan).getByText("Before question running plan")).toBeDefined();
+      expect(within(runningPlan).getByText(mockSummary.description)).toBeDefined();
+      expect(within(runningPlan).getByText("Login page")).toBeDefined();
+      expect(within(runningPlan).queryByText(mockQuestion.question)).toBeNull();
       expect(screen.queryByText("Planning Complete!")).toBeNull();
 
       await act(async () => {
@@ -3640,6 +3644,11 @@ describe("PlanningModeModal", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Running plan" }));
       expect(rendered.container.querySelector(".planning-modal-body")).toHaveClass("planning-modal-body--compact-plan");
+      const runningPlan = screen.getByRole("complementary", { name: "Running plan" });
+      expect(within(runningPlan).getByText(mockSummary.title)).toBeVisible();
+      expect(within(runningPlan).getByText(mockSummary.description)).toBeVisible();
+      expect(within(runningPlan).getByText("Login page")).toBeVisible();
+      expect(within(runningPlan).queryByText(mockQuestion.question)).toBeNull();
       expect(screen.getByRole("button", { name: "Validate plan" })).toBeVisible();
 
       fireEvent.click(screen.getByRole("button", { name: "Answered questions" }));

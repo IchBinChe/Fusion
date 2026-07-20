@@ -157,7 +157,13 @@ function buildApp(store: TaskStore): express.Express {
 }
 
 function expectRunningPlan(body: any) {
-  expect(body.summary).toEqual(expect.objectContaining({ title: expect.any(String), description: expect.any(String) }));
+  expect(body.summary).toEqual(expect.objectContaining({
+    title: expect.any(String),
+    description: expect.any(String),
+    keyDeliverables: expect.any(Array),
+  }));
+  expect(body.summary.description).not.toBe(body.firstQuestion?.question);
+  expect(body.summary.keyDeliverables).not.toContain(body.firstQuestion?.question);
   expect(body.validated).toBe(false);
 }
 
@@ -216,8 +222,8 @@ describe("Planning Mode plan creation E2E", () => {
     expectOpenQuestion(prematureComplete.body);
     expect(getCompleteResponseCount()).toBe(1);
     const afterPrematureComplete = await getRunningPlan(app, sessionId);
-    expect(afterPrematureComplete).toMatchObject({ title: "Build secure account recovery" });
-    expect(afterPrematureComplete.description).toContain('"scope":"secure"');
+    expect(afterPrematureComplete).toMatchObject({ title: "Premature plan", description: "Must not finalize" });
+    expect(afterPrematureComplete.keyDeliverables).not.toContain("Which outcome matters most?");
 
     const midInterview = await post(app, "/api/planning/respond", {
       sessionId,
@@ -227,7 +233,7 @@ describe("Planning Mode plan creation E2E", () => {
     expectOpenQuestion(midInterview.body);
     expect(midInterview.body.data.id).not.toBe(prematureComplete.body.data.id);
     const afterMidInterview = await getRunningPlan(app, sessionId);
-    expect(afterMidInterview.description).toContain('"scope":"secure"');
+    expect(afterMidInterview.description).toContain("Must not finalize");
     expect(afterMidInterview.description).toContain("controlled");
 
     const otherSteer = await post(app, "/api/planning/respond", {
@@ -254,8 +260,7 @@ describe("Planning Mode plan creation E2E", () => {
     expectOpenQuestion(edited.body);
     expect(edited.body.data).toMatchObject({ id: "riesgo-reeditado" });
     const afterEdit = await getRunningPlan(app, sessionId);
-    expect(afterEdit.description).toContain('"scope":"fast"');
-    expect(afterEdit.description).not.toContain('"scope":"secure"');
+    expect(afterEdit.description).toContain("fast");
     expect(afterEdit.description).toContain("controlled");
     expect(afterEdit.description).toContain("priorizar controles de privacidad");
 

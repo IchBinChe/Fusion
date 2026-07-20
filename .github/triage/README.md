@@ -34,9 +34,9 @@ export GITHUB_TOKEN=...        # needs issues:write on the target
 export GROQ_API_KEY=...        # free tier: 14,400 req/day; this needs ~26/day
 export TARGET_REPO=IchBinChe/Fusion
 
-node triage/classify.mjs --eval triage/eval/ground-truth.json --limit 30   # score, writes nothing
-node triage/classify.mjs --dry-run                                        # live issues, writes nothing
-node triage/classify.mjs                                                  # applies labels
+node .github/triage/classify.mjs --eval .github/triage/eval/ground-truth.json --limit 30   # score, writes nothing
+node .github/triage/classify.mjs --dry-run                                        # live issues, writes nothing
+node .github/triage/classify.mjs                                                  # applies labels
 ```
 
 ## On the eval numbers

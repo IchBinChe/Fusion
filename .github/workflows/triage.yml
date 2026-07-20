@@ -44,6 +44,6 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           TARGET_REPO: ${{ github.repository }}
         run: |
-          node triage/classify.mjs \
+          node .github/triage/classify.mjs \
             --limit "${{ inputs.limit || '50' }}" \
             ${{ (inputs.dry_run == true) && '--dry-run' || '' }}

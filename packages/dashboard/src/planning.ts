@@ -18,6 +18,7 @@ import type {
   PlanningResponse,
   TaskPriority,
   TaskStore,
+  Settings,
   NtfyNotificationEvent,
   ThinkingLevel,
   MessageStore,
@@ -27,8 +28,13 @@ import {
   DEFAULT_TASK_PRIORITY,
   TASK_PRIORITIES,
   THINKING_LEVELS,
-  resolvePrompt,
   summarizeTitle,
+  builtinSeamPrompt,
+  renderTriagePolicyPlaceholders,
+  resolveAgentPrompt,
+  resolveEffectivePlannerHeartbeatPatrolEnabled,
+  resolvePlanningPromptFromIr,
+  resolveWorkflowIrById,
   type PromptOverrideMap,
 } from "@fusion/core";
 import type { SubtaskItem } from "./subtask-breakdown.js";
@@ -71,6 +77,8 @@ type PlanningSessionOptions = {
   projectId?: string;
   ntfyConfig?: PlanningNtfyConfig;
   clarificationEnabled?: boolean;
+  /** Workflow selected by the planning entry point; retained for agent rebuilds. */
+  workflowId?: string;
   /** Runtime-only mailbox dependency; never serialize this store. */
   messageStore?: MessageStore;
   pluginRunner?: SkillPluginRunner;
@@ -228,13 +236,50 @@ Planning Mode is user-terminated: each answered turn must produce one consequent
 The model may update the running plan but must never infer completion; only the visible Validate plan action can make a session terminal.
 */
 /** Planning system prompt for the AI agent */
-export const PLANNING_SYSTEM_PROMPT = `You are a planning assistant for the fn task board system. First analyze the codebase and active board with the available read tools, fn_task_list, and fn_task_show. Turn a raw idea into an incrementally maintained plan.
+export const PLANNING_SYSTEM_PROMPT = `## Planning Mode interaction adapter
 
-Ask exactly one next, high-impact question on every turn. Use every prior answer as context, avoid repeated questions, and never decide that the interview is complete or emit a terminal/complete response. The user alone validates the plan.
+First analyze the codebase and active board with the available readonly tools, fn_task_list, and fn_task_show. Treat the workflow planning template above as the quality bar and PROMPT.md structure for the evolving plan, but do not write PROMPT.md or use write tools during this interview.
 
-Respond only with JSON: {"type":"question","data":{"id":"unique-id","type":"single_select|multi_select","question":"...","description":"...","options":[{"id":"option-a","label":"...","description":"...","pros":["..."],"cons":["..."]},{"id":"option-b","label":"...","description":"...","pros":["..."],"cons":["...]},{"id":"other","label":"...","isOther":true}],"runningPlan":{"title":"...","description":"...","suggestedSize":"S|M|L","priority":"normal","suggestedDependencies":[],"keyDeliverables":["concrete work item"]}}}.
+Ask exactly one next, high-impact question on every turn. Use every prior answer as context, avoid repeated questions, and never decide that the interview is complete or emit a terminal/complete response. Only the user can validate the plan.
+
+Respond only with JSON: {"type":"question","data":{"id":"unique-id","type":"single_select|multi_select","question":"...","description":"...","options":[{"id":"option-a","label":"...","description":"...","pros":["..."],"cons":["..."]},{"id":"option-b","label":"...","description":"...","pros":["..."],"cons":["..."]},{"id":"other","label":"...","isOther":true}],"runningPlan":{"title":"...","description":"...","suggestedSize":"S|M|L","priority":"normal","suggestedDependencies":[],"keyDeliverables":["concrete work item"]}}}.
 
 Every turn must include runningPlan: only title, description, suggestedSize, optional priority, suggestedDependencies, and concrete keyDeliverables informed by the idea and answers so far. Never use interview question text as a deliverable. Do not put PROMPT.md sections (Mission, Before → After, Steps, File Scope, Review Level, Completion Criteria, or Do NOT) in runningPlan or free text: triage writes PROMPT.md only after Validate. Validate serializes this lean plan as plan.md without priority; priority remains a task field. Every question must provide at least two alternatives, each with non-empty pros and cons, plus exactly one Other/write-your-own option. Write every label, option, and Other label in the language of the user's original input. Incorporate free-text Other answers verbatim as steering context for the following question.`;
+
+/*
+FNXC:PlanningMode 2026-07-20-14:30:
+Planning Mode must use the same workflow planning seam as triage for a newly added task, then layer its infinite JSON interview contract over that template. A catalog defaultContent is Settings UI documentation, not proof that an operator explicitly replaced the full system prompt.
+*/
+export async function resolvePlanningModeSystemPrompt(
+  store: TaskStore,
+  promptOverrides?: PromptOverrideMap,
+  workflowId?: string,
+): Promise<string> {
+  const settings: Partial<Settings> = (await store.getSettings().catch(() => ({}))) ?? {};
+  const overrides = promptOverrides ?? settings.promptOverrides;
+  const explicitOverride = overrides && Object.prototype.hasOwnProperty.call(overrides, "planning-system")
+    && typeof overrides["planning-system"] === "string"
+    && overrides["planning-system"].trim().length > 0
+    ? overrides["planning-system"]
+    : undefined;
+  if (explicitOverride) return explicitOverride;
+
+  const plannerHeartbeatPatrolEnabled = resolveEffectivePlannerHeartbeatPatrolEnabled(settings);
+  const assignedTriagePrompt = settings.agentPrompts?.roleAssignments?.triage
+    ? resolveAgentPrompt("triage", settings.agentPrompts, { plannerHeartbeatPatrolEnabled })
+    : "";
+  let workflowPrompt: string | undefined;
+  try {
+    const ir = await resolveWorkflowIrById(store, workflowId || settings.defaultWorkflowId || "builtin:coding");
+    workflowPrompt = resolvePlanningPromptFromIr(ir);
+  } catch {
+    // Resolve fail-soft below so a missing custom workflow cannot prevent planning.
+  }
+  const fallback = builtinSeamPrompt("planning")
+    || resolveAgentPrompt("triage", undefined, { plannerHeartbeatPatrolEnabled });
+  const base = assignedTriagePrompt || workflowPrompt || fallback;
+  return `${renderTriagePolicyPlaceholders(base, settings)}\n\n${PLANNING_SYSTEM_PROMPT}`;
+}
 
 
 
@@ -265,6 +310,7 @@ export interface DraftInputPayload {
   thinkingLevel?: ThinkingLevel;
   summarizedFor?: string;
   validated?: boolean;
+  workflowId?: string;
 }
 
 /** Session TTL in milliseconds (7 days) */
@@ -317,6 +363,8 @@ interface Session {
   initialPlan: string;
   title: string;
   projectId?: string;
+  /** Workflow selected at session start, retained for agent reconstruction. */
+  workflowId?: string;
   /** Model override the user picked at draft-create time. Persisted in inputPayload so reopen restores it. */
   draftModelProvider?: string;
   draftModelId?: string;
@@ -539,6 +587,7 @@ function persistSession(session: Session, status: "generating" | "awaiting_input
       ...(session.draftModelId ? { modelId: session.draftModelId } : {}),
       ...(session.draftThinkingLevel ? { thinkingLevel: session.draftThinkingLevel } : {}),
       ...(session.draftSummarizedFor ? { summarizedFor: session.draftSummarizedFor } : {}),
+      ...(session.workflowId ? { workflowId: session.workflowId } : {}),
       validated: session.validated,
       ...(typeof session.clarificationEnabled === "boolean"
         ? { clarificationEnabled: session.clarificationEnabled }
@@ -670,6 +719,7 @@ function buildSessionFromRow(row: AiSessionRow): Session {
     initialPlan: payload.initialPlan ?? "",
     title: row.title,
     projectId: row.projectId ?? undefined,
+    workflowId: payload.workflowId,
     draftModelProvider: payload.modelProvider,
     draftModelId: payload.modelId,
     draftThinkingLevel: thinkingLevel,
@@ -962,7 +1012,7 @@ export async function createSession(
   rootDir?: string,
   promptOverrides?: PromptOverrideMap,
   pluginRunner?: SkillPluginRunner,
-  options?: Pick<PlanningSessionOptions, "ntfyConfig" | "messageStore" | "clarificationEnabled">,
+  options?: Pick<PlanningSessionOptions, "ntfyConfig" | "messageStore" | "clarificationEnabled" | "workflowId">,
 ): Promise<{ sessionId: string; firstQuestion: PlanningQuestion; summary: PlanningSummary; validated: boolean }> {
   // Check rate limit
   if (!checkRateLimit(ip)) {
@@ -998,6 +1048,7 @@ export async function createSession(
     rootDir,
     pluginRunner,
     clarificationEnabled: options?.clarificationEnabled === true,
+    workflowId: options?.workflowId,
     ntfyConfig: options?.ntfyConfig,
     messageStore: options?.messageStore,
   };
@@ -1005,9 +1056,7 @@ export async function createSession(
   sessions.set(sessionId, session);
   persistSession(session, "generating");
 
-  // Resolve the effective system prompt (override or default)
-  const baseSystemPrompt = resolvePrompt("planning-system", promptOverrides) || PLANNING_SYSTEM_PROMPT;
-  const systemPrompt = baseSystemPrompt;
+  const systemPrompt = await resolvePlanningModeSystemPrompt(store, promptOverrides, session.workflowId);
 
   // Create AI agent and get the first question
   // Only await engineReady if createFnAgent hasn't been set externally (e.g., via __setCreateFnAgent)
@@ -1414,7 +1463,7 @@ export async function startExistingSession(
   thinkingLevelOrPromptOverrides?: ThinkingLevel | PromptOverrideMap,
   promptOverridesOrPluginRunner?: PromptOverrideMap | SkillPluginRunner,
   pluginRunnerMaybe?: SkillPluginRunner,
-  runtimeOptions?: Pick<PlanningSessionOptions, "ntfyConfig" | "messageStore" | "clarificationEnabled">,
+  runtimeOptions?: Pick<PlanningSessionOptions, "ntfyConfig" | "messageStore" | "clarificationEnabled" | "workflowId">,
 ): Promise<void> {
   const thinkingLevel = isThinkingLevel(thinkingLevelOrPromptOverrides) ? thinkingLevelOrPromptOverrides : undefined;
   const promptOverrides = isThinkingLevel(thinkingLevelOrPromptOverrides)
@@ -1422,6 +1471,7 @@ export async function startExistingSession(
     : (thinkingLevelOrPromptOverrides as PromptOverrideMap | undefined);
   const pluginRunner = (isThinkingLevel(thinkingLevelOrPromptOverrides) ? pluginRunnerMaybe : promptOverridesOrPluginRunner) as SkillPluginRunner | undefined;
   let session = sessions.get(sessionId);
+  if (session && runtimeOptions?.workflowId) session.workflowId = runtimeOptions.workflowId;
 
   // Draft sessions aren't included in rehydrateFromStore (which only loads
   // recoverable in-flight sessions), and a backend restart drops the in-memory
@@ -1446,6 +1496,7 @@ export async function startExistingSession(
   if (!session) {
     throw new SessionNotFoundError(`Planning session ${sessionId} not found or expired`);
   }
+  if (runtimeOptions?.workflowId) session.workflowId = runtimeOptions.workflowId;
 
   // Drafts are sync'd via aiSessionStore.updateDraft, which only writes
   // SQLite. Pull the latest initialPlan + persisted model override + the
@@ -1567,6 +1618,7 @@ export async function createSessionWithAgent(
     initialPlan,
     title: initialPlan.slice(0, 120),
     projectId: options?.projectId,
+    workflowId: options?.workflowId,
     ntfyConfig: options?.ntfyConfig
       ? {
           enabled: options.ntfyConfig.enabled,
@@ -1701,9 +1753,7 @@ async function createPlanningAgent(
   // Ensure engine is loaded before using createFnAgent
   await ensureEngineReady();
 
-  // Resolve the effective system prompt (override or default)
-  const baseSystemPrompt = resolvePrompt("planning-system", promptOverrides) || PLANNING_SYSTEM_PROMPT;
-  const systemPrompt = baseSystemPrompt;
+  const systemPrompt = await resolvePlanningModeSystemPrompt(store, promptOverrides, session.workflowId);
 
   const skillContext = buildSessionSkillContextSync(null, "executor", rootDir, pluginRunner);
 

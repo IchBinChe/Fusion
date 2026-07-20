@@ -1232,7 +1232,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
         startedPlan,
         projectId,
         modelOverride,
-        { clarificationEnabled: true },
+        { clarificationEnabled: true, ...(workflowId ? { workflowId } : {}) },
         draftSessionId ?? undefined,
       );
       draftSessionIdRef.current = null;
@@ -1256,6 +1256,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     planningModelProvider,
     planningThinkingLevel,
     projectId,
+    workflowId,
     resetPlanningAutoRetryBudget,
   ]);
 

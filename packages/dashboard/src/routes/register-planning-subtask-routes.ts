@@ -511,12 +511,14 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
    */
   router.post("/planning/start", async (req, res) => {
     try {
-      const { initialPlan } = req.body;
+      const { initialPlan, workflowId } = req.body;
 
       if (!initialPlan || typeof initialPlan !== "string") {
         throw badRequest("initialPlan is required and must be a string");
       }
-
+      if (workflowId !== undefined && typeof workflowId !== "string") {
+        throw badRequest("workflowId must be a string when provided");
+      }
 
       const { store: scopedStore } = await getProjectContext(req);
       const settings = await scopedStore.getSettings();
@@ -538,7 +540,7 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
         rootDir,
         settings.promptOverrides,
         ctx.options?.pluginRunner as SkillPluginRunner,
-        runtime,
+        { ...runtime, workflowId },
       );
       res.status(201).json(result);
     } catch (err: unknown) {
@@ -645,6 +647,7 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
         existingSessionId,
         thinkingLevel,
         clarificationEnabled,
+        workflowId,
       } = req.body;
 
       if (!initialPlan || typeof initialPlan !== "string") {
@@ -659,6 +662,10 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
         throw badRequest("planningModelId must be a string when provided");
       }
 
+
+      if (workflowId !== undefined && typeof workflowId !== "string") {
+        throw badRequest("workflowId must be a string when provided");
+      }
 
       if (clarificationEnabled !== undefined && typeof clarificationEnabled !== "boolean") {
         throw badRequest("clarificationEnabled must be a boolean when provided");
@@ -730,7 +737,7 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
             validatedThinkingLevel,
             settings.promptOverrides,
             ctx.options?.pluginRunner as SkillPluginRunner,
-            runtime,
+            { ...runtime, workflowId },
           );
         } else {
           await startExistingSession(
@@ -742,7 +749,7 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
             settings.promptOverrides,
             ctx.options?.pluginRunner as SkillPluginRunner,
             undefined,
-            runtime,
+            { ...runtime, workflowId },
           );
         }
         res.status(201).json({ sessionId: existingSessionId });
@@ -752,6 +759,7 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
       const { createSessionWithAgent, RateLimitError: _RateLimitError2 } = await import("../planning.js");
       const planningOptions = {
         projectId,
+        workflowId,
         ...runtime,
         pluginRunner: ctx.options?.pluginRunner as SkillPluginRunner,
       };

@@ -477,6 +477,16 @@ describe("PlanningModeModal", () => {
       expect(screen.queryByText("Your plan so far")).toBeNull();
     });
 
+    it("forwards the selected workflow to the streaming start request", async () => {
+      render(<PlanningModeModal isOpen={true} onClose={mockOnClose} onTaskCreated={mockOnTaskCreated} onTasksCreated={vi.fn()} tasks={mockTasks} workflowId="WF-custom-planning" />);
+      fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), { target: { value: "Build workflow-aware plan" } });
+      fireEvent.click(screen.getByText("Start Planning"));
+      await waitFor(() => expect(mockStartPlanningStreaming).toHaveBeenCalledWith(
+        "Build workflow-aware plan", undefined, undefined,
+        { clarificationEnabled: true, workflowId: "WF-custom-planning" }, undefined,
+      ));
+    });
+
     /*
     FNXC:PlanningMultiTab 2026-07-14-00:00:
     Planning has no cross-tab locking. Even when another tab is using the same session, this

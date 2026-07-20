@@ -49,6 +49,9 @@ import {
   savePlanningDescription,
   getPlanningDescription,
   clearPlanningDescription,
+  savePlanningActiveSession,
+  getPlanningActiveSession,
+  clearPlanningActiveSession,
 } from "../hooks/modalPersistence";
 import { getRelativeTimeBucket } from "../utils/relativeTimeAgo";
 import { Lightbulb, X, Loader2, CheckCircle, ArrowLeft, ArrowRight, Sparkles, ListTree, GripVertical, ArrowUp, ArrowDown, Plus, Trash2, RefreshCw, ChevronLeft, MessageSquarePlus, AlertCircle, Clock, HelpCircle, StopCircle, Archive, ArchiveRestore, Pencil } from "lucide-react";
@@ -425,6 +428,10 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   // identity change (e.g. typing into the textarea recreates loadSession) and
   // yanks the user back into the previous session's question view.
   const dismissedResumeRef = useRef<string | null>(null);
+  // A mount only needs one storage-backed resume decision. Re-reading after a
+  // user intentionally starts fresh would otherwise pull the old interview
+  // back in when unrelated callbacks change identity.
+  const hasAttemptedStoredResumeRef = useRef(false);
 
   useEffect(() => {
     viewRef.current = view;
@@ -1320,6 +1327,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           // The session was deleted (commonly: this tab just turned it into
           // tasks via Create Task / Create Tasks). Quietly fall back to the
           // new-session view rather than surfacing a scary error banner.
+          clearPlanningActiveSession(projectId);
           setSelectedSessionId(null);
           setMobileShowDetail(false);
           setActivePlanPrompt("");
@@ -1476,7 +1484,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
         });
       }
     },
-    [connectToPlanningStream, projectId, resetPlanningAutoRetryBudget],
+    [connectToPlanningStream, projectId, resetPlanningAutoRetryBudget, t],
   );
 
   // Resume the externally-requested session when the modal first opens.
@@ -1493,6 +1501,28 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     setMobileShowDetail(true);
     void loadSession(resumeSessionId);
   }, [isOpen, resumeSessionId]);
+
+  // Restore the persisted active interview for ordinary Planning navigation.
+  // Explicit resume props and seeded opens own their destination and must not
+  // be replaced by a prior session.
+  useEffect(() => {
+    if (!isOpen || resumeSessionId || initialPlanProp || selectedSessionId || hasAttemptedStoredResumeRef.current) return;
+    hasAttemptedStoredResumeRef.current = true;
+    const storedSessionId = getPlanningActiveSession(projectId);
+    if (!storedSessionId || dismissedResumeRef.current === storedSessionId) return;
+    setSelectedSessionId(storedSessionId);
+    setMobileShowDetail(true);
+    void loadSession(storedSessionId);
+  }, [initialPlanProp, isOpen, projectId, resumeSessionId, selectedSessionId]);
+
+  // Keep the focused interview durable before embedded Planning unmounts on a
+  // main-content navigation change. Selection writes cover starts, sidebar
+  // picks, explicit resumes, and storage-backed restores with one authority.
+  useEffect(() => {
+    if (selectedSessionId) {
+      savePlanningActiveSession(selectedSessionId, projectId);
+    }
+  }, [projectId, selectedSessionId]);
 
   // Re-sync the selected session whenever the planning screen is shown.
   // loadSession tears down any existing stream and reconnects, so the right
@@ -1622,13 +1652,14 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     if (resumeSessionId) {
       dismissedResumeRef.current = resumeSessionId;
     }
+    clearPlanningActiveSession(projectId);
     const preserveActiveDraft = selectedSessionId === null && viewRef.current.type === "initial";
     resetDetailState({ preserveInitialPlan: preserveActiveDraft });
     setSelectedSessionId(null);
     setShowSessionList(false);
     setMobileShowDetail(true);
     setNewSessionFocusSignal((signal) => signal + 1);
-  }, [resetDetailState, resumeSessionId, selectedSessionId]);
+  }, [projectId, resetDetailState, resumeSessionId, selectedSessionId]);
 
   const handleBackToList = useCallback(() => {
     setShowSessionList(true);
@@ -1782,6 +1813,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
         streamConnectionRef.current?.close();
         streamConnectionRef.current = null;
         resetDetailState();
+        clearPlanningActiveSession(projectId);
         setSelectedSessionId(null);
         setMobileShowDetail(false);
       }
@@ -1820,6 +1852,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
         streamConnectionRef.current?.close();
         streamConnectionRef.current = null;
         resetDetailState();
+        clearPlanningActiveSession(projectId);
         setSelectedSessionId(null);
         setMobileShowDetail(false);
       }
@@ -2142,6 +2175,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       // Single-task creation should preserve completed planning history, so
       // only clear the active selection before closing; keep the sidebar row
       // in local state to match persisted server truth.
+      clearPlanningActiveSession(projectId);
       setSelectedSessionId(null);
       handleClose();
     } catch (err) {
@@ -2221,6 +2255,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       setPlanningModelId(undefined);
       setPlanningThinkingLevel("");
       currentSessionIdRef.current = null;
+      clearPlanningActiveSession(projectId);
       setSelectedSessionId(null);
       handleClose();
     } catch (err) {
@@ -2684,7 +2719,17 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
                       {isRetrying ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
                       <span className="icon-ml-6">{isRetrying ? t("planning.retrying", "Retrying...") : t("common.retry", "Retry")}</span>
                     </button>
-                    <button className="btn" onClick={handleClose} disabled={isRetrying}>{t("planning.dismiss", "Dismiss")}</button>
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        // FNXC:PlanningMode 2026-07-20-12:15: FN-8437 treats error dismissal as an intentional exit from the resumable interview, so reopening Planning starts fresh rather than restoring the dismissed failure.
+                        clearPlanningActiveSession(projectId);
+                        handleClose();
+                      }}
+                      disabled={isRetrying}
+                    >
+                      {t("planning.dismiss", "Dismiss")}
+                    </button>
                   </div>
                 </div>
               </div>

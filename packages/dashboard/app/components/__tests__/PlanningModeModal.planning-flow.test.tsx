@@ -191,6 +191,7 @@ describe("PlanningModeModal", () => {
     MockEventSource.reset();
     vi.stubGlobal("EventSource", MockEventSource as any);
     window.sessionStorage.clear();
+    localStorage.clear();
     // Default to desktop viewport; mobile-specific tests override per-test.
     mockViewport("desktop");
     
@@ -270,6 +271,91 @@ describe("PlanningModeModal", () => {
       fireEvent.mouseDown(region);
       fireEvent.click(region);
       expect(mockOnClose).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("last-active session restoration", () => {
+    const activeSession = (status: "generating" | "awaiting_input") => ({
+      id: "session-leave-return",
+      type: "planning" as const,
+      status,
+      title: "Restored planning interview",
+      inputPayload: JSON.stringify({ initialPlan: "Restore a planning interview" }),
+      conversationHistory: JSON.stringify([{ question: mockQuestion, response: { [mockQuestion.id]: "Small" } }]),
+      currentQuestion: status === "awaiting_input"
+        ? JSON.stringify({ ...mockQuestion, id: "q-return", question: "What should happen after return?" })
+        : null,
+      result: JSON.stringify({ ...mockSummary, title: "Running plan restored" }),
+      thinkingOutput: "Persisted mid-generation reasoning",
+      error: null,
+      projectId: "project-restore",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    it.each(["desktop", "mobile"] as const)("FN-8437 restores a generating session after embedded leave/return on %s", async (viewportMode) => {
+      mockViewport(viewportMode);
+      mockFetchAiSession.mockResolvedValue(activeSession("generating"));
+
+      const firstMount = render(
+        <PlanningModeModal isOpen={true} onClose={mockOnClose} onTaskCreated={mockOnTaskCreated} onTasksCreated={vi.fn()} tasks={mockTasks} projectId="project-restore" resumeSessionId="session-leave-return" presentation="embedded" />,
+      );
+      await waitFor(() => expect(mockConnectPlanningStream).toHaveBeenCalledWith("session-leave-return", "project-restore", expect.anything()));
+      firstMount.unmount();
+
+      render(
+        <PlanningModeModal isOpen={true} onClose={mockOnClose} onTaskCreated={mockOnTaskCreated} onTasksCreated={vi.fn()} tasks={mockTasks} projectId="project-restore" presentation="embedded" />,
+      );
+
+      await waitFor(() => expect(mockFetchAiSession).toHaveBeenCalledTimes(2));
+      expect(await screen.findByText("AI is thinking...")).toBeInTheDocument();
+      expect(screen.getByText("Persisted mid-generation reasoning")).toBeInTheDocument();
+      expect(mockConnectPlanningStream).toHaveBeenLastCalledWith("session-leave-return", "project-restore", expect.anything());
+      expect(screen.queryByPlaceholderText(/e.g., Build a user authentication/)).toBeNull();
+    });
+
+    it("FN-8437 rehydrates the server question and running plan when generation finishes while away", async () => {
+      localStorage.setItem("kb:project-restore:kb-planning-active-session", "session-leave-return");
+      mockFetchAiSession.mockResolvedValue(activeSession("awaiting_input"));
+
+      render(
+        <PlanningModeModal isOpen={true} onClose={mockOnClose} onTaskCreated={mockOnTaskCreated} onTasksCreated={vi.fn()} tasks={mockTasks} projectId="project-restore" presentation="embedded" />,
+      );
+
+      expect(await screen.findByText("What should happen after return?")).toBeInTheDocument();
+      expect(screen.getByText("Running plan restored")).toBeInTheDocument();
+      expect(screen.getByText("What is the scope?")).toBeInTheDocument();
+      expect(screen.queryByPlaceholderText(/e.g., Build a user authentication/)).toBeNull();
+    });
+
+    it("FN-8437 clears the active session when dismissing a restored error", async () => {
+      localStorage.setItem("kb:project-restore:kb-planning-active-session", "session-leave-return");
+      mockFetchAiSession.mockResolvedValue({
+        ...activeSession("awaiting_input"),
+        status: "error",
+        currentQuestion: null,
+        error: "Restored planning failure",
+      });
+
+      render(
+        <PlanningModeModal isOpen={true} onClose={mockOnClose} onTaskCreated={mockOnTaskCreated} onTasksCreated={vi.fn()} tasks={mockTasks} projectId="project-restore" presentation="embedded" />,
+      );
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Restored planning failure");
+      fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+      expect(mockOnClose).toHaveBeenCalledTimes(1);
+      expect(localStorage.getItem("kb:project-restore:kb-planning-active-session")).toBeNull();
+    });
+
+    it("FN-8437 keeps an initial-plan handoff fresh instead of restoring the last active session", async () => {
+      localStorage.setItem("kb:project-restore:kb-planning-active-session", "session-leave-return");
+
+      render(
+        <PlanningModeModal isOpen={true} onClose={mockOnClose} onTaskCreated={mockOnTaskCreated} onTasksCreated={vi.fn()} tasks={mockTasks} projectId="project-restore" initialPlan="Intentional new plan" presentation="embedded" />,
+      );
+
+      await waitFor(() => expect(mockStartPlanningStreaming).toHaveBeenCalledWith("Intentional new plan", "project-restore", undefined, { clarificationEnabled: true }, undefined));
+      expect(mockFetchAiSession).not.toHaveBeenCalled();
     });
   });
 

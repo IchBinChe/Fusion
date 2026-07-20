@@ -830,6 +830,7 @@ export {
   archiveAsSameAgentDuplicate,
   flagSameAgentDuplicate,
   flagTriageDuplicate,
+  isTriageDuplicateKeepAcknowledged,
   type SameAgentDuplicateInput,
   type SameAgentDuplicateCandidate,
   type SameAgentDuplicateMatch,

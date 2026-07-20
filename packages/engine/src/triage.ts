@@ -2502,6 +2502,27 @@ export class TriageProcessor {
       }
 
       const resolution = settings.triageDuplicateResolution ?? "prompt";
+      /*
+      FNXC:DuplicateIntake 2026-07-20-12:00:
+      FN-8440 requires a Keep decision to survive marker re-ingestion during replan. The
+      acknowledgement is scoped to this canonical id, so a marker targeting a different active
+      task still receives its own prompt; user and unrelated pauses remain untouched.
+      */
+      const keepAcknowledged = fusionCore.isTriageDuplicateKeepAcknowledged(task.sourceMetadata, canonicalId);
+      if (resolution === "prompt" && keepAcknowledged) {
+        if (canClearInactiveMarker) {
+          if (!await this.runIfStillPlanningUnderTaskLock(task, async () => {
+            await rm(join(this.rootDir, ".fusion", "tasks", task.id, "PROMPT.md"), { force: true });
+          })) return;
+          await this.updatePlanningStateIfStillCurrent(task, {
+            paused: false,
+            pausedReason: null,
+            status: null,
+            sourceMetadataPatch: { nearDuplicateDismissed: true },
+          });
+        }
+        return;
+      }
       if (resolution === "delete") {
         const deleteTaskIf = (this.store as unknown as { deleteTaskIf?: TaskStore["deleteTaskIf"] }).deleteTaskIf;
         if (typeof deleteTaskIf !== "function") return;

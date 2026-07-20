@@ -138,6 +138,8 @@ Layer behavior:
 - **Triage planning loop** — after triage reads the generated `PROMPT.md`, an exact redirect marker short-circuits directly into `finalizeApprovedTask()`. Normal plans run deterministic spec hygiene checks in triage, then the selected workflow's optional Plan Review gate owns AI plan review before execution.
 - **Self-healing sweep** — maintenance Batch 2 runs `resolveExplicitDuplicateMarkerTasks()` across `triage`/`todo` tasks to clean up older stuck marker tasks. The sweep is best-effort, capped at 50 marker tasks per cycle, and can be disabled with the internal setting `resolveExplicitDuplicateMarkerEnabled: false` (default `true`).
 
+An operator's decision is durable for a task and its active canonical pair. **Keep** records the acknowledgement, clears the marker-only prompt and triage decision hold, and lets planning continue; triage and self-healing will not ask again if that same marker is reprocessed. A marker for a different active canonical remains a new decision. **Delete** for an explicit-marker decision soft-deletes the duplicate, while **Archive** for an ordinary near-duplicate leaves it terminal in Archived; neither outcome is reopened as a duplicate decision.
+
 All three layers fail open: parse errors, task lookup failures, file-read failures, activity-recording errors, or other unexpected exceptions log a warning and continue normal intake/triage/self-healing flow instead of blocking task creation or recovery.
 
 Activity uses the existing `task:auto-archived-duplicate` event with `metadata.source` disambiguators:

@@ -43,7 +43,13 @@ const LIMIT = Number(flagValue('--limit') || 50);
 
 // ---------------------------------------------------------------- GitHub
 
-async function gh(path, init = {}) {
+/**
+ * Note: @actions/github does not bundle retry or throttling, and neither does plain fetch.
+ * Rate limiting has to be handled here or not at all. GitHub signals it three different
+ * ways — primary limit (x-ratelimit-remaining: 0), secondary limit (retry-after), and abuse
+ * detection (403 with neither) — so we honour whichever header is present and back off.
+ */
+async function gh(path, init = {}, attempt = 1) {
   const res = await fetch(`https://api.github.com${path}`, {
     ...init,
     headers: {
@@ -53,6 +59,30 @@ async function gh(path, init = {}) {
       ...init.headers,
     },
   });
+
+  const rateLimited =
+    res.status === 429 ||
+    (res.status === 403 && res.headers.get('x-ratelimit-remaining') === '0') ||
+    (res.status === 403 && res.headers.get('retry-after'));
+
+  if (rateLimited && attempt <= 3) {
+    const retryAfter = Number(res.headers.get('retry-after'));
+    const resetAt = Number(res.headers.get('x-ratelimit-reset'));
+    const waitMs = retryAfter
+      ? retryAfter * 1000
+      : resetAt
+        ? Math.max(0, resetAt * 1000 - Date.now())
+        : 2 ** attempt * 1000;
+    console.warn(`rate limited on ${path}; waiting ${Math.ceil(waitMs / 1000)}s`);
+    await new Promise((r) => setTimeout(r, Math.min(waitMs, 60_000)));
+    return gh(path, init, attempt + 1);
+  }
+
+  if (res.status >= 500 && attempt <= 3) {
+    await new Promise((r) => setTimeout(r, 2 ** attempt * 1000));
+    return gh(path, init, attempt + 1);
+  }
+
   if (!res.ok) throw new Error(`GitHub ${res.status} on ${path}: ${await res.text()}`);
   return res.status === 204 ? null : res.json();
 }
@@ -172,7 +202,16 @@ async function classify(areaLabels, issue, attempt = 1) {
  * injection worth at most a wrong-but-valid label.
  */
 function decide(verdict, allowed) {
-  const picked = [verdict?.area].filter(Boolean).filter((l) => allowed.has(l)).slice(0, MAX_AREA_LABELS);
+  // Match case-insensitively and trimmed, then map back to the label's real casing.
+  // A model that answers "Area/Chat " is picking a valid label badly, not picking an
+  // invalid one — dropping it would lose recall without buying any safety.
+  const canonical = new Map([...allowed].map((l) => [l.trim().toLowerCase(), l]));
+  const picked = [verdict?.area]
+    .filter((l) => typeof l === 'string')
+    .map((l) => canonical.get(l.trim().toLowerCase()))
+    .filter(Boolean)
+    .slice(0, MAX_AREA_LABELS);
+
   const confident = Number(verdict?.confidence || 0) >= CONFIDENCE_THRESHOLD;
   if (picked.length && confident) return { labels: picked, abstained: false };
   return { labels: ['needs-triage'], abstained: true };

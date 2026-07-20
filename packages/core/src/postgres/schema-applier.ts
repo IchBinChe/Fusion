@@ -36,8 +36,12 @@ Advances to 0019 for the import-translation legacy-partition backfill. Per-migra
 FNXC:PostgresBigintCounters 2026-07-19-12:00:
 SCHEMA_BASELINE_VERSION advances to 0026 for the bigint counters migration.
 Per-migration identities above stay fixed; only this latest-version marker moves.
+
+FNXC:MigrationStatusRuntimeRead 2026-07-20:
+SCHEMA_BASELINE_VERSION advances to 0030 for project-scoped runtime reads of
+the SQLite cutover ledger.
 */
-export const SCHEMA_BASELINE_VERSION = "0029";
+export const SCHEMA_BASELINE_VERSION = "0030";
 /** FNXC:SymbolLock 2026-07-31-10:00: upgrades need durable task declarations before admission resolves symbols. */
 export const TASK_DECLARED_SYMBOLS_VERSION = "0028";
 const INITIAL_SCHEMA_VERSION = "0000";
@@ -126,6 +130,8 @@ export const SYMBOL_LOCKS_SCHEMA_VERSION = "0025";
 export const BIGINT_COUNTERS_VERSION = "0026";
 /** FNXC:TaskTiming 2026-08-01-10:00: existing clusters need planning-session timing columns. */
 export const PLANNING_ACTIVE_TIMING_VERSION = "0029";
+/** Dashboard health needs project-scoped, read-only runtime access to the SQLite cutover ledger. */
+export const SQLITE_MIGRATION_RUNTIME_READ_VERSION = "0030";
 
 /**
  * Thrown when the database was migrated by a NEWER Fusion binary than the one now
@@ -317,6 +323,7 @@ const WORKFLOW_IR_PIN_AND_LEGACY_ADOPTION_MIGRATION_PATH = join(
 
 const PLANNING_ACTIVE_TIMING_MIGRATION_PATH = join(MIGRATIONS_DIR, "0029_planning_active_timing.sql");
 const TASK_DECLARED_SYMBOLS_MIGRATION_PATH = join(MIGRATIONS_DIR, "0028_task_declared_symbols.sql");
+const SQLITE_MIGRATION_RUNTIME_READ_PATH = join(MIGRATIONS_DIR, "0030_sqlite_migration_runtime_read.sql");
 
 /**
  * Ensure the migration bookkeeping table exists. Lives in the public schema so
@@ -414,6 +421,7 @@ export async function applySchemaBaseline(
     const bigintCountersAlreadyApplied = applied.includes(BIGINT_COUNTERS_VERSION);
     const workflowIrPinAndLegacyAdoptionAlreadyApplied = applied.includes(WORKFLOW_IR_PIN_AND_LEGACY_ADOPTION_VERSION);
     const planningActiveTimingAlreadyApplied = applied.includes(PLANNING_ACTIVE_TIMING_VERSION);
+    const sqliteMigrationRuntimeReadAlreadyApplied = applied.includes(SQLITE_MIGRATION_RUNTIME_READ_VERSION);
     assertBinaryNotOlderThanDatabase(applied);
     let schemaChanged = false;
 
@@ -853,6 +861,13 @@ export async function applySchemaBaseline(
       const migrationSql = await readFile(TASK_DECLARED_SYMBOLS_MIGRATION_PATH, "utf8");
       await tx.execute(sql.raw(migrationSql));
       await tx.execute(sql`INSERT INTO public.${sql.identifier(MIGRATION_BOOKKEEPING_TABLE)} (version) VALUES (${TASK_DECLARED_SYMBOLS_VERSION}) ON CONFLICT (version) DO NOTHING`);
+      schemaChanged = true;
+    }
+
+    if (!sqliteMigrationRuntimeReadAlreadyApplied) {
+      const migrationSql = await readFile(SQLITE_MIGRATION_RUNTIME_READ_PATH, "utf8");
+      await tx.execute(sql.raw(migrationSql));
+      await tx.execute(sql`INSERT INTO public.${sql.identifier(MIGRATION_BOOKKEEPING_TABLE)} (version) VALUES (${SQLITE_MIGRATION_RUNTIME_READ_VERSION}) ON CONFLICT (version) DO NOTHING`);
       schemaChanged = true;
     }
 

@@ -72,6 +72,8 @@ import {
   BIGINT_COUNTERS_VERSION,
   TASK_VERIFICATION_REQUEST_VERSION,
   TASK_DECLARED_SYMBOLS_VERSION,
+  PLANNING_ACTIVE_TIMING_VERSION,
+  SQLITE_MIGRATION_RUNTIME_READ_VERSION,
 } from "../../postgres/schema-applier.js";
 import { ProjectPartitionRekeyError, rekeyFallbackProjectPartition } from "../../postgres/migration-stamping.js";
 import type { PluginSchemaInitHook } from "../../postgres/plugin-schema-hook.js";
@@ -1576,6 +1578,8 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       BIGINT_COUNTERS_VERSION,
       WORKFLOW_IR_PIN_AND_LEGACY_ADOPTION_VERSION,
       TASK_DECLARED_SYMBOLS_VERSION,
+      PLANNING_ACTIVE_TIMING_VERSION,
+      SQLITE_MIGRATION_RUNTIME_READ_VERSION,
     ]);
     expect((await applySchemaBaseline(ctx.db, { pluginHooks: [] })).applied).toBe(false);
   });
@@ -1630,6 +1634,8 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       BIGINT_COUNTERS_VERSION,
       WORKFLOW_IR_PIN_AND_LEGACY_ADOPTION_VERSION,
       TASK_DECLARED_SYMBOLS_VERSION,
+      PLANNING_ACTIVE_TIMING_VERSION,
+      SQLITE_MIGRATION_RUNTIME_READ_VERSION,
     ]);
   });
 
@@ -1817,6 +1823,8 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       BIGINT_COUNTERS_VERSION,
       WORKFLOW_IR_PIN_AND_LEGACY_ADOPTION_VERSION,
       TASK_DECLARED_SYMBOLS_VERSION,
+      PLANNING_ACTIVE_TIMING_VERSION,
+      SQLITE_MIGRATION_RUNTIME_READ_VERSION,
     ]);
   });
 
@@ -1885,6 +1893,8 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       BIGINT_COUNTERS_VERSION,
       WORKFLOW_IR_PIN_AND_LEGACY_ADOPTION_VERSION,
       TASK_DECLARED_SYMBOLS_VERSION,
+      PLANNING_ACTIVE_TIMING_VERSION,
+      SQLITE_MIGRATION_RUNTIME_READ_VERSION,
     ]);
   });
 
@@ -1953,6 +1963,8 @@ pgDescribe("schema-applier: automation project-isolation upgrade", () => {
       BIGINT_COUNTERS_VERSION,
       WORKFLOW_IR_PIN_AND_LEGACY_ADOPTION_VERSION,
       TASK_DECLARED_SYMBOLS_VERSION,
+      PLANNING_ACTIVE_TIMING_VERSION,
+      SQLITE_MIGRATION_RUNTIME_READ_VERSION,
     ]);
   });
 });

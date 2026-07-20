@@ -25,6 +25,7 @@ The following is the complete top-level registrar map currently imported by `rou
 - `registerPluginsAutomationRoutes` — automation and routine CRUD/manual-run/webhook endpoints plus live SSE streams, and plugin-management endpoints. It preserves the `/plugins/:id` registry pass-through; `createPluginRouter` remains mounted later by `routes.ts` so `/plugins/registry` retains precedence. Its co-located `automation-live-run.ts`, `automation-step-execution.ts`, and `plugin-bundled-runtimes.ts` helpers own replayable output, execution, and bundled-runtime fallback metadata.
 - `registerApprovalRoutes` — domain registrar mounted by `createApiRoutes`.
 - `registerWorktrunkRoutes` — domain registrar mounted by `createApiRoutes`.
+- `registerConfigMcpPiSettingsRoutes` (`register-config-mcp-pi-settings-routes.ts`) — config/MCP/Pi-settings registrar with 7 endpoint registrations: `GET /config`; `GET /mcp/discovered`; `POST /mcp/validate`; `GET /pi-settings`; `PUT /pi-settings`; `POST /pi-settings/packages`; `POST /pi-settings/reinstall-fusion`.
 - `registerSystemMaintenanceRoutes` — early-mounted system stats, vitest, maintenance-stamp, and backup routes; distinct from the late `/system/*` Command Center panel registrar.
 - `registerModelRoutes` — domain registrar mounted by `createApiRoutes`.
 - `registerCustomProviderRoutes` — domain registrar mounted by `createApiRoutes`.
@@ -89,47 +90,48 @@ Express matches in registration order. `create-api-routes-mount-sequence.ts` is 
 13. `registerPluginsAutomationRoutes`
 14. `registerApprovalRoutes`
 15. `registerWorktrunkRoutes`
-16. `registerSystemMaintenanceRoutes`
-17. `registerModelRoutes`
-18. `registerCustomProviderRoutes`
-19. `registerAuthRoutes`
-20. `registerRuntimeProviderRoutes`
-21. `registerFnBinaryRoutes`
-22. `registerAiTextAssistantRoutes`
-23. `registerUsageRoutes`
-24. `registerCommandCenterRoutes`
-25. `registerKnowledgeRoutes`
-26. `registerReportRoutes`
-27. `registerSignalRoutes`
-28. `registerMonitorRoutes`
-29. `registerUpdateCheckRoutes`
-30. `registerDiagnosticsRoutes`
-31. `registerCliAgentHooksRoute`
-32. `registerCliAgentSettingsRoutes`
-33. `registerActivityLogRoutes`
-34. `registerAgentCoreListCreateRoutes`
-35. `registerAgentImportExportRoutes`
-36. `registerOrgPortabilityRoutes`
-37. `registerAgentCoreRoutes`
-38. `registerAgentRuntimeRoutes`
-39. `registerSystemRoutes`
-40. `registerAgentReflectionRatingRoutes`
-41. `registerAgentGenerationRoutes`
-42. `registerIntegratedRouters`
-43. `registerProjectRoutes`
-44. `registerNodeRoutes`
-45. `registerDockerNodeRoutes`
-46. `registerDockerProvisioningRoutes`
-47. `registerSettingsSyncRoutes`
-48. `registerSecretsSyncRoutes`
-49. `registerMeshRoutes`
-50. `registerDiscoveryRoutes`
-51. `registerSettingsSyncInboundRoutes`
-52. `registerSecretsSyncInboundRoutes`
-53. `registerSetupActivityRoutes`
-54. `registerIntegratedDevServerRouter`
-55. `registerAgentSkillsRoutes`
-56. `registerProxyRoutes`
+16. `registerConfigMcpPiSettingsRoutes`
+17. `registerSystemMaintenanceRoutes`
+18. `registerModelRoutes`
+19. `registerCustomProviderRoutes`
+20. `registerAuthRoutes`
+21. `registerRuntimeProviderRoutes`
+22. `registerFnBinaryRoutes`
+23. `registerAiTextAssistantRoutes`
+24. `registerUsageRoutes`
+25. `registerCommandCenterRoutes`
+26. `registerKnowledgeRoutes`
+27. `registerReportRoutes`
+28. `registerSignalRoutes`
+29. `registerMonitorRoutes`
+30. `registerUpdateCheckRoutes`
+31. `registerDiagnosticsRoutes`
+32. `registerCliAgentHooksRoute`
+33. `registerCliAgentSettingsRoutes`
+34. `registerActivityLogRoutes`
+35. `registerAgentCoreListCreateRoutes`
+36. `registerAgentImportExportRoutes`
+37. `registerOrgPortabilityRoutes`
+38. `registerAgentCoreRoutes`
+39. `registerAgentRuntimeRoutes`
+40. `registerSystemRoutes`
+41. `registerAgentReflectionRatingRoutes`
+42. `registerAgentGenerationRoutes`
+43. `registerIntegratedRouters`
+44. `registerProjectRoutes`
+45. `registerNodeRoutes`
+46. `registerDockerNodeRoutes`
+47. `registerDockerProvisioningRoutes`
+48. `registerSettingsSyncRoutes`
+49. `registerSecretsSyncRoutes`
+50. `registerMeshRoutes`
+51. `registerDiscoveryRoutes`
+52. `registerSettingsSyncInboundRoutes`
+53. `registerSecretsSyncInboundRoutes`
+54. `registerSetupActivityRoutes`
+55. `registerIntegratedDevServerRouter`
+56. `registerAgentSkillsRoutes`
+57. `registerProxyRoutes`
 <!-- mount-sequence:end -->
 
 ## Ordering rules

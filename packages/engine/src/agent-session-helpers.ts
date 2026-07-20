@@ -702,6 +702,11 @@ export async function createResolvedAgentSession(
     ? runtimeOptionsRaw.skills
     : skillNamesFromSelection;
 
+  /*
+  FNXC:ChatSkills 2026-07-20-10:30:
+  createResolvedAgentSession must preserve additionalSkillPaths into runtime.createSession.
+  Plugin skill names alone never deliver bodies; chat, step, and cron lanes require both halves of the #2017 contract (FN-8443 / #2364).
+  */
   const runtimeOptions: AgentRuntimeOptions = {
     ...runtimeOptionsRaw,
     ...(mergedSkillNames.length > 0 ? { skills: mergedSkillNames } : {}),

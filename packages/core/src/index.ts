@@ -116,6 +116,7 @@ export * from "./overseer-advice.js";
 export * from "./overseer-emission-guard.js";
 export * from "./frontend-ux-policy.js";
 export * from "./original-description-policy.js";
+export * from "./planning-plan-md.js";
 export * from "./file-scope-classification.js";
 export { MAX_TASK_LIST_TEXT_CHARS, clampTaskListText, formatTaskListText } from "./task-list-format.js";
 export {
@@ -830,6 +831,7 @@ export {
   archiveAsSameAgentDuplicate,
   flagSameAgentDuplicate,
   flagTriageDuplicate,
+  isTriageDuplicateKeepAcknowledged,
   type SameAgentDuplicateInput,
   type SameAgentDuplicateCandidate,
   type SameAgentDuplicateMatch,
@@ -2529,6 +2531,10 @@ export type { Deployment as AsyncDeployment, Incident as AsyncIncident } from ".
 export {
   upsertAiSession,
   getAiSession,
+  claimPlanningSessionTaskCreation,
+  finalizePlanningSessionTaskCreation,
+  reconcilePlanningSessionTaskCreation,
+  releasePlanningSessionTaskCreation,
   listActiveAiSessions,
   listAllAiSessions,
   listRecoverableAiSessions,
@@ -2601,3 +2607,4 @@ export {
 export type { LanguageFamily, DetectedContentLanguage } from "./detect-content-language.js";
 export { promoteResearchFinding } from "./research-feature-promotion.js";
 export type { ResearchFeaturePromotionInput } from "./research-feature-promotion.js";
+export { getTotalAgentActiveMs, startPlanningSegment, finalizePlanningSegment } from "./task-timing.js";

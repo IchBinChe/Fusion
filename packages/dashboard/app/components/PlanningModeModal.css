@@ -469,6 +469,7 @@ The New session button must look EXACTLY like Missions' primary sidebar create b
   cursor: pointer;
   padding: var(--space-xs);
   border-radius: var(--radius-sm);
+  flex-shrink: 0;
   transition: background var(--transition-fast), box-shadow var(--transition-fast);
 }
 
@@ -537,6 +538,7 @@ The New session button must look EXACTLY like Missions' primary sidebar create b
   .planning-modal-body--split {
     flex-direction: column;
   }
+
   .planning-sidebar {
     width: 100%;
     border-right: none;
@@ -571,13 +573,22 @@ The New session button must look EXACTLY like Missions' primary sidebar create b
   .planning-modal-body--show-detail .planning-sidebar {
     display: none;
   }
+  /*
+  FNXC:PlanningModeMobile 2026-07-20-10:30:
+  FN-8427 gives session-list mode exclusive ownership of the compact body. JS unmounts
+  RunningPlanPane; this selector is a layout backstop for future render paths so session
+  rows stay scrollable above the New session footer instead of sharing height with a plan.
+  */
   .planning-modal-body--show-list .planning-detail {
     display: none;
   }
-  /* Show back button on mobile whenever it's rendered (the React component
-     only renders it when `mobileShowDetail` is true). */
+  /* The rendered Back control needs a full touch target and must not be squeezed out of the title row. */
   .planning-mobile-back {
     display: inline-flex;
+    min-width: calc(var(--space-md) * 2.25);
+    min-height: calc(var(--space-md) * 2.25);
+    align-items: center;
+    justify-content: center;
   }
   /* Always keep action buttons visible on mobile (no hover) */
   .planning-sidebar-item-delete,
@@ -907,63 +918,6 @@ An empty footer must NOT reserve vertical space or paint its divider band. When 
   max-width: 568px;
   margin: 0 auto;
   justify-content: center;
-}
-
-/*
-FNXC:PlanningMode 2026-07-19-12:00:
-The desktop interview is three panes: answered history, a single question editor, and an always-mounted
-running plan. On narrow screens the established detail navigation stacks panes without removing the plan.
-*/
-.planning-running-plan {
-  display: flex;
-  flex: 0 1 24rem;
-  flex-direction: column;
-  gap: var(--space-md);
-  min-width: 0;
-  padding: var(--space-lg);
-  border-left: 1px solid var(--border);
-  background: var(--surface);
-  overflow: auto;
-}
-
-.planning-running-plan h4,
-.planning-running-plan h5 {
-  margin: 0;
-}
-
-/*
-FNXC:PlanningMode 2026-07-19-15:55:
-Answered-history rows are the sole in-session navigation: make each question a full-width, readable
-button so an earlier response can be edited without restoring the retired linear Back control.
-*/
-.planning-answered-history-edit {
-  width: 100%;
-  justify-content: flex-start;
-  gap: var(--space-sm);
-  overflow: hidden;
-  text-align: left;
-}
-
-.planning-answered-history-edit span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.planning-answered-history-edit.active {
-  border-color: var(--todo);
-  background: var(--card-hover);
-}
-
-.planning-running-plan-content {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  gap: var(--space-sm);
-}
-
-.planning-running-plan-content p {
-  white-space: pre-wrap;
 }
 
 /* Question View */
@@ -1447,6 +1401,42 @@ FNXC:PlanningMode 2026-06-25-09:20:
 Tablet embedded Planning keeps the desktop two-pane shell, so the summary footer must absorb the narrower detail pane instead of relying on the mobile full-width stack. Allow the three labeled actions to wrap inside the pane while preserving the desktop left/right grouping when space is available.
 */
 @media (min-width: 769px) and (max-width: 1024px) {
+  /* FNXC:PlanningModeMobile 2026-07-20-10:30: tablet uses the same compact list destination as phone and short shells, so summary/compose detail cannot remain beside saved session rows. */
+  .planning-modal-body--show-list {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .planning-modal-body--show-list .planning-sidebar {
+    flex: 1 1 auto;
+    height: 100%;
+    min-height: 0;
+    max-height: 100%;
+  }
+
+  .planning-modal-body--show-list .planning-sidebar-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .planning-modal-body--show-list .planning-sidebar-footer {
+    flex-shrink: 0;
+  }
+
+  .planning-modal-body--show-list .planning-detail {
+    display: none;
+  }
+
+  .planning-mobile-back {
+    display: inline-flex;
+    min-width: calc(var(--space-md) * 2.25);
+    min-height: calc(var(--space-md) * 2.25);
+    align-items: center;
+    justify-content: center;
+  }
+
   .planning-summary-actions {
     flex-wrap: wrap;
     align-items: flex-start;
@@ -1858,12 +1848,6 @@ Tablet embedded Planning keeps the desktop two-pane shell, so the summary footer
     font-size: 16px;
   }
 
-  .planning-running-plan {
-    flex-basis: auto;
-    border-top: 1px solid var(--border);
-    border-left: 0;
-  }
-
   /* Confirm buttons: mobile-friendly sizing */
   .planning-confirm-group {
     flex-direction: column;
@@ -1998,11 +1982,4 @@ Tablet embedded Planning keeps the desktop two-pane shell, so the summary footer
 /* Subtask header override */
 .subtask-item-header--between {
   justify-content: space-between;
-}
-
-.planning-answered-history-response {
-  color: var(--text-muted);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }

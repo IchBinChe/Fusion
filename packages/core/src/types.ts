@@ -2078,6 +2078,14 @@ export interface Task {
    *  Incremented whenever the task leaves `in-progress`; never decremented and
    *  never cleared by reopen flows. */
   cumulativeActiveMs?: number;
+  /**
+   * FNXC:TaskTiming 2026-08-01-10:00:
+   * Monotonic active AI planning duration. Unlike column dwell this is only
+   * accrued by a live planning session and is never cleared by reopen.
+   */
+  cumulativePlanningMs?: number;
+  /** Open planning AI segment; finalized exactly once into cumulativePlanningMs. */
+  planningStartedAt?: string;
   /*
   FNXC:TaskTiming 2026-06-26-10:14:
   Per-stage dwell-time instrumentation. `cumulativeActiveMs` only measures `in-progress`,
@@ -4908,6 +4916,10 @@ export interface ArchivedTaskEntry {
   firstExecutionAt?: string;
   /** Accumulated active runtime spent in `in-progress` across attempts. */
   cumulativeActiveMs?: number;
+  /** Accumulated active AI planning duration carried through archive/restore. */
+  cumulativePlanningMs?: number;
+  /** Open planning AI segment carried through archive/restore. */
+  planningStartedAt?: string;
   /** FNXC:TaskTiming 2026-06-26-10:14: per-column cumulative dwell (ms) carried through
    *  archive/restore so per-stage wall-clock survives archival. See Task.columnDwellMs. */
   columnDwellMs?: Record<string, number>;
@@ -5639,6 +5651,12 @@ export interface PlanningQuestion {
   question: string;
   description?: string;
   options?: Array<{ id: string; label: string; description?: string; pros?: string[]; cons?: string[]; isOther?: boolean; customText?: string }>;
+  /*
+  FNXC:PlanningMode 2026-07-20-00:00:
+  FN-8434 carries the evolving plan beside the next interview question. This field is additive:
+  it must never be interpreted as model authority to complete a user-controlled Planning Mode session.
+  */
+  runningPlan?: PlanningSummary;
 }
 
 /** The final summary generated after planning conversation completes */
@@ -5666,6 +5684,11 @@ export interface PlanningSession {
   summary?: PlanningSummary;
   /** User explicitly validated the continuously maintained running plan. */
   validated?: boolean;
+  /** FNXC:PlanningMode 2026-07-20-15:45: Durable planning-to-task handoff cache; proposalClaimId is the crash-safe authority. */
+  createdTaskId?: string;
+  createClaimStatus?: "none" | "creating" | "created";
+  claimOwnerToken?: string;
+  claimStartedAt?: string;
   /**
    * Optional per-session auto-merge override for tasks planned in this session.
    * Not separately persisted; durable form is a branch_groups row keyed by session id.

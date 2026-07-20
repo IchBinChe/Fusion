@@ -620,6 +620,43 @@ describe("createResolvedAgentSession", () => {
     );
   });
 
+  it("forwards plugin skill names and body paths to runtime session factory", async () => {
+    const createSessionMock = vi.fn().mockResolvedValue({
+      session: { prompt: vi.fn() },
+      sessionFile: "session.json",
+    });
+    resolveRuntimeMock.mockResolvedValue({
+      runtime: {
+        id: "pi",
+        name: "Default PI Runtime",
+        createSession: createSessionMock,
+        promptWithFallback: vi.fn(),
+        describeModel: vi.fn(() => "mock/model"),
+      },
+      runtimeId: "pi",
+      wasConfigured: false,
+    });
+
+    const { createResolvedAgentSession } = await import("../agent-session-helpers.js");
+    const additionalSkillPaths = ["/tmp/plugin-skills/foo", "/tmp/plugin-skills"];
+    await createResolvedAgentSession({
+      sessionPurpose: "executor",
+      cwd: "/tmp/project",
+      systemPrompt: "system",
+      skillSelection: {
+        projectRootDir: "/tmp/project",
+        sessionPurpose: "executor",
+        requestedSkillNames: ["plugin-foo"],
+      },
+      additionalSkillPaths,
+    });
+
+    expect(createSessionMock).toHaveBeenCalledWith(expect.objectContaining({
+      skills: ["plugin-foo"],
+      additionalSkillPaths,
+    }));
+  });
+
   it("forwards sessionPurpose into runtime.createSession for host-extension policy", async () => {
     /*
     FNXC:MergeQueue 2026-07-15-11:20:

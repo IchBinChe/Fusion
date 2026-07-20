@@ -18,6 +18,7 @@ import type {
   PlanningResponse,
   TaskPriority,
   TaskStore,
+  Settings,
   NtfyNotificationEvent,
   ThinkingLevel,
   MessageStore,
@@ -27,8 +28,13 @@ import {
   DEFAULT_TASK_PRIORITY,
   TASK_PRIORITIES,
   THINKING_LEVELS,
-  resolvePrompt,
   summarizeTitle,
+  builtinSeamPrompt,
+  renderTriagePolicyPlaceholders,
+  resolveAgentPrompt,
+  resolveEffectivePlannerHeartbeatPatrolEnabled,
+  resolvePlanningPromptFromIr,
+  resolveWorkflowIrById,
   type PromptOverrideMap,
 } from "@fusion/core";
 import type { SubtaskItem } from "./subtask-breakdown.js";
@@ -71,6 +77,8 @@ type PlanningSessionOptions = {
   projectId?: string;
   ntfyConfig?: PlanningNtfyConfig;
   clarificationEnabled?: boolean;
+  /** Workflow selected by the planning entry point; retained for agent rebuilds. */
+  workflowId?: string;
   /** Runtime-only mailbox dependency; never serialize this store. */
   messageStore?: MessageStore;
   pluginRunner?: SkillPluginRunner;
@@ -228,13 +236,50 @@ Planning Mode is user-terminated: each answered turn must produce one consequent
 The model may update the running plan but must never infer completion; only the visible Validate plan action can make a session terminal.
 */
 /** Planning system prompt for the AI agent */
-export const PLANNING_SYSTEM_PROMPT = `You are a planning assistant for the fn task board system. First analyze the codebase and active board with the available read tools, fn_task_list, and fn_task_show. Turn a raw idea into an incrementally maintained plan.
+export const PLANNING_SYSTEM_PROMPT = `## Planning Mode interaction adapter
 
-Ask exactly one next, high-impact question on every turn. Use every prior answer as context, avoid repeated questions, and never decide that the interview is complete or emit a terminal/complete response. The user alone validates the plan.
+First analyze the codebase and active board with the available readonly tools, fn_task_list, and fn_task_show. Treat the workflow planning template above as the quality bar and PROMPT.md structure for the evolving plan, but do not write PROMPT.md or use write tools during this interview.
 
-Respond only with JSON: {"type":"question","data":{"id":"unique-id","type":"single_select|multi_select","question":"...","description":"...","options":[{"id":"option-a","label":"...","description":"...","pros":["..."],"cons":["..."]},{"id":"option-b","label":"...","description":"...","pros":["..."],"cons":["...]},{"id":"other","label":"...","isOther":true}]}}.
+Ask exactly one next, high-impact question only when the user explicitly requests a refine turn. After an answer, update the running plan and do not ask a question. Never decide that the interview is complete or emit a terminal/complete response. Only the user can validate the plan.
 
-Every question must provide at least two alternatives, each with non-empty pros and cons, plus exactly one Other/write-your-own option. Write every label, option, and Other label in the language of the user's original input. Incorporate free-text Other answers verbatim as steering context for the following question.`;
+For a refine turn respond only with JSON: {"type":"question","data":{"id":"unique-id","type":"single_select|multi_select","question":"...","description":"...","options":[{"id":"option-a","label":"...","description":"...","pros":["..."],"cons":["..."]},{"id":"option-b","label":"...","description":"...","pros":["..."],"cons":["..."]},{"id":"other","label":"...","isOther":true}],"runningPlan":{"title":"...","description":"...","suggestedSize":"S|M|L","priority":"normal","suggestedDependencies":[],"keyDeliverables":["concrete work item"]}}}. For an answer-update turn respond only with {"type":"complete","data":{"title":"...","description":"...","suggestedSize":"S|M|L","priority":"normal","suggestedDependencies":[],"keyDeliverables":["concrete work item"]}}.
+
+Every turn must include the running-plan fields: only title, description, suggestedSize, optional priority, suggestedDependencies, and concrete keyDeliverables informed by the idea and answers so far. Never use interview question text as a deliverable. Do not put PROMPT.md sections (Mission, Before → After, Steps, File Scope, Review Level, Completion Criteria, or Do NOT) in runningPlan or free text: triage writes PROMPT.md only after Validate. Validate serializes this lean plan as plan.md without priority; priority remains a task field. Every question must provide at least two alternatives, each with non-empty pros and cons, plus exactly one Other/write-your-own option. Write every label, option, and Other label in the language of the user's original input. Incorporate free-text Other answers verbatim as steering context for the following question.`;
+
+/*
+FNXC:PlanningMode 2026-07-20-14:30:
+Planning Mode must use the same workflow planning seam as triage for a newly added task, then layer its infinite JSON interview contract over that template. A catalog defaultContent is Settings UI documentation, not proof that an operator explicitly replaced the full system prompt.
+*/
+export async function resolvePlanningModeSystemPrompt(
+  store: TaskStore,
+  promptOverrides?: PromptOverrideMap,
+  workflowId?: string,
+): Promise<string> {
+  const settings: Partial<Settings> = (await store.getSettings().catch(() => ({}))) ?? {};
+  const overrides = promptOverrides ?? settings.promptOverrides;
+  const explicitOverride = overrides && Object.prototype.hasOwnProperty.call(overrides, "planning-system")
+    && typeof overrides["planning-system"] === "string"
+    && overrides["planning-system"].trim().length > 0
+    ? overrides["planning-system"]
+    : undefined;
+  if (explicitOverride) return explicitOverride;
+
+  const plannerHeartbeatPatrolEnabled = resolveEffectivePlannerHeartbeatPatrolEnabled(settings);
+  const assignedTriagePrompt = settings.agentPrompts?.roleAssignments?.triage
+    ? resolveAgentPrompt("triage", settings.agentPrompts, { plannerHeartbeatPatrolEnabled })
+    : "";
+  let workflowPrompt: string | undefined;
+  try {
+    const ir = await resolveWorkflowIrById(store, workflowId || settings.defaultWorkflowId || "builtin:coding");
+    workflowPrompt = resolvePlanningPromptFromIr(ir);
+  } catch {
+    // Resolve fail-soft below so a missing custom workflow cannot prevent planning.
+  }
+  const fallback = builtinSeamPrompt("planning")
+    || resolveAgentPrompt("triage", undefined, { plannerHeartbeatPatrolEnabled });
+  const base = assignedTriagePrompt || workflowPrompt || fallback;
+  return `${renderTriagePolicyPlaceholders(base, settings)}\n\n${PLANNING_SYSTEM_PROMPT}`;
+}
 
 
 
@@ -265,6 +310,11 @@ export interface DraftInputPayload {
   thinkingLevel?: ThinkingLevel;
   summarizedFor?: string;
   validated?: boolean;
+  workflowId?: string;
+  createdTaskId?: string;
+  createClaimStatus?: "none" | "creating" | "created";
+  claimOwnerToken?: string;
+  claimStartedAt?: string;
 }
 
 /** Session TTL in milliseconds (7 days) */
@@ -317,6 +367,8 @@ interface Session {
   initialPlan: string;
   title: string;
   projectId?: string;
+  /** Workflow selected at session start, retained for agent reconstruction. */
+  workflowId?: string;
   /** Model override the user picked at draft-create time. Persisted in inputPayload so reopen restores it. */
   draftModelProvider?: string;
   draftModelId?: string;
@@ -341,6 +393,13 @@ interface Session {
   summary?: PlanningSummary;
   /** User-controlled finalization state. */
   validated: boolean;
+  /** Durable create-task linkage; proposalClaimId remains the crash-recovery authority. */
+  createdTaskId?: string;
+  createClaimStatus?: "none" | "creating" | "created";
+  claimOwnerToken?: string;
+  claimStartedAt?: string;
+  /** Whether the current generation must end at plan review rather than a question. */
+  generationPurpose?: "plan_update" | "question";
   /** Last terminal error for retry UX */
   error?: string;
   /** AI agent session for real-time interaction */
@@ -539,7 +598,12 @@ function persistSession(session: Session, status: "generating" | "awaiting_input
       ...(session.draftModelId ? { modelId: session.draftModelId } : {}),
       ...(session.draftThinkingLevel ? { thinkingLevel: session.draftThinkingLevel } : {}),
       ...(session.draftSummarizedFor ? { summarizedFor: session.draftSummarizedFor } : {}),
+      ...(session.workflowId ? { workflowId: session.workflowId } : {}),
       validated: session.validated,
+      ...(session.createdTaskId ? { createdTaskId: session.createdTaskId } : {}),
+      ...(session.createClaimStatus ? { createClaimStatus: session.createClaimStatus } : {}),
+      ...(session.claimOwnerToken ? { claimOwnerToken: session.claimOwnerToken } : {}),
+      ...(session.claimStartedAt ? { claimStartedAt: session.claimStartedAt } : {}),
       ...(typeof session.clarificationEnabled === "boolean"
         ? { clarificationEnabled: session.clarificationEnabled }
         : {}),
@@ -661,9 +725,16 @@ function buildSessionFromRow(row: AiSessionRow): Session {
   return {
     id: row.id,
     ip: payload.ip ?? "",
-    initialPlan: payload.initialPlan ?? row.title,
+    /*
+    FNXC:PlanningMode 2026-07-20-18:00:
+    FN-8441 must preserve a missing persisted initial request. The create handoff uses
+    missingness to fall back to the validated plan body; replacing it with row.title
+    would falsely persist the session title as an operator's Original Description.
+    */
+    initialPlan: payload.initialPlan ?? "",
     title: row.title,
     projectId: row.projectId ?? undefined,
+    workflowId: payload.workflowId,
     draftModelProvider: payload.modelProvider,
     draftModelId: payload.modelId,
     draftThinkingLevel: thinkingLevel,
@@ -679,6 +750,10 @@ function buildSessionFromRow(row: AiSessionRow): Session {
     lastNotifiedQuestionKey: currentQuestion ? `${row.id}:${currentQuestion.id}` : undefined,
     summary: persistedSummary ?? buildRunningSummary(payload.initialPlan ?? row.title, history),
     validated: payload.validated === true,
+    createdTaskId: typeof payload.createdTaskId === "string" ? payload.createdTaskId : undefined,
+    createClaimStatus: payload.createClaimStatus,
+    claimOwnerToken: typeof payload.claimOwnerToken === "string" ? payload.claimOwnerToken : undefined,
+    claimStartedAt: typeof payload.claimStartedAt === "string" ? payload.claimStartedAt : undefined,
     thinkingOutput: row.thinkingOutput,
     lastGeneratedThinking: row.thinkingOutput || "",
     error: row.error ?? undefined,
@@ -956,7 +1031,7 @@ export async function createSession(
   rootDir?: string,
   promptOverrides?: PromptOverrideMap,
   pluginRunner?: SkillPluginRunner,
-  options?: Pick<PlanningSessionOptions, "ntfyConfig" | "messageStore" | "clarificationEnabled">,
+  options?: Pick<PlanningSessionOptions, "ntfyConfig" | "messageStore" | "clarificationEnabled" | "workflowId">,
 ): Promise<{ sessionId: string; firstQuestion: PlanningQuestion; summary: PlanningSummary; validated: boolean }> {
   // Check rate limit
   if (!checkRateLimit(ip)) {
@@ -992,6 +1067,7 @@ export async function createSession(
     rootDir,
     pluginRunner,
     clarificationEnabled: options?.clarificationEnabled === true,
+    workflowId: options?.workflowId,
     ntfyConfig: options?.ntfyConfig,
     messageStore: options?.messageStore,
   };
@@ -999,9 +1075,7 @@ export async function createSession(
   sessions.set(sessionId, session);
   persistSession(session, "generating");
 
-  // Resolve the effective system prompt (override or default)
-  const baseSystemPrompt = resolvePrompt("planning-system", promptOverrides) || PLANNING_SYSTEM_PROMPT;
-  const systemPrompt = baseSystemPrompt;
+  const systemPrompt = await resolvePlanningModeSystemPrompt(store, promptOverrides, session.workflowId);
 
   // Create AI agent and get the first question
   // Only await engineReady if createFnAgent hasn't been set externally (e.g., via __setCreateFnAgent)
@@ -1049,16 +1123,15 @@ export async function createSession(
   session.agent = agentResult;
   session.updatedAt = new Date();
 
-  // Send initial plan to get first question from AI
-  const firstResponse = await getFirstQuestionFromAgent(session, initialPlan);
+  const firstResponse = await getFirstQuestionFromAgent(session, formatInitialPlanRequestForAgent(initialPlan));
 
   const firstQuestion = firstResponse.data;
   session.currentQuestion = firstQuestion;
+  session.summary = mergeRunningSummary(session, firstResponse);
   session.updatedAt = new Date();
   await persistSession(session, "awaiting_input");
   void maybeNotifyPlanningAwaitingInput(session, firstQuestion, true);
 
-  session.summary = buildRunningSummary(initialPlan, session.history);
   return { sessionId, firstQuestion, summary: session.summary, validated: false };
 }
 
@@ -1070,7 +1143,7 @@ export async function createSession(
 async function getFirstQuestionFromAgent(
   session: Session,
   message: string,
-): Promise<{ type: "question"; data: PlanningQuestion }> {
+): Promise<Extract<PlanningResponse, { type: "question" }>> {
   if (!session.agent) {
     throw new InvalidSessionStateError("AI agent not initialized");
   }
@@ -1142,7 +1215,7 @@ async function getFirstQuestionFromAgent(
         try {
           await session.agent.session.prompt(
             "Your previous response could not be parsed as JSON. " +
-            'Please respond with ONLY a valid JSON object: {"type":"question","data":{...}}. ' +
+            'Please respond with ONLY a valid JSON object: {"type":"question","data":{"runningPlan":{...},...}}. ' +
             "No markdown, no explanation, just the JSON."
           );
 
@@ -1194,16 +1267,22 @@ async function getFirstQuestionFromAgent(
   }
 
   if (parsed.type === "question") {
-    return { type: "question", data: normalizePlanningQuestion(parsed.data, session.initialPlan) };
+    return {
+      type: "question",
+      data: {
+        ...normalizePlanningQuestion(parsed.data, session.initialPlan),
+        ...(parsed.data.runningPlan ? { runningPlan: parsed.data.runningPlan } : {}),
+      },
+    };
   }
 
   /*
-  FNXC:PlanningMode 2026-07-18-11:36:
-  FN-8331 makes the first planning turn an interview invariant: a completion cannot become a
-  deepening checkpoint until the user has answered a real clarifying question. Re-prompt once
-  for the required protocol shape, then use a safe local question if the model still refuses.
+  FNXC:PlanningMode 2026-07-20-00:00:
+  FN-8434 preserves a legacy complete payload's plan as a running-plan update while still
+  coercing its control flow into a question. Only the user Validate action may terminalize.
   */
-  return requestMandatoryFirstPlanningQuestion(session);
+  const mandatoryQuestion = await requestMandatoryFirstPlanningQuestion(session);
+  return { type: "question", data: { ...mandatoryQuestion.data, runningPlan: parsed.data } };
 }
 
 function buildMandatoryFirstPlanningQuestion(userInput = ""): PlanningQuestion {
@@ -1403,7 +1482,7 @@ export async function startExistingSession(
   thinkingLevelOrPromptOverrides?: ThinkingLevel | PromptOverrideMap,
   promptOverridesOrPluginRunner?: PromptOverrideMap | SkillPluginRunner,
   pluginRunnerMaybe?: SkillPluginRunner,
-  runtimeOptions?: Pick<PlanningSessionOptions, "ntfyConfig" | "messageStore" | "clarificationEnabled">,
+  runtimeOptions?: Pick<PlanningSessionOptions, "ntfyConfig" | "messageStore" | "clarificationEnabled" | "workflowId">,
 ): Promise<void> {
   const thinkingLevel = isThinkingLevel(thinkingLevelOrPromptOverrides) ? thinkingLevelOrPromptOverrides : undefined;
   const promptOverrides = isThinkingLevel(thinkingLevelOrPromptOverrides)
@@ -1411,6 +1490,7 @@ export async function startExistingSession(
     : (thinkingLevelOrPromptOverrides as PromptOverrideMap | undefined);
   const pluginRunner = (isThinkingLevel(thinkingLevelOrPromptOverrides) ? pluginRunnerMaybe : promptOverridesOrPluginRunner) as SkillPluginRunner | undefined;
   let session = sessions.get(sessionId);
+  if (session && runtimeOptions?.workflowId) session.workflowId = runtimeOptions.workflowId;
 
   // Draft sessions aren't included in rehydrateFromStore (which only loads
   // recoverable in-flight sessions), and a backend restart drops the in-memory
@@ -1435,6 +1515,7 @@ export async function startExistingSession(
   if (!session) {
     throw new SessionNotFoundError(`Planning session ${sessionId} not found or expired`);
   }
+  if (runtimeOptions?.workflowId) session.workflowId = runtimeOptions.workflowId;
 
   // Drafts are sync'd via aiSessionStore.updateDraft, which only writes
   // SQLite. Pull the latest initialPlan + persisted model override + the
@@ -1556,6 +1637,7 @@ export async function createSessionWithAgent(
     initialPlan,
     title: initialPlan.slice(0, 120),
     projectId: options?.projectId,
+    workflowId: options?.workflowId,
     ntfyConfig: options?.ntfyConfig
       ? {
           enabled: options.ntfyConfig.enabled,
@@ -1659,8 +1741,7 @@ async function initializeAgent(
       session.updatedAt = new Date();
     });
 
-    // Send initial message to get first question
-    await continueAgentConversation(session, session.initialPlan);
+    await continueAgentConversation(session, formatInitialPlanRequestForAgent(session.initialPlan));
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       return;
@@ -1691,9 +1772,7 @@ async function createPlanningAgent(
   // Ensure engine is loaded before using createFnAgent
   await ensureEngineReady();
 
-  // Resolve the effective system prompt (override or default)
-  const baseSystemPrompt = resolvePrompt("planning-system", promptOverrides) || PLANNING_SYSTEM_PROMPT;
-  const systemPrompt = baseSystemPrompt;
+  const systemPrompt = await resolvePlanningModeSystemPrompt(store, promptOverrides, session.workflowId);
 
   const skillContext = buildSessionSkillContextSync(null, "executor", rootDir, pluginRunner);
 
@@ -1828,6 +1907,11 @@ async function maybeNotifyPlanningAwaitingInput(
   Proactive planner questions use an inbox message independently of ntfy. The
   inbox lookup is authoritative because a process can die after sendMessage but
   before the persisted marker write; ntfy remains best-effort and separately deduped.
+
+  FNXC:MailboxRelatedWork 2026-07-20-09:30:
+  FN-8428 relies on this stable kind/sessionId/questionId tuple to deduplicate clarification
+  notices and open the exact Planning session from mailbox detail. Keep the readable question in
+  the body, but never replace these metadata fields with a markdown-only navigation link.
   */
   if (proactiveClarification && session.clarificationEnabled && session.messageStore
     && session.lastMailboxNotifiedQuestionKey !== questionKey) {
@@ -2024,21 +2108,110 @@ async function runGenerationWithTimeout<T>(session: Session, operation: (abortSi
   }
 }
 
-/**
- * FNXC:PlanningMode 2026-07-18-16:00:
- * Planning is an infinite, user-gated interview. A running plan is derived after every
- * turn and only validateSession may mark it final; model completion payloads are coerced
- * into another question rather than terminating the session.
- */
-function buildRunningSummary(initialPlan: string, history: PlanningHistoryEntry[]): PlanningSummary {
-  const answers = history.map((entry) => `${entry.question.question}: ${JSON.stringify(entry.response)}`);
+/*
+FNXC:PlanningMode 2026-07-20-00:00:
+FN-8434 makes the Running plan an evolving work product, not an interview transcript.
+Fallback text may acknowledge answer choices, but interview questions must never become
+key deliverables because task creation and breakdown consume those as implementation work.
+*/
+function describePlanningAnswer(entry: PlanningHistoryEntry): string {
+  const response = entry.response && typeof entry.response === "object" && !Array.isArray(entry.response)
+    ? entry.response as Record<string, unknown>
+    : {};
+  const optionLabels = new Map((entry.question.options ?? []).map((option) => [option.id, option.label]));
+  const values = Object.entries(response)
+    .filter(([key]) => key !== "_comment")
+    .flatMap(([, value]) => Array.isArray(value) ? value : [value])
+    .filter((value): value is string | number | boolean => typeof value === "string" || typeof value === "number" || typeof value === "boolean")
+    .map((value) => typeof value === "string" ? optionLabels.get(value) ?? value : String(value));
+  const comment = typeof response._comment === "string" ? response._comment.trim() : "";
+  return [...values, ...(comment ? [comment] : [])].join(", ") || "a response";
+}
+
+/*
+FNXC:PlanningMode 2026-07-20-14:30:
+FN-8438 requires the first Planning Mode turn to author a plan from the operator idea, and every
+following answer to refine that work product. Repeat this contract at the user-message boundary
+for both agent entry points because system instructions alone can be displaced by tool context.
+*/
+export function formatInitialPlanRequestForAgent(initialPlan: string): string {
+  return [
+    "Create the initial running plan from this operator idea before asking the first interview question.",
+    "Return only type:\"question\" JSON with a full runningPlan: a work-product title, a concise implementation description, and concrete work-item keyDeliverables derived from the idea.",
+    "Then ask exactly one high-impact clarifying question with alternatives and pros/cons. Never use that question text as a deliverable. Do not complete or validate the plan; only the user can validate it.",
+    "Operator idea:",
+    initialPlan,
+  ].join("\n\n");
+}
+
+function buildFallbackDeliverables(initialPlan: string): string[] {
+  const subject = initialPlan.trim() || "the requested work";
+  return [
+    `Define scope and acceptance criteria for ${subject}`,
+    `Implement the agreed approach for ${subject}`,
+    `Verify delivery and operational readiness for ${subject}`,
+  ];
+}
+
+function buildRunningSummary(
+  initialPlan: string,
+  history: PlanningHistoryEntry[],
+  previousSummary?: PlanningSummary,
+): PlanningSummary {
+  const subject = initialPlan.trim() || "the requested work";
+  const initialDescription = `Plan and deliver ${subject}. Establish scope, implementation approach, and acceptance criteria through the planning interview.`;
+  const decisions = history.map(describePlanningAnswer).filter(Boolean);
+  const incorporatedDecisions = decisions.join("; ");
+  const priorDescription = previousSummary?.description
+    ?.replace(/\n\nPlanning decisions incorporated: [\s\S]*$/, "")
+    .replace(/\. Refine scope and implementation around the confirmed planning decisions: [\s\S]*$/, ".");
+  const description = decisions.length === 0
+    ? initialDescription
+    : priorDescription
+      ? `${priorDescription}\n\nPlanning decisions incorporated: ${incorporatedDecisions}.`
+      : `Plan and deliver ${subject}. Refine scope and implementation around the confirmed planning decisions: ${incorporatedDecisions}.`;
   return normalizePlanningSummaryPayload({
-    title: initialPlan.slice(0, 80) || "Untitled planning task",
-    description: [initialPlan, ...answers].filter(Boolean).join("\n\n"),
-    suggestedSize: "M",
-    suggestedDependencies: [],
-    keyDeliverables: history.map((entry) => entry.question.question),
-  }, { title: initialPlan, description: initialPlan });
+    title: previousSummary?.title || `Plan: ${subject.slice(0, 74)}`,
+    description,
+    suggestedSize: previousSummary?.suggestedSize ?? "M",
+    priority: previousSummary?.priority,
+    suggestedDependencies: previousSummary?.suggestedDependencies ?? [],
+    keyDeliverables: previousSummary?.keyDeliverables?.length ? previousSummary.keyDeliverables : buildFallbackDeliverables(subject),
+  }, { title: `Plan: ${subject}`, description: initialDescription });
+}
+
+function hasPlanContent(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const plan = value as Record<string, unknown>;
+  return (typeof plan.title === "string" && plan.title.trim().length > 0)
+    || (typeof plan.description === "string" && plan.description.trim().length > 0)
+    || (Array.isArray(plan.keyDeliverables) && plan.keyDeliverables.some((item) => typeof item === "string" && item.trim().length > 0));
+}
+
+function getModelRunningPlan(response: PlanningResponse): unknown {
+  if (response.type === "complete") return response.data;
+  return response.data.runningPlan;
+}
+
+function mergeRunningSummary(session: Session, response?: PlanningResponse): PlanningSummary {
+  const modelPlan = response ? getModelRunningPlan(response) : undefined;
+  if (hasPlanContent(modelPlan)) {
+    /*
+    FNXC:PlanningMode 2026-07-20-00:00:
+    FN-8434 permits a question to carry a partial running-plan update. Merge that patch over
+    the prior work product before normalization so an update to one field cannot reset the
+    model's previously established title, deliverables, dependencies, size, or priority.
+    */
+    const priorPlan = session.summary ?? buildRunningSummary(session.initialPlan, session.history);
+    return normalizePlanningSummaryPayload({
+      ...priorPlan,
+      ...(modelPlan as Record<string, unknown>),
+    }, {
+      title: session.initialPlan,
+      description: session.initialPlan,
+    });
+  }
+  return buildRunningSummary(session.initialPlan, session.history, session.summary);
 }
 
 function planningFallbackCopy(input: string): { question: string; option: (n: number) => string; pro: string; con: string; other: string } {
@@ -2102,7 +2275,8 @@ export async function validateSession(sessionId: string): Promise<PlanningSummar
     activeGenerations.delete(session.id);
   }
 
-  session.summary = buildRunningSummary(session.initialPlan, session.history);
+  // Keep the last model-authored running plan intact; validation only finalizes it.
+  session.summary = session.summary ?? buildRunningSummary(session.initialPlan, session.history);
   session.currentQuestion = undefined;
   session.editingQuestionId = undefined;
   session.validated = true;
@@ -2207,8 +2381,8 @@ async function continueAgentConversation(session: Session, message: string): Pro
             }
             await (session.agent.session.prompt as (input: string, options?: { signal?: AbortSignal }) => Promise<void>)(
               "Your previous response could not be parsed as JSON. " +
-                'Please respond with ONLY a valid JSON object: either {"type":"question","data":{...}} ' +
-                'or {"type":"complete","data":{...}}. No markdown, no explanation, just the JSON.',
+                'Please respond with ONLY a valid JSON object: {"type":"question","data":{"runningPlan":{...},...}}. ' +
+                'No markdown, no explanation, just the JSON.',
               { signal: abortSignal },
             );
             if (abortSignal.aborted) {
@@ -2263,26 +2437,23 @@ async function continueAgentConversation(session: Session, message: string): Pro
       return;
     }
 
-      if (parsed.type === "question") {
-        session.currentQuestion = coerceQuestionResponse(parsed, session);
-        session.summary = buildRunningSummary(session.initialPlan, session.history);
-        session.error = undefined;
-        session.lastGeneratedThinking = session.thinkingOutput;
-        session.updatedAt = new Date();
-        // Persist after deriving the plan: reloads must see the running summary on every turn.
-        persistSession(session, "awaiting_input");
+      session.summary = mergeRunningSummary(session, parsed);
+      session.error = undefined;
+      session.lastGeneratedThinking = session.thinkingOutput;
+      session.updatedAt = new Date();
+      const planUpdate = session.generationPurpose === "plan_update";
+      session.generationPurpose = undefined;
+      /*
+      FNXC:PlanningMode 2026-07-20-15:45:
+      A model can accidentally return question-shaped JSON during an answer update. FN-8442
+      deliberately strips that question instead of exposing it: the next question is exclusively
+      triggered by the plan-review Refine action, optionally with operator focus text.
+      */
+      session.currentQuestion = planUpdate ? undefined : coerceQuestionResponse(parsed, session);
+      persistSession(session, "awaiting_input");
+      planningStreamManager.broadcast(session.id, { type: "summary", data: session.summary });
+      if (session.currentQuestion) {
         void maybeNotifyPlanningAwaitingInput(session, session.currentQuestion, true);
-        planningStreamManager.broadcast(session.id, { type: "summary", data: session.summary });
-        planningStreamManager.broadcast(session.id, { type: "question", data: session.currentQuestion });
-      } else {
-        // A generic engine completion is never terminal in Planning Mode.
-        session.currentQuestion = coerceQuestionResponse(parsed, session);
-        session.summary = buildRunningSummary(session.initialPlan, session.history);
-        session.error = undefined;
-        session.lastGeneratedThinking = session.thinkingOutput;
-        session.updatedAt = new Date();
-        persistSession(session, "awaiting_input");
-        planningStreamManager.broadcast(session.id, { type: "summary", data: session.summary });
         planningStreamManager.broadcast(session.id, { type: "question", data: session.currentQuestion });
       }
     });
@@ -2548,12 +2719,13 @@ function isRefineRequest(responses: Record<string, unknown>): boolean {
   return responses.refine === true;
 }
 
-function formatRefineRequestForAgent(summary: PlanningSummary): string {
+function formatRefineRequestForAgent(summary: PlanningSummary, focus?: string): string {
   return [
     "The user clicked Refine Further on the planning summary.",
     "Continue the planning interview from the existing context.",
     "Ask exactly one focused, high-impact follow-up question with alternatives and pros/cons.",
     "Do not return a completion response: only the user can validate a plan.",
+    ...(focus ? ["The operator wants this next question to focus on:", focus] : []),
     "Current summary:",
     JSON.stringify(summary),
   ].join("\n\n");
@@ -2638,7 +2810,9 @@ export async function submitResponse(
     persistSession(session, "generating");
 
     await ensureSessionAgent(session, rootDir, session.history, promptOverrides, store);
-    const refineMessage = formatRefineRequestForAgent(session.summary);
+    session.generationPurpose = "question";
+    const focus = typeof responses.focus === "string" ? responses.focus.trim() : undefined;
+    const refineMessage = formatRefineRequestForAgent(session.summary, focus);
     await continueAgentConversation(session, refineMessage);
   } else {
     const currentQuestion = captureOtherCustomText(session.currentQuestion, responses);
@@ -2660,6 +2834,8 @@ export async function submitResponse(
     if (isEditingPriorAnswer) {
       session.history[editIndex] = historyEntry;
       session.editingQuestionId = undefined;
+      // Rebuild from history before the next turn so stale pre-edit plan prose cannot survive.
+      session.summary = buildRunningSummary(session.initialPlan, session.history);
       // Existing agent context contains the old answer; rebuild it from the preserved history.
       disposeSessionAgentForRetry(session);
     } else {
@@ -2667,8 +2843,14 @@ export async function submitResponse(
     }
     answeredQuestion = currentQuestion;
 
-    // Answered questions always lead to another question; no answer can validate or complete.
+    /*
+    FNXC:PlanningMode 2026-07-20-15:45:
+    FN-8442 makes answering a plan-update turn. Clear the active question before generation
+    and record its purpose so only an explicit `{ refine: true, focus? }` may surface another
+    question; this keeps the plan-review decision point under operator control.
+    */
     session.currentQuestion = undefined;
+    session.generationPurpose = "plan_update";
     persistSession(session, "generating");
     if (!session.agent) {
       // An edited older answer must be replayed in its original position with every
@@ -2682,8 +2864,8 @@ export async function submitResponse(
       );
     }
     const message = isEditingPriorAnswer
-      ? "An earlier answer was edited. Use the complete preserved interview context above, re-derive the running plan, and ask exactly one new high-impact next question."
-      : formatResponseForAgent(currentQuestion, responses);
+      ? "An earlier answer was edited. Use the complete preserved interview context above and return only the updated plan JSON; do not ask another question."
+      : `${formatResponseForAgent(currentQuestion, responses)}\n\nUpdate the running plan only. Do not ask a next question; the operator may explicitly refine after reviewing the plan.`;
     await continueAgentConversation(session, message);
   }
 
@@ -2704,7 +2886,10 @@ export async function submitResponse(
     return { type: "question", data: answeredQuestion };
   }
 
-  // Should not reach here, but handle gracefully
+  if (session.summary) {
+    return { type: "complete", data: session.summary };
+  }
+
   throw new InvalidSessionStateError("AI agent did not return a question or summary");
 }
 
@@ -2753,7 +2938,7 @@ export async function retrySession(
 
   if (session.history.length === 0) {
     await ensureSessionAgent(session, rootDir, [], promptOverrides, store);
-    await continueAgentConversation(session, session.initialPlan);
+    await continueAgentConversation(session, formatInitialPlanRequestForAgent(session.initialPlan));
     return;
   }
 
@@ -2809,7 +2994,7 @@ export async function rewindSession(
 
   session.currentQuestion = rewindEntry.question;
   session.editingQuestionId = questionId ? questionId : undefined;
-  // Keep the plan available while the user edits; it is re-derived after submit.
+  // Re-derive from retained answers so an edit cannot revive a prior question as a deliverable.
   session.summary = buildRunningSummary(session.initialPlan, session.history);
   session.error = undefined;
   session.lastGeneratedThinking = session.history[session.history.length - 1]?.thinkingOutput ?? "";
@@ -2821,6 +3006,7 @@ export async function rewindSession(
   }
 
   persistSession(session, "awaiting_input");
+  planningStreamManager.broadcast(session.id, { type: "summary", data: session.summary });
   planningStreamManager.broadcast(session.id, { type: "question", data: rewindEntry.question });
 
   return {
@@ -2922,7 +3108,7 @@ export function formatResponseForAgent(
   System prompts can be displaced by long tool/context turns. Repeat the per-answer contract at the invocation boundary
   so every submitted answer steers the following high-impact question instead of inviting a model-generated completion.
   */
-  return `${answerContext}\n\nIncorporate this answer into the running plan, then ask exactly one new, high-impact question that does not repeat a prior question. Offer alternatives with pros and cons. Do not complete or validate the plan; only the user can validate it.`;
+  return `${answerContext}\n\nUpdate only the lean runningPlan fields (title, description, suggestedSize, optional priority, suggestedDependencies, and concrete keyDeliverables) informed by this answer; never list interview questions as deliverables or PROMPT.md sections such as Mission, Steps, File Scope, Review Level, Completion Criteria, or Do NOT. Then ask exactly one new, high-impact question that does not repeat a prior question. Offer alternatives with pros and cons. Do not complete or validate the plan; only the user can validate it.`;
 }
 
 function coerceResponseRecord(question: PlanningQuestion, response: unknown): Record<string, unknown> {
@@ -3084,6 +3270,78 @@ export function getCurrentQuestion(sessionId: string): PlanningQuestion | undefi
  */
 export function getSummary(sessionId: string): PlanningSummary | undefined {
   return sessions.get(sessionId)?.summary;
+}
+
+/**
+ * Persist planning create-task claim/linkage state. The task row's stable proposalClaimId is
+ * authoritative after a crash; these fields make restore and UI handoff deterministic.
+ */
+export async function updatePlanningCreateClaim(
+  sessionId: string,
+  patch: Pick<Session, "createClaimStatus" | "createdTaskId" | "claimOwnerToken" | "claimStartedAt">,
+): Promise<void> {
+  const session = await getSession(sessionId);
+  if (!session) throw new SessionNotFoundError(`Planning session ${sessionId} not found or expired`);
+  Object.assign(session, patch);
+  session.updatedAt = new Date();
+  await persistSession(session, session.validated ? "complete" : "awaiting_input");
+}
+
+function restoreClaimSession(row: import("./ai-session-store.js").AiSessionRow): Session {
+  const restored = buildSessionFromRow(row);
+  sessions.set(restored.id, restored);
+  return restored;
+}
+
+/** Read durable claim state rather than trusting a process-local session cache. */
+export async function getDurablePlanningSession(sessionId: string): Promise<Session | undefined> {
+  if (!_aiSessionStore) return getSession(sessionId);
+  const row = await _aiSessionStore.get(sessionId);
+  return row?.type === "planning" ? restoreClaimSession(row) : undefined;
+}
+
+/** Atomically claim a validated planning session for its one task creation. */
+export async function claimPlanningTaskCreation(sessionId: string, ownerToken: string, startedAt: string): Promise<Session | undefined> {
+  if (!_aiSessionStore || typeof (_aiSessionStore as unknown as { claimPlanningTaskCreation?: unknown }).claimPlanningTaskCreation !== "function") {
+    const session = await getSession(sessionId);
+    if (!session || session.createClaimStatus === "creating" || session.createClaimStatus === "created") return undefined;
+    Object.assign(session, { createClaimStatus: "creating", claimOwnerToken: ownerToken, claimStartedAt: startedAt });
+    return session;
+  }
+  const row = await _aiSessionStore.claimPlanningTaskCreation(sessionId, ownerToken, startedAt);
+  return row ? restoreClaimSession(row) : undefined;
+}
+
+export async function finalizePlanningTaskCreation(sessionId: string, ownerToken: string, taskId: string): Promise<Session | undefined> {
+  if (!_aiSessionStore || typeof (_aiSessionStore as unknown as { finalizePlanningTaskCreation?: unknown }).finalizePlanningTaskCreation !== "function") {
+    const session = await getSession(sessionId);
+    if (!session || session.claimOwnerToken !== ownerToken) return undefined;
+    Object.assign(session, { createClaimStatus: "created", createdTaskId: taskId, claimOwnerToken: undefined, claimStartedAt: undefined });
+    return session;
+  }
+  const row = await _aiSessionStore.finalizePlanningTaskCreation(sessionId, ownerToken, taskId);
+  return row ? restoreClaimSession(row) : undefined;
+}
+
+export async function reconcilePlanningTaskCreation(sessionId: string, taskId: string): Promise<Session | undefined> {
+  if (!_aiSessionStore || typeof (_aiSessionStore as unknown as { reconcilePlanningTaskCreation?: unknown }).reconcilePlanningTaskCreation !== "function") {
+    const session = await getSession(sessionId);
+    if (session) Object.assign(session, { createClaimStatus: "created", createdTaskId: taskId, claimOwnerToken: undefined, claimStartedAt: undefined });
+    return session;
+  }
+  const row = await _aiSessionStore.reconcilePlanningTaskCreation(sessionId, taskId);
+  return row ? restoreClaimSession(row) : undefined;
+}
+
+export async function releasePlanningTaskCreation(sessionId: string, ownerToken: string): Promise<Session | undefined> {
+  if (!_aiSessionStore || typeof (_aiSessionStore as unknown as { releasePlanningTaskCreation?: unknown }).releasePlanningTaskCreation !== "function") {
+    const session = await getSession(sessionId);
+    if (!session || session.claimOwnerToken !== ownerToken) return undefined;
+    Object.assign(session, { createClaimStatus: "none", claimOwnerToken: undefined, claimStartedAt: undefined });
+    return session;
+  }
+  const row = await _aiSessionStore.releasePlanningTaskCreation(sessionId, ownerToken);
+  return row ? restoreClaimSession(row) : undefined;
 }
 
 /**

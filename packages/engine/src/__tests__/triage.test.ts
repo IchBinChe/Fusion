@@ -1536,6 +1536,20 @@ describe("TriageProcessor", () => {
     expect(processor).toBeInstanceOf(TriageProcessor);
   });
 
+  it("uses a synchronous reservation to keep planning and advanced recovery mutually exclusive", async () => {
+    const task = createTriageTask({ id: "FN-RECOVERY-RESERVED" });
+    const release = processor.tryReserveAdvancedRecovery(task.id);
+    expect(release).toBeTypeOf("function");
+    expect(processor.getProcessingTaskIds()).toContain(task.id);
+    expect(processor.getPlanningTaskIds()).not.toContain(task.id);
+
+    await processor.specifyTask(task);
+    expect(store.getTask).not.toHaveBeenCalled();
+
+    release?.();
+    expect(processor.getProcessingTaskIds()).not.toContain(task.id);
+  });
+
   /*
   FNXC:OriginalDescriptionInPrompt 2026-07-14-23:35:
   finalizeApprovedTask must inject ## Original Description with the task description
@@ -1728,6 +1742,33 @@ Planner rewrote mission without the raw request.
 
       expect(specifySpy).toHaveBeenCalledTimes(1);
       expect(specifySpy).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-200" }));
+    });
+
+    it("does not repeatedly dispatch a triage row that already has executor advancement evidence", async () => {
+      const tasks: Task[] = [
+        createTriageTask({ id: "FN-ADVANCED", worktree: "/tmp/fusion-fn-advanced" }),
+        createTriageTask({ id: "FN-UNPLANNED" }),
+      ];
+      const triageStore = createMockStore({
+        listTasks: vi.fn().mockResolvedValue(tasks),
+        getSettings: vi.fn().mockResolvedValue({
+          maxConcurrent: 10,
+          maxTriageConcurrent: 10,
+          pollIntervalMs: 10_000,
+          groupOverlappingFiles: false,
+          autoMerge: true,
+        }),
+      });
+      const triageProcessor = new TriageProcessor(triageStore, rootDir);
+      const specifySpy = vi
+        .spyOn(triageProcessor, "specifyTask")
+        .mockResolvedValue(undefined);
+
+      (triageProcessor as any).running = true;
+      await (triageProcessor as any).poll();
+
+      expect(specifySpy).toHaveBeenCalledOnce();
+      expect(specifySpy).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-UNPLANNED" }));
     });
 
     /*

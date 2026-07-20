@@ -8,14 +8,70 @@ const MAX_MESSAGE_LENGTH = 8192;
 const DEFAULT_POLL_MS = 1000;
 const HISTORY_LIMIT = 20;
 
+/**
+ * FNXC:CliChatConversation 2026-07-20-12:00:
+ * CLI chats use MessageStore's project-scoped mailbox transport, so the stable
+ * CLI-user/agent pair is sufficient to resume a named thread within a project.
+ */
+export function buildCliChatConversationId(agentId: string, override?: string): string {
+  return override ?? `cli-chat:${CLI_USER_ID}:${agentId}`;
+}
+
 export interface ChatInteractiveOptions {
   project?: string;
+  conversationId?: string;
   pollIntervalMs?: number;
   replyTimeoutMs?: number;
   once?: boolean;
   nonInteractive?: boolean;
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
+}
+
+export type ChatCliArgs = Pick<ChatInteractiveOptions, "conversationId" | "pollIntervalMs" | "once" | "nonInteractive"> & {
+  agentId: string;
+  contentArg: string;
+};
+
+/** Parse chat-only argv after the `chat` command for dispatch and unit tests. */
+export function parseChatCliArgs(args: string[]): ChatCliArgs | { error: string } {
+  const usage = "Usage: fn chat <agent-id> [message…] [--once] [--non-interactive] [--poll-ms <n>] [--conversation-id <id>]";
+  const agentId = args[0];
+  if (!agentId) return { error: usage };
+
+  const pollIdx = args.indexOf("--poll-ms");
+  const pollValue = pollIdx === -1 ? undefined : args[pollIdx + 1];
+  const pollIntervalMs = pollValue === undefined ? undefined : Number.parseInt(pollValue, 10);
+  if (pollIdx !== -1 && (!pollValue || pollValue.startsWith("--") || !Number.isFinite(pollIntervalMs) || (pollIntervalMs ?? 0) <= 0)) {
+    return { error: usage };
+  }
+
+  let conversationId: string | undefined;
+  for (let index = 1; index < args.length; index += 1) {
+    if (args[index] !== "--conversation-id") continue;
+    const value = args[index + 1];
+    // FNXC:CliChatConversation 2026-07-20-14:30: Every occurrence must have a value. A first valid flag must not hide a later incomplete flag and silently route mail to the wrong thread.
+    if (conversationId !== undefined || !value || value.startsWith("--")) {
+      return { error: usage };
+    }
+    conversationId = value;
+    index += 1;
+  }
+
+  const filteredArgs = args.slice(1).filter((arg, index, values) => {
+    if (arg === "--once" || arg === "--non-interactive" || arg === "--poll-ms" || arg === "--conversation-id") return false;
+    if (index > 0 && (values[index - 1] === "--poll-ms" || values[index - 1] === "--conversation-id")) return false;
+    return true;
+  });
+  const contentArg = filteredArgs.join(" ").trim();
+  return {
+    agentId,
+    conversationId,
+    pollIntervalMs: pollIdx === -1 ? undefined : pollIntervalMs,
+    contentArg,
+    once: args.includes("--once") || contentArg.length > 0,
+    nonInteractive: args.includes("--non-interactive") || contentArg.length > 0,
+  };
 }
 
 /*
@@ -73,6 +129,37 @@ function printConversationTail(output: NodeJS.WritableStream, messages: Message[
   }
 }
 
+/**
+ * FNXC:CliChatConversation 2026-07-20-14:30:
+ * MessageStore queries are participant-wide, not conversation-scoped. A mailbox
+ * message belongs to this CLI thread only when it carries this id or replies to
+ * an already-known thread message; unassociated agent mail remains unread.
+ */
+function collectConversationMessages(messages: Message[], conversationId: string, threadMessageIds = new Set<string>()): Message[] {
+  const includedIds = new Set<string>();
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const message of messages) {
+      if (includedIds.has(message.id)) continue;
+      const directMatch = message.metadata?.conversationId === conversationId;
+      const replyMatch = typeof message.metadata?.replyTo?.messageId === "string"
+        && threadMessageIds.has(message.metadata.replyTo.messageId);
+      if (!threadMessageIds.has(message.id) && !directMatch && !replyMatch) continue;
+      includedIds.add(message.id);
+      if (!threadMessageIds.has(message.id)) {
+        threadMessageIds.add(message.id);
+        changed = true;
+      }
+    }
+  }
+  return messages.filter((message) => includedIds.has(message.id));
+}
+
+function isConversationReply(message: Message, conversationId: string, threadMessageIds: Set<string>): boolean {
+  return collectConversationMessages([message], conversationId, threadMessageIds).length > 0;
+}
+
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(resolve, ms);
@@ -95,12 +182,15 @@ async function waitForReply(
   output: NodeJS.WritableStream,
   pollIntervalMs: number,
   timeoutMs: number,
+  conversationId: string,
+  threadMessageIds: Set<string>,
 ): Promise<boolean> {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const inbox = await messageStore.getInbox(CLI_USER_ID, "user", { limit: 50 });
     for (const message of inbox.slice().reverse()) {
       if (message.fromId !== agentId || message.fromType !== "agent") continue;
+      if (!isConversationReply(message, conversationId, threadMessageIds)) continue;
       if (printedIds.has(message.id)) continue;
       printedIds.add(message.id);
       printMessage(output, message);
@@ -116,6 +206,7 @@ export async function runChatInteractive(agentId: string, options: ChatInteracti
   const output = options.output ?? process.stdout;
   const input = options.input ?? process.stdin;
   const pollIntervalMs = parsePollMs(options);
+  const conversationId = buildCliChatConversationId(agentId, options.conversationId);
 
   const ownedAgentStore = await createAgentStore(options.project);
   const agentStore = ownedAgentStore.store;
@@ -136,10 +227,18 @@ export async function runChatInteractive(agentId: string, options: ChatInteracti
     { id: CLI_USER_ID, type: "user" },
     { id: agentId, type: "agent" },
   );
-    const tail = conversation.slice(-HISTORY_LIMIT);
+    const threadMessageIds = new Set<string>();
+    const tail = collectConversationMessages(conversation, conversationId, threadMessageIds).slice(-HISTORY_LIMIT);
     for (const message of tail) printedIds.add(message.id);
 
-    output.write(`Chat with Agent ${agentId} — type /exit or Ctrl-C to quit, /help for commands\n`);
+    /*
+    FNXC:CliChatConversation 2026-07-20-12:00:
+    The CLI must name MessageStore inbox delivery honestly: this is a resumable
+    mailbox conversation, not a dashboard ChatView session or multi-agent room.
+    */
+    output.write(`Mailbox conversation with Agent ${agentId} — type /exit or Ctrl-C to quit, /help for commands\n`);
+    output.write(`conversation-id: ${conversationId}\n`);
+    output.write("Delivery: agent inbox (fn_read_messages). Not a dashboard chat session or multi-agent room.\n");
     output.write("Replies appear when this project's engine is running (fn dashboard or fn serve).\n");
     printConversationTail(output, tail);
 
@@ -153,19 +252,25 @@ export async function runChatInteractive(agentId: string, options: ChatInteracti
         return 0;
       }
 
-      await messageStore.sendMessage({
+      const sentMessage = await messageStore.sendMessage({
         fromId: CLI_USER_ID,
         fromType: "user",
         toId: agentId,
         toType: "agent",
         content,
         type: "user-to-agent",
-        metadata: { wakeRecipient: true },
+        /*
+        FNXC:CliChatConversation 2026-07-20-12:00:
+        Keep wake-on-message inbox delivery for durable agents, but stamp every
+        CLI chat turn so agents can recognize the resumable mailbox thread.
+        */
+        metadata: { wakeRecipient: true, kind: "cli-chat", conversationId },
       });
 
       output.write(`you → ${agentId}: ${content}\n`);
       const timeoutMs = options.replyTimeoutMs ?? Math.max(pollIntervalMs * 10, 30_000);
-      const replied = await waitForReply(messageStore, agentId, printedIds, output, pollIntervalMs, timeoutMs);
+      threadMessageIds.add(sentMessage.id);
+      const replied = await waitForReply(messageStore, agentId, printedIds, output, pollIntervalMs, timeoutMs, conversationId, threadMessageIds);
       if (!replied) {
         console.error(`No reply within ${Math.ceil(timeoutMs / 1000)}s`);
       }
@@ -178,6 +283,7 @@ export async function runChatInteractive(agentId: string, options: ChatInteracti
         const inbox = await messageStore.getInbox(CLI_USER_ID, "user", { limit: 50 });
         for (const message of inbox.slice().reverse()) {
           if (message.fromId !== agentId || message.fromType !== "agent") continue;
+          if (!isConversationReply(message, conversationId, threadMessageIds)) continue;
           if (printedIds.has(message.id)) continue;
           printedIds.add(message.id);
           printMessage(output, message);
@@ -200,14 +306,14 @@ export async function runChatInteractive(agentId: string, options: ChatInteracti
       if (!line) continue;
       if (line === "/exit" || line === "/quit") break;
       if (line === "/help") {
-        output.write("Commands: /help, /history, /clear, /exit, /quit\n");
+        output.write(`Commands: /help, /history, /clear, /exit, /quit. Mailbox delivery to the agent inbox; conversation-id: ${conversationId}\n`);
         continue;
       }
       if (line === "/history") {
-        const history = (await messageStore.getConversation(
+        const history = collectConversationMessages(await messageStore.getConversation(
           { id: CLI_USER_ID, type: "user" },
           { id: agentId, type: "agent" },
-        )).slice(-HISTORY_LIMIT);
+        ), conversationId, threadMessageIds).slice(-HISTORY_LIMIT);
         for (const message of history) printedIds.add(message.id);
         printConversationTail(output, history);
         continue;
@@ -221,15 +327,21 @@ export async function runChatInteractive(agentId: string, options: ChatInteracti
         continue;
       }
 
-      await messageStore.sendMessage({
+      const sentMessage = await messageStore.sendMessage({
         fromId: CLI_USER_ID,
         fromType: "user",
         toId: agentId,
         toType: "agent",
         content: line,
         type: "user-to-agent",
-        metadata: { wakeRecipient: true },
+        /*
+        FNXC:CliChatConversation 2026-07-20-12:00:
+        REPL sends share the same conversation identity as once-mode sends;
+        MessageStore remains the transport rather than masquerading as a room.
+        */
+        metadata: { wakeRecipient: true, kind: "cli-chat", conversationId },
       });
+      threadMessageIds.add(sentMessage.id);
       output.write(`you → ${agentId}: ${line}\n`);
     }
 

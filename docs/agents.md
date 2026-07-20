@@ -26,14 +26,16 @@ Use `fn chat` to message an agent from your terminal.
 ### Synopsis
 
 ```bash
-fn chat <agent-id> [message…] [--once] [--non-interactive] [--poll-ms <n>]
+fn chat <agent-id> [message…] [--once] [--non-interactive] [--poll-ms <n>] [--conversation-id <id>]
 ```
 
 ### Behavior
 
-- `fn chat <agent-id>` opens an interactive REPL.
-- Each message is stored as a `user-to-agent` MessageStore message from `cli` with `metadata.wakeRecipient=true`.
-- Agent replies are polled from your inbox and printed as they arrive.
+- `fn chat <agent-id>` opens an interactive **mailbox conversation** REPL. It delivers to the target agent's MessageStore inbox (`fn_read_messages`), not to a dashboard ChatStore/ChatView session or multi-agent room.
+- Each message is stored as a `user-to-agent` MessageStore message from `cli` with `metadata.wakeRecipient=true`, `metadata.kind="cli-chat"`, and a durable `metadata.conversationId`.
+- The default conversation id is `cli-chat:cli:<agent-id>` and is stable for that CLI-user/agent pair in the selected project. Use `--conversation-id <id>` to name or share a different mailbox thread; the CLI banner prints the active id.
+- `fn message send` remains a distinct one-shot mailbox command and does not add CLI-chat conversation metadata.
+- Agent replies are polled from your inbox and printed only when they carry that `conversationId` or use `replyTo.messageId` to reference a message already in the thread; reply streaming and dashboard operator-inbox readability are separately tracked by FN-8424 / issue #2363.
 - Dashboard-created agent chat sessions request the target agent's declared `metadata.skills` plus enabled plugin-contributed skills, so skills such as `ce-debug` are available in chat when the contributing plugin is enabled for the requesting project. Model-only QuickChat sessions request enabled plugin skills, and room responder sessions request the responder agent's skills.
 - Agent-acting session lanes share the same skill-injection contract as executor sessions: executor, merger, triage, reviewer, heartbeat, step-session, dashboard chat/room responders, CLI agent execution, planning, mission interview, milestone/slice interview, agent-onboarding interview, workflow design, memory dreams/insight extraction, and scheduled cron automation all request agent/fallback skills plus enabled plugin-contributed skills when a plugin runner is available. Utility-only lanes that only summarize/extract/generate JSON (title/PR summaries, memory compaction, subtask breakdown, text refinement, agent generation, PR metadata generation, evaluator/research synthesis, and similar one-shot helpers) intentionally stay exempt to avoid loading skills where no agent-style tool loop can use them.
 - In dashboard model-loop chat (main chat, QuickChat, and room responders), typing `/skill:{name}` requests that skill for the current AI session and strips the slash token from the prompt sent to the model. Slash and catalog-style names such as `/skill:review/pr`, `/skill:review/pr/SKILL.md`, and `source::skills/review/pr/SKILL.md` resolve to the matching discovered bare skill token across chat and agent session lanes. The requested skill is still subject to the normal enabled/disabled execution-skill filters; CLI-agent-backed PTY chat keeps raw terminal input semantics and does not interpret this command.
@@ -62,6 +64,7 @@ For the user-facing gallery and notification UX, see [Artifacts View](./dashboar
 - `--once` send one message and exit after first reply (or timeout)
 - `--non-interactive` read full stdin to EOF as message body
 - `--poll-ms <n>` override poll interval in milliseconds (default `1000`, or `FUSION_CHAT_POLL_MS`)
+- `--conversation-id <id>` override the default named mailbox conversation
 
 ### Examples
 

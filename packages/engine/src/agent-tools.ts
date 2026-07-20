@@ -5238,7 +5238,15 @@ export function createReadMessagesTool(messageStore: MessageStore, agentId: stri
         const lines = messageEntries.map(({ message, replyContext }) => {
           const timestamp = new Date(message.createdAt).toLocaleString();
           const readStatus = message.read ? "[read] " : "[unread] ";
-          const baseLine = `${readStatus}[id: ${message.id}] [from: ${message.fromType}:${message.fromId}] ${message.content} (${timestamp})`;
+          /*
+          FNXC:CliChatConversation 2026-07-20-12:00:
+          MessageStore is intentionally the durable-agent CLI transport. Surface
+          its conversation identity here so inbox rows reveal a named thread.
+          */
+          const conversationId = typeof message.metadata?.conversationId === "string" && message.metadata.conversationId.trim()
+            ? ` [conversation: ${message.metadata.conversationId}]`
+            : "";
+          const baseLine = `${readStatus}[id: ${message.id}] [from: ${message.fromType}:${message.fromId}]${conversationId} ${message.content} (${timestamp})`;
           if (!replyContext) {
             return baseLine;
           }

@@ -1071,18 +1071,20 @@ fn message delete MSG-123
 
 ## `fn chat`
 
-Interactive CLI conversation loop with a specific agent.
+Named mailbox conversation loop with a specific agent. It delivers through the agent's MessageStore inbox; it is **not** a dashboard ChatView/ChatStore session or a multi-agent room.
 
 ```bash
-fn chat <agent-id> [message…] [--once] [--non-interactive] [--poll-ms <n>]
+fn chat <agent-id> [message…] [--once] [--non-interactive] [--poll-ms <n>] [--conversation-id <id>]
 ```
 
 ### Behavior
 
-- `fn chat <agent-id>` starts an interactive REPL.
+- `fn chat <agent-id>` starts an interactive mailbox-conversation REPL.
 - `fn chat <agent-id> <message…>` sends one message and waits for a reply (`--once` implied).
-- Messages are sent as `user-to-agent` records from CLI user `cli` with `metadata.wakeRecipient=true`.
-- Replies are polled from the CLI user inbox and printed as they arrive.
+- The default conversation id is `cli-chat:cli:<agent-id>`, stable for the CLI user and target agent in the selected project. The session banner prints it so a later invocation resumes the same named thread.
+- Messages are sent as `user-to-agent` records from CLI user `cli` with `metadata.wakeRecipient=true`, `metadata.kind="cli-chat"`, and `metadata.conversationId`.
+- `fn message send` remains a one-shot mailbox command and does not add `cli-chat` conversation metadata.
+- Replies are polled from the CLI user inbox and printed only when they carry the active `conversationId` or use `replyTo.messageId` to reference a message already in that thread. This mailbox path does not create a dashboard chat session or a multi-agent room.
 
 ### Options
 
@@ -1091,6 +1093,7 @@ fn chat <agent-id> [message…] [--once] [--non-interactive] [--poll-ms <n>]
 | `--once` | Send one message and exit after first reply (or timeout). |
 | `--non-interactive` | Read full stdin to EOF as message body (useful for pipes/scripts). |
 | `--poll-ms <n>` | Poll interval in milliseconds (default `1000`, or `FUSION_CHAT_POLL_MS`). |
+| `--conversation-id <id>` | Override the default mailbox conversation id to name or share a thread. |
 
 ### Examples
 
@@ -1105,7 +1108,7 @@ fn chat agent-abc123 "status update?"
 printf "deploy report" | fn chat agent-abc123 --once --non-interactive
 ```
 
-> Agent replies require a running engine for the same project (for example `fn dashboard` or `fn serve`).
+> Agent replies require a running engine for the same project (for example `fn dashboard` or `fn serve`). Reply streaming and dashboard-operator inbox readability are tracked separately in FN-8424 / issue #2363.
 >
 > See [Agents: Interactive CLI Chat](./agents.md#interactive-cli-chat) for agent-oriented details.
 

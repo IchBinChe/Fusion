@@ -955,6 +955,28 @@ Ship FIVE kinds. Do NOT add roadmap-item in this task.
       expect(cap.last?.systemPrompt).toContain("Return REVISE with the single reason that the approved contract could not be loaded");
     });
 
+    it.each([
+      ["completion summary", { name: "Completion summary", summaryTarget: "task" }],
+      ["ordinary advisory prompt", { name: "Publish artifacts" }],
+    ])("does not inject review-contract instructions into the %s surface", async (_label, stepOverrides) => {
+      const store = createMockStore();
+      const { executor } = makeExecutor(store);
+      const cap = captureSession("Finished the requested work and verified the affected behavior.");
+      const readTaskArtifact = vi.spyOn(executor as any, "readTaskArtifact");
+
+      await (executor as any).executeWorkflowStep(
+        baseStepTask(),
+        makeStep(stepOverrides),
+        "/tmp/wt",
+        {},
+      );
+
+      expect(readTaskArtifact).not.toHaveBeenCalled();
+      expect(cap.last?.systemPrompt).not.toContain("Approved Task Contract:");
+      expect(cap.last?.systemPrompt).not.toContain("Approved Task Contract Unavailable:");
+      expect(cap.last?.systemPrompt).not.toContain("canonical scope");
+    });
+
     it("sets FUSION_HEADLESS=1 only when unattended=true; always sets FUSION_WORKFLOW_STEP", async () => {
       const store = createMockStore();
       const { executor } = makeExecutor(store);

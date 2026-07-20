@@ -16309,7 +16309,7 @@ ${scopeGuard}
      * unrelated local commits can make a plan-only gate reject implementation
      * state and loop back to triage after the planner already approved the spec.
      */
-    const approvedContractBlock = !isPlanReviewStep
+    const approvedContractBlock = isReviewTypeWorkflowStep && !isPlanReviewStep
       ? workflowReviewSpecText
         ? `
 

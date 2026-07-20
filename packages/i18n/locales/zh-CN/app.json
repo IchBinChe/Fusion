@@ -1306,6 +1306,7 @@
     "relativeTimeMinutes_one": "",
     "relativeTimeMinutes_other": "",
     "removeAttachment": "移除 {{name}}",
+    "recent": "最近",
     "rename": "",
     "renameConversationAria": "",
     "renameConversationBody": "",
@@ -9175,6 +9176,9 @@
     "roadmapMatch": {
       "title": "已在路线图中",
       "message": "此报告与已经规划的功能相匹配。"
+    },
+    "roadmapDuplicate": {
+      "title": "已在路线图中 — 添加您的数据点？"
     },
     "targetLabel": "提交目标",
     "targetInherit": "使用已配置的操作目标",

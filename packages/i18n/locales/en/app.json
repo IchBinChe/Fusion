@@ -1318,6 +1318,7 @@
     "relativeTimeMinutes_one": "{{count}}m ago",
     "relativeTimeMinutes_other": "{{count}}m ago",
     "removeAttachment": "Remove {{name}}",
+    "recent": "Recent",
     "rename": "Rename",
     "renameConversationAria": "Rename conversation {{title}}",
     "renameConversationBody": "Choose a new name for this conversation. Leave it blank to show Untitled.",

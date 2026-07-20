@@ -133,9 +133,19 @@ export const registerReportRoutes: ApiRouteRegistrar = ({ router, getScopedStore
   router.post("/report/file", async (req, res) => {
     try {
       const store = await getScopedStore(req); const scopes = await store.getSettingsByScopeFast(); const raw = (req.body ?? {}) as Record<string, unknown>; const rawReport = (raw.report ?? raw) as StructuredReport;
+      const rootDir = store.getRootDir();
+      const scrubContext = { rootDir, projectName: rootDir.split(/[\\/]/).pop() };
       const { screenshotArtifactId: reportArtifactId, attachment: _untrustedAttachment, ...textualRawReport } = rawReport;
-      const untrusted = scrubReportPayload(textualRawReport, { rootDir: store.getRootDir(), projectName: store.getRootDir().split(/[\\/]/).pop() });
-      const input = parseInput({ actionType: raw.actionType ?? (untrusted.context as Record<string, unknown> | undefined)?.actionType ?? "bug", userPrompt: untrusted.userPrompt ?? untrusted.summary, contextRefs: (untrusted.context as Record<string, unknown> | undefined) && { taskId: typeof (untrusted.context as Record<string, unknown>).taskId === "string" ? (untrusted.context as Record<string, unknown>).taskId : undefined, agentId: typeof (untrusted.context as Record<string, unknown>).agentId === "string" ? (untrusted.context as Record<string, unknown>).agentId : undefined }, activityTrace: raw.activityTrace ?? (untrusted.context as Record<string, unknown> | undefined)?.activityTrace, screenshotArtifactId: raw.screenshotArtifactId ?? reportArtifactId });
+      const untrusted = scrubReportPayload(textualRawReport, scrubContext);
+      /*
+       * FNXC:ReportPipeline 2026-07-20-12:00:
+       * /report/file must scrub top-level activityTrace before parseInput and the
+       * pipeline boundary. Raw traces previously bypassed the edited-report scrub
+       * and exposed path, project, or token labels to gatherReportContext; the
+       * nested context fallback remains covered by textualRawReport scrubbing.
+       */
+      const rawActivityTrace = raw.activityTrace === undefined ? undefined : scrubReportPayload({ activityTrace: raw.activityTrace }, scrubContext).activityTrace;
+      const input = parseInput({ actionType: raw.actionType ?? (untrusted.context as Record<string, unknown> | undefined)?.actionType ?? "bug", userPrompt: untrusted.userPrompt ?? untrusted.summary, contextRefs: (untrusted.context as Record<string, unknown> | undefined) && { taskId: typeof (untrusted.context as Record<string, unknown>).taskId === "string" ? (untrusted.context as Record<string, unknown>).taskId : undefined, agentId: typeof (untrusted.context as Record<string, unknown>).agentId === "string" ? (untrusted.context as Record<string, unknown>).agentId : undefined }, activityTrace: rawActivityTrace ?? (untrusted.context as Record<string, unknown> | undefined)?.activityTrace, screenshotArtifactId: raw.screenshotArtifactId ?? reportArtifactId });
       // FNXC:ReportPipeline 2026-07-16-21:00: Validate target before Help can return locally.
       const targetType = parseTargetType(raw.targetType);
       const discussionCategoryId = parseDiscussionCategoryId(raw.discussionCategoryId);
@@ -143,7 +153,7 @@ export const registerReportRoutes: ApiRouteRegistrar = ({ router, getScopedStore
       const inputWithAttachment = attachment ? { ...input, attachment } : input;
       const help = await selfCheckHelpBeforePipeline(store, inputWithAttachment);
       if (help?.answered) return void res.json({ kind: "help", answer: help.answer });
-      res.json(await runReportPipeline(inputWithAttachment, { projectSettings: scopes.project, globalSettings: scopes.global, scrubContext: { rootDir: store.getRootDir(), projectName: store.getRootDir().split(/[\\/]/).pop() }, gatherContext: (reportInput) => gatherReportContext(store, reportInput, scopes.project as Record<string, unknown>) }, { file: true, targetType, discussionCategoryId, endorseIssueNumber: typeof raw.endorseIssueNumber === "number" ? raw.endorseIssueNumber : undefined, endorseDiscussionId: typeof raw.endorseDiscussionId === "string" ? raw.endorseDiscussionId : undefined, endorseRoadmapIssueNumber: typeof raw.endorseRoadmapIssueNumber === "number" ? raw.endorseRoadmapIssueNumber : undefined, report: untrusted }));
+      res.json(await runReportPipeline(inputWithAttachment, { projectSettings: scopes.project, globalSettings: scopes.global, scrubContext, gatherContext: (reportInput) => gatherReportContext(store, reportInput, scopes.project as Record<string, unknown>) }, { file: true, targetType, discussionCategoryId, endorseIssueNumber: typeof raw.endorseIssueNumber === "number" ? raw.endorseIssueNumber : undefined, endorseDiscussionId: typeof raw.endorseDiscussionId === "string" ? raw.endorseDiscussionId : undefined, endorseRoadmapIssueNumber: typeof raw.endorseRoadmapIssueNumber === "number" ? raw.endorseRoadmapIssueNumber : undefined, report: untrusted }));
     } catch (error) { if (error instanceof ApiError) throw error; rethrowAsApiError(error, "Failed to file report"); }
   });
 

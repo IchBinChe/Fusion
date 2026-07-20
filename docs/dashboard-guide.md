@@ -4,7 +4,7 @@
 
 In **Settings → General**, operators can choose a default GitHub report target (**Issue** or **Discussion**) and add an optional per-action override for Bug, Feedback, Idea, or Help. Leaving these settings unset preserves the built-in routing: Bug and Idea file Issues; Feedback and Help file Discussions. The `reportDiscussionCategory` setting selects the category for Discussion reports.
 
-Discussion filing uses the same scrub-before-egress report pipeline as Issues. Duplicate matching considers open Discussions only; a confirmed duplicate receives an upvote reaction and one scrubbed data-point comment rather than a new Discussion. If a repository has Discussions disabled, Fusion detects that during either Discussion search or creation, reruns Issue deduplication, and files an Issue instead; the filed result explicitly identifies that fallback destination.
+Discussion filing uses the same scrub-before-egress report pipeline as Issues. File submissions re-scrub edited report text and activity traces before pipeline processing, so local paths, project labels, and credentials cannot cross that boundary. Duplicate matching considers open Discussions only; a confirmed duplicate receives an upvote reaction and one scrubbed data-point comment rather than a new Discussion. If a repository has Discussions disabled, Fusion detects that during either Discussion search or creation, reruns Issue deduplication, and files an Issue instead; the filed result explicitly identifies that fallback destination.
 
 
 [← Docs index](./README.md)

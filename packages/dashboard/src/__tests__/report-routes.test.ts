@@ -86,6 +86,41 @@ describe("report routes", () => {
     expect(input.actionType).toBe("idea");
   });
 
+  it("scrubs top-level activityTrace before runReportPipeline on /report/file", async () => {
+    vi.mocked(runReportPipeline).mockResolvedValue({ kind: "filed" } as never);
+    const { handlers } = setup();
+    await invoke(handlers.get("/report/file")!, {
+      actionType: "bug",
+      activityTrace: ["Saw crash at /Users/alice/private-project/src/a.ts in private-project with ghp_abcdefghijk1234567890"],
+      report: { userPrompt: "It crashes", body: "clean body", context: {} },
+    });
+
+    expect(runReportPipeline).toHaveBeenCalledTimes(1);
+    const [input] = vi.mocked(runReportPipeline).mock.calls[0]!;
+    const trace = JSON.stringify(input.activityTrace);
+    expect(trace).not.toMatch(/\/Users\/alice|private-project|ghp_/);
+    expect(trace).toMatch(/\[REDACTED(?:_PATH)?\]/);
+  });
+
+  it("preserves absent traces and scrubs the nested activityTrace fallback", async () => {
+    vi.mocked(runReportPipeline).mockResolvedValue({ kind: "filed" } as never);
+    const { handlers } = setup();
+    const route = handlers.get("/report/file")!;
+    await invoke(route, { actionType: "bug", report: { userPrompt: "It crashes", context: {} } });
+    expect(vi.mocked(runReportPipeline).mock.calls[0]![0].activityTrace).toBeUndefined();
+
+    await invoke(route, {
+      actionType: "bug",
+      report: {
+        userPrompt: "It crashes",
+        context: { activityTrace: ["Saw crash at /Users/alice/private-project/src/a.ts in private-project with ghp_abcdefghijk1234567890"] },
+      },
+    });
+    const nestedTrace = JSON.stringify(vi.mocked(runReportPipeline).mock.calls[1]![0].activityTrace);
+    expect(nestedTrace).not.toMatch(/\/Users\/alice|private-project|ghp_/);
+    expect(nestedTrace).toMatch(/\[REDACTED(?:_PATH)?\]/);
+  });
+
   describe("report screenshot references", () => {
     it("runs the multipart middleware before storing only signature-validated artifacts", async () => {
       const { handlers, single, store, setUploadFile } = setup();

@@ -1,0 +1,49 @@
+name: Issue triage
+
+# Cron, not `issues: opened`, for two reasons:
+#  1. a workflow can only receive issue events for the repo it lives in, and the eventual
+#     target is a repo we do not control;
+#  2. an untrusted trigger carrying write permission is the shape behind the 2026
+#     prompt-injection incidents. A schedule has no attacker-controlled trigger.
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Classify and print, write nothing'
+        type: boolean
+        default: true
+      limit:
+        description: 'Max issues to process'
+        type: string
+        default: '50'
+
+concurrency:
+  group: issue-triage
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write        # the only write this needs
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Classify unlabelled issues
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          TARGET_REPO: ${{ github.repository }}
+        run: |
+          node triage/classify.mjs \
+            --limit "${{ inputs.limit || '50' }}" \
+            ${{ (inputs.dry_run == true) && '--dry-run' || '' }}

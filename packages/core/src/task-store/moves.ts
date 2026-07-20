@@ -35,6 +35,7 @@ import {getTaskMergeBlocker} from "../task-merge.js";
 import {__setTaskActivityLogLimitsForTesting} from "../task-store/comments.js";
 import {readTaskRow as readTaskRowAsync, readTaskRowInTransaction, upsertTaskRowInTransaction} from "../task-store/async-persistence.js";
 import {disposeTaskBeforeMove} from "../task-move-disposer.js";
+import {resolveTaskSymbolsForTask} from "../task-symbol-resolution.js";
 
 /*
 FNXC:PostgresCutover 2026-07-05-19:50:
@@ -1135,6 +1136,28 @@ export async function moveTaskInternalImpl(store: TaskStore, id: string, toColum
     }
 
     await store.writeTaskJsonFile(dir, task);
+
+    /*
+    FNXC:MissionSymbolAdmission 2026-07-19-22:04:
+    FN-8306 makes the central lifecycle transition the primary symbol-lock
+    release authority. A durable lock belongs only to active implementation;
+    handoff to review, cancellation/requeue, and terminal moves therefore release
+    the task's declared symbols here. Active implementation is the workflow's
+    countsTowardWip trait, not the legacy `in-progress` id: custom WIP columns
+    must retain and renew locks between internal WIP transitions, then release
+    them only when leaving WIP. PostgreSQL owns durable locks; SQLite has no
+    symbol-lock table and remains on coarse scheduling behavior.
+    */
+    const lifecycleWorkflowIr = workflowIr ?? await resolveTaskWorkflowIrForMove(store, id);
+    const fromIsImplementation = resolveTransitionColumnFacts(lifecycleWorkflowIr, fromColumn).flags.countsTowardWip === true;
+    const toIsImplementation = resolveTransitionColumnFacts(lifecycleWorkflowIr, toColumn).flags.countsTowardWip === true;
+    if (store.backendMode && fromIsImplementation && !toIsImplementation) {
+      const symbols = resolveTaskSymbolsForTask(task);
+      if (symbols.resolvable) {
+        await store.releaseSymbolLocks(symbols.symbols, id);
+      }
+    }
+
     if (fromColumn === "in-review" && toColumn === "todo" && moveSource === "user") {
       const handoffAccepted = await store.getCompletionHandoffAcceptedMarker(id);
       const mergeRequest = await store.getMergeRequestRecordAsync(id);

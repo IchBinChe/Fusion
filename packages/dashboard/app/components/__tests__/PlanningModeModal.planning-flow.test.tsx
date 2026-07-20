@@ -1932,7 +1932,7 @@ describe("PlanningModeModal", () => {
       expect(screen.queryByText("Reconnecting…")).toBeNull();
     });
 
-    it("shows the reconnecting hint while active generation is loading", async () => {
+    it("keeps generation chrome visible without a reconnecting hint during stream recovery", async () => {
       let streamHandlers: any;
       mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
         streamHandlers = handlers;
@@ -1955,11 +1955,13 @@ describe("PlanningModeModal", () => {
       fireEvent.click(screen.getByText("Start Planning"));
       await waitFor(() => expect(mockConnectPlanningStream).toHaveBeenCalledTimes(1));
 
+      expect(screen.getByText("Generating next question...")).toBeInTheDocument();
       act(() => {
         streamHandlers.onConnectionStateChange?.("reconnecting");
       });
 
-      expect(screen.getByText("Reconnecting…")).toBeInTheDocument();
+      expect(screen.getByText("Generating next question...")).toBeInTheDocument();
+      expect(screen.queryByText("Reconnecting…")).toBeNull();
     });
 
     it("shows summary view when resuming a complete persisted session", async () => {

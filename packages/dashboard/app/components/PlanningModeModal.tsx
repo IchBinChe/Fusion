@@ -350,7 +350,6 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const hasLoadedPersistedRef = useRef(false);
   const [streamingOutput, setStreamingOutput] = useState<string>("");
   const [showThinking, setShowThinking] = useState(true);
-  const [isReconnecting, setIsReconnecting] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
   const [isAutoRetrying, setIsAutoRetrying] = useState(false);
   const [autoRetryAttempt, setAutoRetryAttempt] = useState(0);
@@ -817,7 +816,6 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     setBranchName("");
     setBaseBranch("");
     setStreamingOutput("");
-    setIsReconnecting(false);
     setIsRetrying(false);
     resetPlanningAutoRetryBudget();
     setIsRefiningSummary(false);
@@ -930,7 +928,6 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           passive stream catch-up event that overwrites a newer awaiting-input question.
           */
           if (isAnsweredQuestion && editingQuestionIdRef.current !== normalizedQuestion.id) return;
-          setIsReconnecting(false);
           setIsRetrying(false);
           resetPlanningAutoRetryBudget();
           setIsRefiningSummary(false);
@@ -962,7 +959,6 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
         onSummary: (summary) => {
           if (isStaleEvent()) return;
           const normalizedSummary = normalizePlanningSummary(summary);
-          setIsReconnecting(false);
           setIsRetrying(false);
           resetPlanningAutoRetryBudget();
           setIsRefiningSummary(false);
@@ -1004,7 +1000,6 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           // permanent error view. Refetch the session state — if the server
           // still has it in a recoverable state, silently reconnect; only
           // surface the error if the server actually persisted one.
-          setIsReconnecting(true);
           (async () => {
             try {
               const session = await fetchAiSession(sessionId);
@@ -1019,7 +1014,6 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
               // fall through to error view below
             }
 
-            setIsReconnecting(false);
             /*
             FNXC:PlanningRetry 2026-07-15-00:00:
             FN-8332 limits the stuck-turn retry budget to generations started by
@@ -1053,15 +1047,11 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           })();
         },
         onComplete: () => {
-          setIsReconnecting(false);
           setIsRetrying(false);
           resetPlanningAutoRetryBudget();
           setIsRefiningSummary(false);
           refineSummaryInFlightRef.current = false;
           currentSessionIdRef.current = null;
-        },
-        onConnectionStateChange: (state) => {
-          setIsReconnecting(state === "reconnecting");
         },
       });
 
@@ -1155,7 +1145,6 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
               setIsAutoRetrying(false);
             }
 
-            setIsReconnecting(false);
             return;
           } catch (sessionRefreshError) {
             retryError = sessionRefreshError;
@@ -1169,7 +1158,6 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           session: retryTarget,
           errorMessage: getErrorMessage(retryError) || t("planning.retryFailed", "Retry failed. Please try again."),
         });
-        setIsReconnecting(false);
         setIsAutoRetrying(false);
       } finally {
         if (!options.auto) {
@@ -1220,7 +1208,6 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     setStreamingOutput("");
     setConversationHistory([]);
     setResponseHistory([]);
-    setIsReconnecting(false);
     resetPlanningAutoRetryBudget();
     setIsRefiningSummary(false);
     refineSummaryInFlightRef.current = false;
@@ -1251,7 +1238,6 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       connectToPlanningStream(sessionId);
       setResponseHistory([]);
     } catch (err) {
-      setIsReconnecting(false);
       setError(getErrorMessage(err) || t("planning.failedStartSession", "Failed to start planning session"));
       setView({ type: "initial" });
       currentSessionIdRef.current = null;
@@ -1846,7 +1832,6 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     if (!isOpen) {
       hasAutoStartedRef.current = false;
       hasLoadedPersistedRef.current = false;
-      setIsReconnecting(false);
       setIsRetrying(false);
     }
   }, [isOpen]);
@@ -1940,7 +1925,6 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     }
     streamConnectionRef.current?.close();
     streamConnectionRef.current = null;
-    setIsReconnecting(false);
     setIsRetrying(false);
     setIsRefiningSummary(false);
     refineSummaryInFlightRef.current = false;
@@ -2090,7 +2074,6 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
 
     streamConnectionRef.current?.close();
     streamConnectionRef.current = null;
-    setIsReconnecting(false);
     setIsRetrying(false);
     setIsAutoRetrying(false);
     setIsRefiningSummary(false);
@@ -2456,11 +2439,11 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           <div className="planning-detail">
           {error && <div className="form-error planning-error">{error}</div>}
           {/*
-          FNXC:PlanningMode 2026-07-15-00:00:
-          Awaiting-input questions are persisted database state, so transient idle SSE reconnects must not imply that the question is being regenerated. Reserve this hint for the active loading view, where live generation genuinely depends on the stream.
+          FNXC:PlanningMode 2026-07-20-12:00:
+          FN-8436 supersedes FN-8002's loading-only reconnect hint: Planning Mode never
+          surfaces a user-visible reconnecting status. The loading pane's generating/thinking,
+          elapsed-time, and Stop controls are the sole progress feedback while SSE recovers.
           */}
-          {isReconnecting && view.type === "loading" && <div className="form-hint text-muted">{t("planning.reconnecting", "Reconnecting…")}</div>}
-
           {view.type === "initial" && (
             <div className="planning-initial">
               <div className="planning-view-scroll">

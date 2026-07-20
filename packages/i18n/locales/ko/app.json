@@ -4674,7 +4674,12 @@
     "usingDefault": "기본값 사용",
     "whatToBuild": "무엇을 만들고 싶으신가요?",
     "whatToBuildPlaceholder": "예: 로그인, 회원가입, 비밀번호 재설정이 포함된 사용자 인증 시스템 구축...",
-    "agentClarification": ""
+    "agentClarification": "",
+    "nextQuestion": "다음 질문",
+    "answeredQuestions": "답변한 질문",
+    "runningPlan": "진행 중인 계획",
+    "renameSession": "세션 이름 바꾸기",
+    "editAnswer": "{{question}} 답변 수정"
   },
   "plugins": {
     "addItem": "항목 추가",

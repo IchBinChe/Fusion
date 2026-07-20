@@ -101,7 +101,7 @@ gesture delivery enabled across `cap sync` regenerations.
 
 ### Planning Mode
 
-Planning Mode opens directly into the composer pane on mobile when no planning sessions exist, avoiding an empty-sidebar dead end. On desktop/tablet the split view is unaffected. Once sessions are saved, mobile shows the session list as usual and the user can navigate between list and detail panes.
+Planning Mode opens directly into the composer pane on mobile when no planning sessions exist, avoiding an empty-sidebar dead end. On desktop/tablet the split view is unaffected. Once sessions are saved, mobile shows the session list as usual and the user can navigate between list and detail panes; active interviews keep the running plan reachable beside the answered-question history.
 
 ### Chat and Quick Chat mobile scroll/readability behavior
 

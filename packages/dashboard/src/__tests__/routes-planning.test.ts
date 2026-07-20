@@ -342,6 +342,13 @@ class MockAiSessionStore extends EventEmitter {
     this.rows.set(id, { ...row, thinkingOutput, updatedAt: new Date().toISOString() });
   }
 
+  async updateTitle(id: string, title: string): Promise<boolean> {
+    const row = this.rows.get(id);
+    if (!row) return false;
+    this.rows.set(id, { ...row, title, updatedAt: new Date().toISOString() });
+    return true;
+  }
+
   async delete(id: string): Promise<void> {
     this.rows.delete(id);
     this.emit("ai_session:deleted", id);
@@ -549,6 +556,49 @@ describe("Planning Mode Routes", () => {
 
     afterEach(() => {
       __setCreateFnAgent(undefined as any);
+    });
+
+    describe("PATCH /planning/:sessionId/title", () => {
+      function buildTitleRouteApp(sessionStore: MockAiSessionStore) {
+        setAiSessionStore(sessionStore as unknown as Parameters<typeof setAiSessionStore>[0]);
+        return buildApp();
+      }
+
+      it("persists a verbatim title for an active planning session", async () => {
+        const sessionStore = new MockAiSessionStore();
+        await sessionStore.upsert(buildPlanningRow({ id: "planning-active-title", status: "awaiting_input", title: "AI draft" }));
+
+        const res = await REQUEST(buildTitleRouteApp(sessionStore), "PATCH", "/api/planning/planning-active-title/title", JSON.stringify({ title: "  Operator-defined plan  " }), { "Content-Type": "application/json" });
+
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({ sessionId: "planning-active-title", title: "Operator-defined plan" });
+        expect((await sessionStore.get("planning-active-title"))?.title).toBe("Operator-defined plan");
+      });
+
+      it.each(["", "   ", "x".repeat(61)])("rejects an invalid user session title", async (title) => {
+        const sessionStore = new MockAiSessionStore();
+        await sessionStore.upsert(buildPlanningRow({ id: "planning-invalid-title", status: "awaiting_input", title: "Unchanged" }));
+
+        const res = await REQUEST(buildTitleRouteApp(sessionStore), "PATCH", "/api/planning/planning-invalid-title/title", JSON.stringify({ title }), { "Content-Type": "application/json" });
+
+        expect(res.status).toBe(400);
+        expect((await sessionStore.get("planning-invalid-title"))?.title).toBe("Unchanged");
+      });
+
+      it("returns 404 for an unknown session", async () => {
+        const res = await REQUEST(buildTitleRouteApp(new MockAiSessionStore()), "PATCH", "/api/planning/missing/title", JSON.stringify({ title: "No session" }), { "Content-Type": "application/json" });
+        expect(res.status).toBe(404);
+      });
+
+      it("returns 404 without renaming a non-planning AI session", async () => {
+        const sessionStore = new MockAiSessionStore();
+        await sessionStore.upsert({ ...buildPlanningRow({ id: "chat-title-isolation", status: "awaiting_input", title: "Chat title" }), type: "chat" });
+
+        const res = await REQUEST(buildTitleRouteApp(sessionStore), "PATCH", "/api/planning/chat-title-isolation/title", JSON.stringify({ title: "Must not rename" }), { "Content-Type": "application/json" });
+
+        expect(res.status).toBe(404);
+        expect((await sessionStore.get("chat-title-isolation"))?.title).toBe("Chat title");
+      });
     });
 
     describe("POST /planning/start", () => {

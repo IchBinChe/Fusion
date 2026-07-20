@@ -789,6 +789,32 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
     }
   });
 
+  /*
+  FNXC:PlanningMode 2026-07-19-12:00:
+  Rename is intentionally a lock-free, verbatim user action. The planning helper first checks the
+  persisted session type so this planning-scoped endpoint cannot mutate another AI-session surface.
+  */
+  router.patch("/planning/:sessionId/title", async (req, res) => {
+    try {
+      const { sessionId } = req.params;
+      const title = req.body?.title;
+      if (!sessionId || typeof sessionId !== "string") throw badRequest("sessionId is required");
+      if (typeof title !== "string") throw badRequest("title is required and must be a string");
+      const trimmedTitle = title.trim();
+      if (!trimmedTitle) throw badRequest("title must not be empty");
+      if (trimmedTitle.length > 60) throw badRequest("title must be 60 characters or less");
+
+      const { updatePlanningSessionTitle } = await import("../planning.js");
+      if (!(await updatePlanningSessionTitle(sessionId, trimmedTitle))) {
+        throw notFound(`Planning session ${sessionId} not found`);
+      }
+      res.json({ sessionId, title: trimmedTitle });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err, "Failed to rename planning session");
+    }
+  });
+
   /**
    * POST /api/planning/:sessionId/summarize-draft-title
    * Generate (or regenerate) the sidebar title for a draft session from its

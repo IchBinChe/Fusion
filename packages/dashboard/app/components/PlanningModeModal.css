@@ -909,6 +909,63 @@ An empty footer must NOT reserve vertical space or paint its divider band. When 
   justify-content: center;
 }
 
+/*
+FNXC:PlanningMode 2026-07-19-12:00:
+The desktop interview is three panes: answered history, a single question editor, and an always-mounted
+running plan. On narrow screens the established detail navigation stacks panes without removing the plan.
+*/
+.planning-running-plan {
+  display: flex;
+  flex: 0 1 24rem;
+  flex-direction: column;
+  gap: var(--space-md);
+  min-width: 0;
+  padding: var(--space-lg);
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+  overflow: auto;
+}
+
+.planning-running-plan h4,
+.planning-running-plan h5 {
+  margin: 0;
+}
+
+/*
+FNXC:PlanningMode 2026-07-19-15:55:
+Answered-history rows are the sole in-session navigation: make each question a full-width, readable
+button so an earlier response can be edited without restoring the retired linear Back control.
+*/
+.planning-answered-history-edit {
+  width: 100%;
+  justify-content: flex-start;
+  gap: var(--space-sm);
+  overflow: hidden;
+  text-align: left;
+}
+
+.planning-answered-history-edit span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.planning-answered-history-edit.active {
+  border-color: var(--todo);
+  background: var(--card-hover);
+}
+
+.planning-running-plan-content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.planning-running-plan-content p {
+  white-space: pre-wrap;
+}
+
 /* Question View */
 .planning-question {
   display: flex;
@@ -916,56 +973,6 @@ An empty footer must NOT reserve vertical space or paint its divider band. When 
   gap: 20px;
   flex: 1;
   min-height: 0;
-}
-
-.planning-progress {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-xs);
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
-/*
-FNXC:Planning 2026-07-15-00:00:
-FN-8003 keeps Copy prompt in the question progress header so an interview can be restarted from its original idea without leaving the active question. The flexible progress bar preserves room for the recovery action at narrow desktop widths.
-*/
-.planning-progress-header {
-  display: flex;
-  align-items: center;
-  gap: var(--space-sm);
-}
-
-.planning-progress-header .planning-progress-bar {
-  flex: 1;
-  min-width: 0;
-}
-
-.planning-copy-prompt-btn {
-  flex-shrink: 0;
-}
-
-.planning-progress-bar {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-sm);
-}
-
-.planning-progress-step {
-  height: 4px;
-  border-radius: var(--radius-pill);
-  background: var(--border);
-  transition: background-color var(--transition-fast);
-}
-
-.planning-progress-step.active {
-  background: var(--todo);
-}
-
-.planning-progress-text {
-  font-size: 12px;
-  color: var(--text-muted);
 }
 
 .planning-question-form {
@@ -1851,26 +1858,10 @@ Tablet embedded Planning keeps the desktop two-pane shell, so the summary footer
     font-size: 16px;
   }
 
-  /*
-  FNXC:Planning 2026-07-15-00:00:
-  FN-8003 gives the recovery action its own mobile row so Copy prompt remains tappable without squeezing the interview progress bar or error actions.
-  */
-  .planning-progress-header {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .planning-copy-prompt-btn {
-    align-self: flex-start;
-  }
-
-  /* Progress bar compact on narrow screens */
-  .planning-progress-bar {
-    gap: var(--space-xs);
-  }
-
-  .planning-progress-text {
-    font-size: 11px;
+  .planning-running-plan {
+    flex-basis: auto;
+    border-top: 1px solid var(--border);
+    border-left: 0;
   }
 
   /* Confirm buttons: mobile-friendly sizing */
@@ -2007,4 +1998,11 @@ Tablet embedded Planning keeps the desktop two-pane shell, so the summary footer
 /* Subtask header override */
 .subtask-item-header--between {
   justify-content: space-between;
+}
+
+.planning-answered-history-response {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

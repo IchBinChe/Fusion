@@ -4674,7 +4674,12 @@
     "usingDefault": "Modèle par défaut",
     "whatToBuild": "Que voulez-vous construire ?",
     "whatToBuildPlaceholder": "ex : Construire un système d'authentification avec connexion, inscription et réinitialisation du mot de passe…",
-    "agentClarification": ""
+    "agentClarification": "",
+    "nextQuestion": "Question suivante",
+    "answeredQuestions": "Questions répondues",
+    "runningPlan": "Plan en cours",
+    "renameSession": "Renommer la session",
+    "editAnswer": "Modifier la réponse pour {{question}}"
   },
   "plugins": {
     "addItem": "Ajouter un élément",

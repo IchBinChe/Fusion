@@ -4674,7 +4674,12 @@
     "usingDefault": "使用預設",
     "whatToBuild": "您想建構什麼？",
     "whatToBuildPlaceholder": "例如，建構一個包含登入、註冊和密碼重設的使用者驗證系統...",
-    "agentClarification": ""
+    "agentClarification": "",
+    "nextQuestion": "下一個問題",
+    "answeredQuestions": "已回答的問題",
+    "runningPlan": "進行中的計畫",
+    "renameSession": "重新命名工作階段",
+    "editAnswer": "編輯 {{question}} 的回答"
   },
   "plugins": {
     "addItem": "新增項目",

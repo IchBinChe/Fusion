@@ -4674,7 +4674,12 @@
     "usingDefault": "使用默认",
     "whatToBuild": "您想构建什么？",
     "whatToBuildPlaceholder": "例如，构建一个包含登录、注册和密码重置的用户认证系统...",
-    "agentClarification": ""
+    "agentClarification": "",
+    "nextQuestion": "下一个问题",
+    "answeredQuestions": "已回答的问题",
+    "runningPlan": "进行中的计划",
+    "renameSession": "重命名会话",
+    "editAnswer": "编辑 {{question}} 的回答"
   },
   "plugins": {
     "addItem": "添加项目",

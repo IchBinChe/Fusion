@@ -1318,6 +1318,25 @@ export async function createDraftSession(
  * Returns the resolved title (existing or freshly generated) or null if the
  * session was not eligible for summarization.
  */
+/*
+FNXC:PlanningMode 2026-07-19-12:00:
+User session names are an explicit Planning Mode control, unlike AI draft summarization. Keep the
+planning-type predicate beside the persistence seam so a by-id dashboard route can never rename chat sessions.
+*/
+export async function updatePlanningSessionTitle(sessionId: string, title: string): Promise<boolean> {
+  if (!_aiSessionStore) return false;
+
+  const row = await _aiSessionStore.get(sessionId);
+  if (!row || row.type !== "planning") return false;
+
+  const changed = await _aiSessionStore.updateTitle(sessionId, title);
+  if (changed) {
+    const session = sessions.get(sessionId);
+    if (session) session.title = title;
+  }
+  return changed;
+}
+
 export async function summarizeDraftTitle(
   sessionId: string,
   rootDir: string,
@@ -1357,7 +1376,7 @@ export async function summarizeDraftTitle(
   // Re-check status (not title) so a concurrent Start Planning or a later
   // edit-then-blur cycle doesn't overwrite a real generating/complete title.
   const latest = await _aiSessionStore.get(sessionId);
-  if (!latest || latest.status !== "draft") {
+  if (!latest || latest.type !== "planning" || latest.status !== "draft") {
     return latest?.title ?? null;
   }
 

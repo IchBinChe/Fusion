@@ -86,6 +86,7 @@ vi.mock("../../api", () => ({
   cancelPlanning: (...args: any[]) => mockCancelPlanning(...args),
   stopPlanningGeneration: (...args: any[]) => mockStopPlanningGeneration(...args),
   updatePlanningSessionDraft: (...args: any[]) => mockUpdatePlanningSessionDraft(...args),
+  updatePlanningSessionTitle: vi.fn().mockResolvedValue({ sessionId: "session-123", title: "Renamed session" }),
   createTaskFromPlanning: (...args: any[]) => mockCreateTaskFromPlanning(...args),
   validatePlanningSession: (...args: any[]) => mockValidatePlanningSession(...args),
   startPlanningBreakdown: (...args: any[]) => mockStartPlanningBreakdown(...args),
@@ -101,6 +102,7 @@ vi.mock("../../api", () => ({
   pauseTask: (...args: any[]) => mockPauseTask(...args),
   unpauseTask: (...args: any[]) => mockUnpauseTask(...args),
   fetchTaskDetail: (...args: any[]) => mockFetchTaskDetail(...args),
+  fetchTaskVerificationRequest: vi.fn().mockResolvedValue(null),
   requestSpecRevision: (...args: any[]) => mockRequestSpecRevision(...args),
   approvePlan: (...args: any[]) => mockApprovePlan(...args),
   rejectPlan: (...args: any[]) => mockRejectPlan(...args),
@@ -583,7 +585,7 @@ describe("PlanningModeModal", () => {
 
       // Answer the first question
       fireEvent.click(screen.getByText("Medium"));
-      fireEvent.click(screen.getByText("Continue"));
+      fireEvent.click(screen.getByText("Next question"));
 
       // Verify loading state appears with correct message
       await waitFor(() => {

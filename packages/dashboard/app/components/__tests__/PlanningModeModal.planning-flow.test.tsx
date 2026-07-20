@@ -66,6 +66,7 @@ import {
 
 const mockAddToast = vi.fn();
 const mockCopyTextToClipboard = vi.fn();
+const mockUpdatePlanningSessionTitle = vi.fn();
 
 /*
 FNXC:PlanningModeStreamHarness 2026-07-17-16:20:
@@ -98,6 +99,7 @@ vi.mock("../../api", () => ({
   cancelPlanning: (...args: any[]) => mockCancelPlanning(...args),
   stopPlanningGeneration: (...args: any[]) => mockStopPlanningGeneration(...args),
   updatePlanningSessionDraft: (...args: any[]) => mockUpdatePlanningSessionDraft(...args),
+  updatePlanningSessionTitle: (...args: any[]) => mockUpdatePlanningSessionTitle(...args),
   createTaskFromPlanning: (...args: any[]) => mockCreateTaskFromPlanning(...args),
   validatePlanningSession: (...args: any[]) => mockValidatePlanningSession(...args),
   startPlanningBreakdown: (...args: any[]) => mockStartPlanningBreakdown(...args),
@@ -183,6 +185,8 @@ describe("PlanningModeModal", () => {
     mockAddToast.mockReset();
     mockCopyTextToClipboard.mockReset();
     mockCopyTextToClipboard.mockResolvedValue(true);
+    mockUpdatePlanningSessionTitle.mockReset();
+    mockUpdatePlanningSessionTitle.mockResolvedValue({ sessionId: "session-123", title: "Renamed session" });
     MockEventSource.reset();
     vi.stubGlobal("EventSource", MockEventSource as any);
     window.sessionStorage.clear();
@@ -379,14 +383,14 @@ describe("PlanningModeModal", () => {
 
       /*
       FNXC:DashboardTests 2026-07-18-15:20:
-      Full Suite shard 3 (29648952207) observed Small+Continue not reaching respondToPlanning
+      Full Suite shard 3 (29648952207) observed Small+Next question not reaching respondToPlanning
       under load (0 calls). Click the option radio by role and wait for checked + respond
       with the same settle bound as "allows normal question interaction".
       */
       const smallOption = screen.getByRole("radio", { name: /Small/i });
       fireEvent.click(smallOption);
       await waitFor(() => expect(smallOption).toBeChecked());
-      fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+      fireEvent.click(screen.getByRole("button", { name: "Next question" }));
 
       await waitFor(
         () => {
@@ -427,7 +431,7 @@ describe("PlanningModeModal", () => {
       });
 
       fireEvent.click(screen.getByText("Small"));
-      fireEvent.click(screen.getByText("Continue"));
+      fireEvent.click(screen.getByText("Next question"));
 
       await waitFor(
         () => {
@@ -466,7 +470,7 @@ describe("PlanningModeModal", () => {
         expect(screen.getByText("What is the scope?")).toBeDefined();
       });
 
-      const continueButton = screen.getByRole("button", { name: "Continue" });
+      const continueButton = screen.getByRole("button", { name: "Next question" });
       fireEvent.click(screen.getByTestId("planning-option-other"));
       const otherInput = await screen.findByTestId("planning-other-input");
       expect(continueButton).toBeDisabled();
@@ -505,7 +509,7 @@ describe("PlanningModeModal", () => {
         expect(screen.getByText("What is the scope?")).toBeDefined();
       });
 
-      const continueButton = screen.getByRole("button", { name: "Continue" });
+      const continueButton = screen.getByRole("button", { name: "Next question" });
       fireEvent.click(screen.getByTestId("planning-option-other"));
       const otherInput = await screen.findByTestId("planning-other-input");
       fireEvent.change(otherInput, { target: { value: "   " } });
@@ -565,7 +569,7 @@ describe("PlanningModeModal", () => {
         expect(screen.getByText("Which priorities matter?")).toBeDefined();
       });
 
-      const continueButton = screen.getByRole("button", { name: "Continue" });
+      const continueButton = screen.getByRole("button", { name: "Next question" });
       /*
       FNXC:PlanningModeOptions 2026-07-18-14:00:
       Full Suite shard 3 (29646721723) timed out finding planning-other-input after a bare
@@ -630,7 +634,7 @@ describe("PlanningModeModal", () => {
         expect(screen.getByText("Which priorities matter?")).toBeDefined();
       });
 
-      const continueButton = screen.getByRole("button", { name: "Continue" });
+      const continueButton = screen.getByRole("button", { name: "Next question" });
       /*
       FNXC:PlanningModeOptions 2026-07-18-10:35:
       Full-suite shard load observed getByText("Speed") not committing the multi-select
@@ -705,9 +709,9 @@ describe("PlanningModeModal", () => {
       Full Suite shard 3 (29643371961) failed when fireEvent.click(Other) did not flush
       isOtherSelected before the synchronous getByTestId(planning-other-input) under CI
       load. Await findByTestId after the confirm Other button click (same settle discipline
-      as multi-select Other) before asserting Continue enablement and the _other payload.
+      as multi-select Other) before asserting Next question enablement and the _other payload.
       */
-      const continueButton = screen.getByRole("button", { name: "Continue" });
+      const continueButton = screen.getByRole("button", { name: "Next question" });
       fireEvent.click(screen.getByTestId("planning-option-other"));
       const otherInput = await screen.findByTestId("planning-other-input");
       expect(continueButton).toBeDisabled();
@@ -765,7 +769,7 @@ describe("PlanningModeModal", () => {
         expect(screen.getByText("Proceed with this scope?")).toBeDefined();
       });
 
-      const continueButton = screen.getByRole("button", { name: "Continue" });
+      const continueButton = screen.getByRole("button", { name: "Next question" });
       fireEvent.click(screen.getByTestId("planning-option-other"));
       const otherInput = await screen.findByTestId("planning-other-input");
       fireEvent.change(otherInput, {
@@ -3514,7 +3518,7 @@ describe("PlanningModeModal", () => {
       const mediumOption = await screen.findByText("Medium");
       fireEvent.click(mediumOption);
 
-      const continueBtn = await screen.findByRole("button", { name: "Continue" });
+      const continueBtn = await screen.findByRole("button", { name: "Next question" });
       fireEvent.click(continueBtn);
 
       await waitFor(() => {
@@ -3527,15 +3531,100 @@ describe("PlanningModeModal", () => {
     });
   });
 
+  describe("session rename", () => {
+    function renderActiveSessionForRename() {
+      mockFetchAiSession.mockResolvedValueOnce({
+        id: "session-rename",
+        type: "planning",
+        status: "awaiting_input",
+        title: "Original session",
+        inputPayload: JSON.stringify({ initialPlan: "Rename this session" }),
+        conversationHistory: "[]",
+        currentQuestion: JSON.stringify(mockQuestion),
+        result: JSON.stringify(mockSummary),
+        thinkingOutput: "",
+        projectId: null,
+      });
+      return render(<PlanningModeModal isOpen={true} onClose={mockOnClose} onTaskCreated={mockOnTaskCreated} onTasksCreated={vi.fn()} tasks={mockTasks} resumeSessionId="session-rename" initialSessions={[{ id: "session-rename", type: "planning", status: "awaiting_input", title: "Original session", projectId: null, updatedAt: "2026-07-19T00:00:00.000Z" }]} />);
+    }
+
+    it("optimistically renames the active session through the dedicated API", async () => {
+      renderActiveSessionForRename();
+      await screen.findByText("What is the scope?");
+      fireEvent.click(screen.getByRole("button", { name: "Rename session" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Rename session" }), { target: { value: "Updated session" } });
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "Rename session" }), { key: "Enter" });
+
+      await waitFor(() => expect(mockUpdatePlanningSessionTitle).toHaveBeenCalledWith("session-rename", "Updated session", undefined));
+      expect(screen.getByRole("heading", { name: "Updated session" })).toBeDefined();
+    });
+
+    it("rolls a rejected rename back to the persisted title", async () => {
+      mockUpdatePlanningSessionTitle.mockRejectedValueOnce(new Error("Rename rejected"));
+      renderActiveSessionForRename();
+      await screen.findByText("What is the scope?");
+      fireEvent.click(screen.getByRole("button", { name: "Rename session" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Rename session" }), { target: { value: "Rejected rename" } });
+      fireEvent.keyDown(screen.getByRole("textbox", { name: "Rename session" }), { key: "Enter" });
+
+      await screen.findByText("Rename rejected");
+      expect(screen.getByRole("heading", { name: "Original session" })).toBeDefined();
+    });
+  });
+
+  describe.each(["desktop", "mobile"] as const)("single interview action on %s", (viewport) => {
+    it("keeps only Next question and the localized Other input affordance", async () => {
+      mockViewport(viewport);
+      render(<PlanningModeModal isOpen={true} onClose={mockOnClose} onTaskCreated={mockOnTaskCreated} onTasksCreated={vi.fn()} tasks={mockTasks} initialPlan="Build auth system" />);
+
+      await screen.findByText("What is the scope?");
+      expect(screen.getAllByRole("button", { name: "Next question" })).toHaveLength(1);
+      expect(screen.getByRole("radio", { name: "Other (write your own)" })).toBeDefined();
+      expect(screen.queryByRole("button", { name: "Back" })).toBeNull();
+      expect(screen.queryByRole("button", { name: /Copy prompt/i })).toBeNull();
+      expect(screen.queryByText(/Question .* of ~3/i)).toBeNull();
+    });
+  });
+
   /*
-  FNXC:PlanningMode 2026-07-05-00:00:
-  FN-7615 regression coverage: Back is deterministic history navigation (a pure server-side
-  rewind), not AI generation, so it must never render `.planning-loading` (the "Generating next
-  question..."/"AI is thinking..." spinner + Stop screen reserved for real model turns). Cover the
-  success path, the failure path (error surfaced, still on a question form), and the
-  no-history-yet state where the Back button is absent.
+  FNXC:PlanningMode 2026-07-19-23:00:
+  The running plan and user-controlled validation must survive every recoverable session state,
+  including reconnect/loading/error paths that do not mount the center question editor.
   */
-  describe("Back navigation (FN-7615)", () => {
+  describe.each([
+    ["awaiting_input", { currentQuestion: JSON.stringify(mockQuestion) }],
+    ["generating", {}],
+    ["error", { error: "Generation failed" }],
+  ] as const)("running plan for %s sessions", (status, fields) => {
+    it("keeps the plan and Validate plan control visible", async () => {
+      mockFetchAiSession.mockResolvedValueOnce({
+        id: `session-${status}`,
+        type: "planning",
+        status,
+        title: "Persisted planning session",
+        inputPayload: JSON.stringify({ initialPlan: "Persisted plan prompt" }),
+        conversationHistory: "[]",
+        result: JSON.stringify(mockSummary),
+        thinkingOutput: "",
+        projectId: null,
+        ...fields,
+      });
+
+      render(<PlanningModeModal isOpen={true} onClose={mockOnClose} onTaskCreated={mockOnTaskCreated} onTasksCreated={vi.fn()} tasks={mockTasks} resumeSessionId={`session-${status}`} />);
+
+      expect(await screen.findByRole("complementary", { name: "Running plan" })).toHaveTextContent(mockSummary.title);
+      fireEvent.click(screen.getByRole("button", { name: "Validate plan" }));
+      await waitFor(() => expect(mockValidatePlanningSession).toHaveBeenCalledWith(`session-${status}`, undefined));
+    });
+  });
+
+  /*
+  FNXC:PlanningMode 2026-07-19-15:50:
+  FN-8400 replaces linear interview Back with an answered-question edit action. Selecting history
+  must use the question-id rewind contract without presenting generation UI, then restore the answer
+  in the sole center-pane editor so the next question branches from the revised response.
+  */
+  describe("answered-question editing", () => {
     const secondQuestion: PlanningQuestion = {
       id: "q-requirements",
       type: "text",
@@ -3543,298 +3632,96 @@ describe("PlanningModeModal", () => {
       description: "Describe the requirements",
     };
 
-    const thirdQuestion: PlanningQuestion = {
-      id: "q-details",
-      type: "text",
-      question: "Any additional details?",
-      description: "Optional extra context",
-    };
-
-    async function advanceToThirdQuestion() {
+    async function advanceToSecondQuestion() {
       let streamHandlers: any;
       mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
         streamHandlers = handlers;
-        queuePlanningStreamEvent(() => {
-          handlers.onQuestion?.(mockQuestion);
-        });
-
-        return {
-          close: vi.fn(),
-          isConnected: vi.fn().mockReturnValue(true),
-        };
+        queuePlanningStreamEvent(() => handlers.onQuestion?.(mockQuestion));
+        return { close: vi.fn(), isConnected: vi.fn().mockReturnValue(true) };
       });
-
-      let respondCallCount = 0;
-      mockRespondToPlanning.mockImplementation(async () => {
-        respondCallCount += 1;
-        const nextQuestion = respondCallCount === 1 ? secondQuestion : thirdQuestion;
-        queuePlanningStreamEvent(() => {
-          streamHandlers?.onQuestion?.(nextQuestion);
-        });
+      mockRespondToPlanning.mockImplementationOnce(async () => {
+        queuePlanningStreamEvent(() => streamHandlers?.onQuestion?.(secondQuestion));
         return { sessionId: "session-123", currentQuestion: null, summary: null };
       });
 
-      const renderResult = render(
-        <PlanningModeModal
-          isOpen={true}
-          onClose={mockOnClose}
-          onTaskCreated={mockOnTaskCreated}
-          onTasksCreated={vi.fn()}
-          tasks={mockTasks}
-        />,
-      );
-
-      fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), {
-        target: { value: "Build auth system" },
-      });
+      const result = render(<PlanningModeModal isOpen={true} onClose={mockOnClose} onTaskCreated={mockOnTaskCreated} onTasksCreated={vi.fn()} tasks={mockTasks} />);
+      fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), { target: { value: "Build auth system" } });
       fireEvent.click(screen.getByText("Start Planning"));
-
-      await waitFor(() => {
-        expect(screen.getByText("What is the scope?")).toBeDefined();
-      });
-
-      const mediumOption = await screen.findByText("Medium");
-      fireEvent.click(mediumOption);
-      fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
-
-      await waitFor(() => {
-        expect(screen.getByText("What are the key requirements?")).toBeDefined();
-      }, { timeout: 5000 });
-
-      const requirementsTextarea = screen.getByPlaceholderText("Type your answer here...");
-      fireEvent.change(requirementsTextarea, { target: { value: "Auth requirements" } });
-      fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
-
-      await waitFor(() => {
-        expect(screen.getByText("Any additional details?")).toBeDefined();
-      }, { timeout: 5000 });
-
-      return renderResult;
+      await screen.findByText("What is the scope?");
+      fireEvent.click(await screen.findByText("Medium"));
+      fireEvent.click(await screen.findByRole("button", { name: "Next question" }));
+      await screen.findByText("What are the key requirements?");
+      return result;
     }
 
-    it("never renders the generation screen while going back, and restores the previous question with prior Q&A visible", async () => {
-      let resolveRewind!: (value: {
-        currentQuestion: PlanningQuestion;
-        history: Array<{ question: PlanningQuestion; response: unknown; thinkingOutput?: string }>;
-      }) => void;
-      mockRewindPlanningSession.mockImplementation(
-        () => new Promise((resolve) => {
-          resolveRewind = resolve;
-        }),
-      );
-
-      const { container } = await advanceToThirdQuestion();
-
-      const backButton = screen.getByRole("button", { name: /Back/i });
-
-      await act(async () => {
-        fireEvent.click(backButton);
+    it("edits an answered question without replacing the interview with generation UI", async () => {
+      mockRewindPlanningSession.mockResolvedValueOnce({
+        currentQuestion: mockQuestion,
+        history: [{ question: mockQuestion, response: { [mockQuestion.id]: "medium" } }],
       });
+      const { container } = await advanceToSecondQuestion();
 
-      // Symptom assertion (FN-7615): immediately after the click, while the deterministic
-      // rewind is still in flight, the generation view must never be present.
+      fireEvent.click(screen.getByRole("button", { name: "Edit answer for What is the scope?" }));
+
       expect(container.querySelector(".planning-loading")).toBeNull();
-      expect(screen.queryByText("Generating next question...")).toBeNull();
-      expect(screen.queryByText("AI is thinking...")).toBeNull();
-
-      await act(async () => {
-        resolveRewind({
-          currentQuestion: secondQuestion,
-          history: [{ question: mockQuestion, response: { [mockQuestion.id]: "medium" } }],
-        });
-      });
-
-      await waitFor(() => {
-        expect(screen.getByText("What are the key requirements?")).toBeDefined();
-      });
-
-      // Symptom assertion (FN-7615): after the async rewind settles, the generation view must
-      // still never have appeared, and the previous question form is shown with the prior Q&A
-      // (Q1's restored answer) visible above it.
-      expect(container.querySelector(".planning-loading")).toBeNull();
-      expect(screen.getByTestId("conversation-history")).toBeDefined();
-      expect(screen.getByText("What is the scope?")).toBeDefined();
-      expect(screen.getByText("Medium")).toBeDefined();
-      expect(mockRewindPlanningSession).toHaveBeenCalledWith("session-123", undefined);
+      await screen.findByDisplayValue("medium");
+      expect(mockRewindPlanningSession).toHaveBeenCalledWith("session-123", undefined, mockQuestion.id);
+      expect(screen.getByRole("button", { name: "Next question" })).toBeDefined();
     });
 
-    it("stays on the question form and surfaces an error when the rewind request fails", async () => {
+    it("keeps the current question visible when question-id rewind fails", async () => {
       mockRewindPlanningSession.mockRejectedValueOnce(new Error("rewind failed"));
+      const { container } = await advanceToSecondQuestion();
 
-      const { container } = await advanceToThirdQuestion();
-
-      const backButton = screen.getByRole("button", { name: /Back/i });
-
-      await act(async () => {
-        fireEvent.click(backButton);
-      });
+      fireEvent.click(screen.getByRole("button", { name: "Edit answer for What is the scope?" }));
 
       expect(container.querySelector(".planning-loading")).toBeNull();
-
-      await waitFor(() => {
-        expect(screen.getByText("rewind failed")).toBeDefined();
-      });
-
-      // Still on a question form (not loading, not generation) after the failure.
-      expect(container.querySelector(".planning-loading")).toBeNull();
-      expect(screen.getByText("Any additional details?")).toBeDefined();
+      await screen.findByText("rewind failed");
+      expect(screen.getByText("What are the key requirements?")).toBeDefined();
     });
 
-    it("does not render a Back button on the first question, before any history exists", async () => {
-      render(
-        <PlanningModeModal
-          isOpen={true}
-          onClose={mockOnClose}
-          onTaskCreated={mockOnTaskCreated}
-          onTasksCreated={vi.fn()}
-          tasks={mockTasks}
-        />,
-      );
-
-      fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), {
-        target: { value: "Build auth system" },
-      });
-      fireEvent.click(screen.getByText("Start Planning"));
-
-      await waitFor(() => {
-        expect(screen.getByText("What is the scope?")).toBeDefined();
-      });
-
-      expect(screen.queryByRole("button", { name: /Back/i })).toBeNull();
-    });
-  });
-
-  describe("copy original prompt recovery", () => {
-    it("copies the fresh original prompt from an active interview", async () => {
-      const originalPrompt = "Build a recovery flow\nwith a restart path";
-      render(
-        <PlanningModeModal
-          isOpen={true}
-          onClose={mockOnClose}
-          onTaskCreated={mockOnTaskCreated}
-          onTasksCreated={vi.fn()}
-          tasks={mockTasks}
-        />,
-      );
-
-      fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), {
-        target: { value: originalPrompt },
-      });
-      fireEvent.click(screen.getByRole("button", { name: "Start Planning" }));
-
-      const copyButton = await screen.findByRole("button", { name: /copy original prompt/i });
-      fireEvent.click(copyButton);
-
-      await waitFor(() => {
-        expect(mockCopyTextToClipboard).toHaveBeenCalledWith(originalPrompt);
-        expect(mockAddToast).toHaveBeenCalledWith("Prompt copied to clipboard", "success");
-      });
-    });
-
-    it("copies the fresh original prompt after the interview errors", async () => {
-      const streamHandlers: any[] = [];
-      const originalPrompt = "Build an interview that can recover";
-      mockConnectPlanningStream.mockImplementation((_sessionId: string, _projectId: string | undefined, handlers: any) => {
-        streamHandlers.push(handlers);
+    it("submits the selected answer through the edit-and-branch response path", async () => {
+      const branchedQuestion: PlanningQuestion = {
+        id: "q-branched",
+        type: "text",
+        question: "What should the new branch refine?",
+      };
+      let streamHandlers: any;
+      mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
+        streamHandlers = handlers;
+        queuePlanningStreamEvent(() => handlers.onQuestion?.(mockQuestion));
         return { close: vi.fn(), isConnected: vi.fn().mockReturnValue(true) };
       });
-
-      render(
-        <PlanningModeModal
-          isOpen={true}
-          onClose={mockOnClose}
-          onTaskCreated={mockOnTaskCreated}
-          onTasksCreated={vi.fn()}
-          tasks={mockTasks}
-        />,
-      );
-
-      fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), {
-        target: { value: originalPrompt },
+      mockRespondToPlanning.mockImplementationOnce(async () => {
+        queuePlanningStreamEvent(() => streamHandlers?.onQuestion?.(secondQuestion));
+        return { sessionId: "session-123", currentQuestion: null, summary: null };
+      }).mockImplementationOnce(async () => {
+        queuePlanningStreamEvent(() => streamHandlers?.onQuestion?.(branchedQuestion));
+        return { sessionId: "session-123", currentQuestion: null, summary: null };
       });
-      fireEvent.click(screen.getByRole("button", { name: "Start Planning" }));
-      await waitFor(() => expect(streamHandlers).toHaveLength(1));
-
-      for (let index = 0; index < 4; index += 1) {
-        await act(async () => {
-          streamHandlers[index].onError?.("Planning provider failed");
-        });
-      }
-
-      const copyButton = await screen.findByRole("button", { name: /copy original prompt/i });
-      fireEvent.click(copyButton);
-      await waitFor(() => expect(mockCopyTextToClipboard).toHaveBeenCalledWith(originalPrompt));
-    });
-
-    it("restores a resumable awaiting-input session prompt before copying", async () => {
-      const originalPrompt = "Resume awaiting-input prompt";
-      mockFetchAiSession.mockResolvedValueOnce({
-        id: "copy-awaiting-input",
-        type: "planning",
-        status: "awaiting_input",
-        title: "Recoverable session",
-        inputPayload: JSON.stringify({ initialPlan: originalPrompt }),
-        conversationHistory: "[]",
-        currentQuestion: JSON.stringify(mockQuestion),
-        result: null,
-        thinkingOutput: "",
-        error: null,
-        projectId: null,
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-01T00:00:00.000Z",
+      mockRewindPlanningSession.mockResolvedValueOnce({
+        currentQuestion: mockQuestion,
+        history: [{ question: mockQuestion, response: { [mockQuestion.id]: "medium" } }],
       });
 
-      render(
-        <PlanningModeModal
-          isOpen={true}
-          onClose={mockOnClose}
-          onTaskCreated={mockOnTaskCreated}
-          onTasksCreated={vi.fn()}
-          tasks={mockTasks}
-          resumeSessionId="copy-awaiting-input"
-        />,
-      );
+      render(<PlanningModeModal isOpen={true} onClose={mockOnClose} onTaskCreated={mockOnTaskCreated} onTasksCreated={vi.fn()} tasks={mockTasks} />);
+      fireEvent.change(screen.getByPlaceholderText(/e.g., Build a user authentication/), { target: { value: "Build auth system" } });
+      fireEvent.click(screen.getByText("Start Planning"));
+      await screen.findByText("What is the scope?");
+      fireEvent.click(await screen.findByText("Medium"));
+      fireEvent.click(screen.getByRole("button", { name: "Next question" }));
+      await screen.findByText("What are the key requirements?");
+      fireEvent.click(screen.getByRole("button", { name: "Edit answer for What is the scope?" }));
+      await screen.findByDisplayValue("medium");
+      fireEvent.click(screen.getByRole("button", { name: "Next question" }));
 
-      const copyButton = await screen.findByRole("button", { name: /copy original prompt/i });
-      fireEvent.click(copyButton);
-      await waitFor(() => expect(mockCopyTextToClipboard).toHaveBeenCalledWith(originalPrompt));
-    });
-
-
-    it.each(["desktop", "mobile"] as const)("hides Copy prompt without a persisted prompt on %s", async (viewportMode) => {
-      mockViewport(viewportMode);
-      mockFetchAiSession.mockResolvedValueOnce({
-        id: `copy-empty-${viewportMode}`,
-        type: "planning",
-        status: "awaiting_input",
-        title: "Missing prompt",
-        inputPayload: "{}",
-        conversationHistory: "[]",
-        currentQuestion: JSON.stringify(mockQuestion),
-        result: null,
-        thinkingOutput: "",
-        error: null,
-        projectId: null,
-        createdAt: "2026-01-01T00:00:00.000Z",
-        updatedAt: "2026-01-01T00:00:00.000Z",
-      });
-
-      render(
-        <PlanningModeModal
-          isOpen={true}
-          onClose={mockOnClose}
-          onTaskCreated={mockOnTaskCreated}
-          onTasksCreated={vi.fn()}
-          tasks={mockTasks}
-          resumeSessionId={`copy-empty-${viewportMode}`}
-        />,
-      );
-
-      await screen.findByText(mockQuestion.question);
-      expect(screen.queryByRole("button", { name: /copy original prompt/i })).toBeNull();
-      expect(mockCopyTextToClipboard).not.toHaveBeenCalled();
+      await screen.findByText("What should the new branch refine?");
+      expect(mockRewindPlanningSession).toHaveBeenCalledWith("session-123", undefined, mockQuestion.id);
+      expect(mockRespondToPlanning).toHaveBeenLastCalledWith("session-123", { [mockQuestion.id]: "medium" }, undefined);
+      expect(screen.getByRole("button", { name: "Edit answer for What is the scope?" })).toBeDefined();
     });
   });
+
 
   describe("Session history", () => {
     it("renders only one row when fetch and SSE deliver the same session id", async () => {
@@ -4006,7 +3893,7 @@ describe("PlanningModeModal", () => {
         id: "background-planning-session",
         type: "planning" as const,
         status: "awaiting_input" as const,
-        title: "Continue background planning",
+        title: "Next question background planning",
         projectId: null,
         updatedAt: "2026-07-15T00:00:00.000Z",
       }];
@@ -4022,7 +3909,7 @@ describe("PlanningModeModal", () => {
         />,
       );
 
-      expect(screen.getByRole("button", { name: /Continue background planning/i })).toBeDefined();
+      expect(screen.getByRole("button", { name: /Next question background planning/i })).toBeDefined();
       expect(screen.queryByTestId("planning-sidebar-skeleton")).toBeNull();
       await waitFor(() => expect(mockFetchAiSessions).toHaveBeenCalledTimes(1));
     });

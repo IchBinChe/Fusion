@@ -4684,7 +4684,12 @@
     "untitledSession": "Untitled session",
     "usingDefault": "Using default",
     "whatToBuild": "What do you want to build?",
-    "whatToBuildPlaceholder": "e.g., Build a user authentication system with login, signup, and password reset..."
+    "whatToBuildPlaceholder": "e.g., Build a user authentication system with login, signup, and password reset...",
+    "nextQuestion": "Next question",
+    "answeredQuestions": "Answered questions",
+    "runningPlan": "Running plan",
+    "renameSession": "Rename session",
+    "editAnswer": "Edit answer for {{question}}"
   },
   "plugins": {
     "addItem": "Add Item",

@@ -4674,7 +4674,12 @@
     "usingDefault": "Usar predeterminado",
     "whatToBuild": "¿Qué quieres construir?",
     "whatToBuildPlaceholder": "p. ej., Crear un sistema de autenticación con inicio de sesión, registro y restablecimiento de contraseña...",
-    "agentClarification": ""
+    "agentClarification": "",
+    "nextQuestion": "Siguiente pregunta",
+    "answeredQuestions": "Preguntas respondidas",
+    "runningPlan": "Plan en curso",
+    "renameSession": "Renombrar sesión",
+    "editAnswer": "Editar respuesta para {{question}}"
   },
   "plugins": {
     "addItem": "Agregar elemento",

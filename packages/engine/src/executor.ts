@@ -1054,6 +1054,42 @@ export function parseAwaitInputSentinel(output: string | undefined): string | nu
   return question ? question : null;
 }
 
+const USER_QUESTION_TOOL_NAMES = new Set([
+  "askuserquestion",
+  "ask_user",
+  "ask_followup_question",
+  "request_user_input",
+  "elicit",
+  "ask_question",
+  "fn_ask_question",
+]);
+
+/**
+ * Normalize a question-tool invocation into the same durable await-input
+ * contract used by skill sentinels. Some runtimes expose an interactive
+ * question tool even though Fusion workflow-step sessions have no synchronous
+ * listener; detecting the call at the session event boundary prevents the
+ * task from continuing after the unanswered question is rendered.
+ */
+export function parseAwaitInputQuestionToolCall(
+  toolName: string,
+  args: Record<string, unknown> | undefined,
+): string | null {
+  if (!USER_QUESTION_TOOL_NAMES.has(toolName.trim().toLowerCase()) || !args) return null;
+
+  const records = Array.isArray(args.questions) ? args.questions : [args];
+  const questions = records.flatMap((value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    const record = value as Record<string, unknown>;
+    const question = [record.question, record.prompt, record.message, record.text, record.title]
+      .find((candidate): candidate is string => typeof candidate === "string" && candidate.trim().length > 0)
+      ?.trim();
+    return question ? [question] : [];
+  });
+
+  return questions.length > 0 ? questions.join("\n\n") : null;
+}
+
 /**
  * (U2 / KTD-2) Fusion workflow-step conventions preamble, prepended to a skill
  * step's prompt at the skill-prompt build path (runGraphCustomNode). It teaches
@@ -16602,6 +16638,11 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
 
       let output = "";
       const deltaNormalizer = createStreamingDeltaNormalizer();
+      let detectedQuestion: string | null = null;
+      let resolveQuestion: ((value: "await-input") => void) | undefined;
+      const questionPromise = new Promise<"await-input">((resolve) => {
+        resolveQuestion = resolve;
+      });
       session.subscribe((event) => {
         if (event.type === "message_update") {
           const msgEvent = event.assistantMessageEvent;
@@ -16620,6 +16661,16 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
         }
         if (event.type === "tool_execution_start") {
           agentLogger.onToolStart(event.toolName, event.args as Record<string, unknown> | undefined);
+          if (!unattended && detectedQuestion === null) {
+            const question = parseAwaitInputQuestionToolCall(
+              event.toolName,
+              event.args as Record<string, unknown> | undefined,
+            );
+            if (question) {
+              detectedQuestion = question;
+              resolveQuestion?.("await-input");
+            }
+          }
         }
         if (event.type === "tool_execution_end") {
           agentLogger.onToolEnd(event.toolName, event.isError, event.result);
@@ -16645,7 +16696,17 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
         const outcome = await Promise.race([
           promptPromise.then(() => "completed" as const),
           timeoutPromise,
+          questionPromise,
         ]);
+
+        if (outcome === "await-input" && detectedQuestion) {
+          try { session.dispose(); } catch { /* best-effort */ }
+          await agentLogger.flush();
+          return {
+            success: true,
+            output: `===FUSION_AWAIT_INPUT===\n${detectedQuestion}\n===END_FUSION_AWAIT_INPUT===`,
+          };
+        }
 
         if (outcome === "timeout") {
           executorLog.warn(`${task.id}: workflow step '${workflowStep.name}' (${attemptLabel}) timed out after ${timeoutMs}ms — disposing session`);

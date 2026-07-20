@@ -5,9 +5,3 @@ issue_enrichment:
     enabled: true
   labeling:
     auto_apply_labels: true
-  related_issues:
-    enabled: true
-  related_prs:
-    enabled: true
-  duplicate_detection:
-    enabled: true

@@ -1602,19 +1602,6 @@
         "confirmTitle": "조직 번들을 가져올까요?",
         "confirmMessage": "미리본 구성을 이 프로젝트에 적용합니다.",
         "confirmApply": "번들 가져오기"
-      },
-      "versions": {
-        "title": "구성 버전",
-        "description": "기록된 프로젝트 구성 버전을 복원합니다.",
-        "loading": "버전 불러오는 중…",
-        "empty": "아직 구성 버전이 없습니다.",
-        "loadError": "구성 버전을 불러올 수 없습니다",
-        "rollback": "롤백",
-        "rollingBack": "롤백 중…",
-        "rollbackError": "구성을 롤백할 수 없습니다",
-        "confirmTitle": "구성을 롤백할까요?",
-        "confirmMessage": "이 버전을 복원할까요? 롤백은 새 버전으로 기록됩니다.",
-        "confirmRollback": "롤백"
       }
     },
     "ecosystem": {
@@ -6343,7 +6330,8 @@
         "project": "이 프로젝트에만 적용됨"
       },
       "globalMcp": "MCP Servers · Global",
-      "mcp": "MCP Servers · Project"
+      "mcp": "MCP Servers · Project",
+      "configVersions": "구성 버전"
     },
     "nodeRouting": {
       "blockExecution": "",
@@ -6849,6 +6837,19 @@
       "embeddedConnectionCap": "내장 PostgreSQL 연결 상한",
       "embeddedConnectionCapError": "32에서 2,000 사이의 값을 입력하세요.",
       "advanced": "고급 데이터베이스 설정"
+    },
+    "configVersions": {
+      "title": "구성 버전",
+      "description": "기록된 프로젝트 구성 버전을 복원합니다.",
+      "loading": "버전 불러오는 중…",
+      "empty": "아직 구성 버전이 없습니다.",
+      "loadError": "구성 버전을 불러올 수 없습니다",
+      "rollback": "롤백",
+      "rollingBack": "롤백 중…",
+      "rollbackError": "구성을 롤백할 수 없습니다",
+      "confirmTitle": "구성을 롤백할까요?",
+      "confirmMessage": "이 버전을 복원할까요? 롤백은 새 버전으로 기록됩니다.",
+      "confirmRollback": "롤백"
     }
   },
   "setup": {

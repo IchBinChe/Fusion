@@ -1602,19 +1602,6 @@
         "confirmTitle": "匯入組織包？",
         "confirmMessage": "這會將預覽的設定套用到此專案。",
         "confirmApply": "匯入包"
-      },
-      "versions": {
-        "title": "設定版本",
-        "description": "還原任意已記錄的專案設定版本。",
-        "loading": "正在載入版本…",
-        "empty": "尚無設定版本。",
-        "loadError": "無法載入設定版本",
-        "rollback": "回滾",
-        "rollingBack": "正在回滾…",
-        "rollbackError": "無法回滾設定",
-        "confirmTitle": "回滾設定？",
-        "confirmMessage": "還原此版本？回滾會記錄為新版本。",
-        "confirmRollback": "回滾"
       }
     },
     "ecosystem": {
@@ -6343,7 +6330,8 @@
         "project": "特定於此專案"
       },
       "globalMcp": "MCP Servers · Global",
-      "mcp": "MCP Servers · Project"
+      "mcp": "MCP Servers · Project",
+      "configVersions": "設定版本"
     },
     "nodeRouting": {
       "blockExecution": "",
@@ -6849,6 +6837,19 @@
       "embeddedConnectionCap": "內嵌 PostgreSQL 連線上限",
       "embeddedConnectionCapError": "請輸入 32 到 2,000 之間的值。",
       "advanced": "進階資料庫設定"
+    },
+    "configVersions": {
+      "title": "設定版本",
+      "description": "還原任意已記錄的專案設定版本。",
+      "loading": "正在載入版本…",
+      "empty": "尚無設定版本。",
+      "loadError": "無法載入設定版本",
+      "rollback": "回滾",
+      "rollingBack": "正在回滾…",
+      "rollbackError": "無法回滾設定",
+      "confirmTitle": "回滾設定？",
+      "confirmMessage": "還原此版本？回滾會記錄為新版本。",
+      "confirmRollback": "回滾"
     }
   },
   "setup": {

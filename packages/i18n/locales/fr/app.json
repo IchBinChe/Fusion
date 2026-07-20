@@ -1602,19 +1602,6 @@
         "confirmTitle": "Importer le bundle d'organisation ?",
         "confirmMessage": "Cela applique la configuration prévisualisée à ce projet.",
         "confirmApply": "Importer le bundle"
-      },
-      "versions": {
-        "title": "Versions de configuration",
-        "description": "Restaurez n'importe quelle version de configuration de projet enregistrée.",
-        "loading": "Chargement des versions…",
-        "empty": "Aucune version de configuration pour l'instant.",
-        "loadError": "Impossible de charger les versions de configuration",
-        "rollback": "Revenir en arrière",
-        "rollingBack": "Retour en cours…",
-        "rollbackError": "Impossible de revenir en arrière sur la configuration",
-        "confirmTitle": "Revenir à une configuration antérieure ?",
-        "confirmMessage": "Restaurer cette version ? Le retour est enregistré comme une nouvelle version.",
-        "confirmRollback": "Revenir en arrière"
       }
     },
     "ecosystem": {
@@ -6343,7 +6330,8 @@
         "project": "Spécifique à ce projet"
       },
       "globalMcp": "MCP Servers · Global",
-      "mcp": "MCP Servers · Project"
+      "mcp": "MCP Servers · Project",
+      "configVersions": "Versions de configuration"
     },
     "nodeRouting": {
       "blockExecution": "",
@@ -6849,6 +6837,19 @@
       "embeddedConnectionCap": "Plafond de connexions PostgreSQL embarqué",
       "embeddedConnectionCapError": "Saisissez une valeur entre 32 et 2 000.",
       "advanced": "Paramètres de base de données avancés"
+    },
+    "configVersions": {
+      "title": "Versions de configuration",
+      "description": "Restaurez n'importe quelle version de configuration de projet enregistrée.",
+      "loading": "Chargement des versions…",
+      "empty": "Aucune version de configuration pour l'instant.",
+      "loadError": "Impossible de charger les versions de configuration",
+      "rollback": "Revenir en arrière",
+      "rollingBack": "Retour en cours…",
+      "rollbackError": "Impossible de revenir en arrière sur la configuration",
+      "confirmTitle": "Revenir à une configuration antérieure ?",
+      "confirmMessage": "Restaurer cette version ? Le retour est enregistré comme une nouvelle version.",
+      "confirmRollback": "Revenir en arrière"
     }
   },
   "setup": {

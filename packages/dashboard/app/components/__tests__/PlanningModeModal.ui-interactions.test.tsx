@@ -3,9 +3,11 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 describe("PlanningModeModal sequential layout", () => {
-  it("removes retired three-pane and compact interview selectors across responsive surfaces", () => {
+  it("uses one persistent responsive plan-and-question workspace", () => {
     const css = readFileSync(resolve(process.cwd(), "app/components/PlanningModeModal.css"), "utf8");
-    expect(css).not.toMatch(/planning-compact-pane-switcher|planning-running-plan|planning-answered-history/);
+    expect(css).not.toMatch(/planning-compact-pane-switcher|planning-answered-history/);
+    expect(css).toContain("planning-workspace");
+    expect(css).toContain('grid-template-areas: "question plan"');
     expect(css).toContain("planning-summary-actions");
   });
 

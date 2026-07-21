@@ -78,81 +78,74 @@ describe.runIf(executablePath)("Planning Mode browser E2E", () => {
     await server.pluginContainer.close();
   }, 10_000);
 
-  it("starts an AI plan session and asks a focused question only after Refine", async () => {
+  it("starts with one question and regenerates the visible plan before the next question", async () => {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     page.on("console", (event) => console.log(`[planning-browser-e2e] ${event.text?.() ?? ""}`));
     page.on("pageerror", (event) => console.error(`[planning-browser-e2e] ${event.message ?? ""}`));
-    await page.goto(`${baseUrl}app/planning-browser-e2e-fixture.html`);
+    await page.goto(`${baseUrl}app/planning-browser-e2e-fixture.html?reset=1`);
 
     await page.getByLabel("What do you want to build?").fill("Make Planning Mode adaptive");
     await page.getByRole("button", { name: "Start Planning" }).click();
-    await expectVisible(page.getByRole("heading", { name: "Adaptive planning workflow" }));
+    await expectVisible(page.locator("[data-testid='planning-plan-markdown'] h1"));
+    await expectVisible(page.getByText("Which user outcome matters most?"));
     await expectVisible(page.getByRole("button", { name: "Proceed with plan" }));
-    expect(await page.getByText("Who should receive this first?").isVisible()).toBe(false);
-
-    await page.getByRole("button", { name: "Refine" }).click();
-    await page.getByLabel("Security boundaries").check();
-    await page.getByRole("button", { name: "Ask next question" }).click();
+    await page.getByLabel("Speed").check();
+    await page.getByRole("button", { name: "Next" }).click();
+    await expectVisible(page.getByText("Generating plan…"));
+    expect(await page.locator("[data-testid='planning-plan-markdown'] h1").isVisible()).toBe(true);
+    expect(await page.getByText("Which user outcome matters most?").isVisible()).toBe(true);
     await expectVisible(page.getByText("Who should receive this first?"));
-    await page.getByLabel("Operators").check();
-    await page.getByRole("button", { name: "Continue to plan" }).click();
-    await expectVisible(page.getByRole("button", { name: "Proceed with plan" }));
     await page.close();
   }, 30_000);
 
-  it("keeps the Markdown plan scrollable above a bottom action bar on desktop and mobile", async () => {
-    for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 568 }]) {
-      const page = await browser.newPage({ viewport });
-      await page.goto(`${baseUrl}app/planning-browser-e2e-fixture.html?surface=plan-review`);
-      await expectVisible(page.getByRole("heading", { name: "Adaptive planning workflow" }));
-      await expectVisible(page.getByRole("button", { name: "Proceed with plan" }));
+  async function verifyResponsiveWorkspace(viewport: { width: number; height: number }, mobile: boolean): Promise<void> {
+    const page = await browser.newPage({ viewport });
+    await page.goto(`${baseUrl}app/planning-browser-e2e-fixture.html?surface=plan-review&reset=1`);
+    await expectVisible(page.locator("[data-testid='planning-plan-markdown'] h1"));
+    await expectVisible(page.getByText("Which user outcome matters most?"));
+    await expectVisible(page.getByRole("button", { name: "Proceed with plan" }));
 
-      const layout = await page.evaluate(() => {
-        const review = document.querySelector<HTMLElement>("[data-testid='planning-plan-review']")!;
-        const scroll = document.querySelector<HTMLElement>("[data-testid='planning-plan-scroll']")!;
-        const actions = document.querySelector<HTMLElement>("[data-testid='planning-plan-actions']")!;
-        const buttons = [...actions.querySelectorAll<HTMLElement>("button")];
-        const reviewRect = review.getBoundingClientRect();
-        const scrollRect = scroll.getBoundingClientRect();
-        const actionsRect = actions.getBoundingClientRect();
-        return {
-          actionsInsideReview: review.contains(actions),
-          actionsInsideScroll: scroll.contains(actions),
-          actionsAtBottom: Math.abs(reviewRect.bottom - actionsRect.bottom) <= 1,
-          scrollEndsAtActions: Math.abs(scrollRect.bottom - actionsRect.top) <= 1,
-          scrollable: scroll.scrollHeight > scroll.clientHeight,
-          scrollOwnerConfigured: getComputedStyle(scroll).overflowY === "auto",
-          buttonsShareRow: buttons.length === 2 && Math.abs(buttons[0]!.getBoundingClientRect().top - buttons[1]!.getBoundingClientRect().top) <= 1,
-          markdownRendered: Boolean(review.querySelector("h1") && review.querySelector("strong")),
-        };
-      });
+    const layout = await page.evaluate(() => {
+      const workspace = document.querySelector<HTMLElement>("[data-testid='planning-workspace']")!;
+      const plan = document.querySelector<HTMLElement>("[data-testid='planning-plan-pane']")!;
+      const question = document.querySelector<HTMLElement>("[data-testid='planning-question-pane']")!;
+      const scroll = document.querySelector<HTMLElement>("[data-testid='planning-plan-scroll']")!;
+      const actions = document.querySelector<HTMLElement>("[data-testid='planning-plan-actions']")!;
+      const planRect = plan.getBoundingClientRect();
+      const questionRect = question.getBoundingClientRect();
+      const scrollRect = scroll.getBoundingClientRect();
+      const actionsRect = actions.getBoundingClientRect();
+      return {
+        planVisible: planRect.width > 0 && planRect.height > 0,
+        questionVisible: questionRect.width > 0 && questionRect.height > 0,
+        planRightOfQuestion: planRect.left >= questionRect.right,
+        planAboveQuestion: planRect.bottom <= questionRect.top,
+        panesInsideWorkspace: workspace.contains(plan) && workspace.contains(question),
+        actionsInsideScroll: scroll.contains(actions),
+        actionsAtBottom: Math.abs(planRect.bottom - actionsRect.bottom) <= 1,
+        scrollEndsAtActions: Math.abs(scrollRect.bottom - actionsRect.top) <= 1,
+        scrollable: scroll.scrollHeight > scroll.clientHeight,
+        scrollOwnerConfigured: getComputedStyle(scroll).overflowY === "auto",
+        markdownRendered: Boolean(plan.querySelector("h1") && plan.querySelector("strong")),
+      };
+    });
 
-      expect(layout).toEqual({
-        actionsInsideReview: true,
-        actionsInsideScroll: false,
-        actionsAtBottom: true,
-        scrollEndsAtActions: true,
-        scrollable: true,
-        scrollOwnerConfigured: true,
-        buttonsShareRow: true,
-        markdownRendered: true,
-      });
-      if (viewport.width > 1024) {
-        await page.getByRole("button", { name: "Refine" }).click();
-        await expectVisible(page.getByRole("dialog", { name: "Choose areas to refine" }));
-        await page.getByLabel("Security boundaries").check();
-        await page.getByLabel("Observability").check();
-        await page.getByLabel("Or describe another focus").fill("Migration sequencing");
-        await page.getByRole("button", { name: "Ask next question" }).click();
-        await expectVisible(page.getByText("Who should receive this first?"));
-      } else {
-        await page.getByRole("button", { name: "Proceed with plan" }).click();
-        for (let attempt = 0; attempt < 20 && await page.evaluate(() => document.body.dataset.createdTask) !== "FN-BROWSER"; attempt += 1) {
-          await page.waitForTimeout(50);
-        }
-        expect(await page.locator("body").getAttribute("data-created-task")).toBe("FN-BROWSER");
-      }
-      await page.close();
-    }
-  }, 30_000);
+    expect(layout).toMatchObject({
+      planVisible: true,
+      questionVisible: true,
+      planRightOfQuestion: !mobile,
+      planAboveQuestion: mobile,
+      panesInsideWorkspace: true,
+      actionsInsideScroll: false,
+      actionsAtBottom: true,
+      scrollEndsAtActions: true,
+      scrollable: true,
+      scrollOwnerConfigured: true,
+      markdownRendered: true,
+    });
+    await page.close();
+  }
+
+  it("keeps the Markdown plan right of the question on desktop", () => verifyResponsiveWorkspace({ width: 1440, height: 900 }, false), 30_000);
+  it("keeps the Markdown plan above the question on mobile", () => verifyResponsiveWorkspace({ width: 390, height: 568 }, true), 30_000);
 });

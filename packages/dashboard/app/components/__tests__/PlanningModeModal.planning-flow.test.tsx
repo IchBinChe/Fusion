@@ -41,11 +41,18 @@ describe("PlanningModeModal sequential flow", () => {
     await waitFor(() => expect(mockStartPlanningStreaming).toHaveBeenCalledWith("Build secure accounts", "project-1", undefined, { clarificationEnabled: true }, "draft-1"));
     expect(localStorage.getItem("kb:project-1:kb-planning-active-session")).toBe("draft-1");
   });
-  it("renders plan review after an answered turn without retired interview panes", async () => {
-    mockFetchAiSession.mockResolvedValue({ ...base, status: "awaiting_input", currentQuestion: null, result: JSON.stringify(summaryWithRefinements), inputPayload: JSON.stringify({ initialPlan: "Secure accounts" }) });
+  it("keeps the plan visible beside the active question", async () => {
+    mockFetchAiSession.mockResolvedValue({
+      ...base,
+      status: "awaiting_input",
+      currentQuestion: JSON.stringify({ id: "q-1", type: "single_select", question: "Which outcome matters most?", options: [{ id: "secure", label: "Secure defaults" }, { id: "fast", label: "Fast delivery" }] }),
+      result: JSON.stringify(summaryWithRefinements),
+      inputPayload: JSON.stringify({ initialPlan: "Secure accounts" }),
+    });
     renderSession({});
-    const planReview = await screen.findByTestId("planning-plan-review");
-    expect(planReview).toHaveTextContent("Build authentication system");
+    const workspace = await screen.findByTestId("planning-workspace");
+    expect(workspace).toHaveTextContent("Build authentication system");
+    expect(workspace).toHaveTextContent("Which outcome matters most?");
     expect(screen.getByTestId("planning-plan-markdown").querySelector("h1")).toHaveTextContent("Build authentication system");
     expect(screen.getByTestId("planning-plan-markdown").querySelector("strong")).toHaveTextContent("reviewed");
     expect(screen.getByRole("link", { name: "runbook" })).toHaveAttribute("href", "https://example.com/runbook");
@@ -61,12 +68,37 @@ describe("PlanningModeModal sequential flow", () => {
     const scrollRegion = screen.getByTestId("planning-plan-scroll");
     const actionBar = screen.getByTestId("planning-plan-actions");
     expect(scrollRegion).not.toContainElement(actionBar);
-    expect(planReview).toContainElement(actionBar);
-    expect(document.querySelector(".planning-running-plan")).toBeNull();
+    expect(screen.getByTestId("planning-plan-pane")).toContainElement(actionBar);
+    expect(screen.getByRole("button", { name: "Next" })).toBeInTheDocument();
     expect(document.querySelector(".planning-answered-history")).toBeNull();
   });
+
+  it("keeps both panes visible under a generating-plan overlay after Next", async () => {
+    mockFetchAiSession.mockResolvedValue({
+      ...base,
+      status: "awaiting_input",
+      currentQuestion: JSON.stringify({ id: "q-1", type: "single_select", question: "Which outcome matters most?", options: [{ id: "secure", label: "Secure defaults" }, { id: "fast", label: "Fast delivery" }] }),
+      result: JSON.stringify(summaryWithRefinements),
+      inputPayload: "{}",
+    });
+    mockRespondToPlanning.mockReturnValue(new Promise(() => undefined));
+    renderSession({});
+    fireEvent.click(await screen.findByLabelText("Secure defaults"));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    const workspace = screen.getByTestId("planning-workspace");
+    expect(workspace).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByText("Generating plan…")).toBeInTheDocument();
+    expect(screen.getByTestId("planning-plan-pane")).toHaveTextContent("Build authentication system");
+    expect(screen.getByTestId("planning-question-pane")).toHaveTextContent("Which outcome matters most?");
+  });
   it("opens a multi-select refinement menu and sends every selected or custom focus", async () => {
-    mockFetchAiSession.mockResolvedValue({ ...base, status: "awaiting_input", currentQuestion: null, result: JSON.stringify(summaryWithRefinements), inputPayload: "{}" });
+    mockFetchAiSession.mockResolvedValue({
+      ...base,
+      status: "awaiting_input",
+      currentQuestion: JSON.stringify({ id: "q-current", type: "single_select", question: "What should the plan prioritize?", options: [{ id: "security", label: "Security" }, { id: "speed", label: "Speed" }] }),
+      result: JSON.stringify(summaryWithRefinements),
+      inputPayload: "{}",
+    });
     mockRespondToPlanning.mockResolvedValue({
       sessionId: "session-1",
       currentQuestion: {
@@ -82,6 +114,8 @@ describe("PlanningModeModal sequential flow", () => {
     });
     renderSession({});
     fireEvent.click(await screen.findByRole("button", { name: "Refine" }));
+    expect(screen.getByTestId("planning-plan-pane")).toHaveTextContent("Build authentication system");
+    expect(screen.getByTestId("planning-question-pane")).toHaveTextContent("What should the plan prioritize?");
     expect(screen.getByRole("dialog", { name: "Choose areas to refine" })).toBeInTheDocument();
     expect(screen.getByText("What should the next question focus on?")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: "Security boundaries" }));
@@ -94,7 +128,7 @@ describe("PlanningModeModal sequential flow", () => {
   it("restores the updating-plan progress state after refresh", async () => {
     mockFetchAiSession.mockResolvedValue({ ...base, status: "generating", currentQuestion: null, result: JSON.stringify(summaryWithRefinements), inputPayload: JSON.stringify({ generationPurpose: "plan_update" }) });
     renderSession({});
-    expect(await screen.findByText("Updating plan…")).toBeInTheDocument();
+    expect(await screen.findByText("Generating plan…")).toBeInTheDocument();
   });
   it("renders exactly one write-your-own choice for normalized select questions", async () => {
     mockFetchAiSession.mockResolvedValue({

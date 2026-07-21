@@ -69,28 +69,16 @@ describe("PlanningModeModal CSS responsive action contract", () => {
     expect(embeddedRule).toMatch(/max-height\s*:\s*100%\s*;/);
   });
 
-  it("uses the compact interview switcher for mobile, short landscape, and tablet instead of crushing three panes", () => {
+  it("keeps question left and plan right on desktop, then stacks plan above question on mobile", () => {
     const css = loadPlanningCss();
-    const shortShellCss = getMediaBlocks(css, MOBILE_PLANNING_SHELL_QUERY).join("\n");
-    const tabletCss = getMediaBlocks(css, TABLET_SUMMARY_ACTIONS_QUERY).join("\n");
+    const desktopRule = findRule(css, ".planning-workspace");
+    expect(desktopRule).toMatch(/grid-template-areas\s*:\s*"question plan"\s*;/);
+    expect(findRule(css, ".planning-plan-pane")).toMatch(/grid-area\s*:\s*plan\s*;/);
+    expectSomeRule(css, ".planning-question-pane", /grid-area\s*:\s*question\s*;/);
 
-    expect(findRule(shortShellCss, ".planning-modal-body--compact-interview")).toMatch(/flex-direction\s*:\s*column\s*;/);
-    expectSomeRule(shortShellCss, ".planning-compact-pane-switcher", /display\s*:\s*flex\s*;/);
-    /*
-    FNXC:PlanningModeCompactSwitcher 2026-07-20-11:00:
-    FN-8445 keeps the tabs above Answered questions despite its earlier DOM position. jsdom
-    cannot measure flex layout, so both compact media contracts assert the visual-order pin.
-    */
-    expect(findRule(shortShellCss, ".planning-modal-body--compact-interview .planning-compact-pane-switcher")).toMatch(/order\s*:\s*-1\s*;/);
-    expect(findRule(shortShellCss, ".planning-compact-pane-switcher .btn")).toMatch(/min-height\s*:\s*calc\(var\(--space-md\) \* 2\.25\)\s*;/);
-    expect(shortShellCss).toContain(".planning-modal-body--compact-question .planning-running-plan");
-    expect(shortShellCss).toContain(".planning-modal-body--compact-plan .planning-detail");
-    expect(shortShellCss).toContain(".planning-modal-body--compact-history .planning-detail");
-    expect(findRule(tabletCss, ".planning-modal-body--compact-interview")).toMatch(/flex-direction\s*:\s*column\s*;/);
-    expect(findRule(tabletCss, ".planning-modal-body--compact-interview .planning-compact-pane-switcher")).toMatch(/order\s*:\s*-1\s*;/);
-    expect(tabletCss).toContain(".planning-modal-body--compact-question .planning-running-plan");
-
-    expectSomeRule(css, ".planning-running-plan", /flex\s*:\s*0 1 24rem\s*;/);
+    const mobileCss = getMediaBlocks(css, MOBILE_ACTIONS_QUERY).join("\n");
+    expect(findRule(mobileCss, ".planning-workspace")).toMatch(/grid-template-areas\s*:\s*"plan"\s*"question"\s*;/);
+    expect(findRule(mobileCss, ".planning-workspace")).toMatch(/grid-template-rows\s*:\s*minmax\(0, 1fr\) minmax\(0, 1fr\)\s*;/);
   });
 
   it("keeps the mobile sessions list scrolling above the bottom-pinned New session footer", () => {
@@ -120,7 +108,6 @@ describe("PlanningModeModal CSS responsive action contract", () => {
     expect(footerRule).toBeTruthy();
     expect(footerRule).toMatch(/flex-shrink\s*:\s*0\s*;/);
 
-    expect(mobileShellCss).toMatch(/\.planning-modal-body--show-list \.planning-running-plan[\s\S]*?display\s*:\s*none\s*;/);
     const mobileBackRule = findRule(mobileShellCss, ".planning-mobile-back");
     expect(mobileBackRule).toMatch(/display\s*:\s*inline-flex\s*;/);
     expect(mobileBackRule).toMatch(/min-height\s*:\s*calc\(var\(--space-md\) \* 2\.25\)\s*;/);

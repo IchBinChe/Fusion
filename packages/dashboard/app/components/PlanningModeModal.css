@@ -921,6 +921,78 @@ An empty footer must NOT reserve vertical space or paint its divider band. When 
 }
 
 /* Question View */
+.planning-workspace {
+  position: relative;
+  display: grid;
+  grid-template-areas: "question plan";
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.18fr);
+  gap: var(--space-lg);
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--space-lg);
+  overflow: hidden;
+  background: color-mix(in srgb, var(--card) 40%, var(--surface));
+}
+
+.planning-plan-pane,
+.planning-question-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: solid var(--btn-border-width) color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: var(--radius-xl);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.planning-plan-pane {
+  grid-area: plan;
+}
+
+.planning-workspace--plan-only {
+  grid-template-areas: "plan";
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.planning-question-pane {
+  grid-area: question;
+}
+
+.planning-workspace--generating > .planning-plan-pane,
+.planning-workspace--generating > .planning-question-pane {
+  pointer-events: none;
+  filter: saturate(0.65);
+  opacity: 0.58;
+}
+
+.planning-workspace-loader {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-popover);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-md);
+  padding: var(--space-xl);
+  color: var(--text);
+  text-align: center;
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  backdrop-filter: blur(var(--space-xs));
+}
+
+.planning-workspace-loader strong {
+  font-size: var(--font-size-base);
+}
+
+.planning-workspace-loader span {
+  color: var(--text-secondary);
+  font-size: var(--font-size-sm);
+}
+
 .planning-question {
   display: flex;
   flex-direction: column;
@@ -1208,6 +1280,10 @@ its refinement menu remain reachable at the bottom of bounded desktop and mobile
 
 .planning-plan-review {
   gap: 0;
+}
+
+.planning-plan-review > .planning-plan-pane {
+  flex: 1;
 }
 
 .planning-plan-document {
@@ -1865,6 +1941,26 @@ Tablet embedded Planning keeps the desktop two-pane shell, so the summary footer
 
 /* Responsive */
 @media (max-width: 768px) {
+  .planning-workspace {
+    grid-template-areas:
+      "plan"
+      "question";
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--space-md);
+    padding: var(--space-md);
+  }
+
+  .planning-workspace--plan-only {
+    grid-template-areas: "plan";
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .planning-plan-pane,
+  .planning-question-pane {
+    border-radius: var(--radius-lg);
+  }
+
   /* FNXC:PlanningMode 2026-06-22-15:30: this legacy full-viewport sheet sizing
      is for the dialog presentation only. The :not(.planning-modal--embedded)
      guard prevents the embedded view from being yanked to 100vw/100dvh, which

@@ -17,8 +17,8 @@ const summary = {
     "Open refinement areas only from the Refine action",
     "Allow multiple suggested refinement areas",
     "Accept an operator-authored refinement focus",
-    "Ask one focused question after refinement",
-    "Return to plan review after each answer",
+    "Ask one focused question after every answer",
+    "Keep the plan visible throughout the interview",
     "Preserve the plan document while refinement is open",
     "Keep the refinement menu usable on narrow screens",
     "Expose a clear Proceed with plan action",
@@ -32,7 +32,9 @@ const summary = {
   suggestedRefinements: ["Security boundaries", "Rollout strategy", "Failure recovery", "Accessibility", "Observability", "Data migration", "Performance", "Operational readiness", "API compatibility", "Privacy", "Analytics", "Localization", "Offline behavior", "Permissions", "Documentation", "Support readiness"],
 };
 
-const showPlanReview = new URLSearchParams(window.location.search).get("surface") === "plan-review";
+const fixtureParams = new URLSearchParams(window.location.search);
+if (fixtureParams.has("reset")) localStorage.clear();
+const showPlanReview = fixtureParams.get("surface") === "plan-review";
 
 const questions = [
   {
@@ -92,17 +94,11 @@ class MockEventSource {
 
 window.EventSource = MockEventSource as unknown as typeof EventSource;
 
-function emitTurn(questionIndex: number): void {
+function emitTurn(questionIndex: number, delay = 40): void {
   setTimeout(() => {
     streams.forEach((stream) => stream.emit("summary", summary));
     streams.forEach((stream) => stream.emit("question", questions[questionIndex]));
-  }, 20);
-}
-
-function emitSummary(): void {
-  setTimeout(() => {
-    streams.forEach((stream) => stream.emit("summary", summary));
-  }, 20);
+  }, delay);
 }
 
 const originalFetch = window.fetch.bind(window);
@@ -111,16 +107,16 @@ window.fetch = async (input, init = {}) => {
   const method = init.method ?? "GET";
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
   if (url.includes("/planning/start-streaming") && method === "POST") {
-    emitSummary();
+    emitTurn(0);
     return json({ sessionId: "planning-browser-e2e" });
   }
   if (url.includes("/planning/respond") && method === "POST") {
     const body = typeof init.body === "string" ? JSON.parse(init.body) as { responses?: { refine?: boolean } } : {};
     if (body.responses?.refine) {
-      emitTurn(1);
-      return json({ sessionId: "planning-browser-e2e", currentQuestion: questions[1], summary });
+      emitTurn(2, 180);
+      return json({ sessionId: "planning-browser-e2e", currentQuestion: null, summary });
     }
-    emitSummary();
+    emitTurn(1, 180);
     return json({ sessionId: "planning-browser-e2e", currentQuestion: null, summary });
   }
   if (url.includes("/planning/planning-browser-e2e/back") && method === "POST") {
@@ -130,7 +126,7 @@ window.fetch = async (input, init = {}) => {
   if (url.includes("/planning/planning-browser-e2e/validate") && method === "POST") return json({ summary, validated: true });
   if (url.includes("/planning/create-task") && method === "POST") return json({ task: { id: "FN-BROWSER", description: summary.description, column: "todo", dependencies: [], steps: [], currentStep: 0, log: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, alreadyCreated: false });
   if (showPlanReview && url.includes("/ai-sessions/planning-browser-e2e")) {
-    return json({ id: "planning-browser-e2e", title: summary.title, projectId: "project-browser", status: "awaiting_input", currentQuestion: null, result: JSON.stringify(summary), inputPayload: "{}", conversationHistory: "[]", thinkingOutput: "", updatedAt: new Date().toISOString(), archived: false });
+    return json({ id: "planning-browser-e2e", title: summary.title, projectId: "project-browser", status: "awaiting_input", currentQuestion: JSON.stringify(questions[0]), result: JSON.stringify(summary), inputPayload: "{}", conversationHistory: "[]", thinkingOutput: "", updatedAt: new Date().toISOString(), archived: false });
   }
   if (url.includes("/ai-sessions")) return json({ sessions: [] });
   if (url.includes("/models")) return json({ models: [], favoriteProviders: [], favoriteModels: [] });

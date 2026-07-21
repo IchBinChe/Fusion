@@ -16,7 +16,7 @@ vi.mock("../../api", () => {
     fetchAiSession: (...args: unknown[]) => mockFetchAiSession(...args), fetchAiSessions: (...args: unknown[]) => mockFetchAiSessions(...args),
     respondToPlanning: (...args: unknown[]) => mockRespondToPlanning(...args), validatePlanningSession: (...args: unknown[]) => mockValidatePlanningSession(...args), createTaskFromPlanning: (...args: unknown[]) => mockCreateTaskFromPlanning(...args),
     fetchSettings: fn().mockResolvedValue({ modelPresets: [], autoSelectModelPreset: false, defaultPresetBySize: {} }), fetchGlobalSettings: fn().mockResolvedValue({}), fetchModels: fn().mockResolvedValue([]), fetchWorkflowSteps: fn().mockResolvedValue([]), fetchBoardWorkflows: fn().mockResolvedValue({ workflows: [] }),
-    startPlanning: fn(), startPlanningStreaming: (...args: unknown[]) => mockStartPlanningStreaming(...args), createPlanningDraft: (...args: unknown[]) => mockCreatePlanningDraft(...args), connectPlanningStream: fn(), rewindPlanningSession: fn(), retryPlanningSession: fn(), cancelPlanning: fn(), stopPlanningGeneration: fn(), updatePlanningSessionDraft: fn(), updatePlanningSessionTitle: fn(), startPlanningBreakdown: fn(), createTasksFromPlanning: fn(), parseConversationHistory: () => [], acquireSessionLock: fn(), releaseSessionLock: fn(), forceAcquireSessionLock: fn(), uploadAttachment: fn(), deleteAttachment: fn(), updateTask: fn(), pauseTask: fn(), unpauseTask: fn(), fetchTaskDetail: fn(), requestSpecRevision: fn(), approvePlan: fn(), rejectPlan: fn(), refineTask: fn(), deleteAiSession: fn(), refineText: fn(), getRefineErrorMessage: (error: Error) => error.message,
+    startPlanning: fn(), startPlanningStreaming: (...args: unknown[]) => mockStartPlanningStreaming(...args), createPlanningDraft: (...args: unknown[]) => mockCreatePlanningDraft(...args), connectPlanningStream: fn(), rewindPlanningSession: fn(), retryPlanningSession: fn(), cancelPlanning: fn(), stopPlanningGeneration: fn(), updatePlanningSessionDraft: fn(), updatePlanningSessionTitle: fn(), startPlanningBreakdown: fn(), createTasksFromPlanning: fn(), parseConversationHistory: (raw: string) => JSON.parse(raw || "[]"), acquireSessionLock: fn(), releaseSessionLock: fn(), forceAcquireSessionLock: fn(), uploadAttachment: fn(), deleteAttachment: fn(), updateTask: fn(), pauseTask: fn(), unpauseTask: fn(), fetchTaskDetail: fn(), requestSpecRevision: fn(), approvePlan: fn(), rejectPlan: fn(), refineTask: fn(), deleteAiSession: fn(), refineText: fn(), getRefineErrorMessage: (error: Error) => error.message,
   };
 });
 
@@ -71,6 +71,94 @@ describe("PlanningModeModal sequential flow", () => {
     expect(screen.getByTestId("planning-plan-pane")).toContainElement(actionBar);
     expect(screen.getByRole("button", { name: "Next" })).toBeInTheDocument();
     expect(document.querySelector(".planning-answered-history")).toBeNull();
+  });
+
+  it("opens question, answer, and expanded AI reasoning history beside Sessions", async () => {
+    mockFetchAiSession.mockResolvedValue({
+      ...base,
+      status: "awaiting_input",
+      currentQuestion: JSON.stringify({ id: "q-current", type: "text", question: "What should happen next?" }),
+      result: JSON.stringify(summaryWithRefinements),
+      conversationHistory: JSON.stringify([{
+        question: {
+          id: "q-history",
+          type: "single_select",
+          question: "Which outcome matters most?",
+          options: [{ id: "secure", label: "Secure defaults" }],
+        },
+        response: { "q-history": "secure" },
+        thinkingOutput: "I updated the plan to prioritize secure defaults.",
+      }]),
+      inputPayload: "{}",
+    });
+    renderSession({});
+
+    const sessionsButton = await screen.findByRole("button", { name: "Sessions" });
+    const historyButton = screen.getByRole("button", { name: "History" });
+    expect(sessionsButton.parentElement).toContainElement(historyButton);
+    fireEvent.click(historyButton);
+
+    expect(screen.getByRole("region", { name: "Question and answer history" })).toBeInTheDocument();
+    expect(screen.getByText("Which outcome matters most?")).toBeInTheDocument();
+    expect(screen.getByText("Secure defaults")).toBeInTheDocument();
+    expect(screen.getByText("I updated the plan to prioritize secure defaults.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide AI thinking" })).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Close history" }));
+    expect(screen.queryByRole("region", { name: "Question and answer history" })).toBeNull();
+    await waitFor(() => expect(historyButton).toHaveFocus());
+  });
+
+  it("creates the task directly when the user proceeds with the plan", async () => {
+    mockFetchAiSession.mockResolvedValue({
+      ...base,
+      status: "awaiting_input",
+      currentQuestion: JSON.stringify({ id: "q-1", type: "text", question: "Anything else?" }),
+      result: JSON.stringify(summaryWithRefinements),
+      inputPayload: "{}",
+    });
+    renderSession({});
+
+    fireEvent.click(await screen.findByRole("button", { name: "Proceed with plan" }));
+
+    await waitFor(() => expect(mockValidatePlanningSession).toHaveBeenCalledWith("session-1", "project-1"));
+    await waitFor(() => expect(mockCreateTaskFromPlanning).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({ title: mockSummary.title }),
+      "project-1",
+      {},
+    ));
+    expect(screen.queryByRole("heading", { name: "Review your plan" })).toBeNull();
+  });
+
+  it("uses full-view Questions and Plan preview tabs on mobile", async () => {
+    mockViewportMode.mockReturnValue("mobile");
+    mockFetchAiSession.mockResolvedValue({
+      ...base,
+      status: "awaiting_input",
+      currentQuestion: JSON.stringify({ id: "q-mobile", type: "text", question: "What should mobile prioritize?" }),
+      result: JSON.stringify(summaryWithRefinements),
+      inputPayload: "{}",
+    });
+    renderSession({});
+
+    const workspace = await screen.findByTestId("planning-workspace");
+    // The viewport-mode hook is mocked without changing jsdom's CSS media viewport.
+    const questionsTab = screen.getByRole("tab", { name: "Questions", hidden: true });
+    const planTab = screen.getByRole("tab", { name: "Plan preview", hidden: true });
+    expect(questionsTab).toHaveAttribute("aria-selected", "true");
+    expect(workspace).toHaveClass("planning-workspace--mobile-tab-question");
+
+    fireEvent.click(planTab);
+    expect(planTab).toHaveAttribute("aria-selected", "true");
+    expect(questionsTab).toHaveAttribute("aria-selected", "false");
+    expect(workspace).toHaveClass("planning-workspace--mobile-tab-plan");
+    expect(screen.getByTestId("planning-plan-pane")).toHaveTextContent("Build authentication system");
+
+    fireEvent.click(screen.getByRole("button", { name: "History", hidden: true }));
+    expect(screen.getByRole("region", { name: "Question and answer history" })).toBeInTheDocument();
+    expect(screen.getByText("No history yet")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close history" }));
   });
 
   it("keeps both panes visible under a generating-plan overlay after Next", async () => {

@@ -69,7 +69,7 @@ describe("PlanningModeModal CSS responsive action contract", () => {
     expect(embeddedRule).toMatch(/max-height\s*:\s*100%\s*;/);
   });
 
-  it("keeps question left and plan right on desktop, then stacks plan above question on mobile", () => {
+  it("keeps question left and plan right on desktop, then uses full-view tabs on mobile", () => {
     const css = loadPlanningCss();
     const desktopRule = findRule(css, ".planning-workspace");
     expect(desktopRule).toMatch(/grid-template-areas\s*:\s*"question plan"\s*;/);
@@ -77,8 +77,30 @@ describe("PlanningModeModal CSS responsive action contract", () => {
     expectSomeRule(css, ".planning-question-pane", /grid-area\s*:\s*question\s*;/);
 
     const mobileCss = getMediaBlocks(css, MOBILE_ACTIONS_QUERY).join("\n");
-    expect(findRule(mobileCss, ".planning-workspace")).toMatch(/grid-template-areas\s*:\s*"plan"\s*"question"\s*;/);
-    expect(findRule(mobileCss, ".planning-workspace")).toMatch(/grid-template-rows\s*:\s*minmax\(0, 1fr\) minmax\(0, 1fr\)\s*;/);
+    expect(findRule(mobileCss, ".planning-workspace--mobile-tab-question,\n  .planning-workspace--mobile-tab-plan")).toMatch(/"tabs"\s*"content"/);
+    expect(findRule(mobileCss, ".planning-workspace-tabs")).toMatch(/display\s*:\s*grid\s*;/);
+    expect(findRule(mobileCss, ".planning-workspace--mobile-tab-question .planning-plan-pane,\n  .planning-workspace--mobile-tab-plan .planning-question-pane")).toMatch(/display\s*:\s*none\s*;/);
+  });
+
+  it("makes the history sheet full width on mobile while keeping its own scroll owner", () => {
+    const css = loadPlanningCss();
+    expect(findRule(css, ".planning-history-scroll")).toMatch(/overflow-y\s*:\s*auto\s*;/);
+    expect(findRule(css, ".planning-history-panel")).toMatch(/width\s*:\s*min\(100%, calc\(var\(--space-2xl\) \* 15\)\)\s*;/);
+
+    const mobileCss = getMediaBlocks(css, MOBILE_ACTIONS_QUERY).join("\n");
+    expect(findRule(mobileCss, ".planning-history-panel")).toMatch(/width\s*:\s*100%\s*;/);
+  });
+
+  it("uses consistent full-width header controls without crowding the mobile session title", () => {
+    const css = loadPlanningCss();
+    expect(findRule(css, ".planning-header-controls")).toMatch(/gap\s*:\s*var\(--space-sm\)\s*;/);
+    expect(findRule(css, ".planning-header-controls .btn")).toMatch(/min-height\s*:\s*calc\(var\(--space-2xl\) \+ var\(--space-sm\)\)\s*;/);
+
+    const mobileCss = getMediaBlocks(css, MOBILE_ACTIONS_QUERY).join("\n");
+    expect(findRule(mobileCss, ".planning-modal--embedded .modal-header--embedded")).toMatch(/flex-wrap\s*:\s*wrap\s*;/);
+    expect(findRule(mobileCss, ".planning-header-controls")).toMatch(/grid-template-columns\s*:\s*repeat\(2, minmax\(0, 1fr\)\)\s*;/);
+    expect(findRule(mobileCss, ".planning-header-controls")).toMatch(/width\s*:\s*100%\s*;/);
+    expect(findRule(mobileCss, ".planning-modal--embedded .modal-header--embedded .detail-title-row h3")).toMatch(/text-overflow\s*:\s*ellipsis\s*;/);
   });
 
   it("keeps the mobile sessions list scrolling above the bottom-pinned New session footer", () => {

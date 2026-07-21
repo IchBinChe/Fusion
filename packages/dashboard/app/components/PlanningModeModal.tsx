@@ -55,7 +55,7 @@ import {
   clearPlanningActiveSession,
 } from "../hooks/modalPersistence";
 import { getRelativeTimeBucket } from "../utils/relativeTimeAgo";
-import { Lightbulb, X, Loader2, CheckCircle, ArrowLeft, ArrowRight, Sparkles, ListTree, GripVertical, ArrowUp, ArrowDown, Plus, Trash2, RefreshCw, ChevronLeft, MessageSquarePlus, AlertCircle, Clock, HelpCircle, StopCircle, Archive, ArchiveRestore, Pencil } from "lucide-react";
+import { Lightbulb, X, Loader2, CheckCircle, ArrowLeft, ArrowRight, Sparkles, ListTree, GripVertical, ArrowUp, ArrowDown, Plus, Trash2, RefreshCw, ChevronLeft, MessageSquarePlus, AlertCircle, Clock, HelpCircle, StopCircle, Archive, ArchiveRestore, Pencil, History } from "lucide-react";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { ConversationHistory } from "./ConversationHistory";
 import { MailboxMessageContent } from "./MailboxMessageContent";
@@ -501,6 +501,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   Session navigation is an explicit header action so a transient turn cannot replace the three-pane workspace.
   */
   const [showSessionList, setShowSessionList] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [loadedModels, setLoadedModels] = useState<ModelInfo[]>([]);
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
@@ -513,6 +514,29 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
 
   // Sidebar list state
   const [planningSessions, setPlanningSessions] = useState<AiSessionSummary[]>(() => dedupeSessionsById(initialSessions ?? []));
+  const historyCloseRef = useRef<HTMLButtonElement>(null);
+  const historyTriggerRef = useRef<HTMLButtonElement>(null);
+  const closeHistory = useCallback(() => {
+    setIsHistoryOpen(false);
+    requestAnimationFrame(() => historyTriggerRef.current?.focus());
+  }, []);
+  const historyPanelEntries = useMemo(() => {
+    const liveReasoning = streamingOutput.trim();
+    if (!liveReasoning || conversationHistory[conversationHistory.length - 1]?.thinkingOutput === liveReasoning) {
+      return conversationHistory;
+    }
+    return [...conversationHistory, { thinkingOutput: liveReasoning }];
+  }, [conversationHistory, streamingOutput]);
+
+  useEffect(() => {
+    if (!isHistoryOpen) return;
+    historyCloseRef.current?.focus();
+    const handleHistoryEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeHistory();
+    };
+    document.addEventListener("keydown", handleHistoryEscape);
+    return () => document.removeEventListener("keydown", handleHistoryEscape);
+  }, [closeHistory, isHistoryOpen]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(resumeSessionId ?? null);
   // Mobile: when the modal is narrow, only one pane is visible at a time.
@@ -561,8 +585,15 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   // FNXC:PlanningModeMobile 2026-07-20-10:30: Empty mobile state opens the composer because no saved destination exists; once sessions exist, every compact detail surface gets this single Back-to-list escape.
   const canReturnToSessionList = isCompactInterview && mobileShowDetail && planningSessions.length > 0;
   const [isRefineMenuOpen, setIsRefineMenuOpen] = useState(false);
+  const [mobileWorkspaceTab, setMobileWorkspaceTab] = useState<"question" | "plan">("question");
   const [selectedRefineFocuses, setSelectedRefineFocuses] = useState<string[]>([]);
   const [customRefineFocus, setCustomRefineFocus] = useState("");
+
+  useEffect(() => {
+    if (isMobile && workspaceQuestion) {
+      setMobileWorkspaceTab("question");
+    }
+  }, [isMobile, workspaceQuestion?.id]);
   const refineMenuRef = useRef<HTMLDivElement>(null);
   const refineTriggerRef = useRef<HTMLButtonElement>(null);
   const { addToast } = useToast();
@@ -1057,9 +1088,9 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           /*
           FNXC:PlanningMode 2026-07-20-00:00:
           The server broadcasts `summary` on every interview turn before or after its next
-          question. It refreshes the right running-plan pane only; Validate is the sole action
-          allowed to enter terminal SummaryView, preventing a first-answer SSE race from ending
-          the interview.
+          question. It refreshes the right running-plan pane only; Proceed is the sole action
+          allowed to validate and create the task, preventing a first-answer SSE race from ending
+          the interview or exposing an intermediate final screen.
           */
           runningSummaryRef.current = normalizedSummary;
           setRunningSummary(normalizedSummary);
@@ -2334,28 +2365,26 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     validateCreateInFlightRef.current = true;
     setError(null);
     setView({ type: "creating_task", session, summary });
+    let validationCompleted = false;
     try {
-      try {
-        await validatePlanningSession(sessionId, projectId);
-      } catch (err) {
-        // A lost validation response is ambiguous, but a rejected validation must not strand
-        // the user in create-only retry: inspect durable state before choosing the next phase.
-        const persisted = await fetchAiSession(sessionId).catch(() => null);
-        if (persisted && isValidatedPlanningSession(persisted)) {
-          setView({ type: "create_retry", session, summary, errorMessage: getErrorMessage(err) || t("planning.failedCreateTask", "Failed to create task") });
-        } else {
-          setError(getErrorMessage(err) || t("planning.failedCreateTask", "Failed to validate plan"));
-          setView({ type: "plan_review", session, summary });
-        }
-        return;
-      }
-      const task = await createTaskFromPlanning(sessionId, summary, projectId, { ...(workflowId !== undefined ? { workflowId } : {}) });
+      const validated = await validatePlanningSession(sessionId, projectId);
+      validationCompleted = true;
+      const validatedSummary = normalizePlanningSummary(validated.summary);
+      const task = await createTaskFromPlanning(sessionId, validatedSummary, projectId, {
+        ...(workflowId !== undefined ? { workflowId } : {}),
+      });
       onTaskCreated(task);
       clearPlanningActiveSession(projectId);
       setSelectedSessionId(null);
       handleClose();
     } catch (err) {
-      setView({ type: "create_retry", session, summary, errorMessage: getErrorMessage(err) || t("planning.failedCreateTask", "Failed to create task") });
+      const errorMessage = getErrorMessage(err) || t("planning.failedCreateTask", "Failed to create task");
+      if (validationCompleted) {
+        setView({ type: "create_retry", session, summary, errorMessage });
+      } else {
+        setError(errorMessage);
+        setView({ type: "plan_review", session, summary });
+      }
     } finally {
       validateCreateInFlightRef.current = false;
     }
@@ -2550,7 +2579,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   if (!isOpen) return null;
 
   const renderPlanPane = (summary: PlanningSummary) => (
-    <section className="planning-plan-pane" data-testid="planning-plan-pane" aria-label={t("planning.currentPlan", "Current plan")}>
+    <section id="planning-plan-panel" className="planning-plan-pane" data-testid="planning-plan-pane" aria-label={t("planning.currentPlan", "Current plan")}>
       <div className="planning-view-scroll planning-summary-scroll planning-plan-scroll" data-testid="planning-plan-scroll">
         <article className="planning-plan-document">
           <MailboxMessageContent
@@ -2699,17 +2728,38 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           hidden by the mobile list CSS.
           */}
           {selectedSessionId && (view.type === "question" || view.type === "loading" || view.type === "error" || view.type === "plan_review" || view.type === "create_retry") && (
-            <button
-              type="button"
-              className="btn"
-              onClick={() => {
-                const showList = !isSessionListMode;
-                setShowSessionList(showList);
-                if (isCompactInterview) setMobileShowDetail(!showList);
-              }}
-            >
-              {t("planning.sessions", "Sessions")}
-            </button>
+            <div className="planning-header-controls">
+              <button
+                type="button"
+                className="btn"
+                onClick={() => {
+                  const showList = !isSessionListMode;
+                  setIsHistoryOpen(false);
+                  setShowSessionList(showList);
+                  if (isCompactInterview) setMobileShowDetail(!showList);
+                }}
+              >
+                {t("planning.sessions", "Sessions")}
+              </button>
+              <button
+                ref={historyTriggerRef}
+                type="button"
+                className={`btn planning-history-trigger${isHistoryOpen ? " active" : ""}`}
+                aria-expanded={isHistoryOpen}
+                aria-controls="planning-history-panel"
+                onClick={() => {
+                  const nextOpen = !isHistoryOpen;
+                  setIsHistoryOpen(nextOpen);
+                  if (nextOpen) {
+                    setShowSessionList(false);
+                    if (isCompactInterview) setMobileShowDetail(true);
+                  }
+                }}
+              >
+                <History size={16} />
+                {t("planning.history", "History")}
+              </button>
+            </div>
           )}
           {!isEmbedded && (
             <div className="modal-header-actions">
@@ -2725,6 +2775,47 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
             isSessionListMode ? "planning-modal-body--show-list" : "planning-modal-body--show-detail"
           }`}
         >
+          {isHistoryOpen && (
+            <div className="planning-history-overlay" data-testid="planning-history-overlay">
+              <div className="planning-history-backdrop" aria-hidden="true" onClick={closeHistory} />
+              <section
+                id="planning-history-panel"
+                className="planning-history-panel"
+                role="region"
+                aria-label={t("planning.questionAnswerHistory", "Question and answer history")}
+              >
+                <div className="planning-history-header">
+                  <div className="planning-history-heading">
+                    <History size={18} />
+                    <div>
+                      <h4>{t("planning.history", "History")}</h4>
+                      <p>{t("planning.historyHint", "Questions, answers, and AI reasoning for each plan update.")}</p>
+                    </div>
+                  </div>
+                  <button
+                    ref={historyCloseRef}
+                    type="button"
+                    className="btn-icon"
+                    aria-label={t("planning.closeHistory", "Close history")}
+                    onClick={closeHistory}
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+                <div className="planning-history-scroll">
+                  {historyPanelEntries.length > 0 ? (
+                    <ConversationHistory entries={historyPanelEntries} defaultShowThinking />
+                  ) : (
+                    <div className="planning-history-empty">
+                      <History size={24} />
+                      <strong>{t("planning.noHistoryYet", "No history yet")}</strong>
+                      <p>{t("planning.noHistoryHint", "Answered questions and plan-update reasoning will appear here.")}</p>
+                    </div>
+                  )}
+                </div>
+              </section>
+            </div>
+          )}
           {isSessionListMode && (
           <PlanningSessionList
             sessions={planningSessions}
@@ -3033,13 +3124,37 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
 
           {(view.type === "question" || view.type === "loading") && runningSummary && (
             <div
-              className={`planning-workspace${view.type === "loading" ? " planning-workspace--generating" : ""}${workspaceQuestion ? "" : " planning-workspace--plan-only"}`}
+              className={`planning-workspace${view.type === "loading" ? " planning-workspace--generating" : ""}${workspaceQuestion ? ` planning-workspace--mobile-tab-${mobileWorkspaceTab}` : " planning-workspace--plan-only"}`}
               data-testid="planning-workspace"
               aria-busy={view.type === "loading"}
             >
+              {isMobile && workspaceQuestion && (
+                <div className="planning-workspace-tabs" role="tablist" aria-label={t("planning.workspaceViews", "Planning views")}>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={mobileWorkspaceTab === "question"}
+                    aria-controls="planning-question-panel"
+                    className={mobileWorkspaceTab === "question" ? "active" : ""}
+                    onClick={() => setMobileWorkspaceTab("question")}
+                  >
+                    {t("planning.questionsTab", "Questions")}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={mobileWorkspaceTab === "plan"}
+                    aria-controls="planning-plan-panel"
+                    className={mobileWorkspaceTab === "plan" ? "active" : ""}
+                    onClick={() => setMobileWorkspaceTab("plan")}
+                  >
+                    {t("planning.planPreviewTab", "Plan preview")}
+                  </button>
+                </div>
+              )}
               {renderPlanPane(runningSummary)}
               {workspaceQuestion && (
-                <section className="planning-question planning-question-pane" data-testid="planning-question-pane" aria-label={t("planning.currentQuestion", "Current question")}>
+                <section id="planning-question-panel" className="planning-question planning-question-pane" data-testid="planning-question-pane" aria-label={t("planning.currentQuestion", "Current question")}>
                   <QuestionForm
                     question={workspaceQuestion}
                     initialResponse={editingQuestionId

@@ -2,6 +2,6 @@
 "@runfusion/fusion": patch
 ---
 
-summary: Keep the evolving plan visible while Planning Mode asks sequential questions.
+summary: Add mobile Planning tabs, one-click task creation, and answer/reasoning history.
 category: fix
-dev: Adds responsive plan/question panes, a Next action, focused refinement, and a full-workspace generation state.
+dev: Adds a header history sheet, keeps desktop lanes side by side, and uses full-height mobile tabs.

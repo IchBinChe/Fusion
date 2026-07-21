@@ -137,6 +137,23 @@ The embedded planning header must be a visual SIBLING of MissionManager's inline
   flex-shrink: 0;
 }
 
+.planning-header-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-shrink: 0;
+}
+
+.planning-header-controls .btn {
+  min-height: calc(var(--space-2xl) + var(--space-sm));
+}
+
+.planning-history-trigger.active {
+  color: var(--text);
+  background: var(--card-hover);
+  box-shadow: var(--focus-ring);
+}
+
 .planning-modal .text-muted {
   color: var(--text-muted);
 }
@@ -148,6 +165,118 @@ The embedded planning header must be a visual SIBLING of MissionManager's inline
   display: flex;
   flex-direction: column;
   position: relative;
+}
+
+.planning-history-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-popover);
+  display: flex;
+  justify-content: flex-end;
+  min-width: 0;
+  min-height: 0;
+}
+
+.planning-history-backdrop {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--background) 54%, transparent);
+  backdrop-filter: blur(var(--space-xs));
+}
+
+.planning-history-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(100%, calc(var(--space-2xl) * 15));
+  min-width: 0;
+  min-height: 0;
+  border-left: solid var(--btn-border-width) var(--border);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.planning-history-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  padding: var(--space-xl);
+  border-bottom: solid var(--btn-border-width) var(--border);
+}
+
+.planning-history-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-md);
+  min-width: 0;
+}
+
+.planning-history-heading > svg {
+  flex-shrink: 0;
+  margin-top: var(--space-xs);
+  color: var(--todo);
+}
+
+.planning-history-heading h4,
+.planning-history-heading p {
+  margin: 0;
+}
+
+.planning-history-heading h4 {
+  text-wrap: balance;
+}
+
+.planning-history-heading p {
+  margin-top: var(--space-xs);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.planning-history-header .btn-icon {
+  min-width: calc(var(--space-2xl) + var(--space-sm));
+  min-height: calc(var(--space-2xl) + var(--space-sm));
+  flex-shrink: 0;
+}
+
+.planning-history-scroll {
+  flex: 1;
+  min-height: 0;
+  padding: var(--space-xl);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.planning-history-scroll .conversation-history {
+  max-height: none;
+  margin: 0;
+  overflow: visible;
+}
+
+.planning-history-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  min-height: calc(var(--space-2xl) * 6);
+  padding: var(--space-xl);
+  border-radius: var(--radius-xl);
+  color: var(--text-muted);
+  text-align: center;
+  background: var(--card);
+}
+
+.planning-history-empty strong {
+  color: var(--text);
+}
+
+.planning-history-empty p {
+  max-width: calc(var(--space-2xl) * 10);
+  margin: 0;
+  text-wrap: pretty;
 }
 
 .planning-modal-body--split {
@@ -935,6 +1064,10 @@ An empty footer must NOT reserve vertical space or paint its divider band. When 
   background: color-mix(in srgb, var(--card) 40%, var(--surface));
 }
 
+.planning-workspace-tabs {
+  display: none;
+}
+
 .planning-plan-pane,
 .planning-question-pane {
   display: flex;
@@ -996,7 +1129,7 @@ An empty footer must NOT reserve vertical space or paint its divider band. When 
 .planning-question {
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: var(--space-xl);
   flex: 1;
   min-height: 0;
 }
@@ -1010,17 +1143,17 @@ An empty footer must NOT reserve vertical space or paint its divider band. When 
 }
 
 .planning-question-scroll {
-  gap: 16px;
+  gap: var(--space-lg);
   padding-top: 0;
 }
 
 .planning-question-panel {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  padding: 16px 20px 20px;
+  gap: var(--space-lg);
+  padding: var(--space-lg) var(--space-xl) var(--space-xl);
   background: var(--card);
-  border: 1px solid var(--border);
+  border: var(--btn-border-width) solid var(--border);
   border-radius: var(--radius-lg);
 }
 
@@ -1131,9 +1264,10 @@ margins so paragraphs and lists do not create unintended gaps.
   display: flex;
   align-items: flex-start;
   gap: var(--space-md);
-  padding: 14px 16px;
+  min-height: calc(var(--space-2xl) + var(--space-md));
+  padding: var(--space-md) var(--space-lg);
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: var(--btn-border-width) solid var(--border);
   border-radius: var(--radius-lg);
   cursor: pointer;
   transition:
@@ -1518,13 +1652,14 @@ its refinement menu remain reachable at the bottom of bounded desktop and mobile
 .planning-plan-actions {
   position: relative;
   justify-content: flex-end;
-  gap: var(--space-md);
-  padding: var(--space-lg) var(--space-xl);
+  gap: var(--space-lg);
+  padding: var(--space-md) var(--space-xl) var(--space-sm);
   background: color-mix(in srgb, var(--surface) 94%, transparent);
 }
 
 .planning-plan-actions .btn {
   min-width: calc(var(--space-2xl) * 4);
+  min-height: calc(var(--space-2xl) + var(--space-sm));
 }
 
 .planning-refine-menu {
@@ -1655,8 +1790,8 @@ its refinement menu remain reachable at the bottom of bounded desktop and mobile
   .planning-plan-actions {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--space-sm);
-    padding: var(--space-md) var(--space-lg) calc(var(--space-lg) + env(safe-area-inset-bottom));
+    gap: var(--space-md);
+    padding: var(--space-md) var(--space-lg) calc(var(--space-sm) + env(safe-area-inset-bottom));
   }
 
   .planning-plan-actions .btn {
@@ -1941,14 +2076,103 @@ Tablet embedded Planning keeps the desktop two-pane shell, so the summary footer
 
 /* Responsive */
 @media (max-width: 768px) {
+  .planning-modal--embedded .modal-header--embedded {
+    align-content: center;
+    flex-wrap: wrap;
+    gap: var(--space-md);
+    padding: var(--space-md) var(--space-lg);
+  }
+
+  .planning-modal--embedded .modal-header--embedded .detail-title-row {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .planning-modal--embedded .modal-header--embedded .detail-title-row h3 {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .planning-header-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .planning-header-controls .btn {
+    justify-content: center;
+    min-width: 0;
+  }
+
+  .planning-history-panel {
+    width: 100%;
+    border-left: 0;
+  }
+
+  .planning-history-header,
+  .planning-history-scroll {
+    padding: var(--space-lg);
+  }
+
   .planning-workspace {
-    grid-template-areas:
-      "plan"
-      "question";
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
     gap: var(--space-md);
     padding: var(--space-md);
+  }
+
+  .planning-workspace--mobile-tab-question,
+  .planning-workspace--mobile-tab-plan {
+    grid-template-areas:
+      "tabs"
+      "content";
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .planning-workspace-tabs {
+    grid-area: tabs;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-xs);
+    padding: var(--space-xs);
+    border: solid var(--btn-border-width) var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--card);
+  }
+
+  .planning-workspace-tabs button {
+    min-height: calc(var(--space-2xl) + var(--space-sm));
+    padding: var(--space-sm) var(--space-md);
+    border: 0;
+    border-radius: var(--radius-md);
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
+  }
+
+  .planning-workspace-tabs button.active {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .planning-workspace-tabs button:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring-strong);
+  }
+
+  .planning-workspace--mobile-tab-question .planning-question-pane,
+  .planning-workspace--mobile-tab-plan .planning-plan-pane {
+    grid-area: content;
+  }
+
+  .planning-workspace--mobile-tab-question .planning-plan-pane,
+  .planning-workspace--mobile-tab-plan .planning-question-pane {
+    display: none;
   }
 
   .planning-workspace--plan-only {
@@ -2002,6 +2226,11 @@ Tablet embedded Planning keeps the desktop two-pane shell, so the summary footer
   .planning-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .planning-plan-actions {
+    gap: var(--space-md);
+    padding: var(--space-sm) var(--space-lg) calc(var(--space-sm) + env(safe-area-inset-bottom));
   }
 
   .planning-actions .btn,

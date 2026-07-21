@@ -7,6 +7,7 @@ const PLANNING_CSS_PATH = resolve(__dirname, "..", "PlanningModeModal.css");
 const TABLET_SUMMARY_ACTIONS_QUERY = "@media (min-width: 769px) and (max-width: 1024px)";
 const MOBILE_ACTIONS_QUERY = "@media (max-width: 768px)";
 const MOBILE_PLANNING_SHELL_QUERY = "@media (max-width: 768px), (max-height: 480px)";
+const DESKTOP_PLANNING_WORKSPACE_QUERY = "@media (min-width: 1025px)";
 
 function loadPlanningCss(): string {
   return readFileSync(PLANNING_CSS_PATH, "utf-8");
@@ -80,6 +81,27 @@ describe("PlanningModeModal CSS responsive action contract", () => {
     expect(findRule(mobileCss, ".planning-workspace--mobile-tab-question,\n  .planning-workspace--mobile-tab-plan")).toMatch(/"tabs"\s*"content"/);
     expect(findRule(mobileCss, ".planning-workspace-tabs")).toMatch(/display\s*:\s*grid\s*;/);
     expect(findRule(mobileCss, ".planning-workspace--mobile-tab-question .planning-plan-pane,\n  .planning-workspace--mobile-tab-plan .planning-question-pane")).toMatch(/display\s*:\s*none\s*;/);
+  });
+
+  it("keeps desktop planning content flush inside both panes with compact aligned action rows", () => {
+    const css = loadPlanningCss();
+    const desktopCss = getMediaBlocks(css, DESKTOP_PLANNING_WORKSPACE_QUERY).join("\n");
+    const flushScrollRule = findRule(desktopCss, ".planning-question-pane .planning-question-scroll,\n  .planning-plan-pane .planning-plan-scroll");
+    const desktopQuestionPanelRule = findRule(desktopCss, ".planning-question-pane .planning-question-panel");
+    const desktopPlanDocumentRule = findRule(desktopCss, ".planning-plan-pane .planning-plan-document");
+    const sharedActionsRule = findRule(desktopCss, ".planning-question-pane .planning-actions,\n  .planning-plan-actions");
+    const sharedButtonsRule = findRule(desktopCss, ".planning-question-pane .planning-actions .btn,\n  .planning-plan-actions .btn");
+
+    expect(flushScrollRule).toMatch(/padding\s*:\s*0\s*;/);
+    expect(desktopQuestionPanelRule).toMatch(/border\s*:\s*none\s*;/);
+    expect(desktopQuestionPanelRule).toMatch(/border-radius\s*:\s*0\s*;/);
+    expect(desktopPlanDocumentRule).toMatch(/width\s*:\s*100%\s*;/);
+    expect(desktopPlanDocumentRule).toMatch(/box-shadow\s*:\s*none\s*;/);
+    expect(sharedActionsRule).toMatch(/padding\s*:\s*var\(--space-sm\) var\(--space-xl\)\s*;/);
+    expect(sharedButtonsRule).toMatch(/min-height\s*:\s*calc\(var\(--space-2xl\) \+ var\(--space-sm\)\)\s*;/);
+
+    expect(findRule(css, ".planning-question-panel")).toMatch(/border\s*:\s*var\(--btn-border-width\) solid var\(--border\)\s*;/);
+    expect(findRules(css, ".planning-plan-document").some((rule) => /border-radius\s*:\s*var\(--radius-xl\)\s*;/.test(rule))).toBe(true);
   });
 
   it("makes the history sheet full width on mobile while keeping its own scroll owner", () => {

@@ -1,0 +1,129 @@
+name: Workflow drift guard
+
+# Why this exists.
+#
+# This repository is a fork, and we sync from upstream. A workflow file that arrives in a
+# sync starts out ACTIVE — the nine inherited workflows we disabled are disabled by path,
+# and a path that did not exist when we disabled them is covered by nothing. A sync is a
+# push to our own default branch, and push events receive full repository secrets. So the
+# chain is: upstream gains a workflow -> we sync -> it runs -> it can read our API key.
+#
+# Our own workflow's `permissions:` block does not help there; permissions are per-workflow
+# and the arriving file brings its own.
+#
+# This guard turns that silent condition into a failed run. A failed run on your own
+# repository notifies you, and that notification is the entire point.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: workflow-guard
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      # 1. Did the shape of the workflow directory change?
+      #
+      # The list below is deliberate, not generated. Updating it is how you acknowledge a
+      # new file — which is exactly the moment someone should look at what that file does.
+      - name: Workflow directory matches the allow list
+        run: |
+          sort > /tmp/known.txt <<'EOF'
+          desktop-packaging.yml
+          desktop-windows.yml
+          full-suite.yml
+          guard.yml
+          mobile.yml
+          pr-checks.yml
+          release.yml
+          test-release.yml
+          triage.yml
+          verify-elevated-restricted.yml
+          version.yml
+          EOF
+          ls .github/workflows | sort > /tmp/actual.txt
+          if ! diff -q /tmp/known.txt /tmp/actual.txt > /dev/null; then
+            echo "::error::The workflow directory changed. Review every added file before re-running."
+            diff /tmp/known.txt /tmp/actual.txt || true
+            exit 1
+          fi
+          echo "OK — no unexpected workflow files."
+
+      # 2. Did anything gain a trigger that runs with our secrets on someone else's code?
+      #
+      # `pull_request_target` and `workflow_run` run in the context of the base branch with
+      # full secrets, and GitHub's docs are explicit that pull_request_target workflows run
+      # regardless of any fork-PR approval setting. They are the one trigger pair that
+      # cannot be gated by configuration, so they get caught here instead.
+      - name: No privileged triggers
+        run: |
+          if grep -rnE '^[[:space:]]*(pull_request_target|workflow_run)[[:space:]]*:' .github/workflows/; then
+            echo "::error::A workflow declares pull_request_target or workflow_run. Neither is safe here."
+            exit 1
+          fi
+          echo "OK — no privileged triggers."
+
+      # 3. Did a workflow we disabled come back?
+      #
+      # Disabled state lives server-side per path, not in the file, so a rename upstream can
+      # register as a brand new workflow and arrive active.
+      - name: Only our own workflows are active
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows?per_page=100" \
+            --jq '.workflows[] | select(.state == "active") | .path' | sort > /tmp/active.txt
+          sort > /tmp/expected.txt <<'EOF'
+          .github/workflows/guard.yml
+          .github/workflows/triage.yml
+          EOF
+          if ! diff -q /tmp/expected.txt /tmp/active.txt > /dev/null; then
+            echo "::error::Unexpected set of active workflows."
+            diff /tmp/expected.txt /tmp/active.txt || true
+            exit 1
+          fi
+          echo "OK — only guard.yml and triage.yml are active."
+
+      # 4. Are our pinned actions stale?
+      #
+      # Pinning to a commit SHA costs us Dependabot security alerts: GitHub only raises them
+      # for actions referenced by semver, never for SHAs. Rather than take on Dependabot for
+      # a whole forked codebase we do not maintain, we check our own two pins here.
+      # Informational — never fails the run.
+      - name: Report stale action pins
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          grep -rhoE 'uses: [A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}' \
+            .github/workflows/guard.yml .github/workflows/triage.yml \
+            | sed 's/uses: //' | sort -u | while IFS='@' read -r repo sha; do
+              tag=$(gh api "repos/$repo/releases/latest" --jq '.tag_name' 2>/dev/null) || continue
+              ref=$(gh api "repos/$repo/git/ref/tags/$tag" --jq '"\(.object.type) \(.object.sha)"' 2>/dev/null) || continue
+              kind=${ref%% *}; target=${ref##* }
+              if [ "$kind" = "tag" ]; then
+                target=$(gh api "repos/$repo/git/tags/$target" --jq '.object.sha' 2>/dev/null) || continue
+              fi
+              if [ "$sha" = "$target" ]; then
+                echo "current  $repo @ $tag"
+              else
+                echo "::warning::$repo is pinned to $sha but $tag is $target"
+              fi
+            done

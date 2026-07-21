@@ -186,6 +186,18 @@ describe("useTheme", () => {
     expect(document.documentElement.getAttribute("data-color-theme")).toBe("aurora");
   });
 
+  it("hydrates, caches, and applies Calm from backend settings", async () => {
+    mockFetchGlobalSettings.mockResolvedValue({ colorTheme: "calm" });
+
+    const { result } = renderHook(() => useTheme());
+
+    await waitFor(() => {
+      expect(result.current.colorTheme).toBe("calm");
+    });
+    expect(localStorageMock[COLOR_THEME_STORAGE_KEY]).toBe("calm");
+    expect(document.documentElement.getAttribute("data-color-theme")).toBe("calm");
+  });
+
   it("hydrates dashboard font scale from backend on mount", async () => {
     mockFetchGlobalSettings.mockResolvedValue({ dashboardFontScalePct: 110 });
 

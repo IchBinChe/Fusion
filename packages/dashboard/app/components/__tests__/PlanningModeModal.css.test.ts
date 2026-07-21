@@ -115,12 +115,16 @@ describe("PlanningModeModal CSS responsive action contract", () => {
 
   it("uses consistent full-width header controls without crowding the mobile session title", () => {
     const css = loadPlanningCss();
+    const backRule = findRule(css, ".planning-session-back");
     expect(findRule(css, ".planning-header-controls")).toMatch(/gap\s*:\s*var\(--space-sm\)\s*;/);
     expect(findRule(css, ".planning-header-controls .btn")).toMatch(/min-height\s*:\s*calc\(var\(--space-2xl\) \+ var\(--space-sm\)\)\s*;/);
+    expect(backRule).toMatch(/display\s*:\s*inline-flex\s*;/);
+    expect(backRule).toMatch(/min-width\s*:\s*calc\(var\(--space-md\) \* 2\.25\)\s*;/);
+    expect(backRule).toMatch(/min-height\s*:\s*calc\(var\(--space-md\) \* 2\.25\)\s*;/);
 
     const mobileCss = getMediaBlocks(css, MOBILE_ACTIONS_QUERY).join("\n");
     expect(findRule(mobileCss, ".planning-modal--embedded .modal-header--embedded")).toMatch(/flex-wrap\s*:\s*wrap\s*;/);
-    expect(findRule(mobileCss, ".planning-header-controls")).toMatch(/grid-template-columns\s*:\s*repeat\(2, minmax\(0, 1fr\)\)\s*;/);
+    expect(findRule(mobileCss, ".planning-header-controls")).toMatch(/grid-template-columns\s*:\s*minmax\(0, 1fr\)\s*;/);
     expect(findRule(mobileCss, ".planning-header-controls")).toMatch(/width\s*:\s*100%\s*;/);
     expect(findRule(mobileCss, ".planning-modal--embedded .modal-header--embedded .detail-title-row")).toMatch(/flex-wrap\s*:\s*nowrap\s*;/);
     expect(findRule(mobileCss, ".planning-modal--embedded .modal-header--embedded .detail-title-row")).toMatch(/overflow\s*:\s*hidden\s*;/);
@@ -128,7 +132,7 @@ describe("PlanningModeModal CSS responsive action contract", () => {
     expect(findRule(mobileCss, ".planning-modal--embedded .modal-header--embedded .detail-title-row h3")).toMatch(/min-width\s*:\s*0\s*;/);
     expect(findRule(mobileCss, ".planning-modal--embedded .modal-header--embedded .detail-title-row h3")).toMatch(/text-overflow\s*:\s*ellipsis\s*;/);
     expect(findRule(mobileCss, ".planning-modal--embedded .modal-header--embedded .detail-title-row h3")).toMatch(/white-space\s*:\s*nowrap\s*;/);
-    expect(findRule(mobileCss, ".planning-modal--embedded .modal-header--embedded .detail-title-row > svg,\n  .planning-modal--embedded .modal-header--embedded .detail-title-row > .btn-icon,\n  .planning-modal--embedded .modal-header--embedded .planning-mobile-back")).toMatch(/flex\s*:\s*0 0 auto\s*;/);
+    expect(findRule(mobileCss, ".planning-modal--embedded .modal-header--embedded .detail-title-row > svg,\n  .planning-modal--embedded .modal-header--embedded .detail-title-row > .btn-icon,\n  .planning-modal--embedded .modal-header--embedded .planning-session-back")).toMatch(/flex\s*:\s*0 0 auto\s*;/);
   });
 
   it("keeps tablet question and plan actions on one aligned row with a tight bottom inset", () => {
@@ -173,9 +177,5 @@ describe("PlanningModeModal CSS responsive action contract", () => {
     const footerRule = findRule(mobileShellCss, ".planning-modal-body--show-list .planning-sidebar-footer");
     expect(footerRule).toBeTruthy();
     expect(footerRule).toMatch(/flex-shrink\s*:\s*0\s*;/);
-
-    const mobileBackRule = findRule(mobileShellCss, ".planning-mobile-back");
-    expect(mobileBackRule).toMatch(/display\s*:\s*inline-flex\s*;/);
-    expect(mobileBackRule).toMatch(/min-height\s*:\s*calc\(var\(--space-md\) \* 2\.25\)\s*;/);
   });
 });

@@ -587,11 +587,12 @@ The New session button must look EXACTLY like Missions' primary sidebar create b
   padding: 0 8px;
 }
 
-.planning-mobile-back {
-  /* Visible only on mobile (see media query below). On desktop the sidebar
-     is always visible alongside the detail pane, so a back button is never
-     needed. */
-  display: none;
+.planning-session-back {
+  display: inline-flex;
+  min-width: calc(var(--space-md) * 2.25);
+  min-height: calc(var(--space-md) * 2.25);
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
   color: var(--text);
@@ -602,11 +603,11 @@ The New session button must look EXACTLY like Missions' primary sidebar create b
   transition: background var(--transition-fast), box-shadow var(--transition-fast);
 }
 
-.planning-mobile-back:hover {
+.planning-session-back:hover {
   background: var(--card-hover);
 }
 
-.planning-mobile-back:focus-visible {
+.planning-session-back:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring-strong);
 }
@@ -710,14 +711,6 @@ The New session button must look EXACTLY like Missions' primary sidebar create b
   */
   .planning-modal-body--show-list .planning-detail {
     display: none;
-  }
-  /* The rendered Back control needs a full touch target and must not be squeezed out of the title row. */
-  .planning-mobile-back {
-    display: inline-flex;
-    min-width: calc(var(--space-md) * 2.25);
-    min-height: calc(var(--space-md) * 2.25);
-    align-items: center;
-    justify-content: center;
   }
   /* Always keep action buttons visible on mobile (no hover) */
   .planning-sidebar-item-delete,
@@ -1830,14 +1823,6 @@ plan actions, and a token-sized bottom inset keep all three controls inline with
     display: none;
   }
 
-  .planning-mobile-back {
-    display: inline-flex;
-    min-width: calc(var(--space-md) * 2.25);
-    min-height: calc(var(--space-md) * 2.25);
-    align-items: center;
-    justify-content: center;
-  }
-
   .planning-summary-actions {
     flex-wrap: wrap;
     align-items: flex-start;
@@ -2169,7 +2154,7 @@ mobile and desktop offer the same View task / Return to sessions choices.
   /*
   FNXC:PlanningModeMobile 2026-07-20-21:50:
   The Planning detail header keeps Back, the lightbulb, a single-line truncated title, and Edit on
-  one row. Fixed icon controls may not shrink; only the title yields space before Sessions/History.
+  one row. Fixed icon controls may not shrink; only the title yields space before History.
   */
 
   .planning-modal--embedded .modal-header--embedded .detail-title-row {
@@ -2191,7 +2176,7 @@ mobile and desktop offer the same View task / Return to sessions choices.
 
   .planning-modal--embedded .modal-header--embedded .detail-title-row > svg,
   .planning-modal--embedded .modal-header--embedded .detail-title-row > .btn-icon,
-  .planning-modal--embedded .modal-header--embedded .planning-mobile-back {
+  .planning-modal--embedded .modal-header--embedded .planning-session-back {
     flex: 0 0 auto;
   }
 
@@ -2202,7 +2187,7 @@ mobile and desktop offer the same View task / Return to sessions choices.
 
   .planning-header-controls {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: minmax(0, 1fr);
     width: 100%;
   }
 

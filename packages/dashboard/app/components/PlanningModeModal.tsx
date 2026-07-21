@@ -79,12 +79,44 @@ const PLANNING_SIDEBAR_MAX_WIDTH = 560;
 const PLANNING_SIDEBAR_STORAGE_KEY = "fusion:planning-sidebar-width";
 
 const MAX_PLANNING_AUTO_RETRIES = 3;
+const MAX_PLANNING_CREATE_CLAIM_RETRIES = 20;
+
+function isPlanningCreateClaimConflict(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && "status" in error
+    && (error as { status?: unknown }).status === 409
+    && error instanceof Error
+    && error.message.includes("Planning task creation is already in progress");
+}
+
+async function createTaskAfterActiveClaim(createTask: () => Promise<Task>): Promise<Task> {
+  for (let retryCount = 0; ; retryCount += 1) {
+    try {
+      return await createTask();
+    } catch (error) {
+      if (!isPlanningCreateClaimConflict(error) || retryCount >= MAX_PLANNING_CREATE_CLAIM_RETRIES) throw error;
+      /*
+      FNXC:PlanningMode 2026-07-20-23:20:
+      A 409 create-claim response is cross-process coordination, not a failed user action. The
+      endpoint is idempotent by planning session, so keep the single Proceed action in its loading
+      state and retry until the active creator returns the one canonical task (or its lease expires).
+      The first retry is immediate for the common just-finished race; later retries are bounded.
+      */
+      if (retryCount > 0) {
+        await new Promise<void>((resolve) => window.setTimeout(resolve, Math.min(750 * retryCount, 2_000)));
+      }
+    }
+  }
+}
 
 interface PlanningModeModalProps {
   isOpen: boolean;
   onClose: () => void;
   onTaskCreated: (task: Task) => void;
   onTasksCreated: (tasks: Task[]) => void;
+  /** FNXC:PlanningMode 2026-07-20-23:20: Open the task produced by a completed planning session from the durable success handoff. */
+  onViewTask?: (task: Task) => void;
   tasks: Task[];
   initialPlan?: string;
   projectId?: string;
@@ -109,7 +141,7 @@ type ViewState =
   | { type: "plan_review"; session: PlanningSession; summary: PlanningSummary }
   | { type: "creating_task"; session: PlanningSession; summary: PlanningSummary }
   | { type: "create_retry"; session: PlanningSession; summary: PlanningSummary; errorMessage: string }
-  | { type: "task_created"; taskId: string }
+  | { type: "task_created"; taskId: string; task?: Task }
   | { type: "error"; session: PlanningSession; errorMessage: string }
   | { type: "breakdown"; sessionId: string; originalSubtasks: SubtaskItem[]; subtasks: SubtaskItem[]; dirty: boolean }
   | { type: "loading" };
@@ -334,7 +366,7 @@ function parseModelSelection(value: string): { provider?: string; modelId?: stri
   };
 }
 
-export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreated, tasks, initialPlan: initialPlanProp, projectId, workflowId, resumeSessionId, initialSessions, presentation = "modal" }: PlanningModeModalProps) {
+export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreated, onViewTask, tasks, initialPlan: initialPlanProp, projectId, workflowId, resumeSessionId, initialSessions, presentation = "modal" }: PlanningModeModalProps) {
   const { t } = useTranslation("app");
   // FNXC:EmbeddedPresentation 2026-06-22-12:00: shared hook supplies isEmbedded (DOM branching) plus the modal-only gates.
   // Note: the Escape handler intentionally does NOT gate on embedded here — embedded planning preserves its historical
@@ -2138,14 +2170,12 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   */
   useEffect(() => {
     if (view.type !== "task_created" || restoredTaskHandoffRef.current === view.taskId) return;
-    const task = tasks.find((candidate) => candidate.id === view.taskId);
+    const task = view.task ?? tasks.find((candidate) => candidate.id === view.taskId);
     if (!task) return;
     restoredTaskHandoffRef.current = task.id;
     onTaskCreated(task);
     clearPlanningActiveSession(projectId);
-    setSelectedSessionId(null);
-    handleClose();
-  }, [handleClose, onTaskCreated, projectId, tasks, view]);
+  }, [onTaskCreated, projectId, tasks, view]);
 
   // Handle escape key to close
   useEffect(() => {
@@ -2385,13 +2415,11 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       const validated = await validatePlanningSession(sessionId, projectId);
       validationCompleted = true;
       const validatedSummary = normalizePlanningSummary(validated.summary);
-      const task = await createTaskFromPlanning(sessionId, validatedSummary, projectId, {
+      const task = await createTaskAfterActiveClaim(() => createTaskFromPlanning(sessionId, validatedSummary, projectId, {
         ...(workflowId !== undefined ? { workflowId } : {}),
-      });
-      onTaskCreated(task);
+      }));
       clearPlanningActiveSession(projectId);
-      setSelectedSessionId(null);
-      handleClose();
+      setView({ type: "task_created", taskId: task.id, task });
     } catch (err) {
       const errorMessage = getErrorMessage(err) || t("planning.failedCreateTask", "Failed to create task");
       if (validationCompleted) {
@@ -2403,21 +2431,22 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     } finally {
       validateCreateInFlightRef.current = false;
     }
-  }, [handleClose, onTaskCreated, projectId, t, workflowId, workspaceQuestion]);
+  }, [projectId, t, workflowId, workspaceQuestion]);
 
   const handleRetryCreateTask = useCallback(async () => {
     if (view.type !== "create_retry" || validateCreateInFlightRef.current) return;
     validateCreateInFlightRef.current = true;
     setView({ type: "creating_task", session: view.session, summary: view.summary });
     try {
-      const task = await createTaskFromPlanning(view.session.sessionId, view.summary, projectId, { ...(workflowId !== undefined ? { workflowId } : {}) });
-      onTaskCreated(task); clearPlanningActiveSession(projectId); setSelectedSessionId(null); handleClose();
+      const task = await createTaskAfterActiveClaim(() => createTaskFromPlanning(view.session.sessionId, view.summary, projectId, { ...(workflowId !== undefined ? { workflowId } : {}) }));
+      clearPlanningActiveSession(projectId);
+      setView({ type: "task_created", taskId: task.id, task });
     } catch (err) {
       setView({ ...view, errorMessage: getErrorMessage(err) || t("planning.failedCreateTask", "Failed to create task") });
     } finally {
       validateCreateInFlightRef.current = false;
     }
-  }, [handleClose, onTaskCreated, projectId, t, view, workflowId]);
+  }, [projectId, t, view, workflowId]);
 
   const handleCreateTask = useCallback(async () => {
     if (view.type !== "summary") return;
@@ -3187,7 +3216,31 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
 
           {view.type === "creating_task" && <div className="planning-loading"><Loader2 size={24} className="spin" /> {t("planning.creatingTask", "Creating task…")}</div>}
           {view.type === "task_created" && (
-            <div className="planning-loading" data-testid="planning-task-created"><CheckCircle size={24} /> {t("planning.taskCreated", "Task created")}</div>
+            <div className="planning-task-created" data-testid="planning-task-created" role="status" aria-live="polite">
+              <div className="planning-task-created-icon"><CheckCircle size={28} /></div>
+              <div className="planning-task-created-copy">
+                <h4>{t("planning.taskCreated", "Task created")}</h4>
+                <p>{t("planning.taskCreatedHint", "Your approved plan is ready to work on.")}</p>
+                <span className="planning-task-created-id">{view.taskId}</span>
+              </div>
+              <div className="planning-task-created-actions">
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={!onViewTask || !(view.task ?? tasks.find((candidate) => candidate.id === view.taskId))}
+                  onClick={() => {
+                    const task = view.task ?? tasks.find((candidate) => candidate.id === view.taskId);
+                    if (task) onViewTask?.(task);
+                  }}
+                >
+                  {t("planning.viewTask", "View task")}
+                  <ArrowRight size={16} />
+                </button>
+                <button type="button" className="btn" onClick={handleBackToList}>
+                  {t("planning.returnToSessions", "Return to sessions")}
+                </button>
+              </div>
+            </div>
           )}
           {view.type === "create_retry" && (
             <div className="planning-summary" data-testid="planning-create-retry">

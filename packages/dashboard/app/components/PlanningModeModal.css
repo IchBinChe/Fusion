@@ -787,7 +787,7 @@ An empty footer must NOT reserve vertical space or paint its divider band. When 
   gap: var(--space-sm);
   padding: var(--space-md);
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: var(--btn-border-width) solid var(--border);
   border-radius: var(--radius-md);
 }
 
@@ -1863,6 +1863,72 @@ plan actions, and a token-sized bottom inset keep all three controls inline with
   color: var(--text-muted);
 }
 
+/*
+FNXC:PlanningMode 2026-07-20-23:20:
+Successful plan creation remains a compact handoff instead of closing Planning or presenting
+another review screen. Reuse the shared button primitives and semantic success token so both
+mobile and desktop offer the same View task / Return to sessions choices.
+*/
+.planning-task-created {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-lg);
+  padding: var(--space-xl);
+  text-align: center;
+}
+
+.planning-task-created-icon {
+  display: grid;
+  place-items: center;
+  width: calc(var(--space-2xl) + var(--space-lg));
+  aspect-ratio: 1;
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 12%, transparent);
+  border: var(--btn-border-width) solid color-mix(in srgb, var(--color-success) 35%, var(--border));
+  border-radius: 50%;
+}
+
+.planning-task-created-copy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
+  max-width: calc(var(--space-2xl) * 12);
+}
+
+.planning-task-created-copy h4,
+.planning-task-created-copy p {
+  margin: 0;
+}
+
+.planning-task-created-copy p {
+  color: var(--text-muted);
+}
+
+.planning-task-created-id {
+  padding: var(--space-xs) var(--space-sm);
+  color: var(--text-secondary);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+.planning-task-created-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+}
+
+.planning-task-created-actions .btn {
+  justify-content: center;
+}
+
 /* AI Thinking Output Display */
 .planning-thinking-container {
   display: flex;
@@ -2051,6 +2117,15 @@ plan actions, and a token-sized bottom inset keep all three controls inline with
 
 /* Responsive */
 @media (max-width: 768px) {
+  .planning-task-created-actions {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .planning-task-created-actions .btn {
+    width: 100%;
+  }
+
   .planning-modal--embedded .modal-header--embedded {
     align-content: center;
     flex-wrap: wrap;

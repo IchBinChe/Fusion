@@ -152,7 +152,7 @@ describe("PlanningModeModal sequential flow", () => {
     await waitFor(() => expect(historyButton).toHaveFocus());
   });
 
-  it("creates the task directly when the user proceeds with the plan", async () => {
+  it("creates the task directly and offers task and session-list handoffs", async () => {
     mockFetchAiSession.mockResolvedValue({
       ...base,
       status: "awaiting_input",
@@ -160,7 +160,10 @@ describe("PlanningModeModal sequential flow", () => {
       result: JSON.stringify(summaryWithRefinements),
       inputPayload: "{}",
     });
-    renderSession({});
+    const onClose = vi.fn();
+    const onTaskCreated = vi.fn();
+    const onViewTask = vi.fn();
+    render(<PlanningModeModal isOpen onClose={onClose} onTaskCreated={onTaskCreated} onTasksCreated={vi.fn()} onViewTask={onViewTask} tasks={mockTasks} projectId="project-1" resumeSessionId="session-1" />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Proceed with plan" }));
 
@@ -172,6 +175,86 @@ describe("PlanningModeModal sequential flow", () => {
       {},
     ));
     expect(screen.queryByRole("heading", { name: "Review your plan" })).toBeNull();
+    expect(await screen.findByTestId("planning-task-created")).toHaveTextContent("FN-8442");
+    expect(onTaskCreated).toHaveBeenCalledWith({ id: "FN-8442" });
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "View task" }));
+    expect(onViewTask).toHaveBeenCalledWith({ id: "FN-8442" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Return to sessions" }));
+    expect(await screen.findByRole("complementary", { name: "Planning sessions" })).toBeInTheDocument();
+  });
+
+  it("automatically resolves an in-progress create claim without showing retry UI", async () => {
+    mockFetchAiSession.mockResolvedValue({
+      ...base,
+      status: "awaiting_input",
+      currentQuestion: JSON.stringify({ id: "q-1", type: "text", question: "Anything else?" }),
+      result: JSON.stringify(summaryWithRefinements),
+      inputPayload: "{}",
+    });
+    mockCreateTaskFromPlanning
+      .mockRejectedValueOnce(Object.assign(new Error("Planning task creation is already in progress"), { status: 409 }))
+      .mockResolvedValueOnce({ id: "FN-8442" });
+
+    renderSession({});
+    fireEvent.click(await screen.findByRole("button", { name: "Proceed with plan" }));
+
+    expect(await screen.findByTestId("planning-task-created")).toHaveTextContent("FN-8442");
+    expect(mockCreateTaskFromPlanning).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId("planning-create-retry")).toBeNull();
+  });
+
+  it("keeps both created-task handoffs reachable on mobile", async () => {
+    mockViewportMode.mockReturnValue("mobile");
+    mockFetchAiSession.mockResolvedValue({
+      ...base,
+      status: "awaiting_input",
+      currentQuestion: JSON.stringify({ id: "q-1", type: "text", question: "Anything else?" }),
+      result: JSON.stringify(summaryWithRefinements),
+      inputPayload: "{}",
+    });
+    const onViewTask = vi.fn();
+    render(<PlanningModeModal isOpen onClose={vi.fn()} onTaskCreated={vi.fn()} onTasksCreated={vi.fn()} onViewTask={onViewTask} tasks={mockTasks} projectId="project-1" resumeSessionId="session-1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Proceed with plan" }));
+
+    expect(await screen.findByRole("button", { name: "View task" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Return to sessions" })).toBeEnabled();
+  });
+
+  it("restores a linked task into the created-task handoff", async () => {
+    mockFetchAiSession.mockResolvedValue({
+      ...base,
+      status: "complete",
+      currentQuestion: null,
+      result: JSON.stringify(mockSummary),
+      inputPayload: JSON.stringify({ validated: true, createdTaskId: "FN-001" }),
+    });
+    const onTaskCreated = vi.fn();
+    const onViewTask = vi.fn();
+    render(<PlanningModeModal isOpen onClose={vi.fn()} onTaskCreated={onTaskCreated} onTasksCreated={vi.fn()} onViewTask={onViewTask} tasks={mockTasks} projectId="project-1" resumeSessionId="session-1" />);
+
+    expect(await screen.findByTestId("planning-task-created")).toHaveTextContent("FN-001");
+    await waitFor(() => expect(onTaskCreated).toHaveBeenCalledWith(mockTasks[0]));
+    expect(screen.getByRole("button", { name: "View task" })).toBeEnabled();
+  });
+
+  it("waits for a restored linked task before enabling its task handoff", async () => {
+    mockFetchAiSession.mockResolvedValue({
+      ...base,
+      status: "complete",
+      currentQuestion: null,
+      result: JSON.stringify(mockSummary),
+      inputPayload: JSON.stringify({ validated: true, createdTaskId: "FN-LATER" }),
+    });
+    const onTaskCreated = vi.fn();
+    render(<PlanningModeModal isOpen onClose={vi.fn()} onTaskCreated={onTaskCreated} onTasksCreated={vi.fn()} onViewTask={vi.fn()} tasks={[]} projectId="project-1" resumeSessionId="session-1" />);
+
+    expect(await screen.findByTestId("planning-task-created")).toHaveTextContent("FN-LATER");
+    expect(screen.getByRole("button", { name: "View task" })).toBeDisabled();
+    expect(onTaskCreated).not.toHaveBeenCalled();
   });
 
   it("uses full-view Questions and Plan preview tabs on mobile", async () => {

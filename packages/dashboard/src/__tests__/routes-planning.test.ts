@@ -790,6 +790,63 @@ describe("Planning Mode Routes", () => {
     });
 
     describe("POST /planning/start-streaming", () => {
+      it("does not expose the seeded fallback as a reviewable plan while the AI turn is active", async () => {
+        const messages: Array<{ role: string; content: string }> = [];
+        let releasePrompt: (() => void) | undefined;
+        let markPromptStarted: (() => void) | undefined;
+        const promptStarted = new Promise<void>((resolve) => {
+          markPromptStarted = resolve;
+        });
+        __setCreateFnAgent(async () => ({
+          session: {
+            state: { messages },
+            prompt: vi.fn(async (message: string) => {
+              messages.push({ role: "user", content: message });
+              markPromptStarted?.();
+              await new Promise<void>((resolve) => {
+                releasePrompt = resolve;
+              });
+              messages.push({
+                role: "assistant",
+                content: JSON.stringify({
+                  type: "complete",
+                  data: {
+                    title: "AI-authored plan",
+                    description: "Generated after repository inspection.",
+                    proposedChanges: ["Implement the requested behavior"],
+                    acceptanceCriteria: ["The behavior is verified"],
+                    keyDeliverables: ["Working implementation"],
+                  },
+                }),
+              });
+            }),
+            dispose: vi.fn(),
+          },
+        }));
+
+        const startRes = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start-streaming",
+          JSON.stringify({ initialPlan: "Generate this plan with AI" }),
+          { "Content-Type": "application/json" },
+        );
+        const sessionId = startRes.body.sessionId as string;
+        const streamPromise = REQUEST(buildApp(), "GET", `/api/planning/${sessionId}/stream`);
+
+        await promptStarted;
+        planningStreamManager.broadcast(sessionId, { type: "complete" });
+        const streamRes = await streamPromise;
+        releasePrompt?.();
+        await vi.waitFor(() => {
+          expect(planningStreamManager.getBufferedEvents(sessionId, 0).some((event) => event.event === "summary")).toBe(true);
+        });
+
+        expect(messages[0]?.content).toContain("Generate this plan with AI");
+        expect(streamRes.body).not.toContain("event: summary");
+        expect(streamRes.body).not.toContain("Generate this plan with AI");
+      });
+
       it("broadcasts a reviewable initial plan without an unsolicited question", async () => {
         const messages: Array<{ role: string; content: string }> = [];
         const responses = [

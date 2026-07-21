@@ -1723,7 +1723,15 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
       awaiting-input question; only Validate writes `session.validated`, which authorizes a
       terminal complete event and closes the stream.
       */
-      if (session.summary) {
+      /*
+      FNXC:PlanningMode 2026-07-20-18:05:
+      New and resumed sessions seed `summary` with deterministic fallback copy before the AI
+      turn starts. While `generationPurpose` is set, that value is working state rather than a
+      review-ready plan. Publishing it here moves the client out of loading early and exposes
+      Refine/Validate against the still-active generation. Only catch up a settled summary;
+      the generation path clears its purpose before broadcasting the AI-authored replacement.
+      */
+      if (session.summary && session.generationPurpose === undefined) {
         const existing = planningStreamManager.getBufferedEvents(sessionId, 0);
         const lastSummaryEvent = [...existing].reverse().find((event) => event.event === "summary");
         const summaryEventId = lastSummaryEvent?.id

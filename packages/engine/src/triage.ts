@@ -191,7 +191,10 @@ import { buildAgentGatedActionSummary } from "./permanent-agent-gating.js";
 export interface TriageProcessorOptions {
   pollIntervalMs?: number;
   semaphore?: AgentSemaphore;
-  /** Usage limit pauser — triggers global pause when API limits are detected. */
+  /**
+   * FNXC:ProviderRateLimitIsolation 2026-07-21-18:00:
+   * Parks only tasks routed through the provider whose API limit was detected.
+   */
   usageLimitPauser?: UsageLimitPauser;
   /** Stuck task detector — monitors triage sessions for stagnation and triggers recovery. */
   stuckTaskDetector?: StuckTaskDetector;
@@ -1325,6 +1328,7 @@ export class TriageProcessor {
     );
     this.options.onSpecifyStart?.(task);
 
+    let activePlanningProvider: string | undefined;
     try {
       const detail = await this.store.getTask(task.id);
       const currentTask = detail ?? task;
@@ -1578,6 +1582,7 @@ export class TriageProcessor {
           settings,
           assignedAgent?.runtimeConfig,
         );
+        activePlanningProvider = planningModel.provider;
 
         const planningSessionModelOptions = {
           defaultProvider: planningModel.provider,
@@ -1981,12 +1986,14 @@ export class TriageProcessor {
         this.stuckAborted.delete(task.id);
         await this.handleStuckAbortRequeue(task, "catch");
       } else {
-        // Check if the error is a usage-limit error and trigger global pause
+        // FNXC:ProviderRateLimitIsolation 2026-07-21-18:00: preserve the resolved
+        // planning provider so health recovery can resume only its parked lane.
         if (this.options.usageLimitPauser && isUsageLimitError(errorMessage)) {
           await this.options.usageLimitPauser.onUsageLimitHit(
             "triage",
             task.id,
             errorMessage,
+            activePlanningProvider,
           );
         } else if (err instanceof ModelFallbackExhaustedError) {
           /*

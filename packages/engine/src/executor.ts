@@ -1541,7 +1541,10 @@ export interface TaskExecutorOptions {
   semaphore?: AgentSemaphore;
   /** Worktree pool for recycling idle worktrees across tasks. */
   pool?: WorktreePool;
-  /** Usage limit pauser — triggers global pause when API limits are detected. */
+  /**
+   * FNXC:ProviderRateLimitIsolation 2026-07-21-18:00:
+   * Parks only tasks routed through the provider whose API limit was detected.
+   */
   usageLimitPauser?: UsageLimitPauser;
   /** Stuck task detector — monitors agent sessions for stagnation and triggers recovery. */
   stuckTaskDetector?: StuckTaskDetector;

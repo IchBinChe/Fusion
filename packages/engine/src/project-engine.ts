@@ -421,6 +421,12 @@ export class ProjectEngine {
    * subsequent polls emits exactly one `escalate` entry, not one per poll.
    */
   private readonly plannerEscalationEmitDedup = new Set<string>();
+  /**
+   * FNXC:PlannerOversight 2026-07-21-22:56:
+   * Dedup keys for durable "retry_step skipped — live session" task-log lines so
+   * the 45s overseer poll does not flood FN-8471-class live-skip conditions.
+   */
+  private readonly plannerLiveRetrySkipLogDedup = new Set<string>();
   private prReconciler?: PrReconciler;
   private prCommentHandler?: PrCommentHandler;
   private notifier?: NtfyNotifier;
@@ -1642,6 +1648,7 @@ export class ProjectEngine {
       // dedup keys from before the stop.
       this.plannerObservationEmitDedup.delete(taskId);
       this.clearPlannerEscalationDedup(taskId);
+      this.clearPlannerLiveRetrySkipLogDedup(taskId);
 
       return { applied: true, reason: "stopped", task: updatedTask };
     } catch (err) {
@@ -1779,6 +1786,22 @@ export class ProjectEngine {
   }
 
   /**
+   * FNXC:PlannerOversight 2026-07-21-23:20:
+   * Clear live-retry skip-log dedup keys when oversight stops, is disabled, or the
+   * task leaves the in-flight set — same lifetime as observation/escalation dedup.
+   * Without this, a later live-skip episode on the same (taskId, stage) would never
+   * emit its durable log (Greptile/CodeRabbit on #2393).
+   */
+  private clearPlannerLiveRetrySkipLogDedup(taskId: string): void {
+    const prefix = `${taskId}::`;
+    for (const key of [...this.plannerLiveRetrySkipLogDedup]) {
+      if (key.startsWith(prefix)) {
+        this.plannerLiveRetrySkipLogDedup.delete(key);
+      }
+    }
+  }
+
+  /**
    * FNXC:PlannerOversight 2026-07-04-12:00:
    * Concrete FN-7512 handler wiring — ONLY reuses existing mechanisms:
    * `injectGuidance`/`requestTargetedFix` post a planner-authored steering
@@ -1810,6 +1833,33 @@ export class ProjectEngine {
         );
       },
       retryStep: async (task, decision) => {
+        /*
+        FNXC:PlannerOversight 2026-07-21-22:56:
+        Never hard-cancel a live executor to "retry" incomplete work (FN-8471).
+        moveTask(in-progress→todo) aborts agent/graph sessions via task:moved.
+        When a coding/step/CLI session or graph claim is still live, skip the bounce
+        and return false so PlannerRecoveryController does not burn the attempt
+        budget. Mirror self-healing FN-7566 live-session refusal before reclaim.
+        Durable skip log is deduped per (taskId, stage) so 45s polls do not flood the task log.
+        */
+        const executor = this.runtime.getExecutor?.();
+        if (executor?.isTaskLiveForOverseerRetry?.(task.id) === true) {
+          const stage = (decision.watchedStage ?? "executor") as string;
+          const skipKey = `${task.id}::${stage}`;
+          if (!this.plannerLiveRetrySkipLogDedup.has(skipKey)) {
+            this.plannerLiveRetrySkipLogDedup.add(skipKey);
+            runtimeLog.log(
+              `[planner-oversight] retry_step skipped for ${task.id} — live executor/session still active (refusing hard-cancel thrash)`,
+            );
+            await store.logEntry(
+              task.id,
+              `[planner] stage=${stage} signal=retry-skipped: live session active — not bouncing to todo`,
+            ).catch(() => undefined);
+          }
+          return false;
+        }
+        // Live surface cleared — allow a fresh skip log if work goes live again later.
+        this.plannerLiveRetrySkipLogDedup.delete(`${task.id}::${decision.watchedStage ?? "executor"}`);
         await store.moveTask(task.id, "todo", { preserveProgress: true, moveSource: "engine" } as Parameters<TaskStore["moveTask"]>[2]);
         // FN-7551: the attempt just dispatched — record it as attemptCount + 1
         // (decision.attemptCount is the count BEFORE this dispatch).
@@ -1824,6 +1874,7 @@ export class ProjectEngine {
             sourceLinks: this.toInterventionSourceLinks(decision.sourceLinks),
           }),
         );
+        return true;
       },
       requestTargetedFix: async (task, decision) => {
         const sourceRef = decision.sourceLinks[0]?.ref;
@@ -2889,6 +2940,7 @@ export class ProjectEngine {
             this.sessionAdvisorLogCursor.delete(task.id);
             this.plannerObservationEmitDedup.delete(task.id);
             this.clearPlannerEscalationDedup(task.id);
+            this.clearPlannerLiveRetrySkipLogDedup(task.id);
             continue;
           }
           // FN-7743: resolve the executor-stall threshold from the task's
@@ -2951,6 +3003,7 @@ export class ProjectEngine {
           this.sessionAdvisorLogCursor.delete(taskId);
           this.plannerObservationEmitDedup.delete(taskId);
           this.clearPlannerEscalationDedup(taskId);
+          this.clearPlannerLiveRetrySkipLogDedup(taskId);
         }
       }
     } catch {

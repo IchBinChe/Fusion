@@ -1894,3 +1894,20 @@ const setupHooks: PluginSetupHooks = {
 ```
 
 `checkSetup` is required. `install` and `uninstall` are optional.
+
+## Declarative MCP servers
+
+Plugins may declare MCP servers with `mcpServers`. Declarations are active only in projects where the plugin is enabled; Fusion does not install the referenced binary.
+
+```ts
+mcpServers: [{
+  name: "roslyn-navigator",
+  transport: "stdio",
+  command: "cwm-roslyn-navigator",
+  args: [],
+  env: { TOKEN: { secretRef: "roslyn-token", scope: "project" } },
+  enabledByDefault: true,
+}]
+```
+
+`enabledByDefault` defaults to `true`. Plugin declarations cannot set `enabled`: project settings own enablement. Effective precedence is global settings, enabled plugin declarations, then project settings by name. A project definition overrides a plugin declaration and a same-named project `enabled:false` entry tombstones it. Use Fusion secret references for sensitive `env` or `headers`; never ship plaintext credentials. Missing commands retain normal per-server MCP spawn-failure isolation.

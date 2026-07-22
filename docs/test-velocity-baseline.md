@@ -5,7 +5,7 @@
 ## Latest baseline
 
 - Cycle: **2026-W30**
-- Captured at: **2026-07-22T16:26:26.004Z**
+- Captured at: **2026-07-22T20:52:05.508Z**
 - Timing snapshot: `scripts/test-timings.json` captured at **2026-06-27T05:41:42.568Z**
 - Quarantine ledger: `scripts/lib/test-quarantine.json`
 
@@ -13,10 +13,10 @@
 
 | Metric | Current | Delta vs previous |
 |---|---:|---:|
-| Merge gate wall-time (`pnpm test:gate`) | 43.9s | +35.1s |
-| Boot smoke wall-time (`pnpm smoke:boot`) | 20.1s | +2.5s |
-| Changed-only test wall-time (`pnpm test`) | 39.2s | -22.1s |
-| Quarantine / flake count | 2 | +1 |
+| Merge gate wall-time (`pnpm test:gate`) | 45.2s | +1.3s |
+| Boot smoke wall-time (`pnpm smoke:boot`) | 18.3s | -1.9s |
+| Changed-only test wall-time (`pnpm test`) | 36.7s | -2.5s |
+| Quarantine / flake count | 2 | 0 |
 | Deletion-due quarantines | 0 | n/a |
 
 ## Measurement failures
@@ -72,16 +72,16 @@
 
 | Row | Captured at | Gate | Boot smoke | `pnpm test` | Quarantine count |
 |---|---|---:|---:|---:|---:|
-| Previous | 2026-07-08T18:17:42.464Z | 8.8s | 17.6s | 1m 01s | 1 |
-| Latest | 2026-07-22T16:26:26.004Z | 43.9s | 20.1s | 39.2s | 2 |
-| Delta | — | +35.1s | +2.5s | -22.1s | +1 |
+| Previous | 2026-07-22T16:26:26.004Z | 43.9s | 20.1s | 39.2s | 2 |
+| Latest | 2026-07-22T20:52:05.508Z | 45.2s | 18.3s | 36.7s | 2 |
+| Delta | — | +1.3s | -1.9s | -2.5s | 0 |
 
 _Future weekly rows append to `scripts/test-velocity-history.json`; compare the latest row against the previous row before posting to #leads._
 
 ## Post to #leads
 
 ```text
-FN-6612 weekly test velocity: gate 43.9s (+35.1s), boot smoke 20.1s (+2.5s), pnpm test 39.2s (-22.1s), quarantine ledger 2 (+1). Slowest file: packages/dashboard/src/__tests__/insights-routes.test.ts at 26.5s. Deletion-due quarantines: 0.
+FN-6612 weekly test velocity: gate 45.2s (+1.3s), boot smoke 18.3s (-1.9s), pnpm test 36.7s (-2.5s), quarantine ledger 2 (0). Slowest file: packages/dashboard/src/__tests__/insights-routes.test.ts at 26.5s. Deletion-due quarantines: 0.
 ```
 
 ## How to refresh

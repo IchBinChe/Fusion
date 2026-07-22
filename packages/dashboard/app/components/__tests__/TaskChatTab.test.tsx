@@ -2776,6 +2776,21 @@ describe("TaskChatTab", () => {
     expect(css).not.toContain("62vh");
   });
 
+  it("matches the Activity Live composer radius to its transcript on desktop and mobile", () => {
+    const css = readFileSync(resolve(__dirname, "../TaskChatTab.css"), "utf8");
+    const sharedStyles = readFileSync(resolve(__dirname, "../../styles.css"), "utf8");
+    const transcriptRule = getCssRuleBlock(css, ".task-chat-transcript");
+    const inputRule = getCssRuleBlock(css, ".task-chat-input");
+    const mobileCss = getCssAfter(css, "@media (max-width: 768px)");
+    const mobileInputRule = getCssRuleBlock(mobileCss, ".task-chat-input");
+    const globalInputRule = getCssRuleBlock(sharedStyles, ".input,");
+
+    expect(getCssDeclaration(transcriptRule, "border-radius")).toBe("var(--radius-lg)");
+    expect(getCssDeclaration(inputRule, "border-radius")).toBe("var(--radius-lg)");
+    expect(mobileInputRule).not.toMatch(/border-radius\s*:/);
+    expect(getCssDeclaration(globalInputRule, "border-radius")).toBe("var(--radius-sm)");
+  });
+
   it("positions the icon-only expand toggle as a tokenized chat-view overlay with no toolbar shell", () => {
     const css = readFileSync(resolve(__dirname, "../TaskChatTab.css"), "utf8");
     const tabRule = getCssRuleBlock(css, ".task-chat-tab");

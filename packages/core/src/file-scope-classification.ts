@@ -25,6 +25,9 @@ export interface FileScopeClassificationResult {
 /*
 FNXC:FileScopeClassification 2026-06-25-04:34:
 Task File Scope is operator intent, not every path-like token in PROMPT.md. Keep this classifier conservative so read-only evidence, wrong-worktree safeguards, generated locks, route names, and conditional changesets do not create false write-scope leases or file-scope merge guards.
+
+FNXC:FileScopeClassification 2026-07-21-12:00:
+Root-level repo files with letter-leading extensions (global.json, Directory.Packages.props, MyApp.slnx, tsconfig.json, .env) are valid File Scope entries. Requiring a slash rejected them, which failed GitHub imports whose issue bodies declare those paths and dropped them from extractEffectiveWriteScopeFromPrompt. Still reject bare identifiers (main, todo) and version-like tokens (v1.2.3) via the letter-leading final-extension rule. Extensionless well-known roots (Makefile, Dockerfile) stay on the explicit allowlist.
 */
 const KNOWN_FILE_SCOPE_ROOT_FILES = new Set([
   "makefile",
@@ -38,6 +41,9 @@ const KNOWN_FILE_SCOPE_ROOT_FILES = new Set([
   "package.json",
   "pnpm-lock.yaml",
 ]);
+
+/** Final segment ends with a letter-leading extension (.json, .props, .slnx, .env). */
+const FILE_EXTENSION_RE = /\.[A-Za-z][A-Za-z0-9]*$/;
 
 const INCLUDE_CONTEXT_RE = /\b(expected|touched|touch|modify|modified|write|writes|implementation|must update|artifacts?|files? changed|source paths?)\b/i;
 const EXCLUDE_CONTEXT_RE = /\b(forbidden|non-goals?|out of scope|do not edit|do not modify|must not edit|must not modify|do not hand-edit|hand-edit|read-only|context to read|evidence only|metadata|wrong[- ]worktree|safeguards?)\b/i;
@@ -67,7 +73,6 @@ export function isValidFileScopeEntry(token: string): boolean {
 
   const segments = trimmed.split("/");
   const lastSegment = segments[segments.length - 1] ?? "";
-  const hasSlash = trimmed.includes("/");
   const hasDotInLastSegment = lastSegment.includes(".");
 
   if (KNOWN_FILE_SCOPE_ROOT_FILES.has(lastSegment.toLowerCase())) {
@@ -78,7 +83,8 @@ export function isValidFileScopeEntry(token: string): boolean {
     return true;
   }
 
-  if (hasSlash && hasDotInLastSegment) {
+  // Nested (`src/MyApp/Program.cs`) or root-level (`global.json`, `Directory.Packages.props`) files.
+  if (hasDotInLastSegment && FILE_EXTENSION_RE.test(lastSegment)) {
     return true;
   }
 

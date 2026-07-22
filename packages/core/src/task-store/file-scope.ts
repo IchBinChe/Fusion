@@ -5,56 +5,15 @@
  * Extracted from the monolithic packages/core/src/store.ts (U5 decomposition).
  * Pure behavior-invariant move: function bodies are byte-identical to their
  * pre-extraction form. store.ts re-imports these helpers.
+ *
+ * FNXC:FileScopeClassification 2026-07-21-12:00:
+ * isValidFileScopeEntry is owned by file-scope-classification.ts so create/update
+ * validation and extractEffectiveWriteScopeFromPrompt cannot drift. Root-level
+ * files with extensions (global.json, Directory.Packages.props, MyApp.slnx) must
+ * pass both paths — GitHub issue bodies that declare them were failing import.
  */
-const KNOWN_FILE_SCOPE_ROOT_FILES = new Set([
-  "makefile",
-  "dockerfile",
-  "justfile",
-  "license",
-  "readme",
-  "changelog",
-  "agents.md",
-]);
-
-export function isValidFileScopeEntry(token: string): boolean {
-  const trimmed = token.trim();
-  if (!trimmed) return false;
-
-  const lower = trimmed.toLowerCase();
-  if (
-    lower.startsWith("origin/")
-    || lower.startsWith("upstream/")
-    || lower.startsWith("refs/")
-    || /^https?:\/\//i.test(trimmed)
-    || /^git@/i.test(trimmed)
-    || /^ssh:\/\//i.test(trimmed)
-    || /^[a-z]+\/fn-\d+$/i.test(trimmed)
-    || /^[a-f0-9]{7,}$/i.test(trimmed)
-    || trimmed.includes("..")
-    || trimmed.startsWith("/")
-  ) {
-    return false;
-  }
-
-  const segments = trimmed.split("/");
-  const lastSegment = segments[segments.length - 1];
-  const hasSlash = trimmed.includes("/");
-  const hasDotInLastSegment = lastSegment.includes(".");
-
-  if (KNOWN_FILE_SCOPE_ROOT_FILES.has(lastSegment.toLowerCase())) {
-    return true;
-  }
-
-  if (trimmed.includes("**") || trimmed.endsWith("/*") || (lastSegment.includes("*") && hasDotInLastSegment)) {
-    return true;
-  }
-
-  if (hasSlash && hasDotInLastSegment) {
-    return true;
-  }
-
-  return false;
-}
+export { isValidFileScopeEntry } from "../file-scope-classification.js";
+import { isValidFileScopeEntry } from "../file-scope-classification.js";
 
 export function extractFileScopeTokens(content: string): string[] {
   const headingMatch = content.match(/^##\s+File\s+Scope\s*$/m);

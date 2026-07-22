@@ -34,9 +34,11 @@ import { createLogger } from "./logger.js";
 import {
   promptWithFallback,
   describeModel,
+  isRetryableModelSelectionError,
   wrapToolsWithActionGate,
   wrapToolsWithPermanentAgentGating,
   wrapToolsWithRtkRewrite,
+  type FallbackModelUsedPayload,
 } from "./pi.js";
 import type { RunAuditor } from "./run-audit.js";
 import { MockAgentRuntime } from "./providers/mock-provider.js";
@@ -465,31 +467,171 @@ function applyGrokCliNoKeyRuntimeOptions(
   return runtimeOptions;
 }
 
+/** The deferred grok-cli fallback pair a session swaps to when its primary fails (see below). */
+interface DeferredGrokCliFallback {
+  /** Concrete model id for the Grok CLI runtime (provider prefix stripped). */
+  modelId: string | undefined;
+  thinkingLevel: AgentRuntimeOptions["fallbackThinkingLevel"];
+}
+
 /*
-FNXC:GrokCliRouting 2026-07-22-14:30:
-A grok-cli fallback behind a non-grok primary is unusable without a Fusion-visible
-GROK_API_KEY: pi resolves fallback swaps through the key-requiring provider registry
-(the original FN-7758 failure mode), and cross-runtime swaps into the Grok CLI runtime
-are not supported mid-session. Drop the fallback pair, keep the configured primary
-untouched, and surface the drop via a session warning plus run-audit metadata so the
-operator can fix the lane (set GROK_API_KEY or pick a same-runtime fallback).
+FNXC:GrokCliRouting 2026-07-22-15:10:
+A grok-cli fallback behind a non-grok primary cannot ride pi's in-session swap without a
+Fusion-visible GROK_API_KEY: pi resolves fallback swaps through the key-requiring provider
+registry (the original FN-7758 failure mode). Instead of promoting the fallback over a
+healthy primary (the old FN-7758 behavior — it silently replaced the configured planning
+model on every session) or discarding it, DEFER it: withhold the pair from the primary
+runtime's options and, when the Grok CLI runtime plugin is available, arm a prompt-time
+swap that recreates the session on the Grok CLI runtime only after the primary actually
+fails with a retryable model-selection error. When the Grok runtime plugin is unavailable
+the pair is dropped with a warning + audit flag so the drift is operator-visible.
 */
-function dropGrokCliFallbackForNoVisibleKey(
+function deferGrokCliFallbackForNoVisibleKey(
   runtimeOptions: AgentRuntimeOptions,
-): { options: AgentRuntimeOptions; dropped: boolean } {
+  pluginRunner: PluginRunner | undefined,
+): { options: AgentRuntimeOptions; deferred?: DeferredGrokCliFallback; dropped: boolean } {
   if (runtimeOptions.defaultProvider === GROK_CLI_PROVIDER_ID
     || runtimeOptions.fallbackProvider !== GROK_CLI_PROVIDER_ID
     || isGrokApiKeyFusionVisible()) {
     return { options: runtimeOptions, dropped: false };
   }
+  const options: AgentRuntimeOptions = {
+    ...runtimeOptions,
+    fallbackProvider: undefined,
+    fallbackModelId: undefined,
+    fallbackThinkingLevel: undefined,
+  };
+  let grokRuntimeAvailable = false;
+  try {
+    grokRuntimeAvailable = Boolean(pluginRunner?.getRuntimeById("grok"));
+  } catch {
+    grokRuntimeAvailable = false;
+  }
+  if (!grokRuntimeAvailable) {
+    return { options, dropped: true };
+  }
   return {
-    options: {
-      ...runtimeOptions,
-      fallbackProvider: undefined,
-      fallbackModelId: undefined,
-      fallbackThinkingLevel: undefined,
+    options,
+    deferred: {
+      modelId: stripGrokCliModelProviderPrefix(runtimeOptions.fallbackModelId),
+      thinkingLevel: runtimeOptions.fallbackThinkingLevel,
     },
-    dropped: true,
+    dropped: false,
+  };
+}
+
+/*
+FNXC:GrokCliRouting 2026-07-22-15:10:
+Prompt-time engagement of a deferred grok-cli fallback (see deferGrokCliFallbackForNoVisibleKey).
+Wraps the session's promptWithFallback: the first retryable model-selection failure of the
+primary creates a fresh session on the Grok CLI runtime with the deferred fallback model and
+re-issues the failed prompt there; every later prompt stays on the Grok CLI session. The swap
+happens at most once, non-retryable errors propagate unchanged, and the engagement is reported
+through onFallbackModelUsed plus an ids-only `session:grok-cli-fallback-engaged` audit event.
+*/
+function armDeferredGrokCliFallback(args: {
+  session: AgentSession & { promptWithFallback?: unknown };
+  sessionPurpose: SessionPurpose;
+  pluginRunner: PluginRunner | undefined;
+  runAuditor: RunAuditor | undefined;
+  deferred: DeferredGrokCliFallback;
+  grokCreateOptions: AgentRuntimeOptions;
+  primaryProvider: string | undefined;
+  primaryModelId: string | undefined;
+  onFallbackModelUsed: ((payload: FallbackModelUsedPayload) => Promise<void> | void) | undefined;
+  taskId: string | undefined;
+  taskTitle: string | undefined;
+}): void {
+  const {
+    session, sessionPurpose, pluginRunner, runAuditor, deferred, grokCreateOptions,
+    primaryProvider, primaryModelId, onFallbackModelUsed, taskId, taskTitle,
+  } = args;
+  const original = session.promptWithFallback as (prompt: string, options?: unknown) => Promise<unknown>;
+  const primaryDescription = `${primaryProvider ?? "unknown"}/${primaryModelId ?? "unknown"}`;
+  const fallbackDescription = `${GROK_CLI_PROVIDER_ID}/${deferred.modelId ?? "unknown"}`;
+  let grokSwap: { runtime: Awaited<ReturnType<typeof resolveRuntime>>["runtime"]; session: AgentSession } | undefined;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (session as any).promptWithFallback = async (prompt: string, promptOptions?: unknown) => {
+    if (grokSwap) {
+      return grokSwap.runtime.promptWithFallback(grokSwap.session, prompt, promptOptions);
+    }
+    try {
+      return await original(prompt, promptOptions);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!isRetryableModelSelectionError(message)) throw err;
+      sessionLog.warn(
+        `[${sessionPurpose}] primary "${primaryDescription}" failed retryably (${message}); engaging deferred grok-cli fallback "${fallbackDescription}" on the Grok CLI runtime`,
+      );
+      let resolvedGrok: Awaited<ReturnType<typeof resolveRuntime>>;
+      let grokSession: AgentSession;
+      try {
+        resolvedGrok = await resolveRuntime(buildRuntimeResolutionContext(sessionPurpose, pluginRunner, "grok"));
+        if (resolvedGrok.runtimeId !== "grok") throw new Error("Grok CLI runtime unavailable at swap time");
+        grokSession = (await resolvedGrok.runtime.createSession(grokCreateOptions)).session;
+      } catch (swapErr) {
+        const swapMessage = swapErr instanceof Error ? swapErr.message : String(swapErr);
+        sessionLog.warn(
+          `[${sessionPurpose}] deferred grok-cli fallback engagement failed (${swapMessage}); propagating primary failure`,
+        );
+        throw err;
+      }
+      grokSwap = { runtime: resolvedGrok.runtime, session: grokSession };
+      // Dispose the Grok CLI ACP session alongside the primary session so the
+      // swapped-in subprocess cannot outlive the session the engine tracks.
+      const disposable = session as unknown as { dispose?: () => Promise<void> | void };
+      const originalDispose = typeof disposable.dispose === "function" ? disposable.dispose.bind(session) : undefined;
+      disposable.dispose = async () => {
+        try {
+          await (grokSession as unknown as { dispose?: () => Promise<void> | void }).dispose?.();
+        } catch {
+          // best-effort: the primary session's dispose must still run
+        }
+        return originalDispose?.();
+      };
+      const normalizedFailure = message.toLowerCase();
+      const failureCategory: FallbackModelUsedPayload["failureCategory"] =
+        normalizedFailure.includes("auth")
+        || normalizedFailure.includes("api key")
+        || normalizedFailure.includes("credential")
+        || normalizedFailure.includes("401")
+        || normalizedFailure.includes("403")
+          ? "authentication"
+          : normalizedFailure.includes("rate limit") || normalizedFailure.includes("429") || normalizedFailure.includes("quota")
+            ? "rate-limit"
+            : "model-selection";
+      try {
+        await onFallbackModelUsed?.({
+          primaryModel: primaryDescription,
+          fallbackModel: fallbackDescription,
+          triggerPoint: "prompt-time",
+          taskId,
+          taskTitle,
+          timestamp: new Date().toISOString(),
+          failureCategory,
+        });
+      } catch {
+        // observer failures must not break the swapped prompt
+      }
+      try {
+        await runAuditor?.database({
+          type: "session:grok-cli-fallback-engaged",
+          target: "grok",
+          metadata: {
+            sessionPurpose,
+            primaryProvider: primaryProvider ?? null,
+            primaryModelId: primaryModelId ?? null,
+            fallbackModelId: deferred.modelId ?? null,
+            triggerPoint: "prompt-time",
+            failureCategory,
+          },
+        });
+      } catch (auditErr) {
+        sessionLog.warn(`[${sessionPurpose}] failed to record session:grok-cli-fallback-engaged audit: ${String(auditErr)}`);
+      }
+      return grokSwap.runtime.promptWithFallback(grokSwap.session, prompt, promptOptions);
+    }
   };
 }
 
@@ -783,22 +925,27 @@ export async function createResolvedAgentSession(
     deriveOmpRuntimeHint(runtimeOptions, pluginRunner);
   }
   /*
-  FNXC:GrokCliRouting 2026-07-22-14:30:
+  FNXC:GrokCliRouting 2026-07-22-15:10:
   When only the fallback is grok-cli with no visible key (and the session is not explicitly
-  hinted onto the Grok runtime), the fallback is unusable — drop it so the configured primary
-  keeps running on its own runtime instead of being preempted.
+  hinted onto the Grok runtime), withhold the pair from the primary runtime and arm a
+  prompt-time swap to the Grok CLI runtime instead of preempting the configured primary.
   */
-  const grokFallbackDrop = !useMockRuntime && !autoGrokRuntimeHint && effectiveRuntimeHint !== "grok"
-    ? dropGrokCliFallbackForNoVisibleKey(effectiveRuntimeOptions)
-    : { options: effectiveRuntimeOptions, dropped: false };
+  const grokFallbackDeferral = !useMockRuntime && !autoGrokRuntimeHint && effectiveRuntimeHint !== "grok"
+    ? deferGrokCliFallbackForNoVisibleKey(effectiveRuntimeOptions, pluginRunner)
+    : { options: effectiveRuntimeOptions, dropped: false as const };
   const effectiveRuntimeOptionsWithModel: AgentRuntimeOptions = autoGrokRuntimeHint
     ? applyGrokCliNoKeyRuntimeOptions(effectiveRuntimeOptions)
     : usesOmpRuntime
-      ? applyOmpCliRuntimeOptions(grokFallbackDrop.options)
-      : grokFallbackDrop.options;
-  if (grokFallbackDrop.dropped) {
+      ? applyOmpCliRuntimeOptions(grokFallbackDeferral.options)
+      : grokFallbackDeferral.options;
+  const deferredGrokFallback = "deferred" in grokFallbackDeferral ? grokFallbackDeferral.deferred : undefined;
+  if (grokFallbackDeferral.dropped) {
     sessionLog.warn(
-      `[${sessionPurpose}] configured grok-cli fallback "${runtimeOptions.fallbackModelId ?? "unknown"}" dropped: no Fusion-visible GROK_API_KEY and cross-runtime fallback swaps are unsupported; primary "${runtimeOptions.defaultProvider}/${runtimeOptions.defaultModelId}" is unchanged. Set GROK_API_KEY or configure a same-runtime fallback.`,
+      `[${sessionPurpose}] configured grok-cli fallback "${runtimeOptions.fallbackModelId ?? "unknown"}" dropped: no Fusion-visible GROK_API_KEY and the Grok CLI runtime plugin is unavailable; primary "${runtimeOptions.defaultProvider}/${runtimeOptions.defaultModelId}" is unchanged. Install/enable the Grok CLI runtime plugin or set GROK_API_KEY.`,
+    );
+  } else if (deferredGrokFallback) {
+    sessionLog.log(
+      `[${sessionPurpose}] grok-cli fallback "${deferredGrokFallback.modelId ?? "unknown"}" deferred to the Grok CLI runtime: it engages only if primary "${runtimeOptions.defaultProvider}/${runtimeOptions.defaultModelId}" fails with a retryable model error.`,
     );
   }
 
@@ -879,7 +1026,8 @@ export async function createResolvedAgentSession(
         modelId: effectiveRuntimeOptionsWithModel.defaultModelId ?? null,
         mockProviderActive,
         testModeActive,
-        ...(grokFallbackDrop.dropped ? { grokCliFallbackDropped: true } : {}),
+        ...(grokFallbackDeferral.dropped ? { grokCliFallbackDropped: true } : {}),
+        ...(deferredGrokFallback ? { grokCliFallbackDeferred: true } : {}),
         ...(noModelResolved ? { noModelResolved: true, runtimeBuiltInFallbackModel } : {}),
         /*
         FNXC:FusionToolBridgeDiagnostics 2026-07-20-08:00:
@@ -899,8 +1047,9 @@ export async function createResolvedAgentSession(
         ...(effectiveRuntimeHint ? { runtimeHint: effectiveRuntimeHint } : {}),
         ...(autoGrokRuntimeHint ? { reason: "grok-cli-no-visible-key" } : {}),
         ...(autoOmpRuntimeHint ? { reason: "omp-cli-runtime" } : {}),
-        ...(grokFallbackDrop.dropped ? { reason: "grok-cli-fallback-dropped-no-visible-key" } : {}),
-        ...(!autoGrokRuntimeHint && !autoOmpRuntimeHint && !grokFallbackDrop.dropped && "fallbackReason" in resolved && resolved.fallbackReason ? { reason: resolved.fallbackReason } : {}),
+        ...(grokFallbackDeferral.dropped ? { reason: "grok-cli-fallback-dropped-no-visible-key" } : {}),
+        ...(deferredGrokFallback ? { reason: "grok-cli-fallback-deferred-no-visible-key" } : {}),
+        ...(!autoGrokRuntimeHint && !autoOmpRuntimeHint && !grokFallbackDeferral.dropped && !deferredGrokFallback && "fallbackReason" in resolved && resolved.fallbackReason ? { reason: resolved.fallbackReason } : {}),
       },
     });
   } catch (err) {
@@ -924,6 +1073,49 @@ export async function createResolvedAgentSession(
       prompt: string,
       options?: unknown,
     ) => runtime.promptWithFallback(session, prompt, options);
+  }
+
+  /*
+  FNXC:GrokCliRouting 2026-07-22-15:10:
+  Deferred grok-cli fallback engagement. The primary session runs with NO in-runtime
+  fallback (the pair was withheld above), so a retryable model failure surfaces here as a
+  thrown error instead of pi's in-session swap. On the first such failure, create a fresh
+  session on the Grok CLI runtime with the deferred fallback model and re-issue the failed
+  prompt there; all subsequent prompts stay on the Grok CLI session. Conversation state
+  from turns completed on the primary before the swap is not replayed — same limitation
+  as a lane-level retry — so the swap logs and audits itself for visibility.
+  Non-retryable errors propagate unchanged; the swap happens at most once.
+  */
+  if (deferredGrokFallback) {
+    const grokBaseOptions: AgentRuntimeOptions = {
+      ...effectiveRuntimeOptionsWithModel,
+      sessionPurpose,
+      defaultProvider: GROK_CLI_PROVIDER_ID,
+      defaultModelId: deferredGrokFallback.modelId,
+      defaultThinkingLevel: deferredGrokFallback.thinkingLevel ?? effectiveRuntimeOptionsWithModel.defaultThinkingLevel,
+    };
+    armDeferredGrokCliFallback({
+      session,
+      sessionPurpose,
+      pluginRunner,
+      runAuditor,
+      deferred: deferredGrokFallback,
+      grokCreateOptions: shouldWrapCustomToolsForRuntime("grok")
+        ? {
+            ...grokBaseOptions,
+            customTools: wrapCustomToolsForPluginRuntime(
+              effectiveRuntimeOptionsWithModel.customTools,
+              effectiveRuntimeOptionsWithModel,
+              { runtimeId: "grok", sessionPurpose },
+            ),
+          }
+        : grokBaseOptions,
+      primaryProvider: runtimeOptions.defaultProvider,
+      primaryModelId: runtimeOptions.defaultModelId,
+      onFallbackModelUsed: runtimeOptions.onFallbackModelUsed,
+      taskId: runtimeOptions.taskId,
+      taskTitle: runtimeOptions.taskTitle,
+    });
   }
 
   return {

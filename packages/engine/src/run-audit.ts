@@ -633,6 +633,15 @@ export type DatabaseMutationType =
    */
   | "session:runtime-resolved"
   /**
+   * FNXC:GrokCliRouting 2026-07-22-15:10:
+   * A deferred grok-cli fallback engaged at prompt time: the primary model failed with a
+   * retryable model-selection error and the session swapped onto the Grok CLI runtime with
+   * the deferred fallback model. Metadata is ids/outcomes-only:
+   * `{ sessionPurpose, primaryProvider, primaryModelId, fallbackModelId, triggerPoint, failureCategory }`
+   * — never error prose.
+   */
+  | "session:grok-cli-fallback-engaged"
+  /**
    * FNXC:AgentReflectionTelemetry 2026-06-27-00:00:
    * Agent performance reflection attempts must emit durable telemetry for every generated, skipped, or failed outcome. Metadata carries ids, trigger taxonomy, counts, and outcomes only; never persist reflection summaries, insight strings, suggested-improvement text, triggerDetail, or prompt text.
    *

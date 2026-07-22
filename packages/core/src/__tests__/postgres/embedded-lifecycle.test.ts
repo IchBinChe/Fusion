@@ -490,12 +490,16 @@ describe("embedded-lifecycle: macOS dylib compatibility links", () => {
       writeFileSync(join(libDir, "libzstd.1.5.7.dylib"), "");
       writeFileSync(join(libDir, "liblz4.1.10.0.dylib"), "");
       writeFileSync(join(libDir, "libz.1.3.2.dylib"), "");
+      // This is the loader-name pair in the packaged Darwin payload: i18n
+      // requests the ABI-specific uc name rather than the unversioned link.
       writeFileSync(join(libDir, "libicui18n.68.2.dylib"), "");
+      writeFileSync(join(libDir, "libicuuc.68.2.dylib"), "");
 
       const created = normalizeMacosEmbeddedPostgresDylibSymlinks(nativeRoot);
 
       expect(created.map((link) => link.expected).sort()).toEqual([
         "libicui18n.dylib",
+        "libicuuc.68.dylib",
         "liblz4.1.dylib",
         "libpq.5.dylib",
         "libz.1.dylib",
@@ -503,6 +507,7 @@ describe("embedded-lifecycle: macOS dylib compatibility links", () => {
       ]);
       expect(readlinkSync(join(libDir, "libpq.5.dylib"))).toBe("libpq.5.15.dylib");
       expect(readlinkSync(join(libDir, "libzstd.1.dylib"))).toBe("libzstd.1.5.7.dylib");
+      expect(readlinkSync(join(libDir, "libicuuc.68.dylib"))).toBe("libicuuc.68.2.dylib");
 
       // Idempotent: the second pass sees the compatibility names and creates nothing.
       expect(normalizeMacosEmbeddedPostgresDylibSymlinks(nativeRoot)).toEqual([]);
@@ -511,20 +516,37 @@ describe("embedded-lifecycle: macOS dylib compatibility links", () => {
     }
   });
 
-  it("replaces stale broken compatibility-name symlinks", () => {
+  it("selects the highest matching ICU patch and repairs a dangling loader-name link", () => {
     const nativeRoot = mkdtempSync(join(tmpdir(), "fusion-embedded-native-"));
     try {
       const libDir = join(nativeRoot, "lib");
       mkdirSync(libDir, { recursive: true });
-      writeFileSync(join(libDir, "libpq.5.16.dylib"), "");
-      symlinkSync("libpq.5.15.dylib", join(libDir, "libpq.5.dylib"));
+      writeFileSync(join(libDir, "libicuuc.68.2.dylib"), "");
+      writeFileSync(join(libDir, "libicuuc.68.12.dylib"), "");
+      symlinkSync("libicuuc.68.1.dylib", join(libDir, "libicuuc.68.dylib"));
 
       const created = normalizeMacosEmbeddedPostgresDylibSymlinks(nativeRoot);
 
       expect(created).toEqual([
-        { expected: "libpq.5.dylib", target: "libpq.5.16.dylib", created: true },
+        { expected: "libicuuc.68.dylib", target: "libicuuc.68.12.dylib", created: true },
       ]);
-      expect(readlinkSync(join(libDir, "libpq.5.dylib"))).toBe("libpq.5.16.dylib");
+      expect(readlinkSync(join(libDir, "libicuuc.68.dylib"))).toBe("libicuuc.68.12.dylib");
+    } finally {
+      rmSync(nativeRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves a valid ICU compatibility link and treats absent library trees as no-ops", () => {
+    const nativeRoot = mkdtempSync(join(tmpdir(), "fusion-embedded-native-"));
+    try {
+      const libDir = join(nativeRoot, "lib");
+      mkdirSync(libDir, { recursive: true });
+      writeFileSync(join(libDir, "libicuuc.68.2.dylib"), "");
+      symlinkSync("libicuuc.68.2.dylib", join(libDir, "libicuuc.68.dylib"));
+
+      expect(normalizeMacosEmbeddedPostgresDylibSymlinks(nativeRoot)).toEqual([]);
+      expect(readlinkSync(join(libDir, "libicuuc.68.dylib"))).toBe("libicuuc.68.2.dylib");
+      expect(normalizeMacosEmbeddedPostgresDylibSymlinks(join(nativeRoot, "missing"))).toEqual([]);
     } finally {
       rmSync(nativeRoot, { recursive: true, force: true });
     }

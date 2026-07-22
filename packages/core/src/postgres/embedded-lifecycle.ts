@@ -750,12 +750,20 @@ export interface EmbeddedDylibNormalization {
   readonly created: boolean;
 }
 
+/*
+FNXC:PostgresEmbedded 2026-07-22-14:34:
+The bundled libicui18n.68.2.dylib records libicuuc.68.dylib as its loader
+name. macOS dyld must find that ABI-specific compatibility name before initdb
+runs, so normalize it only from the packaged libicuuc.68.<patch>.dylib payload
+rather than adding a broad unversioned ICU link or relying on system libraries.
+*/
 const MACOS_EMBEDDED_DYLIB_SYMLINKS: readonly EmbeddedDylibSymlinkSpec[] = [
   { expected: "libpq.5.dylib", candidate: /^libpq\.5\..+\.dylib$/ },
   { expected: "libzstd.1.dylib", candidate: /^libzstd\.1\..+\.dylib$/ },
   { expected: "liblz4.1.dylib", candidate: /^liblz4\.1\..+\.dylib$/ },
   { expected: "libz.1.dylib", candidate: /^libz\.1\..+\.dylib$/ },
   { expected: "libicui18n.dylib", candidate: /^libicui18n\..+\.dylib$/ },
+  { expected: "libicuuc.68.dylib", candidate: /^libicuuc\.68\..+\.dylib$/ },
 ];
 
 function sortDylibCandidates(files: readonly string[], candidate: RegExp): string[] {
@@ -768,10 +776,11 @@ function sortDylibCandidates(files: readonly string[], candidate: RegExp): strin
  * Normalize macOS embedded-postgres library names before initdb/postgres spawn.
  *
  * The @embedded-postgres/darwin-* packages can contain fully-versioned dylibs
- * (for example libpq.5.15.dylib, libzstd.1.5.7.dylib) while the bundled
- * binaries link against ABI compatibility names such as libpq.5.dylib and
- * libzstd.1.dylib via @loader_path/../lib/.... When the package postinstall
- * symlink hydration is skipped or incomplete, dyld fails before initdb can run.
+ * (for example libpq.5.15.dylib, libzstd.1.5.7.dylib, and
+ * libicuuc.68.2.dylib) while the bundled binaries link against ABI compatibility
+ * names such as libpq.5.dylib, libzstd.1.dylib, and libicuuc.68.dylib via
+ * @loader_path/../lib/.... When the package postinstall symlink hydration is
+ * skipped or incomplete, dyld fails before initdb can run.
  *
  * This is intentionally local to the embedded binary package and idempotent:
  * existing compatibility names are left alone; missing compatibility names are

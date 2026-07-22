@@ -429,12 +429,20 @@ function buildMissingGrokRuntimeError(): Error {
   );
 }
 
+/*
+FNXC:GrokCliRouting 2026-07-22-14:30:
+The no-visible-key Grok CLI auto-derive fires only when grok-cli is the PRIMARY provider.
+FN-7758 used to fire on a grok-cli FALLBACK too and promoted it to primary up front, which
+silently replaced a healthy configured primary (e.g. planning openai-codex/gpt-5.6-sol ran
+as grok/grok-4.5 on every triage session because the workflow's planningFallback was
+grok-cli). A fallback must never preempt a primary that has not failed; the fallback-only
+case is handled by dropGrokCliFallbackForNoVisibleKey below.
+*/
 function deriveGrokRuntimeHintForNoVisibleKey(
   runtimeOptions: AgentRuntimeOptions,
   pluginRunner: PluginRunner | undefined,
 ): string | undefined {
-  if (runtimeOptions.defaultProvider !== GROK_CLI_PROVIDER_ID
-    && runtimeOptions.fallbackProvider !== GROK_CLI_PROVIDER_ID) return undefined;
+  if (runtimeOptions.defaultProvider !== GROK_CLI_PROVIDER_ID) return undefined;
   if (isGrokApiKeyFusionVisible()) return undefined;
   try {
     if (pluginRunner?.getRuntimeById("grok")) return "grok";
@@ -454,23 +462,35 @@ function applyGrokCliNoKeyRuntimeOptions(
     };
   }
 
-  if (runtimeOptions.fallbackProvider === GROK_CLI_PROVIDER_ID) {
-    return {
+  return runtimeOptions;
+}
+
+/*
+FNXC:GrokCliRouting 2026-07-22-14:30:
+A grok-cli fallback behind a non-grok primary is unusable without a Fusion-visible
+GROK_API_KEY: pi resolves fallback swaps through the key-requiring provider registry
+(the original FN-7758 failure mode), and cross-runtime swaps into the Grok CLI runtime
+are not supported mid-session. Drop the fallback pair, keep the configured primary
+untouched, and surface the drop via a session warning plus run-audit metadata so the
+operator can fix the lane (set GROK_API_KEY or pick a same-runtime fallback).
+*/
+function dropGrokCliFallbackForNoVisibleKey(
+  runtimeOptions: AgentRuntimeOptions,
+): { options: AgentRuntimeOptions; dropped: boolean } {
+  if (runtimeOptions.defaultProvider === GROK_CLI_PROVIDER_ID
+    || runtimeOptions.fallbackProvider !== GROK_CLI_PROVIDER_ID
+    || isGrokApiKeyFusionVisible()) {
+    return { options: runtimeOptions, dropped: false };
+  }
+  return {
+    options: {
       ...runtimeOptions,
-      defaultProvider: runtimeOptions.fallbackProvider,
-      defaultModelId: stripGrokCliModelProviderPrefix(runtimeOptions.fallbackModelId),
-      /*
-       * FNXC:Settings-ThinkingLevel 2026-07-10-00:00:
-       * When the no-visible-key Grok CLI fallback is promoted to the primary runtime, promote its fallback thinking level too; the cleared fallback pair must not leave the Grok CLI session using the superseded primary model's thinking level.
-       */
-      defaultThinkingLevel: runtimeOptions.fallbackThinkingLevel ?? runtimeOptions.defaultThinkingLevel,
       fallbackProvider: undefined,
       fallbackModelId: undefined,
       fallbackThinkingLevel: undefined,
-    };
-  }
-
-  return runtimeOptions;
+    },
+    dropped: true,
+  };
 }
 
 function pickSettingsThenRuntimeModel(
@@ -739,10 +759,12 @@ export async function createResolvedAgentSession(
   provider routing stays on the mock runtime. Strip only the provider-qualified model prefix so the CLI
   receives the concrete selected model via GrokRuntimeAdapter without changing non-grok sessions.
 
-  FNXC:GrokCliRouting 2026-07-09-22:10:
-  FN-7758 extends the no-visible-key invariant to configured fallback models. Pi resolves fallback models
-  during session creation and prompt-time swaps through the key-requiring provider registry, so a grok-cli
-  fallback must select the Grok CLI runtime up front and promote the fallback model into the CLI session.
+  FNXC:GrokCliRouting 2026-07-22-14:30:
+  FN-7758's fallback-promotion behavior is removed: a configured grok-cli FALLBACK no longer selects the
+  Grok CLI runtime or replaces the primary model up front. That promotion silently discarded a healthy
+  configured primary (planning ran grok-4.5 instead of the configured gpt-5.6-sol on every session).
+  Fallback-only grok-cli selections without a visible key now keep the primary on its own runtime and
+  drop the unusable fallback pair with a warning + audit flag (see dropGrokCliFallbackForNoVisibleKey).
 
   FNXC:GrokCliRouting 2026-07-09-23:05:
   FN-7761 closes the packaged serve/daemon/dashboard gap: if grok-cli is selected and no Fusion-visible key exists, this seam must never silently fall through to the key-requiring pi/openai-completions runtime when the Grok plugin was not pre-installed. The hosts eagerly install/load the bundled runtime; if that genuinely fails, throw an operator-actionable error naming the two supported remediations.
@@ -760,11 +782,25 @@ export async function createResolvedAgentSession(
     // selections must fail here instead so pi never attempts registry resolution.
     deriveOmpRuntimeHint(runtimeOptions, pluginRunner);
   }
+  /*
+  FNXC:GrokCliRouting 2026-07-22-14:30:
+  When only the fallback is grok-cli with no visible key (and the session is not explicitly
+  hinted onto the Grok runtime), the fallback is unusable — drop it so the configured primary
+  keeps running on its own runtime instead of being preempted.
+  */
+  const grokFallbackDrop = !useMockRuntime && !autoGrokRuntimeHint && effectiveRuntimeHint !== "grok"
+    ? dropGrokCliFallbackForNoVisibleKey(effectiveRuntimeOptions)
+    : { options: effectiveRuntimeOptions, dropped: false };
   const effectiveRuntimeOptionsWithModel: AgentRuntimeOptions = autoGrokRuntimeHint
     ? applyGrokCliNoKeyRuntimeOptions(effectiveRuntimeOptions)
     : usesOmpRuntime
-      ? applyOmpCliRuntimeOptions(effectiveRuntimeOptions)
-      : effectiveRuntimeOptions;
+      ? applyOmpCliRuntimeOptions(grokFallbackDrop.options)
+      : grokFallbackDrop.options;
+  if (grokFallbackDrop.dropped) {
+    sessionLog.warn(
+      `[${sessionPurpose}] configured grok-cli fallback "${runtimeOptions.fallbackModelId ?? "unknown"}" dropped: no Fusion-visible GROK_API_KEY and cross-runtime fallback swaps are unsupported; primary "${runtimeOptions.defaultProvider}/${runtimeOptions.defaultModelId}" is unchanged. Set GROK_API_KEY or configure a same-runtime fallback.`,
+    );
+  }
 
   const resolved = useMockRuntime
     ? {
@@ -832,10 +868,18 @@ export async function createResolvedAgentSession(
         sessionPurpose,
         runtimeId: resolved.runtimeId,
         wasConfigured: resolved.wasConfigured,
-        provider: runtimeOptions.defaultProvider ?? null,
-        modelId: runtimeOptions.defaultModelId ?? null,
+        /*
+        FNXC:ModelResolution 2026-07-22-14:30:
+        Audit the POST-transform pair the session actually runs, not the pre-transform
+        configuration. The old pre-transform values masked the FN-7758 fallback promotion:
+        run-audit claimed planning used the configured primary while the session ran the
+        promoted grok fallback.
+        */
+        provider: effectiveRuntimeOptionsWithModel.defaultProvider ?? null,
+        modelId: effectiveRuntimeOptionsWithModel.defaultModelId ?? null,
         mockProviderActive,
         testModeActive,
+        ...(grokFallbackDrop.dropped ? { grokCliFallbackDropped: true } : {}),
         ...(noModelResolved ? { noModelResolved: true, runtimeBuiltInFallbackModel } : {}),
         /*
         FNXC:FusionToolBridgeDiagnostics 2026-07-20-08:00:
@@ -855,7 +899,8 @@ export async function createResolvedAgentSession(
         ...(effectiveRuntimeHint ? { runtimeHint: effectiveRuntimeHint } : {}),
         ...(autoGrokRuntimeHint ? { reason: "grok-cli-no-visible-key" } : {}),
         ...(autoOmpRuntimeHint ? { reason: "omp-cli-runtime" } : {}),
-        ...(!autoGrokRuntimeHint && !autoOmpRuntimeHint && "fallbackReason" in resolved && resolved.fallbackReason ? { reason: resolved.fallbackReason } : {}),
+        ...(grokFallbackDrop.dropped ? { reason: "grok-cli-fallback-dropped-no-visible-key" } : {}),
+        ...(!autoGrokRuntimeHint && !autoOmpRuntimeHint && !grokFallbackDrop.dropped && "fallbackReason" in resolved && resolved.fallbackReason ? { reason: resolved.fallbackReason } : {}),
       },
     });
   } catch (err) {

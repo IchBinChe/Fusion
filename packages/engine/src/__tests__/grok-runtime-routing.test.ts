@@ -342,7 +342,8 @@ describe("Grok CLI runtime routing (FN-7725)", () => {
         runtimeHint: "grok",
         reason: "grok-cli-no-visible-key",
         provider: "grok-cli",
-        modelId: "grok-cli/grok-4.5",
+        // FNXC:ModelResolution 2026-07-22-14:30: audit records the post-transform model the session actually runs (provider prefix stripped for the CLI).
+        modelId: "grok-4.5",
       }),
     }));
   });
@@ -425,12 +426,19 @@ describe("Grok CLI runtime routing (FN-7725)", () => {
     }));
   });
 
-  it("auto-routes a grok-cli fallback model to the Grok runtime when no Fusion-visible key exists", async () => {
+  /*
+  FNXC:GrokCliRouting 2026-07-22-14:30:
+  A grok-cli FALLBACK behind a healthy non-grok primary must never preempt the primary.
+  The old FN-7758 behavior routed the whole session onto the Grok CLI runtime and promoted
+  the fallback model up front, so every planning session silently ran grok-4.5 instead of
+  the configured primary. The fixed invariant: primary stays on its own runtime with its
+  configured model; the unusable grok-cli fallback pair is dropped and the drop is audited.
+  */
+  it("keeps the configured primary and drops a grok-cli fallback when no Fusion-visible key exists", async () => {
     vi.mocked(fusionCore.isGrokApiKeyFusionVisible).mockReturnValue(false);
     const grokRegistration = await createGrokRegistration();
-    const pluginRunner = createMockPluginRunner({
-      getRuntimeById: vi.fn().mockReturnValue(grokRegistration),
-    });
+    const getRuntimeById = vi.fn().mockReturnValue(grokRegistration);
+    const pluginRunner = createMockPluginRunner({ getRuntimeById });
     const audit = { database: vi.fn().mockResolvedValue(undefined) };
 
     const result = await createResolvedAgentSession({
@@ -445,23 +453,26 @@ describe("Grok CLI runtime routing (FN-7725)", () => {
       systemPrompt: "fallback-selection-only",
     });
 
-    expect(result.runtimeId).toBe("grok");
-    expect(result.wasConfigured).toBe(true);
-    expect(mockCreateFnAgent).not.toHaveBeenCalled();
-    expect(result.session).toMatchObject({ model: "grok-4.5" });
+    expect(result.runtimeId).toBe("pi");
+    expect(mockCreateFnAgent).toHaveBeenCalledWith(expect.objectContaining({
+      defaultProvider: "openai",
+      defaultModelId: "gpt-4o",
+      fallbackProvider: undefined,
+      fallbackModelId: undefined,
+    }));
     expect(audit.database).toHaveBeenCalledWith(expect.objectContaining({
       type: "session:runtime-resolved",
-      target: "grok",
+      target: "pi",
       metadata: expect.objectContaining({
-        runtimeHint: "grok",
-        reason: "grok-cli-no-visible-key",
+        reason: "grok-cli-fallback-dropped-no-visible-key",
+        grokCliFallbackDropped: true,
         provider: "openai",
         modelId: "gpt-4o",
       }),
     }));
   });
 
-  it("auto-routes a bare grok-cli fallback model id without adding a provider prefix", async () => {
+  it("drops a bare grok-cli fallback model id while leaving the primary untouched", async () => {
     vi.mocked(fusionCore.isGrokApiKeyFusionVisible).mockReturnValue(false);
     const grokRegistration = await createGrokRegistration();
     const pluginRunner = createMockPluginRunner({
@@ -479,8 +490,37 @@ describe("Grok CLI runtime routing (FN-7725)", () => {
       systemPrompt: "fallback-bare-model",
     });
 
-    expect(result.runtimeId).toBe("grok");
-    expect(result.session).toMatchObject({ model: "grok-4.5" });
+    expect(result.runtimeId).toBe("pi");
+    expect(mockCreateFnAgent).toHaveBeenCalledWith(expect.objectContaining({
+      defaultProvider: "anthropic",
+      defaultModelId: "claude-sonnet-4-5",
+      fallbackProvider: undefined,
+      fallbackModelId: undefined,
+    }));
+  });
+
+  it("keeps a grok-cli fallback when a Fusion-visible key exists (pi can resolve it directly)", async () => {
+    vi.mocked(fusionCore.isGrokApiKeyFusionVisible).mockReturnValue(true);
+    const pluginRunner = createMockPluginRunner();
+
+    const result = await createResolvedAgentSession({
+      sessionPurpose: "executor",
+      pluginRunner,
+      cwd: "/tmp/project",
+      defaultProvider: "openai",
+      defaultModelId: "gpt-4o",
+      fallbackProvider: "grok-cli",
+      fallbackModelId: "grok-4.5",
+      systemPrompt: "visible-key-fallback",
+    });
+
+    expect(result.runtimeId).toBe("pi");
+    expect(mockCreateFnAgent).toHaveBeenCalledWith(expect.objectContaining({
+      defaultProvider: "openai",
+      defaultModelId: "gpt-4o",
+      fallbackProvider: "grok-cli",
+      fallbackModelId: "grok-4.5",
+    }));
   });
 
   it("keeps mock/test-mode provider routing on the mock runtime when grok-cli fallback is configured", async () => {

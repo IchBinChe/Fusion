@@ -568,6 +568,7 @@ export {
 export {
   resolveEffectiveSettings,
   resolveEffectiveSettingsDetailed,
+  resolveProjectWorkflowModelLaneBaseline,
   resolveEffectiveSettingsById,
   resolveOptionalReviewRevisionBudget,
   resolveEffectivePlannerOversightLevel,
@@ -1572,9 +1573,13 @@ export {
 } from "./ai-summarize.js";
 export {
   applyTestModeOverrides,
+  hasConfiguredFallbackLane,
   isTestModeActive,
   resolveExecutionSettingsModel,
   resolveExecutorFallbackModel,
+  resolvePlanningFallbackModel,
+  resolveValidatorFallbackModel,
+  resolveSelectedWorkflowModelLane,
   resolveMergerFallbackModel,
   resolveMergerSettingsModel,
   resolvePhaseThinkingLevel,

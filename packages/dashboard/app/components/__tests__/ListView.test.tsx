@@ -2248,6 +2248,8 @@ describe("ListView", () => {
   it.each([
     { status: "executing", column: "in-progress" as const, label: "executing" },
     { status: "merging-fix", column: "in-review" as const, label: "Merging fixes…" },
+    { status: "needs-replan", column: "triage" as const, label: "Revising" },
+    { status: "needs-replan", column: "todo" as const, label: "Revising" },
   ])("renders agent-active tasks with static highlight styling for $status", ({ status, column, label }) => {
     const tasks = [
       createMockTask({
@@ -5378,6 +5380,8 @@ describe("ListView - Bulk Selection", () => {
     it.each([
       { status: "executing", column: "in-progress" as const },
       { status: "merging-fix", column: "in-review" as const },
+      { status: "needs-replan", column: "triage" as const },
+      { status: "needs-replan", column: "todo" as const },
     ])("applies agent-active class to mobile cards for active states (%s)", ({ status, column }) => {
       mockMobileViewport();
 

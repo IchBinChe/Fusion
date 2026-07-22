@@ -55,6 +55,7 @@ vi.mock("../QuickEntryBox", () => ({
     workflowId,
     workflowOptions,
     defaultWorkflowId,
+    onMoveTask,
   }: {
     onCreate?: (input: { description: string; workflowId?: string | null }) => Promise<unknown>;
     addToast: (message: string, type?: "error" | "success" | "info" | "warning") => void;
@@ -63,6 +64,7 @@ vi.mock("../QuickEntryBox", () => ({
     workflowId?: string | null;
     workflowOptions?: { id: string; name: string }[];
     defaultWorkflowId?: string | null;
+    onMoveTask?: (id: string, column: string) => Promise<unknown>;
   }) => {
     const [value, setValue] = useState("");
     const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null | undefined>(
@@ -144,6 +146,9 @@ vi.mock("../QuickEntryBox", () => ({
           <span data-testid="quick-entry-workflow-props" data-workflow-id={workflowId ?? ""} data-default-workflow-id={defaultWorkflowId ?? ""} data-workflow-options={JSON.stringify((workflowOptions ?? []).map((option) => option.id))} />
           <button type="button" data-testid="quick-entry-save" onClick={() => void submit()}>
             Save
+          </button>
+          <button type="button" data-testid="quick-entry-move" onClick={() => void onMoveTask?.("FN-created", "todo")}>
+            Move
           </button>
         </div>
         {modelMenuOpen ? (
@@ -3668,6 +3673,13 @@ describe("ListView Quick Entry", () => {
     expect(quickEntryArea?.contains(quickEntry)).toBe(true);
     // QuickEntryBox should be inside the table container (parent of quick-entry area)
     expect(tableContainer?.contains(quickEntry)).toBe(true);
+  });
+
+  it("wires QuickEntry Start moves through the list host callback", async () => {
+    const onMoveTask = vi.fn().mockResolvedValue(createMockTask({ id: "FN-created", column: "todo" }));
+    renderListView({ onQuickCreate: vi.fn(), onMoveTask });
+    fireEvent.click(screen.getByTestId("quick-entry-move"));
+    await waitFor(() => expect(onMoveTask).toHaveBeenCalledWith("FN-created", "todo"));
   });
 
   it("shows model selector control when QuickEntryBox is expanded", async () => {

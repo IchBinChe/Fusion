@@ -848,6 +848,7 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktree
           {canCreateInColumn && (
             <QuickEntryBox 
               onCreate={handleQuickCreate}
+              onMoveTask={onMoveTask}
               addToast={addToast} 
               tasks={allTasks ?? []}
               availableModels={availableModels}

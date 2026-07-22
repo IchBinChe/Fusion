@@ -2592,6 +2592,7 @@ export function ListView({
             <div className="list-quick-entry-above-table">
               <QuickEntryBox 
                 onCreate={handleListQuickCreate}
+                onMoveTask={onMoveTask}
                 addToast={addToast}
                 tasks={tasks}
                 availableModels={availableModels}

@@ -34,7 +34,7 @@ vi.mock("../WorktreeGroup", () => ({
   ),
 }));
 vi.mock("../QuickEntryBox", () => ({
-  QuickEntryBox: ({ favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, autoExpand, onCreate }: { favoriteProviders?: string[]; favoriteModels?: string[]; onToggleFavorite?: (provider: string) => void; onToggleModelFavorite?: (modelId: string) => void; autoExpand?: boolean; onCreate?: (input: { description: string }) => void }) => (
+  QuickEntryBox: ({ favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, autoExpand, onCreate, onMoveTask }: { favoriteProviders?: string[]; favoriteModels?: string[]; onToggleFavorite?: (provider: string) => void; onToggleModelFavorite?: (modelId: string) => void; autoExpand?: boolean; onCreate?: (input: { description: string }) => void; onMoveTask?: (id: string, column: string) => Promise<unknown> }) => (
     <div
       data-testid="quick-entry-box"
       data-favorite-providers={JSON.stringify(favoriteProviders ?? [])}
@@ -44,6 +44,7 @@ vi.mock("../QuickEntryBox", () => ({
       data-auto-expand={autoExpand === false ? "false" : "true"}
     >
       <button type="button" onClick={() => onCreate?.({ description: "Quick task" })}>create</button>
+      <button type="button" data-testid="quick-entry-move" onClick={() => void onMoveTask?.("FN-created", "todo")}>move</button>
     </div>
   ),
 }));
@@ -650,6 +651,13 @@ describe("Column QuickEntryBox", () => {
     render(<Column {...defaultProps} tasks={tasks} onQuickCreate={vi.fn()} />);
     const quickEntry = screen.getByTestId("quick-entry-box");
     expect(quickEntry.getAttribute("data-auto-expand")).toBe("false");
+  });
+
+  it("wires QuickEntry Start moves through the host state-updating callback", async () => {
+    const onMoveTask = vi.fn().mockResolvedValue(makeTask("FN-created"));
+    render(<Column {...defaultProps} tasks={[]} onQuickCreate={vi.fn()} onMoveTask={onMoveTask} />);
+    fireEvent.click(screen.getByTestId("quick-entry-move"));
+    await waitFor(() => expect(onMoveTask).toHaveBeenCalledWith("FN-created", "todo"));
   });
 
   it("preserves selected built-in workflow id when quick-creating in workflow mode", async () => {

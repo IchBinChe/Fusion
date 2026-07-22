@@ -69,6 +69,7 @@
     "fix-pooled-worktree-ownership",
     "fix-postgres-activity-lifecycle",
     "fix-postgres-startup-migration-deadlock",
+    "fix-settings-beta-update-check",
     "fix-task-card-overseer-cache",
     "fix-task-done-summary-prose",
     "fix-triage-prompt-writer-tools",

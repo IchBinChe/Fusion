@@ -2,6 +2,110 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
+## 0.73.0-beta.2
+
+### Highlights
+- Choose your update track: new beta and stable release channels, selectable in Settings or via `fn update --channel`
+- Custom workflows finally own the board — cards move through your own columns, not a fixed six
+- Security: report screenshots and activity traces are scrubbed of paths and tokens before filing
+- Auto-generated task verification videos now show up in the Quality hub when review artifacts are enabled
+- Dozens of Planning Mode fixes: reliable resume, scrollable plans, mobile support, and an end to false completions
+
+### New
+- Beta and stable release channels with independent update tracking
+- Quality hub shows task verification videos when review artifacts are enabled
+- Review artifact controls and deliverable galleries for task reviews
+- Auto-generated feature-video artifacts captured at task completion
+- Guided in-app Bug, Feedback, Idea, and Help reporting, with GitHub Issues or Discussions destinations and roadmap dedup
+- Consent-based screenshots and scrubbed activity context attached to in-app reports
+- Mission auto-merge override so a mission's features can share one branch and PR
+- Mailbox approval flow for ephemeral agent follow-up tasks
+- Unified max concurrency across planning, execution, and review with simplified board capacity indicators
+- Configuration version history and rollback moved into Settings
+- Portable secret-scrubbed organization export/import via `fn org-export` / `fn org-import`
+- Ideation is now a top-level experimental view with atomic Mission handoff
+- Mission hierarchy tools exposed to engine agents and dashboard chat
+- Task E2E verification requests observable from chat
+- Promote completed research findings into mission roadmap features
+- Native structure previews (missions, findings, evals, goals, roadmap items) in chat and mail
+- WhatsApp pairing QR and setup instructions surfaced in plugin settings
+- Embeddable PostgreSQL connection cap now configurable in Advanced Settings
+- Aurora, Calm, and Dawn dashboard color themes
+- Dashboard chat agents can now edit files and run bash with coding workspace tools
+
+### Fixed
+- SQLite→PostgreSQL migration status now shown on the dashboard during cutover
+- Reconnecting status text removed from Planning Mode
+- Approved task scope preserved during review and worktree recovery
+- Retried agent steps no longer create duplicate follow-up tasks
+- Boards on custom workflows show and move cards in their own columns
+- Built-in workflows no longer send cards backward to Todo or stall the PR workflow
+- Chat/mailbox crash from raw NUL bytes fixed
+- Server Claude CLI login issues reported immediately instead of a false usage timeout
+- Codex weekly usage now shown correctly
+- Task chat progress feed added for steps, failures, reviews, and rollbacks
+- Numerous Planning Mode reliability fixes: persistent timers, clean resume, mobile taps, refinement submission, clarifying questions, plan drafting, and history behavior
+- Workflows without a merge step now finish in their completion column
+- Tasks with no saved workflow selection can move between columns again
+- Dependency-ready workflow steps finalize correctly alongside slower steps
+- Task completion no longer blocked by summary wording
+- Windows update reliability and Compound Engineering persona restoration in npm installs
+- Chinese translations restored for duplicate roadmap reports
+- Overseer eye icon visibility fixes across task cards and detail view
+- Archived shared-branch landing proof preserved during PostgreSQL promotion
+- Task-card cost badge repositioned below Promote button
+- GitHub/GitLab issue form auto-translation fixed
+- PWAs recover auth tokens after unauthorized backend responses
+- Foreign-language issue forms auto-translate correctly
+- Token counts no longer inflated by reused agent sessions
+- GitHub issue import dedup hardened against edited descriptions
+- Dashboard build failure from missing html2canvas dependency fixed
+- Settings now auto-save with safe flush on close
+- Task detail inline icons and action buttons sized consistently across themes/breakpoints
+- Pinned chat conversations separated in list; message edit Save fixed
+- Compound Engineering navigation visibility fixed
+- Same-agent near-duplicates stay on the board by default
+- Report menu stacking and Command Center report placement fixed
+- Settings Configuration Versions translations restored for several locales
+- `@agentclientprotocol/sdk` install fix for Claude CLI pi extension
+- Mission interview start crash fixed for default thinking level
+- Startup crash fixed for projects with fallback and registered partition data
+- Grok/Claude Fusion MCP bridge packaging and model marker fixes
+- Only one agent badge shown when task is assigned to its creator
+- CLI chat replies and dashboard inbox reads restored
+- `fn chat` now a stable named mailbox conversation
+- Workflow tasks stay paused while awaiting operator answers to agent questions
+- Mobile navigation and Planning Mode back-navigation fixes
+- Dashboard TUI Logs tab timestamp noise reduced
+- Duplicate decisions persisted so Fusion doesn't re-ask
+- Skill loading, plugin enable-state consistency, and duplicate onLoad fixes
+- Workflow-definition ID collision fix on create
+- Provider-scoped task pauses now recover automatically when capacity returns
+- Mid-flight tasks from older Fusion versions now adopted cleanly on upgrade
+- MCP server unavailability no longer stalls tasks
+- Merge-review blockers preserved across concurrent-main rebuilds
+- Plan Review recovery for missing workflow plans
+- Duplicate in-progress GitHub tracking issue notifications eliminated
+- Custom Merging column now receives the card at merge instead of In-review
+- Mission features resume correctly after engine restart
+- Test-mode database isolation from the normal Fusion database
+- Anthropic OAuth token rotation no longer causes concurrent task fallback
+- Duplicate diagnostic follow-ups deduplicated across parents
+- Quick Add agent picker closes on outside click
+- In-progress-to-Todo moves now await executor cancellation before persisting
+- Plan Review replans no longer strand completed tasks in Triage
+- PostgreSQL migration-health read permission errors fixed
+- Report screenshots stored as validated local artifacts
+
+### Breaking
+- Removed the Planning Mode deepening checkpoint and fixed interview depth caps; explicit user validation now replaces AI-driven completion
+
+### Security
+- Report activityTrace payloads are now scrubbed of paths and tokens before filing
+
+### Internal
+- Review gates now run exclusively as workflow graph nodes; the in-session step reviewer (`fn_review_step`) and its RETHINK/checkpoint machinery are removed
+
 ## 0.73.0-beta.1
 
 ### Highlights

@@ -1,5 +1,12 @@
 # runfusion.ai
 
+## 0.73.0-beta.2
+
+### Patch Changes
+
+- Updated dependencies [757b423]
+  - @runfusion/fusion@0.73.0-beta.2
+
 ## 0.73.0-beta.1
 
 ### Patch Changes

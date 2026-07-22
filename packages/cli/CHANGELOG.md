@@ -1,5 +1,13 @@
 # @runfusion/fusion
 
+## 0.73.0-beta.2
+
+### Patch Changes
+
+- 757b423: summary: Settings Check for updates now finds newer beta releases when the beta channel is selected.
+  category: fix
+  dev: Settings footer and GET /api/updates/check now force-refresh through channel-aware performUpdateCheck (updateChannel + npm beta dist-tag) instead of always querying registry latest with prerelease-blind compare.
+
 ## 0.73.0-beta.1
 
 ### Minor Changes

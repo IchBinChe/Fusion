@@ -1620,7 +1620,7 @@ For setup prerequisites, security caveats for tokenized URLs/QR links, and troub
 
 The Skills view now supports the full browse-and-install loop for skills.sh entries: use **Skills Catalog** to search the catalog, click **Install** on any card with a source repository, and the dashboard will run the same installer as the CLI (`npx skills add <owner/repo> -y -a pi`, with `--skill <slug>` when applicable). On success, the view refreshes **Discovered Skills** immediately so the newly installed skill appears without a page reload.
 
-The Skills API provides endpoints for managing execution skills. Skills are toggled via project-scoped settings in `.fusion/settings.json`.
+The Skills API provides endpoints for managing execution skills. Skills are toggled via project-scoped settings in `.fusion/settings.json`. Toggle entries match the skill body’s relative path beneath `skills/` (for example, `api/api-versioning/SKILL.md`), not just its displayed name. Stale flat-layout entries such as `-api-versioning/SKILL.md` are ignored for skills that now use a categorized body path, keeping the Skills view and agent-session manifest aligned.
 
 ![Skills view](./screenshots/skills-view.png)
 

@@ -198,7 +198,13 @@ import type { StuckTaskDetector, StuckTaskEvent } from "./stuck-task-detector.js
 import type { PluginRunner } from "./plugin-runner.js";
 import { isContextLimitError } from "./context-limit-detector.js";
 import { StepSessionExecutor } from "./step-session-executor.js";
-import { makeAncestryBlastRadiusGuard, resetStepToBaseline, runTaskStep, type RunTaskStepResult } from "./step-runner.js";
+import {
+  isUsableWorktreeDirectory,
+  makeAncestryBlastRadiusGuard,
+  resetStepToBaseline,
+  runTaskStep,
+  type RunTaskStepResult,
+} from "./step-runner.js";
 // FNXC:MergerUnification 2026-06-21-19:05: the foundation branch imported `acquireWorkspaceRepoWorktree` here but never used it in executor.ts (the agent tool wraps it via agent-tools.ts), which fails lint on the inherited base. Removed until master-plan U1 re-adds it together with its per-repo acquisition usage.
 import { acquireTaskWorktree, type AcquireTaskWorktreeResult } from "./worktree-acquisition.js";
 import { resolveCapturedBaseCommitSha } from "./base-commit-capture.js";
@@ -6883,7 +6889,13 @@ export class TaskExecutor {
         thinkingLevel,
       );
 
-    if (!worktreePath) {
+    /*
+     * FNXC:BaselineCwdGating 2026-07-21-19:21:
+     * FN-8464 requires graph step projection to defer until this candidate is a real directory.
+     * A stale, non-directory, or inaccessible truthy path must follow fresh-worktree ordering so
+     * runTaskStep never spawns baseline git with an unusable cwd; acquisition supplies baseCommitSha.
+     */
+    if (!worktreePath || !isUsableWorktreeDirectory(worktreePath)) {
       const result = await runStep(stepIndex);
       const refreshed = await this.store.getTask(task.id).catch(() => live);
       return {

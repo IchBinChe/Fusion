@@ -344,35 +344,81 @@ describe("useColumnScrollSnap", () => {
   });
 
   /*
-  FNXC:BoardNavigation 2026-07-22-15:10:
-  Tap-to-stop during post-lift momentum must not hard-jump using the original swipe direction.
+  FNXC:BoardNavigation 2026-07-22-15:10 / 2026-07-22-15:26:
+  Tap-to-stop during post-lift momentum must not page with the original swipe direction, and
+  must hard-jump to the nearest column center so the board never rests between columns.
   */
-  it("does not jump when the user taps during momentum after a swipe", () => {
+  it("tap during momentum settles to nearest column, not the cancelled swipe direction", () => {
     const scroller = createScroller(3, 0);
     renderHook(() => useColumnScrollSnap(scroller, { mobileOnly: true, isUserInteraction: () => true }));
 
     act(() => {
-      // Start a forward swipe and lift so the idle settle is armed.
+      // Forward swipe arms a rightward directional settle (would page to column 1).
       dispatchPointerEvent(scroller, "pointerdown", 200);
       dispatchPointerEvent(scroller, "pointermove", 160);
       scroller.scrollLeft = 30;
       scroller.dispatchEvent(new Event("scroll"));
       dispatchPointerEvent(scroller, "pointerup", 160);
 
-      // Coast a bit more (native fling), then the user taps to stop mid-travel.
+      // Coast only slightly — still nearest to column 0 — then tap to stop.
+      scroller.scrollLeft = 40;
+      scroller.dispatchEvent(new Event("scroll"));
+      dispatchPointerEvent(scroller, "pointerdown", 100);
+      dispatchPointerEvent(scroller, "pointerup", 100);
+    });
+
+    settleAfterMomentum();
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
+    // Nearest is column 0; original rightward settle would have jumped to COLUMN_WIDTH.
+    expect(scroller.scrollLeft).toBe(0);
+    expect(isColumnCentered(scroller, [...scroller.children] as HTMLElement[])).toBe(true);
+  });
+
+  it("tap during momentum past the midpoint snaps to the nearer column center", () => {
+    const scroller = createScroller(3, 0);
+    renderHook(() => useColumnScrollSnap(scroller, { mobileOnly: true, isUserInteraction: () => true }));
+
+    act(() => {
+      dispatchPointerEvent(scroller, "pointerdown", 200);
+      dispatchPointerEvent(scroller, "pointermove", 160);
+      scroller.scrollLeft = 30;
+      scroller.dispatchEvent(new Event("scroll"));
+      dispatchPointerEvent(scroller, "pointerup", 160);
+
+      // Past the midpoint toward column 1 — nearest is column 1.
       scroller.scrollLeft = 55;
       scroller.dispatchEvent(new Event("scroll"));
       dispatchPointerEvent(scroller, "pointerdown", 100);
       dispatchPointerEvent(scroller, "pointerup", 100);
     });
 
-    // Without re-baselining the second touch, the original rightward settle would jump to COLUMN_WIDTH.
     settleAfterMomentum();
     act(() => {
       vi.advanceTimersByTime(500);
     });
 
-    expect(scroller.scrollLeft).toBe(55);
+    expect(scroller.scrollLeft).toBe(COLUMN_WIDTH);
+    expect(isColumnCentered(scroller, [...scroller.children] as HTMLElement[])).toBe(true);
+  });
+
+  it("never rests between columns after a zero-direction settle", () => {
+    const scroller = createScroller(3, 40);
+    renderHook(() => useColumnScrollSnap(scroller, { mobileOnly: true, isUserInteraction: () => true }));
+
+    act(() => {
+      dispatchPointerEvent(scroller, "pointerdown", 200);
+      scroller.scrollLeft = 40;
+      scroller.dispatchEvent(new Event("scroll"));
+      dispatchPointerEvent(scroller, "pointerup", 200);
+    });
+    settleAfterMomentum();
+
+    const columns = [...scroller.children] as HTMLElement[];
+    expect(isColumnCentered(scroller, columns)).toBe(true);
+    expect([0, COLUMN_WIDTH, COLUMN_WIDTH * 2]).toContain(scroller.scrollLeft);
   });
 
   it("starts a new directional settle after a pan that continues from a mid-momentum re-touch", () => {
@@ -398,6 +444,7 @@ describe("useColumnScrollSnap", () => {
     settleAfterMomentum();
 
     expect(scroller.scrollLeft).toBe(0);
+    expect(isColumnCentered(scroller, [...scroller.children] as HTMLElement[])).toBe(true);
   });
 
   it("does not attach on non-phone desktop", () => {

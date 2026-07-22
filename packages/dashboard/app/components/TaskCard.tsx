@@ -329,8 +329,16 @@ const TIME_INDICATOR_COLUMNS = new Set<ColumnId>([
 ]);
 const LIVE_TIME_INDICATOR_POLL_MS = 30_000;
 
+/*
+FNXC:TaskCardStatus 2026-07-31-00:00:
+FN-8482 requires compact no-ellipsis active-merge labels on task cards, while the shared
+status mapper retains its ellipsis-bearing output for ListView and other non-card surfaces.
+Only strip a terminal Unicode ellipsis after the shared mapper resolves one of the active
+merge statuses so non-merge labels, status routing, and localization remain unchanged.
+*/
 function getTaskStatusLabel(status: string, t: TFunction<"app">, workflowStepLabel?: string): string {
-  return getTaskStatusBadgeLabel(status, t, workflowStepLabel);
+  const label = getTaskStatusBadgeLabel(status, t, workflowStepLabel);
+  return ACTIVE_MERGE_STATUSES.has(status) && label.endsWith("…") ? label.slice(0, -1) : label;
 }
 
 function getDoneCompletionMs(task: Task): number | null {
@@ -3144,9 +3152,7 @@ function TaskCardComponent({
                     ? t("tasks.needsInput", "Needs input")
                     : isTransientPlannerActive
                       ? t("tasks.statusPlanning", "Planning")
-                      : visualStatus === "merging-fix"
-                        ? t("tasks.statusMergingFix", "Merging fixes…")
-                        : getTaskStatusLabel(visualStatus!, t, getRunningWorkflowStepLabel(task))}
+                      : getTaskStatusLabel(visualStatus!, t, getRunningWorkflowStepLabel(task))}
           </span>
         )}
         {showOptionalGateBadge && optionalGateBadge && (

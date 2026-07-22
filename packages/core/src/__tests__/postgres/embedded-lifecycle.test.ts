@@ -490,12 +490,16 @@ describe("embedded-lifecycle: macOS dylib compatibility links", () => {
       writeFileSync(join(libDir, "libzstd.1.5.7.dylib"), "");
       writeFileSync(join(libDir, "liblz4.1.10.0.dylib"), "");
       writeFileSync(join(libDir, "libz.1.3.2.dylib"), "");
+      // This is the loader-name pair in the packaged Darwin payload: i18n
+      // requests the ABI-specific uc name rather than the unversioned link.
       writeFileSync(join(libDir, "libicui18n.68.2.dylib"), "");
+      writeFileSync(join(libDir, "libicuuc.68.2.dylib"), "");
 
       const created = normalizeMacosEmbeddedPostgresDylibSymlinks(nativeRoot);
 
       expect(created.map((link) => link.expected).sort()).toEqual([
         "libicui18n.dylib",
+        "libicuuc.68.dylib",
         "liblz4.1.dylib",
         "libpq.5.dylib",
         "libz.1.dylib",
@@ -503,6 +507,7 @@ describe("embedded-lifecycle: macOS dylib compatibility links", () => {
       ]);
       expect(readlinkSync(join(libDir, "libpq.5.dylib"))).toBe("libpq.5.15.dylib");
       expect(readlinkSync(join(libDir, "libzstd.1.dylib"))).toBe("libzstd.1.5.7.dylib");
+      expect(readlinkSync(join(libDir, "libicuuc.68.dylib"))).toBe("libicuuc.68.2.dylib");
 
       // Idempotent: the second pass sees the compatibility names and creates nothing.
       expect(normalizeMacosEmbeddedPostgresDylibSymlinks(nativeRoot)).toEqual([]);
@@ -511,20 +516,37 @@ describe("embedded-lifecycle: macOS dylib compatibility links", () => {
     }
   });
 
-  it("replaces stale broken compatibility-name symlinks", () => {
+  it("selects the highest matching ICU patch and repairs a dangling loader-name link", () => {
     const nativeRoot = mkdtempSync(join(tmpdir(), "fusion-embedded-native-"));
     try {
       const libDir = join(nativeRoot, "lib");
       mkdirSync(libDir, { recursive: true });
-      writeFileSync(join(libDir, "libpq.5.16.dylib"), "");
-      symlinkSync("libpq.5.15.dylib", join(libDir, "libpq.5.dylib"));
+      writeFileSync(join(libDir, "libicuuc.68.2.dylib"), "");
+      writeFileSync(join(libDir, "libicuuc.68.12.dylib"), "");
+      symlinkSync("libicuuc.68.1.dylib", join(libDir, "libicuuc.68.dylib"));
 
       const created = normalizeMacosEmbeddedPostgresDylibSymlinks(nativeRoot);
 
       expect(created).toEqual([
-        { expected: "libpq.5.dylib", target: "libpq.5.16.dylib", created: true },
+        { expected: "libicuuc.68.dylib", target: "libicuuc.68.12.dylib", created: true },
       ]);
-      expect(readlinkSync(join(libDir, "libpq.5.dylib"))).toBe("libpq.5.16.dylib");
+      expect(readlinkSync(join(libDir, "libicuuc.68.dylib"))).toBe("libicuuc.68.12.dylib");
+    } finally {
+      rmSync(nativeRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves a valid ICU compatibility link and treats absent library trees as no-ops", () => {
+    const nativeRoot = mkdtempSync(join(tmpdir(), "fusion-embedded-native-"));
+    try {
+      const libDir = join(nativeRoot, "lib");
+      mkdirSync(libDir, { recursive: true });
+      writeFileSync(join(libDir, "libicuuc.68.2.dylib"), "");
+      symlinkSync("libicuuc.68.2.dylib", join(libDir, "libicuuc.68.dylib"));
+
+      expect(normalizeMacosEmbeddedPostgresDylibSymlinks(nativeRoot)).toEqual([]);
+      expect(readlinkSync(join(libDir, "libicuuc.68.dylib"))).toBe("libicuuc.68.2.dylib");
+      expect(normalizeMacosEmbeddedPostgresDylibSymlinks(join(nativeRoot, "missing"))).toEqual([]);
     } finally {
       rmSync(nativeRoot, { recursive: true, force: true });
     }
@@ -1109,6 +1131,125 @@ describe("embedded-lifecycle: readPortFromPostmasterPid (P1 code-review fix)", (
  * both startup-factory boot and direct lifecycle callers. Mock starts reject
  * before database work so these tests stay deterministic and process-free.
  */
+/*
+ * FNXC:PostgresEmbedded 2026-07-21-10:00:
+ * A shared data directory's pid file is the cross-process join contract. These
+ * process-free tests make the original extension timeout reproducible: the real
+ * layout joins using index 3, while a persistent unreadable lock file must never
+ * instantiate a colliding embedded-postgres start.
+ */
+describe("embedded-lifecycle: postmaster.pid join safety", () => {
+  it("joins an issue-shaped live pid without instantiating a second postmaster", async () => {
+    const dataDir = makeDataDir();
+    const ctor = vi.fn();
+    class UnexpectedEmbeddedPostgres {
+      constructor() {
+        ctor();
+      }
+      initialise = vi.fn(async () => {});
+      start = vi.fn(async () => {});
+      stop = vi.fn(async () => {});
+    }
+    __setEmbeddedPostgresCtorForTests(UnexpectedEmbeddedPostgres as never);
+    const ensureJoinedDatabase = vi
+      .spyOn(EmbeddedPostgresLifecycle.prototype, "ensureJoinedDatabase")
+      .mockResolvedValue(undefined);
+    try {
+      writeFileSync(
+        join(dataDir, "postmaster.pid"),
+        ["1866", dataDir, "1784424901", "34643", "/tmp", "localhost", "79484 2", "ready"].join("\n") + "\n",
+      );
+      const lifecycle = new EmbeddedPostgresLifecycle(baseOptions(dataDir));
+
+      await expect(lifecycle.start()).resolves.toMatchObject({
+        runtimeUrl: expect.stringContaining(":34643/"),
+      });
+      expect(ensureJoinedDatabase).toHaveBeenCalledWith(34643);
+      expect(ctor).not.toHaveBeenCalled();
+      expect(lifecycle.getOwnsProcess()).toBe(false);
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed for an unparseable present pid without starting PostgreSQL", async () => {
+    const dataDir = makeDataDir();
+    const ctor = vi.fn();
+    class UnexpectedEmbeddedPostgres {
+      constructor() {
+        ctor();
+      }
+      initialise = vi.fn(async () => {});
+      start = vi.fn(async () => {});
+      stop = vi.fn(async () => {});
+    }
+    __setEmbeddedPostgresCtorForTests(UnexpectedEmbeddedPostgres as never);
+    try {
+      // `/tmp` at index 3 mirrors the prior off-by-one regression shape.
+      writeFileSync(
+        join(dataDir, "postmaster.pid"),
+        ["1866", dataDir, "1784424901", "/tmp", "localhost", "79484 2", "ready"].join("\n") + "\n",
+      );
+      const lifecycle = new EmbeddedPostgresLifecycle(baseOptions(dataDir));
+
+      await expect(lifecycle.start()).rejects.toThrow(
+        /postmaster\.pid is present but its port could not be read.*second postmaster will not be started/i,
+      );
+      expect(ctor).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed for an empty present pid without starting PostgreSQL", async () => {
+    const dataDir = makeDataDir();
+    const ctor = vi.fn();
+    class UnexpectedEmbeddedPostgres {
+      constructor() {
+        ctor();
+      }
+      initialise = vi.fn(async () => {});
+      start = vi.fn(async () => {});
+      stop = vi.fn(async () => {});
+    }
+    __setEmbeddedPostgresCtorForTests(UnexpectedEmbeddedPostgres as never);
+    try {
+      writeFileSync(join(dataDir, "postmaster.pid"), "");
+      const lifecycle = new EmbeddedPostgresLifecycle(baseOptions(dataDir));
+
+      await expect(lifecycle.start()).rejects.toThrow(/postmaster\.pid is present but its port could not be read/i);
+      expect(ctor).not.toHaveBeenCalled();
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("allows a fresh start when postmaster.pid is absent", async () => {
+    const dataDir = makeDataDir();
+    const ctor = vi.fn();
+    const expected = new Error("mock start reached");
+    class RecordingEmbeddedPostgres {
+      constructor() {
+        ctor();
+      }
+      initialise = vi.fn(async () => {});
+      start = vi.fn(async () => {
+        throw expected;
+      });
+      stop = vi.fn(async () => {});
+    }
+    __setEmbeddedPostgresCtorForTests(RecordingEmbeddedPostgres as never);
+    try {
+      const lifecycle = new EmbeddedPostgresLifecycle({ ...baseOptions(dataDir), startTimeoutMs: 0 });
+
+      await expect(lifecycle.start()).rejects.toBe(expected);
+      expect(ctor).toHaveBeenCalledOnce();
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("embedded-lifecycle: shared-memory-safe postgres flags", () => {
   const sentinel = new Error("mock postgres start complete");
 

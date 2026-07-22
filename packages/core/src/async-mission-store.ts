@@ -9,7 +9,7 @@ import { EventEmitter } from "node:events";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import * as schema from "./postgres/schema/index.js";
 import type { AsyncDataLayer } from "./postgres/data-layer.js";
-import { normalizeMissionAssertionType } from "./mission-types.js";
+import { FEATURE_LOOP_TRANSITIONS, normalizeMissionAssertionType } from "./mission-types.js";
 import type {
   Mission,
   Milestone,
@@ -98,7 +98,9 @@ import {
   updateFeature,
   deleteFeature,
   getFeatureByTaskId,
+  getConflictingFeatureByTaskId,
   unlinkFeatureFromTaskId,
+  getTerminalTaskEvidence,
   getMaxEventSeq,
   insertMissionEvent,
   countMissionEvents,
@@ -180,6 +182,24 @@ import {
  * Validator-run and generated-fix events are emitted after their PostgreSQL
  * transactions commit, matching the synchronous store's observable contract.
  */
+export type TerminalTaskReconciliationErrorCode =
+  | "FEATURE_NOT_FOUND"
+  | "TASK_NOT_FOUND"
+  | "TASK_NOT_TERMINAL"
+  | "TASK_ARCHIVE_INVALID"
+  | "FEATURE_TASK_CONFLICT"
+  | "TASK_FEATURE_CONFLICT";
+
+export class TerminalTaskReconciliationError extends Error {
+  constructor(
+    public readonly code: TerminalTaskReconciliationErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "TerminalTaskReconciliationError";
+  }
+}
+
 export class AsyncMissionStore extends EventEmitter<MissionStoreEvents> {
   private idSequence = 0;
   private readonly milestonesMissingStructuredAssertions = new Set<string>();
@@ -915,6 +935,92 @@ export class AsyncMissionStore extends EventEmitter<MissionStoreEvents> {
     return updated;
   }
 
+  /**
+   * FNXC:MissionReconciliation 2026-07-20-08:34:
+   * Shipped-delivery repair is a dedicated transaction, not ordinary feature linking. It accepts only a live done row or the supported retained archived tombstone+cold snapshot, preserves conflict guards, leaves loop attempts and mission run controls untouched, and updates only the live task backlink because archived evidence must never be resurrected.
+   */
+  async reconcileFeatureDoneWithTerminalTask(featureId: string, taskId: string): Promise<MissionFeature> {
+    const outcome = await this.layer.transactionImmediate(async (tx) => {
+      const feature = await getFeature(tx, featureId);
+      if (!feature) {
+        throw new TerminalTaskReconciliationError("FEATURE_NOT_FOUND", `Feature ${featureId} not found`);
+      }
+      if (feature.taskId && feature.taskId !== taskId) {
+        throw new TerminalTaskReconciliationError(
+          "FEATURE_TASK_CONFLICT",
+          `Feature ${featureId} is already linked to ${feature.taskId}; cannot reconcile against ${taskId}`,
+        );
+      }
+
+      const evidence = await getTerminalTaskEvidence(tx, taskId);
+      if (evidence.kind === "missing") {
+        throw new TerminalTaskReconciliationError("TASK_NOT_FOUND", `Delivery task ${taskId} not found`);
+      }
+      if (evidence.kind === "nonterminal") {
+        throw new TerminalTaskReconciliationError(
+          "TASK_NOT_TERMINAL",
+          `Delivery task ${taskId} must be in done or supported archived state, not ${evidence.column}`,
+        );
+      }
+      if (evidence.kind === "invalid-deleted") {
+        throw new TerminalTaskReconciliationError(
+          "TASK_ARCHIVE_INVALID",
+          `Delivery task ${taskId} is deleted or archived without a valid retained tombstone and archive snapshot`,
+        );
+      }
+
+      const taskFeature = await getConflictingFeatureByTaskId(tx, taskId, featureId);
+      if (taskFeature) {
+        throw new TerminalTaskReconciliationError(
+          "TASK_FEATURE_CONFLICT",
+          `Delivery task ${taskId} is already linked to feature ${taskFeature.id}`,
+        );
+      }
+
+      const slice = await getSlice(tx, feature.sliceId);
+      if (!slice) throw new TerminalTaskReconciliationError("FEATURE_NOT_FOUND", `Slice ${feature.sliceId} not found`);
+      const milestone = await getMilestone(tx, slice.milestoneId);
+      if (!milestone) throw new TerminalTaskReconciliationError("FEATURE_NOT_FOUND", `Milestone ${slice.milestoneId} not found`);
+      const mission = await getMission(tx, milestone.missionId);
+      if (!mission) throw new TerminalTaskReconciliationError("FEATURE_NOT_FOUND", `Mission ${milestone.missionId} not found`);
+
+      const now = new Date().toISOString();
+      const featureChanged = feature.taskId !== taskId || feature.status !== "done";
+      const reconciledFeature: MissionFeature = featureChanged
+        ? { ...feature, taskId, status: "done", updatedAt: now }
+        : feature;
+      if (featureChanged) await updateFeature(tx, reconciledFeature);
+
+      if (evidence.kind === "done") {
+        await setTaskMissionLinkage(tx, taskId, mission.id, slice.id);
+      }
+
+      const sliceStatus = await this.computeSliceStatusWithHandle(tx, slice.id);
+      const reconciledSlice = slice.status === sliceStatus ? slice : { ...slice, status: sliceStatus, updatedAt: now };
+      if (reconciledSlice !== slice) await updateSlice(tx, reconciledSlice);
+
+      const milestoneStatus = await this.computeMilestoneStatusWithHandle(tx, milestone.id);
+      const reconciledMilestone = milestone.status === milestoneStatus
+        ? milestone
+        : { ...milestone, status: milestoneStatus, updatedAt: now };
+      if (reconciledMilestone !== milestone) await updateMilestone(tx, reconciledMilestone);
+
+      return {
+        feature: reconciledFeature,
+        featureChanged,
+        linked: feature.taskId !== taskId,
+        slice: reconciledSlice !== slice ? reconciledSlice : undefined,
+        milestone: reconciledMilestone !== milestone ? reconciledMilestone : undefined,
+      };
+    });
+
+    if (outcome.featureChanged) this.emit("feature:updated", outcome.feature);
+    if (outcome.linked) this.emit("feature:linked", { feature: outcome.feature, taskId });
+    if (outcome.slice) this.emit("slice:updated", outcome.slice);
+    if (outcome.milestone) this.emit("milestone:updated", outcome.milestone);
+    return outcome.feature;
+  }
+
   async linkFeatureToTask(featureId: string, taskId: string): Promise<MissionFeature> {
     const feature = await getFeature(this.db, featureId);
     if (!feature) throw new Error(`Feature ${featureId} not found`);
@@ -1230,11 +1336,53 @@ export class AsyncMissionStore extends EventEmitter<MissionStoreEvents> {
     const feature = await getFeature(this.db, featureId);
     if (!feature) throw new Error(`Feature ${featureId} not found`);
     const current = feature.loopState ?? "idle";
-    const valid: Record<FeatureLoopState, FeatureLoopState[]> = { idle: ["implementing"], implementing: ["validating"], validating: ["needs_fix", "passed", "blocked"], needs_fix: ["implementing"], passed: [], blocked: [] };
-    if (!valid[current].includes(newState)) throw new Error(`Invalid loop state transition from '${current}' to '${newState}'. Allowed transitions from '${current}': ${valid[current].join(", ") || "none"}`);
+    const allowedNextStates = FEATURE_LOOP_TRANSITIONS[current] || [];
+    if (!allowedNextStates.includes(newState)) throw new Error(`Invalid loop state transition from '${current}' to '${newState}'. Allowed transitions from '${current}': ${allowedNextStates.join(", ") || "none"}`);
     if (newState === "implementing" && (feature.implementationAttemptCount ?? 0) >= DEFAULT_IMPLEMENTATION_RETRY_BUDGET) {
       await this.updateFeature(featureId, { loopState: "blocked" });
       throw new Error(`Feature ${featureId} has exhausted its retry budget (${DEFAULT_IMPLEMENTATION_RETRY_BUDGET} attempts). Transitioning to 'blocked' state.`);
+    }
+
+    /*
+    FNXC:MissionRecovery 2026-07-21-21:30:
+    Recovering validating to implementing must terminalize the interrupted validator run in the same transaction as the feature transition. A stale reaper or delayed validator completion must not overwrite the resumed feature with an outcome from the abandoned validation cycle.
+    */
+    if (current === "validating" && newState === "implementing" && feature.lastValidatorRunId) {
+      const run = await getValidatorRun(this.db, feature.lastValidatorRunId);
+      if (run?.status === "running") {
+        const now = new Date().toISOString();
+        const interruptedRun: MissionValidatorRun = {
+          ...run,
+          status: "error",
+          summary: "Interrupted validation was superseded by loop-state recovery",
+          completedAt: now,
+          updatedAt: now,
+        };
+        const won = await this.layer.transactionImmediate(async (tx) => {
+          const terminalRun = await transitionRunningValidatorRun(tx, interruptedRun);
+          if (!terminalRun) return false;
+          await updateFeature(tx, {
+            ...feature,
+            loopState: "implementing",
+            lastValidatorStatus: "error",
+            updatedAt: now,
+          });
+          return true;
+        });
+        if (won) {
+          const updated = await getFeature(this.db, featureId);
+          if (!updated) throw new Error(`Feature ${featureId} not found after recovery`);
+          this.emit("feature:updated", updated);
+          this.emit("validator-run:completed", interruptedRun, "error", Math.max(0, Date.parse(now) - Date.parse(run.startedAt)));
+          return updated;
+        }
+
+        const freshFeature = await getFeature(this.db, featureId);
+        const freshCurrent = freshFeature?.loopState ?? "idle";
+        if (freshCurrent !== "validating") {
+          throw new Error(`Invalid loop state transition from '${freshCurrent}' to '${newState}'. Allowed transitions from '${freshCurrent}': ${(FEATURE_LOOP_TRANSITIONS[freshCurrent] || []).join(", ") || "none"}`);
+        }
+      }
     }
     return this.updateFeature(featureId, { loopState: newState });
   }
@@ -1719,10 +1867,14 @@ export class AsyncMissionStore extends EventEmitter<MissionStoreEvents> {
 
   // ════════════════ STATUS ROLLUP ════════════════
   async computeSliceStatus(sliceId: string): Promise<SliceStatus> {
-    const features = await listFeatures(this.db, sliceId);
+    return this.computeSliceStatusWithHandle(this.db, sliceId);
+  }
+
+  private async computeSliceStatusWithHandle(handle: QueryHandle, sliceId: string): Promise<SliceStatus> {
+    const features = await listFeatures(handle, sliceId);
     if (features.length === 0) return "pending";
     /* FNXC:MissionStatusPerformance 2026-07-14-18:45: Slice reconciliation loads assertion membership for the whole feature set once; status rollups must not issue one assertion query per feature. */
-    const featureIdsWithAssertions = await listFeatureIdsWithAssertions(this.db, features.map((feature) => feature.id));
+    const featureIdsWithAssertions = await listFeatureIdsWithAssertions(handle, features.map((feature) => feature.id));
     let allDone = true;
     for (const feature of features) {
       if (feature.status !== "done") { allDone = false; break; }
@@ -1739,7 +1891,11 @@ export class AsyncMissionStore extends EventEmitter<MissionStoreEvents> {
   }
 
   async computeMilestoneStatus(milestoneId: string): Promise<MilestoneStatus> {
-    const slices = await listSlices(this.db, milestoneId);
+    return this.computeMilestoneStatusWithHandle(this.db, milestoneId);
+  }
+
+  private async computeMilestoneStatusWithHandle(handle: QueryHandle, milestoneId: string): Promise<MilestoneStatus> {
+    const slices = await listSlices(handle, milestoneId);
     if (slices.length === 0) return "planning";
     const allComplete = slices.every((s) => s.status === "complete");
     if (allComplete) return "complete";

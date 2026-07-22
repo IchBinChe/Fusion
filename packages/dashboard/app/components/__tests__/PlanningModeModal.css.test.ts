@@ -7,6 +7,8 @@ const PLANNING_CSS_PATH = resolve(__dirname, "..", "PlanningModeModal.css");
 const TABLET_SUMMARY_ACTIONS_QUERY = "@media (min-width: 769px) and (max-width: 1024px)";
 const MOBILE_ACTIONS_QUERY = "@media (max-width: 768px)";
 const MOBILE_PLANNING_SHELL_QUERY = "@media (max-width: 768px), (max-height: 480px)";
+/* FNXC:PlanningMode 2026-07-21-18:41: flush pane rules cover tablet + desktop (two-pane shell). */
+const DESKTOP_PLANNING_WORKSPACE_QUERY = "@media (min-width: 769px)";
 
 function loadPlanningCss(): string {
   return readFileSync(PLANNING_CSS_PATH, "utf-8");
@@ -69,28 +71,99 @@ describe("PlanningModeModal CSS responsive action contract", () => {
     expect(embeddedRule).toMatch(/max-height\s*:\s*100%\s*;/);
   });
 
-  it("uses the compact interview switcher for mobile, short landscape, and tablet instead of crushing three panes", () => {
+  it("keeps question left and plan right on desktop, then uses full-view tabs on mobile", () => {
     const css = loadPlanningCss();
-    const shortShellCss = getMediaBlocks(css, MOBILE_PLANNING_SHELL_QUERY).join("\n");
+    const desktopRule = findRule(css, ".planning-workspace");
+    expect(desktopRule).toMatch(/grid-template-areas\s*:\s*"question plan"\s*;/);
+    // FNXC:PlanningMode 2026-07-21-16:47: interview panes sit flush — no outer workspace gutter or inter-pane gap.
+    expect(desktopRule).toMatch(/padding\s*:\s*0\s*;/);
+    expect(desktopRule).toMatch(/gap\s*:\s*0\s*;/);
+    expect(findRule(css, ".planning-plan-pane")).toMatch(/grid-area\s*:\s*plan\s*;/);
+    expectSomeRule(css, ".planning-question-pane", /grid-area\s*:\s*question\s*;/);
+    expectSomeRule(css, ".planning-question-pane", /border-right\s*:\s*solid var\(--btn-border-width\)/);
+    expect(findRule(css, ".planning-plan-pane,\n.planning-question-pane")).toMatch(/border-radius\s*:\s*0\s*;/);
+
+    const mobileCss = getMediaBlocks(css, MOBILE_ACTIONS_QUERY).join("\n");
+    expect(findRule(mobileCss, ".planning-workspace--mobile-tab-question,\n  .planning-workspace--mobile-tab-plan")).toMatch(/"tabs"\s*"content"/);
+    expect(findRule(mobileCss, ".planning-workspace-tabs")).toMatch(/display\s*:\s*grid\s*;/);
+    expect(findRule(mobileCss, ".planning-workspace--mobile-tab-question .planning-plan-pane,\n  .planning-workspace--mobile-tab-plan .planning-question-pane")).toMatch(/display\s*:\s*none\s*;/);
+    // FNXC:PlanningMode 2026-07-21-18:34: mobile question/plan review sit flush — no outer workspace gutter or nested pane chrome.
+    expect(findRule(mobileCss, ".planning-workspace")).toMatch(/padding\s*:\s*0\s*;/);
+    expect(findRule(mobileCss, ".planning-workspace")).toMatch(/gap\s*:\s*0\s*;/);
+    expect(findRule(mobileCss, ".planning-question-pane")).toMatch(/border-right\s*:\s*none\s*;/);
+    expect(findRule(mobileCss, ".planning-plan-pane,\n  .planning-question-pane")).toMatch(/border\s*:\s*none\s*;/);
+    expect(findRule(mobileCss, ".planning-plan-pane,\n  .planning-question-pane")).toMatch(/border-radius\s*:\s*0\s*;/);
+    expect(findRule(mobileCss, ".planning-question-pane .planning-question-scroll,\n  .planning-plan-pane .planning-plan-scroll")).toMatch(/padding\s*:\s*0\s*;/);
+    expect(findRule(mobileCss, ".planning-question-pane .planning-question-panel")).toMatch(/border\s*:\s*none\s*;/);
+    expect(findRule(mobileCss, ".planning-plan-pane .planning-plan-document")).toMatch(/padding\s*:\s*var\(--space-lg\)\s*;/);
+  });
+
+  it("keeps tablet and desktop planning content flush inside both panes with compact aligned action rows", () => {
+    const css = loadPlanningCss();
+    const twoPaneCss = getMediaBlocks(css, DESKTOP_PLANNING_WORKSPACE_QUERY).join("\n");
+    const flushScrollRule = findRule(twoPaneCss, ".planning-question-pane .planning-question-scroll,\n  .planning-plan-pane .planning-plan-scroll");
+    const questionPanelRule = findRule(twoPaneCss, ".planning-question-pane .planning-question-panel");
+    const planDocumentRule = findRule(twoPaneCss, ".planning-plan-pane .planning-plan-document");
+    const sharedActionsRule = findRule(twoPaneCss, ".planning-question-pane .planning-actions,\n  .planning-plan-actions");
+    const sharedButtonsRule = findRule(twoPaneCss, ".planning-question-pane .planning-actions .btn,\n  .planning-plan-actions .btn");
+
+    expect(flushScrollRule).toMatch(/padding\s*:\s*0\s*;/);
+    expect(questionPanelRule).toMatch(/border\s*:\s*none\s*;/);
+    expect(questionPanelRule).toMatch(/border-radius\s*:\s*0\s*;/);
+    expect(planDocumentRule).toMatch(/width\s*:\s*100%\s*;/);
+    expect(planDocumentRule).toMatch(/box-shadow\s*:\s*none\s*;/);
+    expect(sharedActionsRule).toMatch(/padding\s*:\s*var\(--space-sm\) var\(--space-xl\)\s*;/);
+    expect(sharedButtonsRule).toMatch(/min-height\s*:\s*calc\(var\(--space-2xl\) \+ var\(--space-sm\)\)\s*;/);
+
+    expect(findRule(css, ".planning-question-panel")).toMatch(/border\s*:\s*var\(--btn-border-width\) solid var\(--border\)\s*;/);
+    expect(findRules(css, ".planning-plan-document").some((rule) => /border-radius\s*:\s*var\(--radius-xl\)\s*;/.test(rule))).toBe(true);
+  });
+
+  it("makes the history sheet full width on mobile while keeping its own scroll owner", () => {
+    const css = loadPlanningCss();
+    expect(findRule(css, ".planning-history-scroll")).toMatch(/overflow-y\s*:\s*auto\s*;/);
+    expect(findRule(css, ".planning-history-panel")).toMatch(/width\s*:\s*min\(100%, calc\(var\(--space-2xl\) \* 15\)\)\s*;/);
+
+    const mobileCss = getMediaBlocks(css, MOBILE_ACTIONS_QUERY).join("\n");
+    expect(findRule(mobileCss, ".planning-history-panel")).toMatch(/width\s*:\s*100%\s*;/);
+  });
+
+  it("uses consistent full-width header controls without crowding the mobile session title", () => {
+    const css = loadPlanningCss();
+    const backRule = findRule(css, ".planning-session-back");
+    expect(findRule(css, ".planning-header-controls")).toMatch(/gap\s*:\s*var\(--space-sm\)\s*;/);
+    expect(findRule(css, ".planning-header-controls .btn")).toMatch(/min-height\s*:\s*calc\(var\(--space-2xl\) \+ var\(--space-sm\)\)\s*;/);
+    expect(backRule).toMatch(/display\s*:\s*inline-flex\s*;/);
+    expect(backRule).toMatch(/min-width\s*:\s*calc\(var\(--space-md\) \* 2\.25\)\s*;/);
+    expect(backRule).toMatch(/min-height\s*:\s*calc\(var\(--space-md\) \* 2\.25\)\s*;/);
+
+    const mobileCss = getMediaBlocks(css, MOBILE_ACTIONS_QUERY).join("\n");
+    expect(findRule(mobileCss, ".planning-modal--embedded .modal-header--embedded")).toMatch(/flex-wrap\s*:\s*wrap\s*;/);
+    expect(findRule(mobileCss, ".planning-header-controls")).toMatch(/grid-template-columns\s*:\s*minmax\(0, 1fr\)\s*;/);
+    expect(findRule(mobileCss, ".planning-header-controls")).toMatch(/width\s*:\s*100%\s*;/);
+    expect(findRule(mobileCss, ".planning-modal--embedded .modal-header--embedded .detail-title-row")).toMatch(/flex-wrap\s*:\s*nowrap\s*;/);
+    expect(findRule(mobileCss, ".planning-modal--embedded .modal-header--embedded .detail-title-row")).toMatch(/overflow\s*:\s*hidden\s*;/);
+    expect(findRule(mobileCss, ".planning-modal--embedded .modal-header--embedded .detail-title-row h3")).toMatch(/flex\s*:\s*1 1 auto\s*;/);
+    expect(findRule(mobileCss, ".planning-modal--embedded .modal-header--embedded .detail-title-row h3")).toMatch(/min-width\s*:\s*0\s*;/);
+    expect(findRule(mobileCss, ".planning-modal--embedded .modal-header--embedded .detail-title-row h3")).toMatch(/text-overflow\s*:\s*ellipsis\s*;/);
+    expect(findRule(mobileCss, ".planning-modal--embedded .modal-header--embedded .detail-title-row h3")).toMatch(/white-space\s*:\s*nowrap\s*;/);
+    expect(findRule(mobileCss, ".planning-modal--embedded .modal-header--embedded .detail-title-row > svg,\n  .planning-modal--embedded .modal-header--embedded .detail-title-row > .btn-icon,\n  .planning-modal--embedded .modal-header--embedded .planning-session-back")).toMatch(/flex\s*:\s*0 0 auto\s*;/);
+  });
+
+  it("keeps tablet question and plan actions on one aligned row with a tight bottom inset", () => {
+    const css = loadPlanningCss();
     const tabletCss = getMediaBlocks(css, TABLET_SUMMARY_ACTIONS_QUERY).join("\n");
+    const sharedFooterRule = findRule(tabletCss, ".planning-question-pane .planning-actions,\n  .planning-plan-actions");
+    const sharedButtonRule = findRule(tabletCss, ".planning-question-pane .planning-actions .btn,\n  .planning-plan-actions .btn");
 
-    expect(findRule(shortShellCss, ".planning-modal-body--compact-interview")).toMatch(/flex-direction\s*:\s*column\s*;/);
-    expectSomeRule(shortShellCss, ".planning-compact-pane-switcher", /display\s*:\s*flex\s*;/);
-    /*
-    FNXC:PlanningModeCompactSwitcher 2026-07-20-11:00:
-    FN-8445 keeps the tabs above Answered questions despite its earlier DOM position. jsdom
-    cannot measure flex layout, so both compact media contracts assert the visual-order pin.
-    */
-    expect(findRule(shortShellCss, ".planning-modal-body--compact-interview .planning-compact-pane-switcher")).toMatch(/order\s*:\s*-1\s*;/);
-    expect(findRule(shortShellCss, ".planning-compact-pane-switcher .btn")).toMatch(/min-height\s*:\s*calc\(var\(--space-md\) \* 2\.25\)\s*;/);
-    expect(shortShellCss).toContain(".planning-modal-body--compact-question .planning-running-plan");
-    expect(shortShellCss).toContain(".planning-modal-body--compact-plan .planning-detail");
-    expect(shortShellCss).toContain(".planning-modal-body--compact-history .planning-detail");
-    expect(findRule(tabletCss, ".planning-modal-body--compact-interview")).toMatch(/flex-direction\s*:\s*column\s*;/);
-    expect(findRule(tabletCss, ".planning-modal-body--compact-interview .planning-compact-pane-switcher")).toMatch(/order\s*:\s*-1\s*;/);
-    expect(tabletCss).toContain(".planning-modal-body--compact-question .planning-running-plan");
-
-    expectSomeRule(css, ".planning-running-plan", /flex\s*:\s*0 1 24rem\s*;/);
+    expect(sharedFooterRule).toMatch(/align-items\s*:\s*stretch\s*;/);
+    expect(sharedFooterRule).toMatch(/min-height\s*:\s*calc\(var\(--space-2xl\) \+ var\(--space-xl\)\)\s*;/);
+    expect(sharedFooterRule).toMatch(/padding\s*:\s*var\(--space-sm\) var\(--space-lg\) var\(--space-xs\)\s*;/);
+    expect(sharedButtonRule).toMatch(/flex\s*:\s*1 1 0\s*;/);
+    expect(sharedButtonRule).toMatch(/min-width\s*:\s*0\s*;/);
+    expect(sharedButtonRule).toMatch(/min-height\s*:\s*calc\(var\(--space-2xl\) \+ var\(--space-md\)\)\s*;/);
+    expectSomeRule(tabletCss, ".planning-plan-actions", /display\s*:\s*flex\s*;/);
+    expectSomeRule(tabletCss, ".planning-plan-actions", /flex-wrap\s*:\s*nowrap\s*;/);
   });
 
   it("keeps the mobile sessions list scrolling above the bottom-pinned New session footer", () => {
@@ -119,10 +192,5 @@ describe("PlanningModeModal CSS responsive action contract", () => {
     const footerRule = findRule(mobileShellCss, ".planning-modal-body--show-list .planning-sidebar-footer");
     expect(footerRule).toBeTruthy();
     expect(footerRule).toMatch(/flex-shrink\s*:\s*0\s*;/);
-
-    expect(mobileShellCss).toMatch(/\.planning-modal-body--show-list \.planning-running-plan[\s\S]*?display\s*:\s*none\s*;/);
-    const mobileBackRule = findRule(mobileShellCss, ".planning-mobile-back");
-    expect(mobileBackRule).toMatch(/display\s*:\s*inline-flex\s*;/);
-    expect(mobileBackRule).toMatch(/min-height\s*:\s*calc\(var\(--space-md\) \* 2\.25\)\s*;/);
   });
 });

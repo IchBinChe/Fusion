@@ -116,4 +116,73 @@ describe("createPluginRouter wiring under /api/plugins", () => {
     expect(taskStore.listTasks).toHaveBeenCalled();
     expect(handlers.taskStoreHandler).toHaveBeenCalled();
   });
+
+  /*
+  FNXC:PluginRoutes 2026-07-22-09:55:
+  UI-only / --no-engine dashboards pass pluginRunner=undefined (Grok dual-remediation)
+  while still loading plugins on pluginLoader. Compound Engineering's bundled view then
+  painted while /sessions and /artifacts hit the catch-all 404 "Not found". Mount routes
+  from the loader when the runner is absent so CE and other plugin APIs stay reachable.
+  */
+  it("mounts plugin-defined routes from pluginLoader when pluginRunner is undefined", async () => {
+    const sessionsHandler = vi.fn(async () => ({ sessions: [] }));
+    const artifactsHandler = vi.fn(async () => ({ groups: [], totalArtifacts: 0, totalErrors: 0 }));
+    const startHandler = vi.fn(async () => ({ session: { id: "ce-1", status: "launching" } }));
+
+    const pluginStore = {
+      listPlugins: vi.fn(async () => [{ id: "fusion-plugin-compound-engineering", name: "Compound Engineering", enabled: true }]),
+      getPlugin: vi.fn(async (id: string) => ({ id, settings: {}, enabled: true, manifest: { id, name: id, version: "0.1.0", description: "" } })),
+      enablePlugin: vi.fn(),
+      disablePlugin: vi.fn(),
+      registerPlugin: vi.fn(),
+      unregisterPlugin: vi.fn(),
+      updatePluginSettings: vi.fn(),
+      updatePluginState: vi.fn(),
+    } as any;
+
+    const pluginLoader = {
+      getPlugin: vi.fn((id: string) => (id === "fusion-plugin-compound-engineering" ? { manifest: { id } } : undefined)),
+      getPluginRoutes: vi.fn(() => [
+        { pluginId: "fusion-plugin-compound-engineering", route: { method: "GET", path: "/sessions", handler: sessionsHandler } },
+        { pluginId: "fusion-plugin-compound-engineering", route: { method: "GET", path: "/artifacts", handler: artifactsHandler } },
+        { pluginId: "fusion-plugin-compound-engineering", route: { method: "POST", path: "/sessions", handler: startHandler } },
+      ]),
+      createRouteContext: vi.fn(async () => ({
+        pluginId: "fusion-plugin-compound-engineering",
+        taskStore: {},
+        settings: {},
+        logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+        emitEvent: vi.fn(),
+      })),
+      loadPlugin: vi.fn(),
+      stopPlugin: vi.fn(),
+    } as any;
+
+    const app = express();
+    app.use(express.json());
+    // No pluginRunner — mirrors UI-only dashboard wiring.
+    app.use("/api/plugins", createPluginRouter(pluginStore, pluginLoader, undefined, {} as any));
+    app.use((_req, res) => res.status(404).json({ error: "Not found" }));
+
+    const sessions = await performGet(app, "/api/plugins/fusion-plugin-compound-engineering/sessions");
+    expect(sessions.status).toBe(200);
+    expect(sessions.body).toEqual({ sessions: [] });
+    expect(sessionsHandler).toHaveBeenCalled();
+
+    const artifacts = await performGet(app, "/api/plugins/fusion-plugin-compound-engineering/artifacts");
+    expect(artifacts.status).toBe(200);
+    expect(artifacts.body).toEqual({ groups: [], totalArtifacts: 0, totalErrors: 0 });
+    expect(artifactsHandler).toHaveBeenCalled();
+
+    const started = await performRequest(
+      app,
+      "POST",
+      "/api/plugins/fusion-plugin-compound-engineering/sessions",
+      JSON.stringify({ stage: "strategy" }),
+      { "content-type": "application/json" },
+    );
+    expect(started.status).toBe(200);
+    expect(started.body).toEqual({ session: { id: "ce-1", status: "launching" } });
+    expect(startHandler).toHaveBeenCalled();
+  });
 });

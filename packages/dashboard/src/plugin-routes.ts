@@ -693,113 +693,135 @@ export function createPluginRouter(
 
   // ── Plugin-Defined Routes ──────────────────────────────────────
 
-  // Mount plugin-defined routes
-  if (pluginRunner) {
-    const pluginRoutes = pluginRunner.getPluginRoutes();
+  /*
+  FNXC:PluginRoutes 2026-07-22-09:55:
+  Mount plugin-defined HTTP routes from the dashboard PluginLoader always, and
+  union in PluginRunner routes when present. Do not gate mounting on pluginRunner:
+  UI-only / --no-engine (and engine-warmup failure) pass pluginRunner=undefined for
+  Grok dual-remediation, which previously skipped ALL plugin routes. Compound
+  Engineering still rendered its bundled dashboard view, so operators saw
+  "Failed to load sessions/artifacts: Not found" (catch-all 404) on every CE API
+  call while the stage cards painted normally. Prefer loader entries on key
+  collisions so handlers resolve against the same pluginLoader instance.
+  */
+  type PluginRouteEntry = { pluginId: string; route: import("@fusion/core").PluginRouteDefinition };
+  const pluginRoutesByKey = new Map<string, PluginRouteEntry>();
+  const addPluginRoutes = (entries: PluginRouteEntry[]) => {
+    for (const entry of entries) {
+      const key = `${entry.pluginId}\0${entry.route.method}\0${entry.route.path}`;
+      pluginRoutesByKey.set(key, entry);
+    }
+  };
+  if (pluginRunner && typeof pluginRunner.getPluginRoutes === "function") {
+    addPluginRoutes(pluginRunner.getPluginRoutes());
+  }
+  const loaderRoutes = (pluginLoader as { getPluginRoutes?: () => PluginRouteEntry[] }).getPluginRoutes?.();
+  if (loaderRoutes) {
+    addPluginRoutes(loaderRoutes);
+  }
 
-    for (const { pluginId, route } of pluginRoutes) {
-      const fullPath = `/${pluginId}${route.path.startsWith("/") ? route.path : `/${route.path}`}`;
+  for (const { pluginId, route } of pluginRoutesByKey.values()) {
+    const fullPath = `/${pluginId}${route.path.startsWith("/") ? route.path : `/${route.path}`}`;
 
-      const handler = catchHandler(async (req: Request, res: Response) => {
-        // Get the plugin context
-        const plugin = pluginLoader.getPlugin(pluginId);
-        if (!plugin) {
-          throw notFound(`Plugin "${pluginId}" not loaded`);
+    const handler = catchHandler(async (req: Request, res: Response) => {
+      // Get the plugin context
+      const plugin = pluginLoader.getPlugin(pluginId);
+      if (!plugin) {
+        throw notFound(`Plugin "${pluginId}" not loaded`);
+      }
+
+      // FNXC:BranchGroupProjectScoping 2026-07-14-06:15: return the trimmed id, not the raw padded string.
+      const queryProjectId = typeof req.query.projectId === "string" ? req.query.projectId.trim() : "";
+      const bodyProjectId =
+        req.body && typeof req.body === "object" && typeof (req.body as { projectId?: unknown }).projectId === "string"
+          ? (req.body as { projectId: string }).projectId.trim()
+          : "";
+      const projectId = queryProjectId || bodyProjectId || undefined;
+      const scopedStore = projectId ? await getOrCreateProjectStore(projectId) : null;
+      const taskStore = scopedStore ?? defaultTaskStore ?? ({} as import("@fusion/core").TaskStore);
+
+      let settings: Record<string, unknown> = {};
+      const scopedPluginStore = scopedStore?.getPluginStore?.();
+      if (scopedPluginStore) {
+        try {
+          const scopedPlugin = await scopedPluginStore.getPlugin(pluginId);
+          settings = scopedPlugin.settings;
+        } catch {
+          // Fall back to default store plugin settings when project-scoped plugin record is unavailable.
         }
-
-        // FNXC:BranchGroupProjectScoping 2026-07-14-06:15: return the trimmed id, not the raw padded string.
-        const queryProjectId = typeof req.query.projectId === "string" ? req.query.projectId.trim() : "";
-        const bodyProjectId =
-          req.body && typeof req.body === "object" && typeof (req.body as { projectId?: unknown }).projectId === "string"
-            ? (req.body as { projectId: string }).projectId.trim()
-            : "";
-        const projectId = queryProjectId || bodyProjectId || undefined;
-        const scopedStore = projectId ? await getOrCreateProjectStore(projectId) : null;
-        const taskStore = scopedStore ?? defaultTaskStore ?? ({} as import("@fusion/core").TaskStore);
-
-        let settings: Record<string, unknown> = {};
-        const scopedPluginStore = scopedStore?.getPluginStore?.();
-        if (scopedPluginStore) {
-          try {
-            const scopedPlugin = await scopedPluginStore.getPlugin(pluginId);
-            settings = scopedPlugin.settings;
-          } catch {
-            // Fall back to default store plugin settings when project-scoped plugin record is unavailable.
-          }
+      }
+      if (!scopedPluginStore || Object.keys(settings).length === 0) {
+        try {
+          const pluginRecord = await pluginStore.getPlugin(pluginId);
+          settings = pluginRecord.settings;
+        } catch {
+          // Keep empty settings when plugin store record isn't available.
         }
-        if (!scopedPluginStore || Object.keys(settings).length === 0) {
-          try {
-            const pluginRecord = await pluginStore.getPlugin(pluginId);
-            settings = pluginRecord.settings;
-          } catch {
-            // Keep empty settings when plugin store record isn't available.
-          }
-        }
+      }
 
-        const ctx: PluginContext = await pluginLoader.createRouteContext(pluginId, {
-          taskStore,
-          settings,
-          resolveProjectTaskStore: getOrCreateProjectStore,
-          // Real publish-to-/api/events seam: forward custom plugin events to
-          // connected SSE clients, scoped to the request's project so a
-          // project stream only sees its own events.
-          emitEvent: (event: string, data: unknown) => {
-            emitPluginCustomSseEvent(pluginId, event, data, projectId);
-          },
-        });
-
-        // Call the route handler with Express Request cast to unknown
-        const result = await route.handler(req as unknown, ctx);
-
-        if (isPluginRouteResponse(result)) {
-          if (result.headers) {
-            for (const [name, value] of Object.entries(result.headers)) {
-              res.setHeader(name, value);
-            }
-          }
-          if (result.contentType) {
-            res.setHeader("Content-Type", result.contentType);
-          }
-          if (result.status === 204) {
-            res.status(204).send();
-            return;
-          }
-          if (result.body === undefined) {
-            res.status(result.status).send();
-            return;
-          }
-          if (
-            result.contentType
-            || typeof result.body === "string"
-            || Buffer.isBuffer(result.body)
-          ) {
-            res.status(result.status).send(result.body);
-            return;
-          }
-          res.status(result.status).json(result.body);
-          return;
-        }
-
-        res.status(200).json(result);
+      const ctx: PluginContext = await pluginLoader.createRouteContext(pluginId, {
+        taskStore,
+        settings,
+        resolveProjectTaskStore: getOrCreateProjectStore,
+        // Real publish-to-/api/events seam: forward custom plugin events to
+        // connected SSE clients, scoped to the request's project so a
+        // project stream only sees its own events.
+        emitEvent: (event: string, data: unknown) => {
+          emitPluginCustomSseEvent(pluginId, event, data, projectId);
+        },
       });
 
-      switch (route.method) {
-        case "GET":
-          router.get(fullPath, handler);
-          break;
-        case "POST":
-          router.post(fullPath, handler);
-          break;
-        case "PUT":
-          router.put(fullPath, handler);
-          break;
-        case "PATCH":
-          router.patch(fullPath, handler);
-          break;
-        case "DELETE":
-          router.delete(fullPath, handler);
-          break;
+      // Call the route handler with Express Request cast to unknown
+      const result = await route.handler(req as unknown, ctx);
+
+      if (isPluginRouteResponse(result)) {
+        if (result.headers) {
+          for (const [name, value] of Object.entries(result.headers)) {
+            res.setHeader(name, value);
+          }
+        }
+        if (result.contentType) {
+          res.setHeader("Content-Type", result.contentType);
+        }
+        if (result.status === 204) {
+          res.status(204).send();
+          return;
+        }
+        if (result.body === undefined) {
+          res.status(result.status).send();
+          return;
+        }
+        if (
+          result.contentType
+          || typeof result.body === "string"
+          || Buffer.isBuffer(result.body)
+        ) {
+          res.status(result.status).send(result.body);
+          return;
+        }
+        res.status(result.status).json(result.body);
+        return;
       }
+
+      res.status(200).json(result);
+    });
+
+    switch (route.method) {
+      case "GET":
+        router.get(fullPath, handler);
+        break;
+      case "POST":
+        router.post(fullPath, handler);
+        break;
+      case "PUT":
+        router.put(fullPath, handler);
+        break;
+      case "PATCH":
+        router.patch(fullPath, handler);
+        break;
+      case "DELETE":
+        router.delete(fullPath, handler);
+        break;
     }
   }
 

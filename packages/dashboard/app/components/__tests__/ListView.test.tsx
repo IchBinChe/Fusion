@@ -2169,16 +2169,16 @@ describe("ListView", () => {
     expect(screen.queryByText("Reviewing")).not.toBeInTheDocument();
   });
 
-  it("FN-8170 suppresses stale planning only on Todo and In Progress table rows", () => {
+  it("FN-8475 renders Todo planning in desktop table rows without a placeholder", () => {
     const matchMediaSpy = mockDesktopViewport();
     try {
       renderListView({
         tasks: [
-          createMockTask({ id: "FN-8170-todo", column: "todo", status: "planning" }),
-          createMockTask({ id: "FN-8170-active", column: "in-progress", status: "planning" }),
-          createMockTask({ id: "FN-8170-triage", column: "triage", status: "planning" }),
+          createMockTask({ id: "FN-8475-todo", column: "todo", status: "planning" }),
+          createMockTask({ id: "FN-8475-active", column: "in-progress", status: "planning" }),
+          createMockTask({ id: "FN-8475-triage", column: "triage", status: "planning" }),
           createMockTask({
-            id: "FN-8170-executing",
+            id: "FN-8475-executing",
             column: "in-progress",
             status: "executing",
             steps: [{ name: "Running step", status: "in-progress" }],
@@ -2186,15 +2186,53 @@ describe("ListView", () => {
         ],
       });
 
-      for (const id of ["FN-8170-todo", "FN-8170-active"]) {
+      for (const id of ["FN-8475-todo", "FN-8475-active", "FN-8475-triage"]) {
         const row = screen.getByText(id).closest("tr") as HTMLElement;
-        expect(within(row).queryByText("planning")).toBeNull();
-        expect(row.querySelector(".list-status-badge")).toHaveTextContent("-");
+        expect(within(row).getByText("planning")).toHaveClass("list-status-badge");
+        expect(row.querySelector(".list-status-badge")).not.toHaveTextContent("-");
       }
-      expect(within(screen.getByText("FN-8170-triage").closest("tr") as HTMLElement).getByText("planning")).toBeInTheDocument();
-      expect(within(screen.getByText("FN-8170-executing").closest("tr") as HTMLElement).getByText("executing")).toBeInTheDocument();
+      expect(within(screen.getByText("FN-8475-executing").closest("tr") as HTMLElement).getByText("executing")).toBeInTheDocument();
     } finally {
       matchMediaSpy.mockRestore();
+    }
+  });
+
+  it("FN-8475 renders Todo planning in grouped mobile cards", () => {
+    const matchMediaSpy = mockMobileViewport();
+    try {
+      renderListView({
+        tasks: [createMockTask({ id: "FN-8475-todo-mobile", column: "todo", status: "planning" })],
+      });
+
+      const card = screen.getByText("FN-8475-todo-mobile").closest(".list-card") as HTMLElement;
+      expect(within(card).getByText("planning")).toHaveClass("list-status-badge");
+    } finally {
+      matchMediaSpy.mockRestore();
+    }
+  });
+
+  it("FN-8493 renders Revising, not Replan, for bare needs-replan list rows on desktop and mobile", () => {
+    const task = createMockTask({ id: "FN-8493-needs-replan", column: "triage", status: "needs-replan" });
+
+    const desktopViewport = mockDesktopViewport();
+    try {
+      const { unmount } = renderListView({ tasks: [task] });
+      const row = screen.getByText(task.id).closest("tr") as HTMLElement;
+      expect(within(row).getByText("Revising")).toHaveClass("list-status-badge");
+      expect(within(row).queryByText("Replan")).not.toBeInTheDocument();
+      unmount();
+    } finally {
+      desktopViewport.mockRestore();
+    }
+
+    const mobileViewport = mockMobileViewport();
+    try {
+      renderListView({ tasks: [task] });
+      const card = screen.getByText(task.id).closest(".list-card") as HTMLElement;
+      expect(within(card).getByText("Revising")).toHaveClass("list-status-badge");
+      expect(within(card).queryByText("Replan")).not.toBeInTheDocument();
+    } finally {
+      mobileViewport.mockRestore();
     }
   });
 
@@ -2210,6 +2248,8 @@ describe("ListView", () => {
   it.each([
     { status: "executing", column: "in-progress" as const, label: "executing" },
     { status: "merging-fix", column: "in-review" as const, label: "Merging fixes…" },
+    { status: "needs-replan", column: "triage" as const, label: "Revising" },
+    { status: "needs-replan", column: "todo" as const, label: "Revising" },
   ])("renders agent-active tasks with static highlight styling for $status", ({ status, column, label }) => {
     const tasks = [
       createMockTask({
@@ -5170,7 +5210,7 @@ describe("ListView - Bulk Selection", () => {
       expect(within(card as HTMLElement).getByText("executing")).toBeInTheDocument();
     });
 
-    it("FN-8170 suppresses stale planning only on Todo and In Progress mobile cards", () => {
+    it("FN-8475 renders Todo and In Progress planning in mobile cards", () => {
       mockMobileViewport();
 
       const { container } = renderListView({
@@ -5187,10 +5227,9 @@ describe("ListView - Bulk Selection", () => {
         ],
       });
 
-      for (const id of ["FN-8170-mobile-todo", "FN-8170-mobile-active"]) {
-        expect(within(container.querySelector(`[data-id="${id}"]`) as HTMLElement).queryByText("planning")).toBeNull();
+      for (const id of ["FN-8170-mobile-todo", "FN-8170-mobile-active", "FN-8170-mobile-triage"]) {
+        expect(within(container.querySelector(`[data-id="${id}"]`) as HTMLElement).getByText("planning")).toHaveClass("list-status-badge");
       }
-      expect(within(container.querySelector('[data-id="FN-8170-mobile-triage"]') as HTMLElement).getByText("planning")).toBeInTheDocument();
       expect(within(container.querySelector('[data-id="FN-8170-mobile-executing"]') as HTMLElement).getByText("executing")).toBeInTheDocument();
     });
 
@@ -5341,6 +5380,8 @@ describe("ListView - Bulk Selection", () => {
     it.each([
       { status: "executing", column: "in-progress" as const },
       { status: "merging-fix", column: "in-review" as const },
+      { status: "needs-replan", column: "triage" as const },
+      { status: "needs-replan", column: "todo" as const },
     ])("applies agent-active class to mobile cards for active states (%s)", ({ status, column }) => {
       mockMobileViewport();
 

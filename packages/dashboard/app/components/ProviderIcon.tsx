@@ -1,9 +1,49 @@
+import { useId } from "react";
 import { Cpu } from "lucide-react";
 
 import { inferProviderIconKey } from "../utils/providerIconKey";
 
+/*
+FNXC:ProviderIcon 2026-07-22-12:00:
+FN-8488 requires llama.cpp and llama-server to render an intentional provider mark rather than a Lucide Cpu with a brand testid. The terminal-and-llama-ear silhouette remains legible at compact card sizes while keeping unknown providers on the real Cpu fallback.
+*/
 function LlamaCppIcon({ size, color, label = "llama.cpp" }: { size: number; color: string; label?: string }) {
-  return <Cpu size={size} color={color} aria-label={label} data-testid="llama-cpp-icon" />;
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      data-testid="llama-cpp-icon"
+      aria-label={label}
+    >
+      <path d="M4 5.5 8.5 2v4.1L12 4l3.5 2.1V2L20 5.5V19a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V5.5Z" fill={color} />
+      <path d="m8 12 2.2 2L8 16m4 0h4" stroke="var(--provider-icon-contrast)" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/*
+FNXC:ProviderIcon 2026-07-22-12:00:
+FN-8488 adds catalog-complete marks for Brave Search and Tavily so Authentication, onboarding, and inherited ProviderIcon surfaces never degrade those first-class IDs to Cpu.
+*/
+function BraveIcon({ size, color, label = "Brave Search" }: { size: number; color: string; label?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" data-testid="brave-icon" aria-label={label}>
+      <path d="m12 2 7 3.5v6.4c0 4.5-2.8 8.5-7 10.1-4.2-1.6-7-5.6-7-10.1V5.5L12 2Z" fill={color} />
+      <path d="m9 10 1.5-1.2L12 10l1.5-1.2L15 10v4.4L12 17l-3-2.6V10Z" fill="var(--provider-icon-contrast)" />
+    </svg>
+  );
+}
+
+function TavilyIcon({ size, color, label = "Tavily" }: { size: number; color: string; label?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" data-testid="tavily-icon" aria-label={label}>
+      <path d="M3 4h18v4h-7v12H10V8H3V4Z" fill={color} />
+      <path d="m17 13 1.2 2.8L21 17l-2.8 1.2L17 21l-1.2-2.8L13 17l2.8-1.2L17 13Z" fill={color} />
+    </svg>
+  );
 }
 
 export interface ProviderIconProps {
@@ -527,11 +567,13 @@ function GitHubIcon({ size, color, label = "GitHub" }: { size: number; color: st
 }
 
 /*
-FNXC:ProviderIcons 2026-07-18-18:24:
-FN-8354: OMP ACP is a first-class provider, so its shared dashboard icon must use the official omp.sh favicon's stepped T mark rather than the generic Cpu fallback. Render its official single-color silhouette with the provider token so it remains legible in either theme.
+FNXC:ProviderIcons 2026-07-22-00:00:
+FN-8487: The shared OMP mark must retain the official omp.sh favicon's pink-to-purple-to-cyan diagonal gradient instead of adapting to the theme as a monochrome glyph. Keep the favicon's stepped-T path but omit its dark rounded tile so the mark remains transparent on dashboard chrome.
 Source: https://omp.sh/favicon.svg
 */
-function OmpIcon({ size, color, label = "Oh My Pi" }: { size: number; color: string; label?: string }) {
+function OmpIcon({ size, label = "Oh My Pi" }: { size: number; color: string; label?: string }) {
+  const gradientId = `omp-gradient-${useId().replace(/:/g, "")}`;
+
   return (
     <svg
       width={size}
@@ -542,7 +584,14 @@ function OmpIcon({ size, color, label = "Oh My Pi" }: { size: number; color: str
       data-testid="omp-icon"
       aria-label={label}
     >
-      <path d="M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z" fill={color} />
+      <defs>
+        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="var(--provider-omp-gradient-start)" />
+          <stop offset="0.5" stopColor="var(--provider-omp-gradient-mid)" />
+          <stop offset="1" stopColor="var(--provider-omp-gradient-end)" />
+        </linearGradient>
+      </defs>
+      <path d="M14 16h36v8H40v32h-8V24h-6v22h-8V24h-4z" fill={`url(#${gradientId})`} />
     </svg>
   );
 }
@@ -550,7 +599,7 @@ function OmpIcon({ size, color, label = "Oh My Pi" }: { size: number; color: str
 // Hermes — caduceus (winged staff) mark, single-color so it adapts to theme.
 function HermesIcon({ size, color, label = "Hermes" }: { size: number; color: string; label?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label={label}>
+    <svg width={size} height={size} viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" data-testid="hermes-icon" role="img" aria-label={label}>
       <rect x="30" y="10" width="4" height="46" rx="2" fill={color} />
       <path d="M30 18 C24 14, 14 14, 10 18 C14 16, 22 16, 28 20" fill={color} opacity="0.9" />
       <path d="M30 22 C26 19, 18 19, 14 22 C18 20, 24 20, 28 24" fill={color} opacity="0.7" />
@@ -565,11 +614,11 @@ function HermesIcon({ size, color, label = "Hermes" }: { size: number; color: st
 
 // OpenClaw — pixel-art lobster (verbatim 16×16 source SVG, recolor disabled
 // so the iconic palette survives).
-function OpenClawIcon({ size, label = "OpenClaw" }: { size: number; color: string; label?: string }) {
+function OpenClawIcon({ size, color, label = "OpenClaw" }: { size: number; color: string; label?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" role="img" aria-label={label}>
+    <svg width={size} height={size} viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" data-testid="openclaw-icon" role="img" aria-label={label}>
       <rect width="16" height="16" fill="none" />
-      <g fill="#3a0a0d">
+      <g fill="var(--provider-openclaw-outline)">
         <rect x="1" y="5" width="1" height="3" />
         <rect x="2" y="4" width="1" height="1" />
         <rect x="2" y="8" width="1" height="1" />
@@ -591,7 +640,7 @@ function OpenClawIcon({ size, label = "OpenClaw" }: { size: number; color: strin
         <rect x="12" y="13" width="1" height="1" />
         <rect x="5" y="14" width="6" height="1" />
       </g>
-      <g fill="#ff4f40">
+      <g fill={color}>
         <rect x="5" y="3" width="6" height="1" />
         <rect x="4" y="4" width="8" height="1" />
         <rect x="3" y="5" width="10" height="1" />
@@ -602,7 +651,7 @@ function OpenClawIcon({ size, label = "OpenClaw" }: { size: number; color: strin
         <rect x="5" y="12" width="6" height="1" />
         <rect x="6" y="13" width="4" height="1" />
       </g>
-      <g fill="#ff775f">
+      <g fill="var(--provider-openclaw-highlight)">
         <rect x="1" y="6" width="2" height="1" />
         <rect x="2" y="5" width="1" height="1" />
         <rect x="2" y="7" width="1" height="1" />
@@ -610,11 +659,11 @@ function OpenClawIcon({ size, label = "OpenClaw" }: { size: number; color: strin
         <rect x="13" y="5" width="1" height="1" />
         <rect x="13" y="7" width="1" height="1" />
       </g>
-      <g fill="#081016">
+      <g fill="var(--provider-openclaw-eye)">
         <rect x="6" y="5" width="1" height="1" />
         <rect x="9" y="5" width="1" height="1" />
       </g>
-      <g fill="#f5fbff">
+      <g fill="var(--provider-openclaw-eye-highlight)">
         <rect x="6" y="4" width="1" height="1" />
         <rect x="9" y="4" width="1" height="1" />
       </g>
@@ -625,7 +674,7 @@ function OpenClawIcon({ size, label = "OpenClaw" }: { size: number; color: strin
 // Paperclip — official paperclip outline, theme-color aware.
 function PaperclipIcon({ size, color, label = "Paperclip" }: { size: number; color: string; label?: string }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label={label}>
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" data-testid="paperclip-icon" role="img" aria-label={label}>
       <path
         d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551"
         stroke={color}
@@ -782,6 +831,12 @@ const providerConfig: Record<
 
   // OpenRouter appears in onboarding auth cards and should not fall back to CPU.
   openrouter: { component: OpenRouterIcon, color: "var(--provider-openrouter)" },
+  /*
+  FNXC:ProviderIcon 2026-07-22-12:00:
+  FN-8488 makes every static Authentication catalog ID resolve through a branded ProviderIcon entry. Brave Search and Tavily are API-key catalog providers, not custom provider names, so they must never reach the unknown Cpu fallback.
+  */
+  brave: { component: BraveIcon, color: "var(--provider-brave)", label: "Brave Search" },
+  tavily: { component: TavilyIcon, color: "var(--provider-tavily)", label: "Tavily" },
 
   minimax: { component: MiniMaxIcon, color: "var(--provider-minimax)" },
   "minimax-cn": { component: MiniMaxIcon, color: "var(--provider-minimax)", label: "MiniMax (CN)" },

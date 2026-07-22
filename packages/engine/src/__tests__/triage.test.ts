@@ -1627,6 +1627,45 @@ Planner rewrote mission without the raw request.
     }
   });
 
+  it("does not release planning to todo when the authoritative PROMPT.md disappears before transition", async () => {
+    const task = createTriageTask({ id: "FN-MISSING-RELEASE", status: "planning", recoveryRetryCount: 0 });
+    const tempRoot = await mkdtemp(join(tmpdir(), "fusion-missing-release-"));
+    try {
+      const taskDir = join(tempRoot, ".fusion", "tasks", task.id);
+      await mkdir(taskDir, { recursive: true });
+      const written = `# Task: ${task.id} - Missing release artifact\n\n## Steps\n\n### Step 1: Implement\n\n- [ ] Do the work\n`;
+      await writeFile(join(taskDir, "PROMPT.md"), written, "utf-8");
+      const localStore = createMockStore({
+        getTask: vi.fn().mockResolvedValue({ ...task, prompt: "" }),
+        recordRunAuditEvent: vi.fn().mockResolvedValue(undefined),
+      });
+      const localProcessor = new TriageProcessor(localStore, tempRoot);
+
+      await (localProcessor as any).finalizeApprovedTask(task, written, { requirePlanApproval: false } as Settings);
+
+      expect(localStore.moveTaskIf).not.toHaveBeenCalled();
+      for (const [, patch] of localStore.updateTask.mock.calls) {
+        expect(patch).not.toEqual(expect.objectContaining({
+          steps: expect.anything(),
+        }));
+        expect(patch).not.toEqual(expect.objectContaining({
+          sourceMetadataPatch: expect.anything(),
+        }));
+      }
+      expect(localStore.updateTask).toHaveBeenCalledWith(task.id, expect.objectContaining({
+        status: null,
+        recoveryRetryCount: 1,
+        nextRecoveryAt: expect.any(String),
+      }));
+      expect(localStore.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "task:required-artifact-missing",
+        metadata: expect.objectContaining({ source: "planning-release", action: "replan" }),
+      }));
+    } finally {
+      await cleanupTriageFixtureRoot(tempRoot);
+    }
+  });
+
   it("includes workflow discovery and selection tools in the full triage toolset", async () => {
     const task = createTriageTask({ id: "FN-WORKFLOW-TOOLS" });
     const detailedTask = { ...mockTaskDetail, id: task.id, attachments: [], comments: [] };
@@ -1677,7 +1716,7 @@ Planner rewrote mission without the raw request.
   });
 
   describe("poll ordering", () => {
-    it("dispatches eligible triage tasks by priority desc then createdAt asc", async () => {
+    it("dispatches eligible triage tasks by createdAt asc", async () => {
       const tasks: Task[] = [
         createTriageTask({
           id: "FN-100",
@@ -1721,10 +1760,10 @@ Planner rewrote mission without the raw request.
 
       expect(specifySpy).toHaveBeenCalledTimes(4);
       expect(specifySpy.mock.calls.map(([task]) => task.id)).toEqual([
-        "FN-101",
+        "FN-100",
         "FN-103",
         "FN-102",
-        "FN-100",
+        "FN-101",
       ]);
     });
 
@@ -1802,6 +1841,7 @@ Planner rewrote mission without the raw request.
           ...createTriageTask({ id: "FN-EXEC", priority: "normal" }),
           column: "in-progress",
           status: null,
+          sessionFile: "/tmp/fusion-fn-exec-session.json",
         } as Task,
       ];
 
@@ -2411,8 +2451,8 @@ describe("requirePlanApproval setting", () => {
    * awaiting-approval a second time; the fix must move straight to todo instead.
    */
   describe("FN-7569: plan approval fingerprint idempotency", () => {
-    const planText = "# Task: FN-IDEMPOTENT - Idempotent plan\n\n## Mission\n\nDo the thing.\n\n## File Scope\n\n- a.ts\n";
-    const changedPlanText = "# Task: FN-IDEMPOTENT - Idempotent plan\n\n## Mission\n\nDo the thing, differently.\n\n## File Scope\n\n- a.ts\n- b.ts\n";
+    const planText = "# Task: FN-IDEMPOTENT - Idempotent plan\n\n## Mission\n\nDo the thing.\n\n## File Scope\n\n- a.ts\n\n## Steps\n\n### Step 1: Implement\n\nDo the thing.\n";
+    const changedPlanText = "# Task: FN-IDEMPOTENT - Idempotent plan\n\n## Mission\n\nDo the thing, differently.\n\n## File Scope\n\n- a.ts\n- b.ts\n\n## Steps\n\n### Step 1: Implement differently\n\nDo the changed thing.\n";
 
     /*
     FNXC:PlanApproval 2026-07-15-14:05:
@@ -2885,6 +2925,81 @@ describe("specified triage recovery", () => {
     );
   });
 
+  it("does not recover a prose-only partial planning draft into execution", async () => {
+    await writeFile(
+      join(rootDir, ".fusion", "tasks", "FN-001", "PROMPT.md"),
+      "# Refinement: unfinished plan\n\nOperator request.\n\n## Original Description\n\nOperator request.\n",
+    );
+    const store = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({
+        maxConcurrent: 2,
+        maxWorktrees: 4,
+        pollIntervalMs: 10000,
+        groupOverlappingFiles: false,
+        autoMerge: true,
+        requirePlanApproval: false,
+      } as Settings),
+      parseStepsFromPrompt: vi.fn().mockResolvedValue([]),
+    });
+    const processor = new TriageProcessor(store, rootDir);
+
+    const recovered = await processor.recoverApprovedTask({
+      id: "FN-001",
+      title: "Refinement: unfinished plan",
+      description: "Operator request.",
+      column: "triage",
+      status: "planning",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:02:00.000Z",
+    });
+
+    expect(recovered).toBe(false);
+    expect(store.moveTask).not.toHaveBeenCalledWith("FN-001", "todo");
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-001",
+      "Planning recovery withheld: PROMPT.md has no executable steps and does not declare no commits expected",
+    );
+  });
+
+  it("recovers a structured implementation plan without a no-commits marker", async () => {
+    await writeFile(
+      join(rootDir, ".fusion", "tasks", "FN-001", "PROMPT.md"),
+      "# Task: FN-001 - Implement change\n\n**Size:** M\n\n## Steps\n\n### Step 1: Implement\n\nMake the change.\n",
+    );
+    const store = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({
+        maxConcurrent: 2,
+        maxWorktrees: 4,
+        pollIntervalMs: 10000,
+        groupOverlappingFiles: false,
+        autoMerge: true,
+        requirePlanApproval: false,
+      } as Settings),
+      parseStepsFromPrompt: vi.fn().mockResolvedValue([{ name: "Implement", status: "pending" }]),
+    });
+    const processor = new TriageProcessor(store, rootDir);
+
+    const recovered = await processor.recoverApprovedTask({
+      id: "FN-001",
+      description: "Implement change",
+      column: "triage",
+      status: "planning",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:02:00.000Z",
+    });
+
+    expect(recovered).toBe(true);
+    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo");
+  });
+
   /*
   FNXC:TriageStuckKill 2026-07-18-22:30:
   Null status alone is not proof of an approved plan (Greptile P1). Only recover null-status
@@ -3165,6 +3280,12 @@ Forbidden paths / non-goals:
 - Do not edit Atlas files: \`AtlasNotes.xcodeproj/**\`, \`Tests/AtlasNotesMobileUITests/**\`, \`Packages/MobileApp/**\`.
 - Evidence only: \`.fusion/fusion.db\`, \`.fusion/tasks/*/task.json\`, \`Packages/*/Package.resolved\`.
 - Conditional only: \`.changeset/*.md\`.
+
+## Steps
+
+### Step 1: Fix poisoned scope
+
+Apply the scoped implementation changes.
 `,
     );
 
@@ -3226,7 +3347,7 @@ Forbidden paths / non-goals:
   it("updates malformed metadata title from prompt heading when task ID matches", async () => {
     await writeFile(
       join(rootDir, ".fusion", "tasks", "FN-001", "PROMPT.md"),
-      "# Task: FN-001 - Experimental AI Agent Onboarding Flow\n\n**Size:** M\n\n## Review Level: 2\n\nRecovered specification",
+      "# Task: FN-001 - Experimental AI Agent Onboarding Flow\n\n**Size:** M\n\n## Review Level: 2\n\nRecovered specification\n\n## Steps\n\n### Step 1: Implement onboarding flow\n\nMake the change.",
     );
 
     const store = createMockStore({
@@ -3265,7 +3386,7 @@ Forbidden paths / non-goals:
   it("does not overwrite title when heading task ID does not match", async () => {
     await writeFile(
       join(rootDir, ".fusion", "tasks", "FN-001", "PROMPT.md"),
-      "# Task: FN-999 - Wrong Task\n\n**Size:** M\n\n## Review Level: 2\n\nRecovered specification",
+      "# Task: FN-999 - Wrong Task\n\n**Size:** M\n\n## Review Level: 2\n\nRecovered specification\n\n## Steps\n\n### Step 1: Implement change\n\nMake the change.",
     );
 
     const store = createMockStore({
@@ -3315,7 +3436,7 @@ Forbidden paths / non-goals:
   it("preserves imported GitHub issue titles during planning recovery", async () => {
     await writeFile(
       join(rootDir, ".fusion", "tasks", "FN-001", "PROMPT.md"),
-      "# Task: FN-001 - Different AI-generated planning title\n\n**Size:** M\n\n## Review Level: 2\n\nRecovered specification",
+      "# Task: FN-001 - Different AI-generated planning title\n\n**Size:** M\n\n## Review Level: 2\n\nRecovered specification\n\n## Steps\n\n### Step 1: Implement issue fix\n\nMake the change.",
     );
 
     const store = createMockStore({
@@ -4145,11 +4266,11 @@ describe("taskCreate tool model inheritance", () => {
 
       expect(store.logEntry).toHaveBeenCalledWith(
         "FN-7437",
-        "Triage using model: mock-model (thinking effort: low)",
+        "Planning using model: mock-model (thinking effort: low)",
       );
       expect(store.appendAgentLog).toHaveBeenCalledWith(
         "FN-7437",
-        "Triage using model: mock-model (thinking effort: low)",
+        "Planning using model: mock-model (thinking effort: low)",
         "status",
         undefined,
         "triage",
@@ -4374,6 +4495,7 @@ describe("taskCreate tool model inheritance", () => {
             defaultModelId: "gpt-4o",
             planningFallbackProvider: "anthropic",
             planningFallbackModelId: "claude-3-5-haiku-20241022",
+            planningFallbackThinkingLevel: "xhigh",
           } as Settings),
         });
         mockCreateFnAgent.mockResolvedValue({ session: baseSession() });
@@ -4392,6 +4514,7 @@ describe("taskCreate tool model inheritance", () => {
             defaultModelId: "nvidia/moonshotai/kimi-k2.6",
             fallbackProvider: "anthropic",
             fallbackModelId: "claude-3-5-haiku-20241022",
+            fallbackThinkingLevel: "xhigh",
           }),
         );
       });
@@ -4529,7 +4652,10 @@ describe("taskCreate tool model inheritance", () => {
       await new TriageProcessor(store, "/test/root", { pollIntervalMs: 100_000 }).specifyTask(task);
 
       expect(liveTask).toMatchObject({ column: "in-review", status: "reviewing", worktree: "/tmp/FN-7977-MODEL", steps: [{ id: "1" }] });
-      expect(store.updateTask).toHaveBeenCalledTimes(1);
+      expect(store.updateTask).toHaveBeenCalledWith(task.id, { status: "planning" });
+      expect(store.updateTask).toHaveBeenCalledWith(task.id, {
+        planningStartedAt: expect.any(String),
+      });
     });
 
     it("keeps advanced worktree and steps after deterministic validation recovery", async () => {
@@ -4559,7 +4685,10 @@ describe("taskCreate tool model inheritance", () => {
       await new TriageProcessor(store, "/test/root", { pollIntervalMs: 100_000 }).specifyTask(task);
 
       expect(liveTask).toMatchObject({ column: "in-progress", status: "executing", worktree: "/tmp/FN-7977-VALIDATION", steps: [{ id: "1" }] });
-      expect(store.updateTask).toHaveBeenCalledTimes(1);
+      expect(store.updateTask).toHaveBeenCalledWith(task.id, { status: "planning" });
+      expect(store.updateTask).toHaveBeenCalledWith(task.id, {
+        planningStartedAt: expect.any(String),
+      });
     });
 
     it("escalates to error state when triage retries are exhausted via specifyTask", async () => {
@@ -5114,11 +5243,11 @@ describe("taskCreate tool model inheritance", () => {
       // Verify appendAgentLog was called with model and thinking effort info on the same triage row.
       expect(store.logEntry).toHaveBeenCalledWith(
         "FN-300",
-        "Triage using model: mock-model (thinking effort: high)",
+        "Planning using model: mock-model (thinking effort: high)",
       );
       expect(store.appendAgentLog).toHaveBeenCalledWith(
         "FN-300",
-        "Triage using model: mock-model (thinking effort: high)",
+        "Planning using model: mock-model (thinking effort: high)",
         "status",
         undefined,
         "triage",

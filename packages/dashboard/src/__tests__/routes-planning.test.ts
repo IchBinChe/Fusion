@@ -790,11 +790,67 @@ describe("Planning Mode Routes", () => {
     });
 
     describe("POST /planning/start-streaming", () => {
-      it("broadcasts a mandatory question instead of accepting a first-turn completion", async () => {
+      it("does not expose the seeded fallback as a reviewable plan while the AI turn is active", async () => {
+        const messages: Array<{ role: string; content: string }> = [];
+        let releasePrompt: (() => void) | undefined;
+        let markPromptStarted: (() => void) | undefined;
+        const promptStarted = new Promise<void>((resolve) => {
+          markPromptStarted = resolve;
+        });
+        __setCreateFnAgent(async () => ({
+          session: {
+            state: { messages },
+            prompt: vi.fn(async (message: string) => {
+              messages.push({ role: "user", content: message });
+              markPromptStarted?.();
+              await new Promise<void>((resolve) => {
+                releasePrompt = resolve;
+              });
+              messages.push({
+                role: "assistant",
+                content: JSON.stringify({
+                  type: "complete",
+                  data: {
+                    title: "AI-authored plan",
+                    description: "Generated after repository inspection.",
+                    proposedChanges: ["Implement the requested behavior"],
+                    acceptanceCriteria: ["The behavior is verified"],
+                    keyDeliverables: ["Working implementation"],
+                  },
+                }),
+              });
+            }),
+            dispose: vi.fn(),
+          },
+        }));
+
+        const startRes = await REQUEST(
+          buildApp(),
+          "POST",
+          "/api/planning/start-streaming",
+          JSON.stringify({ initialPlan: "Generate this plan with AI" }),
+          { "Content-Type": "application/json" },
+        );
+        const sessionId = startRes.body.sessionId as string;
+        const streamPromise = REQUEST(buildApp(), "GET", `/api/planning/${sessionId}/stream`);
+
+        await promptStarted;
+        planningStreamManager.broadcast(sessionId, { type: "complete" });
+        const streamRes = await streamPromise;
+        releasePrompt?.();
+        await vi.waitFor(() => {
+          expect(planningStreamManager.getBufferedEvents(sessionId, 0).some((event) => event.event === "summary")).toBe(true);
+        });
+
+        expect(messages[0]?.content).toContain("Generate this plan with AI");
+        expect(streamRes.body).not.toContain("event: summary");
+        expect(streamRes.body).not.toContain("Generate this plan with AI");
+      });
+
+      it("broadcasts a reviewable initial plan without an unsolicited question", async () => {
         const messages: Array<{ role: string; content: string }> = [];
         const responses = [
-          JSON.stringify({ type: "complete", data: { title: "Too early", description: "A plan", keyDeliverables: [] } }),
-          JSON.stringify({ type: "question", data: { id: "q-stream-required", type: "text", question: "What risk should the plan address?" } }),
+          JSON.stringify({ type: "complete", data: { title: "Reporting workflow plan", description: "A concrete reporting plan", proposedChanges: ["Update report generation"], acceptanceCriteria: ["Reports complete successfully"], keyDeliverables: ["Implement report generation"] } }),
         ];
         let responseIndex = 0;
         __setCreateFnAgent(async () => ({
@@ -819,10 +875,9 @@ describe("Planning Mode Routes", () => {
         expect(res.status).toBe(201);
         planningStreamManager.consumeInitialTurn(res.body.sessionId)!();
         await vi.waitFor(() => {
-          const questions = planningStreamManager.getBufferedEvents(res.body.sessionId, 0)
-            .filter((event) => event.event === "question");
-          expect(questions).toHaveLength(1);
-          expect(JSON.parse(questions[0]!.data)).toMatchObject({ id: expect.any(String), type: expect.any(String) });
+          const events = planningStreamManager.getBufferedEvents(res.body.sessionId, 0);
+          expect(events.filter((event) => event.event === "summary")).toHaveLength(1);
+          expect(events.filter((event) => event.event === "question")).toHaveLength(0);
         });
         expect(messages).toHaveLength(2);
         expect(messages[0]?.content).toContain("Build a detailed reporting workflow");
@@ -1299,7 +1354,8 @@ describe("Planning Mode Routes", () => {
           expect(promptCalls).toHaveLength(1);
           expect(streamRes.body).toContain("event: thinking");
           expect(streamRes.body).toContain("live first-turn reasoning");
-          expect(streamRes.body).toContain("event: question");
+          expect(streamRes.body).toContain("event: summary");
+          expect(streamRes.body).not.toContain("event: question");
         } finally {
           vi.useRealTimers();
         }
@@ -1351,7 +1407,8 @@ describe("Planning Mode Routes", () => {
           expect(promptCalls).toHaveLength(1);
           expect(streamRes.body).toContain("event: thinking");
           expect(streamRes.body).toContain("live first-turn reasoning");
-          expect(streamRes.body).toContain("event: question");
+          expect(streamRes.body).toContain("event: summary");
+          expect(streamRes.body).not.toContain("event: question");
         } finally {
           vi.useRealTimers();
         }

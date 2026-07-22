@@ -12,10 +12,12 @@
 import type { TaskStore, TaskComment, AgentPromptsConfig, Settings } from "@fusion/core";
 import {
   buildReviewerMemoryInstructions,
+  hasConfiguredFallbackLane,
   resolveAgentMemoryInclusionMode,
   resolveAgentPrompt,
   resolvePersistAgentThinkingLog,
   resolveTaskSeamPrompt,
+  resolveValidatorFallbackModel,
 } from "@fusion/core";
 import { recordRetry } from "./retry-burned-logger.js";
 import { mergeEffectiveSettings } from "./effective-settings.js";
@@ -23,7 +25,12 @@ import { describeModel, formatModelMarkerDetails, promptWithFallback } from "./p
 import { isContextLimitError } from "./context-limit-detector.js";
 import { classifyError } from "./transient-error-detector.js";
 import { withRetry } from "./retry-with-backoff.js";
-import { createResolvedAgentSession, extractRuntimeHint, resolveValidatorSessionModel } from "./agent-session-helpers.js";
+import {
+  createResolvedAgentSession,
+  extractRuntimeHint,
+  resolveValidatorFallbackThinkingLevel,
+  resolveValidatorSessionModel,
+} from "./agent-session-helpers.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
 import { AgentLogger } from "./agent-logger.js";
 import { reviewerLog } from "./logger.js";
@@ -48,7 +55,7 @@ A reviewer provider failure (rate limit / flaky network) is NOT a review verdict
 
 Root cause this type exists to fix: the reviewer was the only AI lane that never classified provider errors. A 429 became `UNAVAILABLE`, which drove the fallback ladder to re-hit the SAME rate-limited model instantly (when no validator fallback is configured the "fallback" is a same-model strict-prompt rerun), and `fn_review_step` then told the model "code review remains blocking; retry once", so the executor's agent re-called the tool indefinitely. Observed symptom: 14 identical "Reviewer using model: umans/umans-kimi-k2.7" markers with no review text, one per spawned session, hammering an already-limited provider.
 
-`UNAVAILABLE` is reserved for its real meaning: the reviewer RAN and could not produce a parseable verdict. Provider failures throw this instead so they reach the machinery that already exists to handle them — `withRateLimitRetry` backoff, `UsageLimitPauser` global pause, and the executor's bounded transient recovery. See `getDeferredReviewerFatal` in executor.ts for why the escape needs a deferred re-raise.
+`UNAVAILABLE` is reserved for its real meaning: the reviewer RAN and could not produce a parseable verdict. Provider failures throw this instead so they reach the machinery that already exists to handle them — `withRateLimitRetry` backoff, the provider-scoped `UsageLimitPauser` task park, and the executor's bounded transient recovery. See `getDeferredReviewerFatal` in executor.ts for why the escape needs a deferred re-raise.
 */
 /** Bounded local retry budget for transient network blips inside one review attempt. */
 const REVIEWER_TRANSIENT_MAX_RETRIES = 3;
@@ -56,13 +63,16 @@ const REVIEWER_TRANSIENT_MAX_RETRIES = 3;
 export class ReviewerProviderError extends Error {
   constructor(
     message: string,
-    /** `usage-limit` → global pause; `transient` → bounded recovery retry. Never `permanent`. */
+    /** `usage-limit` → affected-task provider pause; `transient` → bounded recovery retry. Never `permanent`. */
     public readonly classification: "usage-limit" | "transient",
-    options?: { cause?: unknown },
+    options?: { cause?: unknown; provider?: string },
   ) {
     super(message, options);
     this.name = "ReviewerProviderError";
+    this.provider = options?.provider;
   }
+
+  readonly provider?: string;
 }
 
 export interface ReviewResult {
@@ -205,6 +215,13 @@ export async function reviewStep(
       // Fall back to the snapshot — better to spawn than crash on a transient store error.
     }
   }
+  if (options.store && options.taskId && liveSettings) {
+    try {
+      liveSettings = await mergeEffectiveSettings(options.store, { id: options.taskId }, liveSettings);
+    } catch {
+      // Keep the best available snapshot when task/workflow resolution fails.
+    }
+  }
   if (liveSettings?.globalPause || liveSettings?.enginePaused) {
     const reason = liveSettings.globalPause ? "Global pause" : "Engine paused";
     reviewerLog.log(
@@ -289,12 +306,27 @@ export async function reviewStep(
   const validatorProvider = reviewerModel.provider;
   const validatorModelId = reviewerModel.modelId;
 
-  const validatorFallbackProvider = options.projectValidatorFallbackProvider && options.projectValidatorFallbackModelId
-    ? options.projectValidatorFallbackProvider
-    : options.fallbackProvider;
-  const validatorFallbackModelId = options.projectValidatorFallbackProvider && options.projectValidatorFallbackModelId
-    ? options.projectValidatorFallbackModelId
-    : options.fallbackModelId;
+  const reviewerFallbackSettings: Partial<Settings> = {
+    ...reviewerModelSettings,
+    validatorFallbackProvider: effectiveSettings?.validatorFallbackProvider,
+    validatorFallbackModelId: effectiveSettings?.validatorFallbackModelId,
+    fallbackProvider: effectiveSettings?.fallbackProvider,
+    fallbackModelId: effectiveSettings?.fallbackModelId,
+  };
+  if (options.projectValidatorFallbackProvider && options.projectValidatorFallbackModelId) {
+    reviewerFallbackSettings.validatorFallbackProvider = options.projectValidatorFallbackProvider;
+    reviewerFallbackSettings.validatorFallbackModelId = options.projectValidatorFallbackModelId;
+  }
+  if (options.fallbackProvider && options.fallbackModelId) {
+    reviewerFallbackSettings.fallbackProvider = options.fallbackProvider;
+    reviewerFallbackSettings.fallbackModelId = options.fallbackModelId;
+  }
+  const hasConfiguredValidatorFallback = hasConfiguredFallbackLane(reviewerFallbackSettings, "validation");
+  const validatorFallback = hasConfiguredValidatorFallback
+    ? resolveValidatorFallbackModel(reviewerFallbackSettings)
+    : { provider: undefined, modelId: undefined };
+  const validatorFallbackProvider = validatorFallback.provider;
+  const validatorFallbackModelId = validatorFallback.modelId;
 
   let reviewerInstructions = "";
   if (options.agentStore && options.rootDir) {
@@ -470,7 +502,8 @@ export async function reviewStep(
       defaultModelId: overrides?.forceModelId ?? validatorModelId,
       fallbackProvider: validatorFallbackProvider,
       fallbackModelId: validatorFallbackModelId,
-      fallbackThinkingLevel: options.fallbackThinkingLevel,
+      fallbackThinkingLevel: options.fallbackThinkingLevel
+        ?? resolveValidatorFallbackThinkingLevel(options.defaultThinkingLevel, reviewerFallbackSettings),
       defaultThinkingLevel: options.defaultThinkingLevel,
       runAuditor,
       settings: effectiveSettings,
@@ -658,21 +691,9 @@ export async function reviewStep(
   };
 
   const hasConfiguredFallback = Boolean(validatorFallbackProvider && validatorFallbackModelId);
-  // Merge per-task effective workflow settings (U3, KTD-3) over the base so the
-  // retry-budget reads (maxReviewerContextRetries / maxReviewerFallbackRetries via
-  // recordRetry) pick up workflow values. `liveSettings`/`options.settings` are the
-  // base; the merge is behavior-inert when nothing is customized. Resolved once
-  // here (all recordRetry sites share it).
-  const retrySettingsBase = liveSettings ?? options.settings;
-  let retrySettings = retrySettingsBase;
-  if (options.store && options.taskId && retrySettingsBase) {
-    try {
-      const retryTask = await options.store.getTask(options.taskId);
-      retrySettings = await mergeEffectiveSettings(options.store, retryTask, retrySettingsBase);
-    } catch {
-      // Keep the base snapshot on any store/resolve error (never-throw).
-    }
-  }
+  // The task-effective snapshot used for model selection also carries workflow
+  // retry-budget values, so every recordRetry site shares the same resolution.
+  const retrySettings = effectiveSettings;
 
   const resetReviewerFallbackRetryCount = async (): Promise<void> => {
     if (!options.store || !options.taskId || typeof options.store.updateTask !== "function") {
@@ -688,7 +709,7 @@ export async function reviewStep(
     /*
     FNXC:ReviewerProviderErrors 2026-07-15-11:20:
     Classify BEFORE the fallback ladder. The ladder's premise is "this model produced a bad review, try another prompt/model" — a premise that is false for provider failures and actively harmful for them:
-      - usage-limit: the ladder's same-model strict-prompt rerun (taken whenever no validator fallback is configured) re-hits the exact model that just rate-limited us, with no delay. Escalate instead so `withRateLimitRetry` backs off and `UsageLimitPauser` pauses every lane.
+      - usage-limit: the ladder's same-model strict-prompt rerun (taken whenever no validator fallback is configured) re-hits the exact model that just rate-limited us, with no delay. Escalate instead so `withRateLimitRetry` backs off and `UsageLimitPauser` parks only this provider-routed task.
       - transient: `runAttempt` already spent its bounded backoff budget above, so the network is genuinely down. Escalate to the executor's bounded recovery (requeue with delay) rather than burning the reviewer fallback budget on a dead link.
     Neither burns `reviewerFallbackRetryCount` — that budget exists to bound BAD REVIEWS, and spending it on an outage would fail tasks that have nothing wrong with them.
     */
@@ -700,7 +721,10 @@ export async function reviewStep(
       if (options.store && options.taskId) {
         await options.store.logEntry(options.taskId, escalationMessage).catch(() => undefined);
       }
-      throw new ReviewerProviderError(providerErrorMessage, classification, { cause: err });
+      throw new ReviewerProviderError(providerErrorMessage, classification, {
+        cause: err,
+        provider: validatorProvider,
+      });
     }
 
     if (hasConfiguredFallback) {

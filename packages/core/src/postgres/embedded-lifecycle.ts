@@ -750,12 +750,20 @@ export interface EmbeddedDylibNormalization {
   readonly created: boolean;
 }
 
+/*
+FNXC:PostgresEmbedded 2026-07-22-14:34:
+The bundled libicui18n.68.2.dylib records libicuuc.68.dylib as its loader
+name. macOS dyld must find that ABI-specific compatibility name before initdb
+runs, so normalize it only from the packaged libicuuc.68.<patch>.dylib payload
+rather than adding a broad unversioned ICU link or relying on system libraries.
+*/
 const MACOS_EMBEDDED_DYLIB_SYMLINKS: readonly EmbeddedDylibSymlinkSpec[] = [
   { expected: "libpq.5.dylib", candidate: /^libpq\.5\..+\.dylib$/ },
   { expected: "libzstd.1.dylib", candidate: /^libzstd\.1\..+\.dylib$/ },
   { expected: "liblz4.1.dylib", candidate: /^liblz4\.1\..+\.dylib$/ },
   { expected: "libz.1.dylib", candidate: /^libz\.1\..+\.dylib$/ },
   { expected: "libicui18n.dylib", candidate: /^libicui18n\..+\.dylib$/ },
+  { expected: "libicuuc.68.dylib", candidate: /^libicuuc\.68\..+\.dylib$/ },
 ];
 
 function sortDylibCandidates(files: readonly string[], candidate: RegExp): string[] {
@@ -768,10 +776,11 @@ function sortDylibCandidates(files: readonly string[], candidate: RegExp): strin
  * Normalize macOS embedded-postgres library names before initdb/postgres spawn.
  *
  * The @embedded-postgres/darwin-* packages can contain fully-versioned dylibs
- * (for example libpq.5.15.dylib, libzstd.1.5.7.dylib) while the bundled
- * binaries link against ABI compatibility names such as libpq.5.dylib and
- * libzstd.1.dylib via @loader_path/../lib/.... When the package postinstall
- * symlink hydration is skipped or incomplete, dyld fails before initdb can run.
+ * (for example libpq.5.15.dylib, libzstd.1.5.7.dylib, and
+ * libicuuc.68.2.dylib) while the bundled binaries link against ABI compatibility
+ * names such as libpq.5.dylib, libzstd.1.dylib, and libicuuc.68.dylib via
+ * @loader_path/../lib/.... When the package postinstall symlink hydration is
+ * skipped or incomplete, dyld fails before initdb can run.
  *
  * This is intentionally local to the embedded binary package and idempotent:
  * existing compatibility names are left alone; missing compatibility names are
@@ -1000,22 +1009,45 @@ function isDuplicateDatabaseError(error: unknown): boolean {
   return code === "23505" && constraint === "pg_database_datname_index";
 }
 
-function isAlreadyRunning(dataDir: string): { port: number; database: string } | null {
-  // Check in-process registry first
+const POSTMASTER_PID_READ_ATTEMPTS = 3;
+const POSTMASTER_PID_READ_RETRY_MS = 10;
+
+function waitForPostmasterPidReread(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, POSTMASTER_PID_READ_RETRY_MS));
+}
+
+/**
+ * Resolve an instance another lifecycle/process already owns.
+ *
+ * FNXC:PostgresEmbedded 2026-07-21-10:00:
+ * A present `postmaster.pid` is a live-lock signal, not permission to launch a
+ * second postmaster. PostgreSQL can write it while a joiner reads, so retry a
+ * small bounded number of times; if its port remains unreadable, fail closed
+ * instead of turning parser-null into the double-boot collision that exhausts
+ * extension TaskStore's caller budget.
+ */
+async function isAlreadyRunning(dataDir: string): Promise<{ port: number; database: string } | null> {
+  // Check in-process registry first.
   const cached = runningInstances.get(dataDir);
   if (cached) return cached;
 
-  // Check postmaster.pid — another process (or a prior call) may have started PG
-  if (!existsSync(join(dataDir, "postmaster.pid"))) return null;
+  const pidPath = join(dataDir, "postmaster.pid");
+  if (!existsSync(pidPath)) return null;
 
-  // Read the port from postmaster.pid
-  const port = readPortFromPostmasterPid(dataDir);
-  if (!port) return null;
+  for (let attempt = 0; attempt < POSTMASTER_PID_READ_ATTEMPTS; attempt += 1) {
+    const port = readPortFromPostmasterPid(dataDir);
+    if (port) {
+      // Probe: can we connect to this port? We return it optimistically; the
+      // connection layer reports a stale-but-parseable pid without a second start.
+      return { port, database: "fusion" };
+    }
+    if (!existsSync(pidPath)) return null;
+    if (attempt < POSTMASTER_PID_READ_ATTEMPTS - 1) await waitForPostmasterPidReread();
+  }
 
-  // Probe: can we connect to this port?
-  // We return the port optimistically — the connection layer will fail fast
-  // if the port is stale (postmaster.pid left over from a crash).
-  return { port, database: "fusion" };
+  throw new Error(
+    `embedded postgres: postmaster.pid is present but its port could not be read after ${POSTMASTER_PID_READ_ATTEMPTS} attempts; a second postmaster will not be started (data dir ${dataDir})`,
+  );
 }
 
 /**
@@ -1202,7 +1234,7 @@ export class EmbeddedPostgresLifecycle {
 
     // FNXC:PostgresCutover 2026-06-27-11:05:
     // Check if PG is already running for this data dir. If so, reuse it.
-    const existing = isAlreadyRunning(this.options.dataDir);
+    const existing = await isAlreadyRunning(this.options.dataDir);
     if (existing) {
       this.options.onLog(
         `embedded postgres: already running on port ${existing.port} (data dir ${this.options.dataDir}), connecting without starting a new instance`,
@@ -1369,7 +1401,7 @@ export class EmbeddedPostgresLifecycle {
       and orphan a live postmaster nothing would ever stop. See isPostgresLockCollisionError.
       */
       if (!isPostgresLockCollisionError(error)) throw error;
-      const existing = isAlreadyRunning(this.options.dataDir);
+      const existing = await isAlreadyRunning(this.options.dataDir);
       if (!existing) throw error;
 
       /*

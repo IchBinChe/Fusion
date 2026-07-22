@@ -13,6 +13,12 @@ FNXC:BoardNavigation 2026-07-22-15:10:
 A tap during post-lift momentum must cancel the pending directional settle and re-baseline
 the gesture at the current scrollLeft (pointerHeld true). Otherwise the original swipe's
 idle timer still hard-jumps the board away from where the user stopped.
+
+FNXC:BoardNavigation 2026-07-22-15:26:
+After any user touch sequence ends, the board must rest on exactly one column center — never
+between columns. Tap-to-stop and zero-pan lifts hard-jump to the nearest center (not the
+cancelled swipe's directional page). Directional paging still applies only when the settle
+gesture itself had pan intent.
 */
 /** After lift/cancel/wheel: wait for scroll idle (momentum finished) before paging. */
 const SCROLL_IDLE_SETTLE_MS = 48;
@@ -325,6 +331,31 @@ export function useColumnScrollSnap(
       reassertPinnedScrollLeft();
     };
 
+    /**
+     * FNXC:BoardNavigation 2026-07-22-15:26:
+     * Hard-jump to the nearest column center when off-center. Returns true when a snap
+     * applied (or already centered); false only when there are no usable snap columns.
+     */
+    const snapToNearestColumnIfNeeded = (): boolean => {
+      const columns = getSnapColumns(scroller);
+      if (columns.length < 2) {
+        restoreNativeSnap();
+        return false;
+      }
+      const viewportWidth = scroller.clientWidth || scroller.getBoundingClientRect().width;
+      if (viewportWidth <= 0) {
+        restoreNativeSnap();
+        return false;
+      }
+      if (isColumnCentered(scroller, columns)) {
+        restoreNativeSnap();
+        return true;
+      }
+      const targetIndex = nearestColumnIndex(scroller, columns);
+      applySnapTo(scrollLeftToCenterColumn(scroller, columns[targetIndex]));
+      return true;
+    };
+
     const snapInScrollDirection = () => {
       clearIdleTimer();
       if (!interactionActive) return;
@@ -353,8 +384,13 @@ export function useColumnScrollSnap(
       gestureStartClientX = null;
       lastClientX = null;
 
+      /*
+      FNXC:BoardNavigation 2026-07-22-15:26:
+      No pan on this settle gesture (tap-to-stop after re-baseline, pure tap): still never
+      rest between columns — nearest-center only. Do not reuse a cancelled swipe's direction.
+      */
       if (!hadPanIntent) {
-        restoreNativeSnap();
+        snapToNearestColumnIfNeeded();
         return;
       }
 
@@ -522,8 +558,9 @@ export function useColumnScrollSnap(
       if (sawHorizontalMovement || lockedDirection !== 0) {
         armIdleSettle();
       } else {
+        // FNXC:BoardNavigation 2026-07-22-15:26: Cancelled zero-pan touch must not leave mid-column.
         interactionActive = false;
-        restoreNativeSnap();
+        snapToNearestColumnIfNeeded();
       }
     };
 

@@ -66,6 +66,7 @@ describe("ThemeSelector", () => {
 
     const listbox = screen.getByRole("listbox", { name: "Color theme" });
     expect(renderedThemeIds(listbox)).toEqual(EXPECTED_THEME_IDS);
+    fireEvent.change(screen.getByRole("searchbox", { name: /filter color themes/i }), { target: { value: "ocean" } });
     const oceanOption = within(listbox).getByRole("option", { name: "Ocean" });
     expect(oceanOption.querySelector(".theme-swatch-ocean")).toBeTruthy();
     fireEvent.click(oceanOption);

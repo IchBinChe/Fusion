@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import i18next from "i18next";
 import { ThemeDropdown } from "../ThemeDropdown";
 
 // FNXC:Theme 2026-07-16-14:30: FN-8146 pins the historical Settings-grid set, including restored shadcn-mono, so a removal from COLOR_THEMES cannot make the all-themes checks pass circularly.
@@ -251,6 +252,111 @@ describe("ThemeDropdown", () => {
 
     expect(css).toContain('[data-theme="light"] .theme-swatch-shadcn-mono,\n[data-theme="light"] .theme-swatch-shadcn-mono-red');
     expect(css).not.toContain('[data-theme="light"] .theme-swatch-shadcn-mono,\n.theme-swatch-shadcn-mono-red');
+  });
+
+  it("filters rendered labels case- and diacritic-insensitively without changing canonical order", () => {
+    render(<ThemeDropdown colorTheme="ocean" onColorThemeChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /ocean/i }));
+    const filter = screen.getByRole("searchbox", { name: /filter color themes/i });
+
+    fireEvent.change(filter, { target: { value: "  shadcn mono red  " } });
+    expect(renderedThemeIds(screen.getByRole("listbox"))).toEqual(["shadcn-mono-red"]);
+
+    fireEvent.change(filter, { target: { value: "rose pine" } });
+    expect(renderedThemeIds(screen.getByRole("listbox"))).toEqual(["rose-pine"]);
+
+    fireEvent.change(filter, { target: { value: "   " } });
+    expect(renderedThemeIds(screen.getByRole("listbox"))).toEqual(EXPECTED_THEME_IDS);
+    expect(new Set(renderedThemeIds(screen.getByRole("listbox"))).size).toBe(EXPECTED_THEME_IDS.length);
+  });
+
+  it("filters the translated display label and falls back to theme metadata", () => {
+    i18next.addResourceBundle("en", "app", { theme: { colorTheme: { ocean: "Marée" } } }, true, true);
+    const { unmount } = render(<ThemeDropdown colorTheme="ocean" onColorThemeChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /marée/i }));
+    const filter = screen.getByRole("searchbox", { name: /filter color themes/i });
+    fireEvent.change(filter, { target: { value: "maree" } });
+    expect(screen.getByRole("option", { name: "Marée" })).toBeDefined();
+    fireEvent.change(filter, { target: { value: "forest" } });
+    expect(screen.getByRole("option", { name: "Forest" })).toBeDefined();
+    unmount();
+    i18next.removeResourceBundle("en", "app");
+  });
+
+  it("keeps no-result filtering non-selectable and restores a valid filtered roving option", () => {
+    const onColorThemeChange = vi.fn();
+    render(<ThemeDropdown colorTheme="ocean" onColorThemeChange={onColorThemeChange} />);
+    fireEvent.click(screen.getByRole("button", { name: /ocean/i }));
+    const filter = screen.getByRole("searchbox", { name: /filter color themes/i });
+    fireEvent.change(filter, { target: { value: "missing theme" } });
+    expect(screen.getByText(/no color themes found/i)).toBeDefined();
+    expect(screen.queryAllByRole("option")).toHaveLength(0);
+    fireEvent.keyDown(filter, { key: "ArrowDown" });
+    expect(onColorThemeChange).not.toHaveBeenCalled();
+    fireEvent.change(filter, { target: { value: "ocean" } });
+    expect(screen.getByRole("option", { name: "Ocean" })).toHaveAttribute("tabindex", "0");
+  });
+
+  it("uses pointer and trigger keyboard origins to focus the specified targets", () => {
+    const { unmount } = render(<ThemeDropdown colorTheme="forest" onColorThemeChange={vi.fn()} />);
+    const pointerTrigger = screen.getByRole("button", { name: /forest/i });
+    expect(pointerTrigger).not.toHaveAttribute("aria-controls");
+    fireEvent.click(pointerTrigger);
+    expect(screen.getByRole("searchbox", { name: /filter color themes/i })).toHaveFocus();
+    expect(pointerTrigger).toHaveAttribute("aria-controls", "theme-dropdown-listbox");
+    unmount();
+
+    for (const [key, expected] of [["ArrowDown", "Fusion Legacy"], ["ArrowUp", "Shadcn Gray Blue"], ["Enter", "Forest"], [" ", "Forest"]]) {
+      const { unmount: close } = render(<ThemeDropdown colorTheme="forest" onColorThemeChange={vi.fn()} />);
+      const trigger = screen.getByRole("button", { name: /forest/i });
+      fireEvent.keyDown(trigger, { key });
+      expect(screen.getByRole("option", { name: expected })).toHaveFocus();
+      expect(screen.getByRole("searchbox", { name: /filter color themes/i })).not.toHaveFocus();
+      close();
+    }
+  });
+
+  it("transfers input focus and navigates only filtered options before selecting once", () => {
+    const onColorThemeChange = vi.fn();
+    render(<ThemeDropdown colorTheme="ocean" onColorThemeChange={onColorThemeChange} />);
+    fireEvent.click(screen.getByRole("button", { name: /ocean/i }));
+    const filter = screen.getByRole("searchbox", { name: /filter color themes/i });
+    fireEvent.change(filter, { target: { value: "shadcn mono" } });
+    fireEvent.keyDown(filter, { key: "ArrowDown" });
+    expect(screen.getByRole("option", { name: "Shadcn Mono" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("option", { name: "Shadcn Mono" }), { key: "ArrowUp" });
+    expect(screen.getByRole("option", { name: "Shadcn Mono Yellow" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("option", { name: "Shadcn Mono Yellow" }), { key: "Home" });
+    expect(screen.getByRole("option", { name: "Shadcn Mono" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("option", { name: "Shadcn Mono" }), { key: "End" });
+    expect(screen.getByRole("option", { name: "Shadcn Mono Yellow" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("option", { name: "Shadcn Mono Yellow" }), { key: "Enter" });
+    expect(onColorThemeChange).toHaveBeenCalledTimes(1);
+    expect(onColorThemeChange).toHaveBeenCalledWith("shadcn-mono-yellow");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(screen.queryByRole("searchbox")).toBeNull();
+  });
+
+  it("removes conditional listbox linkage and filter shell for all close paths", () => {
+    render(<ThemeDropdown colorTheme="ocean" onColorThemeChange={vi.fn()} />);
+    const trigger = screen.getByRole("button", { name: /ocean/i });
+    fireEvent.click(trigger);
+    fireEvent.keyDown(screen.getByRole("searchbox", { name: /filter color themes/i }), { key: "Escape" });
+    expect(trigger).not.toHaveAttribute("aria-controls");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(screen.queryByRole("searchbox")).toBeNull();
+
+    fireEvent.click(trigger);
+    fireEvent.pointerDown(document.body);
+    expect(trigger).not.toHaveAttribute("aria-controls");
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(screen.queryByRole("searchbox")).toBeNull();
+  });
+
+  it("uses tokenized filter styles within the existing mobile static popover", () => {
+    const css = readFileSync("app/components/ThemeDropdown.css", "utf8");
+    expect(css).toMatch(/\.theme-dropdown-filter \.input:focus-visible[\s\S]*?var\(--accent\)[\s\S]*?var\(--focus-ring\)/);
+    expect(css).toMatch(/\.theme-dropdown-no-results[\s\S]*?var\(--space-sm\)[\s\S]*?var\(--text-muted\)/);
   });
 
   it("preserves the mobile static in-flow popover branch without dropdown elevation", () => {

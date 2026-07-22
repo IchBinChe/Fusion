@@ -113,6 +113,7 @@ describe("CommandCenterControls concurrency markers", () => {
     fireEvent.click(trigger);
     const listbox = screen.getByRole("listbox", { name: "Color theme" });
     expect(renderedThemeIds(listbox)).toEqual(EXPECTED_THEME_IDS);
+    fireEvent.change(screen.getByRole("searchbox", { name: /filter color themes/i }), { target: { value: "dawn" } });
     fireEvent.click(screen.getByRole("option", { name: "Dawn" }));
 
     expect(onColorThemeChange).toHaveBeenCalledWith("dawn");

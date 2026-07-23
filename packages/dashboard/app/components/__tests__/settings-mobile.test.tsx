@@ -42,6 +42,7 @@ const defaultSettings = {
 
 vi.mock("../../api", () => ({
   fetchProjects: vi.fn(() => Promise.resolve([])),
+  fetchPlugins: vi.fn(() => Promise.resolve([])),
   fetchGitRemotes: vi.fn(() => Promise.resolve({ remotes: [] })),
   fetchGitRemotesDetailed: vi.fn(() => Promise.resolve([])),
   fetchGitBranches: vi.fn(() => Promise.resolve([])),

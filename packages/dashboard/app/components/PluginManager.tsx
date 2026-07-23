@@ -42,6 +42,8 @@ interface PluginLifecyclePayload {
 interface PluginManagerProps {
   addToast: (message: string, type?: ToastType) => void;
   projectId?: string;
+  /** Lets a mounted Settings owner refresh installed-only runtime navigation. */
+  onPluginsChanged?: () => void;
 }
 
 interface BuiltinPlugin {
@@ -264,7 +266,7 @@ function renderPluginError(plugin: PluginInstallation, className = "plugin-error
   );
 }
 
-export function PluginManager({ addToast, projectId }: PluginManagerProps) {
+export function PluginManager({ addToast, projectId, onPluginsChanged }: PluginManagerProps) {
   const { t } = useTranslation("app");
   const [plugins, setPlugins] = useState<PluginInstallation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -506,6 +508,7 @@ export function PluginManager({ addToast, projectId }: PluginManagerProps) {
       setInstallPath("");
       setInstallAiScanOnLoad(false);
       await loadPlugins();
+      onPluginsChanged?.();
     } catch (err) {
       addToast(t("plugins.installFailed", "Failed to install plugin: {{error}}", { error: err instanceof Error ? err.message : String(err) }), "error");
     } finally {
@@ -524,6 +527,7 @@ export function PluginManager({ addToast, projectId }: PluginManagerProps) {
       await installPlugin({ path: plugin.path }, projectId);
       addToast(t("plugins.builtinInstalledGlobally", "{{name}} installed globally", { name: plugin.name }), "success");
       await loadPlugins();
+      onPluginsChanged?.();
     } catch (err) {
       addToast(t("plugins.builtinInstallFailed", "Failed to install {{name}}: {{error}}", { name: plugin.name, error: err instanceof Error ? err.message : String(err) }), "error");
     } finally {
@@ -542,6 +546,7 @@ export function PluginManager({ addToast, projectId }: PluginManagerProps) {
       await installPlugin({ path: entry.path }, projectId);
       addToast(t("plugins.registryInstalled", "{{name}} installed and enabled", { name: entry.name }), "success");
       await loadPlugins();
+      onPluginsChanged?.();
       await loadRegistry(registrySearchQuery, registryCategory);
     } catch (err) {
       addToast(t("plugins.registryInstallFailed", "Failed to install {{name}}: {{error}}", { name: entry.name, error: err instanceof Error ? err.message : String(err) }), "error");
@@ -590,6 +595,7 @@ export function PluginManager({ addToast, projectId }: PluginManagerProps) {
       // FNXC:PluginEnablementScope 2026-07-21-16:30: Preserve this authoritative
       // response if the single confirmation refresh races a stale scoped-list read.
       await loadPlugins(true, enabledPlugin);
+      onPluginsChanged?.();
     } catch (err) {
       addToast(t("plugins.enablePluginFailed", "Failed to enable plugin: {{error}}", { error: err instanceof Error ? err.message : String(err) }), "error");
     }
@@ -601,6 +607,7 @@ export function PluginManager({ addToast, projectId }: PluginManagerProps) {
       setPlugins((previous) => previous.map((entry) => entry.id === disabledPlugin.id ? disabledPlugin : entry));
       addToast(t("plugins.disabledForProject", "{{name}} disabled for this project", { name: plugin.name }), "success");
       await loadPlugins(true, disabledPlugin);
+      onPluginsChanged?.();
     } catch (err) {
       addToast(t("plugins.disablePluginFailed", "Failed to disable plugin: {{error}}", { error: err instanceof Error ? err.message : String(err) }), "error");
     }
@@ -675,6 +682,7 @@ export function PluginManager({ addToast, projectId }: PluginManagerProps) {
       await uninstallPlugin(plugin.id, projectId);
       addToast(t("plugins.uninstalledGlobally", "{{name}} uninstalled globally", { name: plugin.name }), "success");
       await loadPlugins();
+      onPluginsChanged?.();
       setSelectedPlugin(null);
     } catch (err) {
       addToast(t("plugins.uninstallFailed", "Failed to uninstall plugin: {{error}}", { error: err instanceof Error ? err.message : String(err) }), "error");

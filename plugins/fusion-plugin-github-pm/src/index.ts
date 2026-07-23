@@ -262,3 +262,15 @@ export {
   githubPmSetMilestoneStateTool,
   githubPmDeleteMilestoneTool,
 } from "./tools.js";
+/*
+FNXC:GithubPmDiscussions 2026-07-25-12:30:
+KB-005 re-exports: the discussion-browse client types/methods (already declared in
+github-client.ts, re-exported here following the FUSI-014/KB-002/KB-003 one-export-block-per-
+feature precedent) and the discussion-browse read-route array + handlers. DiscussionsPanel.tsx/
+DiscussionsPanel.css are deliberately NOT re-exported here (React/CSS modules stay out of this
+server entry point per the FUSI-001 constraint noted at the top of this file). This is a
+READ-ONLY feature -- no write route, no agent tool is added by this block.
+*/
+export { buildDiscussionSearchQuery } from "./github-client.js";
+export type { GitHubDiscussionCategory, GitHubDiscussionBrowseItem, GitHubDiscussionBrowseOptions } from "./github-client.js";
+export { discussionRoutes, getDiscussionCategories, getDiscussionsList } from "./discussion-routes.js";

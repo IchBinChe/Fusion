@@ -292,6 +292,32 @@ The pre-existing `milestones` placeholder-copy entry in `TAB_PLACEHOLDER_COPY` i
 
 `scripts/copy-css.mjs` now globs every `*.css` file directly under `src/` (KB-004), so `MilestonesPanel.css` ships to `dist/` automatically without an explicit list entry.
 
+## Discussion browser (KB-005)
+
+The **Discussions** tab (previously a placeholder) now renders `DiscussionsPanel`, a **read-only** discussion browser: a category rail, a search box, a sort control, and a Q&A-only answered/unanswered filter. Siblings KB-006 (discussion detail/threaded comments) and KB-007 (create discussions / mark answers) build on this browser; this feature adds no write route, no agent tool, and does not touch the `confirmWrites` gate.
+
+**Client methods** (`src/github-client.ts`), additive alongside the existing `listDiscussions`/`GITHUB_DISCUSSIONS_QUERY` (which stays unchanged — it feeds FUSI-005's taxonomy generator):
+
+- `listDiscussionCategories(owner, repo)` — GraphQL `repository { discussionCategories(first: 100) { nodes { id name slug emoji emojiHTML isAnswerable description } } }`, mapped to `GitHubDiscussionCategory[]` (nodes missing `id`/`name` are filtered out). A single non-paginated page (categories rarely exceed 100).
+- `searchDiscussions(owner, repo, { category?, search?, sort?, answered?, maxItems? })` — browses discussions via GitHub's `search(type: DISCUSSION)` connection (not the plain `discussions` connection `listDiscussions` uses) so results match GitHub's own Discussions-tab search bar. Cursor-paginated through the shared `paginateGraphQl`. Maps each node to `GitHubDiscussionBrowseItem` (`number`, `title`, `url`, `categoryName`, `categoryEmoji`, `upvoteCount`, `commentCount`, `isAnswered`, `authorLogin`, `createdAt`, `updatedAt`); `isAnswered` is derived from `answer != null || answerChosenAt != null`.
+- `buildDiscussionSearchQuery(owner, repo, options)` — exported standalone so the search-query-fidelity contract is unit-testable and so `discussion-routes.ts` can echo the exact same string back to callers. Deterministically assembles: always `repo:{owner}/{repo}`; `category:"Name"` (quoted, escaping embedded quotes) when `options.category` is set; `is:answered`/`is:unanswered` when `options.answered` is set; `sort:updated` for `"activity"` (the default) or `sort:created` for `"newest"`; the trimmed free-text `options.search` appended **last**.
+
+**Routes** (`src/discussion-routes.ts`, plugin-scoped, read-only), mirroring `issues-routes.ts`'s exact repo-resolution/auth/error-mapping conventions:
+
+- `GET /discussions/categories?repo=` — `{ ok, repo, categories }`. No repo resolves → `200 { ok:true, repo:null, categories:[] }`. A discussions-disabled/permission error (403/401/404) **degrades** to `{ ok:true, repo, categories:[] }` rather than a hard failure — the discussions tab's FUSI-009 gating already communicates the disabled/inaccessible state, so this route never duplicates that check.
+- `GET /discussions/list?repo=&category=&search=&sort=&answered=` — `{ ok, repo, items, query }`, where `query` echoes the exact search string built by `buildDiscussionSearchQuery` for this request (useful for the fidelity assertion + debugging). `sort` ∈ `activity`/`newest`, `answered` ∈ `answered`/`unanswered`; an invalid value is silently ignored (falls back to the default) rather than 400ing. No repo resolves → `200 { ok:true, repo:null, items:[], query:null }`.
+
+Both routes resolve auth exclusively via `resolveGitHubAuth` and map `GitHubApiError` through `githubErrorToResponse`; the token is never echoed.
+
+**`DiscussionsPanel`** (`src/DiscussionsPanel.tsx` + `.css`), mounted in `GitHubPmView.tsx`'s `discussions` tabpanel (read-only — it takes `{ repo, context }`, no `confirmWrites` prop):
+
+- A category **rail** ("All categories" + one entry per category) renders each category's emoji (the `emoji` glyph/shortcode text — **never** `emojiHTML` via `dangerouslySetInnerHTML`) and exact name.
+- A **search** box (debounced, mirroring `IssuesPanel`'s `SEARCH_DEBOUNCE_MS` convention), a **sort** control ("Latest activity" ↔ "Newest"), and an **answered/unanswered** filter that renders **only** when the selected category's `isAnswerable === true` — absent for "All categories" and non-Q&A categories.
+- The result list renders each discussion's title (linked to its GitHub `url`, `target="_blank" rel="noopener noreferrer"`), category emoji+name chip, comment count, upvote count, an answered/unanswered badge (for rows whose own category is answerable), author login, and relative updated time.
+- Loading/empty/error states are handled with `aria-live` messaging; a repo with zero categories still shows the rail (with empty-state copy in the list), and a discussions-disabled/not-authenticated repo never reaches this panel at all — `GitHubPmTabPanelBody` renders the existing `TabCapabilityNotice` instead, reusing FUSI-009's gating rather than duplicating a second check here.
+
+See `src/__tests__/github-client.test.ts`, `discussion-routes.test.ts`, and `DiscussionsPanel.test.tsx` for the category-mapping, search-query-fidelity (every filter-combination assertion), Q&A-only-answered-filter, and capability-gating coverage.
+
 ## Write confirmation (`confirmWrites`) (FUSI-017)
 
 A 2026-07-23 security audit found ZERO confirm/dryRun/requireConfirm gating anywhere in this plugin's write surfaces. `confirmWrites` closes that gap with one default-ON setting enforced identically across all three write layers (the same contract FUSI-015's future write routes/tools/UI must inherit):

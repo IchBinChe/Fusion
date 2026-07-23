@@ -513,6 +513,62 @@ export interface GitHubDiscussionListItem {
   createdAt?: string;
 }
 
+/*
+FNXC:GithubPmDiscussions 2026-07-25-10:00:
+KB-005 discussion BROWSE types -- deliberately separate from `GitHubDiscussionListItem`/
+`listDiscussions` above, which stays UNCHANGED (it feeds FUSI-005's taxonomy generator and
+its accumulate-all/degrade-to-[] contract must never change). The browse read is built on
+GitHub's `search(type: DISCUSSION)` connection (not the plain `discussions` connection) so
+results match the qualifiers GitHub's own Discussions tab search bar uses
+(`category:`/`is:answered`/`is:unanswered`/`sort:updated`/`sort:created`) -- a plain
+`discussions(first, after, orderBy)` read has no equivalent free-text/category/answered
+filtering, so it cannot reproduce the same result set the acceptance criteria require.
+`GitHubDiscussionCategory` is intentionally NOT named `DiscussionCategorySummary` -- that
+name is already taken by taxonomy-proposal.ts's unrelated taxonomy-generation summary type.
+*/
+export interface GitHubDiscussionCategory {
+  id: string;
+  name: string;
+  slug: string;
+  /** Emoji glyph/shortcode text, e.g. "\ud83d\udcac" or ":speech_balloon:". Render this, never `emojiHTML`, via `dangerouslySetInnerHTML`. */
+  emoji: string;
+  /** GitHub's rendered emoji HTML fragment. Available for callers that need it, but the UI must not inject it as raw HTML. */
+  emojiHTML: string;
+  isAnswerable: boolean;
+  description?: string;
+}
+
+/** Row shape returned by `searchDiscussions`, feeding the KB-005 discussion browser's result list. */
+export interface GitHubDiscussionBrowseItem {
+  number: number;
+  title: string;
+  url: string;
+  categoryName: string | null;
+  categoryEmoji: string | null;
+  upvoteCount: number;
+  commentCount: number;
+  /** Derived from `answer != null || answerChosenAt != null` -- true only for a genuinely answered Q&A discussion. */
+  isAnswered: boolean;
+  authorLogin: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+/**
+ * FNXC:GithubPmDiscussions 2026-07-25-10:00:
+ * `category` is the category NAME (not slug/id) -- matching how GitHub's own Discussions tab
+ * search bar accepts `category:"Name"`. `sort` defaults to "activity" (`sort:updated`) when
+ * omitted, mirroring GitHub's own default Discussions-tab ordering.
+ */
+export interface GitHubDiscussionBrowseOptions {
+  category?: string;
+  search?: string;
+  sort?: "activity" | "newest";
+  answered?: "answered" | "unanswered";
+  /** Bounds total items returned across all GraphQL pages. Default: a single page. */
+  maxItems?: number;
+}
+
 /**
  * FNXC:GitHubPmClient 2026-07-24-00:00:
  * Portable, plugin-owned GitHub API client. Constructor takes a token (may be undefined for
@@ -1041,6 +1097,71 @@ export class GitHubClient {
   }
 
   /**
+   * FNXC:GithubPmDiscussions 2026-07-25-10:10:
+   * KB-005: `repository { discussionCategories(first: 100) { nodes {...} } }` -- a single
+   * (non-paginated) page is sufficient for a category rail; GitHub repos practically never
+   * exceed 100 discussion categories. Nodes missing an `id`/`name` are filtered out.
+   */
+  async listDiscussionCategories(owner: string, repo: string): Promise<GitHubDiscussionCategory[]> {
+    const data = await this.graphql<{
+      repository?: {
+        discussionCategories?: {
+          nodes?: Array<{
+            id?: string;
+            name?: string;
+            slug?: string;
+            emoji?: string;
+            emojiHTML?: string;
+            isAnswerable?: boolean;
+            description?: string | null;
+          } | null>;
+        };
+      };
+    }>(GITHUB_DISCUSSION_CATEGORIES_QUERY, { owner, repo });
+    const nodes = data.repository?.discussionCategories?.nodes ?? [];
+    return nodes
+      .filter((node): node is NonNullable<typeof node> => Boolean(node && node.id && node.name))
+      .map((node) => ({
+        id: node.id as string,
+        name: node.name as string,
+        slug: node.slug ?? "",
+        emoji: node.emoji ?? "",
+        emojiHTML: node.emojiHTML ?? "",
+        isAnswerable: node.isAnswerable === true,
+        description: node.description ?? undefined,
+      }));
+  }
+
+  /**
+   * FNXC:GithubPmDiscussions 2026-07-25-10:15:
+   * KB-005: browse discussions via GitHub's `search(type: DISCUSSION)` connection so results
+   * match GitHub's own Discussions-tab search bar exactly. The search query string is built
+   * deterministically by the standalone, unit-testable `buildDiscussionSearchQuery` (below) --
+   * this method never assembles the qualifier string inline. Cursor-paginated through the
+   * shared `paginateGraphQl` bounded by `options.maxItems ?? GRAPHQL_PAGE_SIZE`.
+   */
+  async searchDiscussions(owner: string, repo: string, options: GitHubDiscussionBrowseOptions = {}): Promise<GitHubDiscussionBrowseItem[]> {
+    const maxItems = options.maxItems ?? GRAPHQL_PAGE_SIZE;
+    const query = buildDiscussionSearchQuery(owner, repo, options);
+    return this.paginateGraphQl<GitHubDiscussionBrowseItem>(async (after) => {
+      const data = await this.graphql<{
+        search?: {
+          nodes?: Array<GitHubRestDiscussionSearchNode | null>;
+          pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+        };
+      }>(GITHUB_DISCUSSION_SEARCH_QUERY, { query, first: Math.min(GRAPHQL_PAGE_SIZE, maxItems), after: after ?? null });
+      const connection = data.search;
+      const nodes = (connection?.nodes ?? [])
+        .filter((node): node is GitHubRestDiscussionSearchNode => Boolean(node && typeof node.number === "number"))
+        .map(mapDiscussionSearchNode);
+      return {
+        nodes,
+        pageInfo: { hasNextPage: connection?.pageInfo?.hasNextPage === true, endCursor: connection?.pageInfo?.endCursor ?? null },
+      };
+    }, maxItems);
+  }
+
+  /**
    * FNXC:GitHubPmClient 2026-07-24-01:00:
    * FUSI-013: fetch a single issue's full detail. Rejects a pull_request-shaped payload
    * (GitHub's issues REST endpoint also serves PRs by number) with a not_found-style error
@@ -1498,6 +1619,102 @@ const GITHUB_DISCUSSIONS_QUERY = `query FusionGitHubPmDiscussions($owner: String
     }
   }
 }`;
+
+/*
+FNXC:GithubPmDiscussions 2026-07-25-10:20:
+KB-005 query constants, placed with the other query constants per this file's convention.
+A single non-paginated `discussionCategories(first: 100)` page (categories rarely exceed
+that count) feeds the category rail; the browse list uses `search(type: DISCUSSION)`
+(NOT the plain `discussions` connection `GITHUB_DISCUSSIONS_QUERY` above uses) because only
+the search connection supports the qualifier-based filtering (`category:`/`is:answered`/
+`sort:`/free text) GitHub's own Discussions-tab search bar exposes.
+*/
+const GITHUB_DISCUSSION_CATEGORIES_QUERY = `query FusionGitHubPmDiscussionCategories($owner: String!, $repo: String!) {
+  repository(owner: $owner, name: $repo) {
+    discussionCategories(first: 100) {
+      nodes { id name slug emoji emojiHTML isAnswerable description }
+    }
+  }
+}`;
+
+const GITHUB_DISCUSSION_SEARCH_QUERY = `query FusionGitHubPmDiscussionSearch($query: String!, $first: Int!, $after: String) {
+  search(query: $query, type: DISCUSSION, first: $first, after: $after) {
+    nodes {
+      ... on Discussion {
+        number
+        title
+        url
+        category { name emoji isAnswerable }
+        upvoteCount
+        comments { totalCount }
+        answer { id }
+        answerChosenAt
+        author { login }
+        createdAt
+        updatedAt
+      }
+    }
+    pageInfo { hasNextPage endCursor }
+  }
+}`;
+
+interface GitHubRestDiscussionSearchNode {
+  number: number;
+  title: string;
+  url: string;
+  category?: { name?: string; emoji?: string; isAnswerable?: boolean } | null;
+  upvoteCount?: number;
+  comments?: { totalCount?: number };
+  answer?: { id?: string } | null;
+  answerChosenAt?: string | null;
+  author?: { login?: string } | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+function mapDiscussionSearchNode(node: GitHubRestDiscussionSearchNode): GitHubDiscussionBrowseItem {
+  return {
+    number: node.number,
+    title: node.title,
+    url: node.url,
+    categoryName: node.category?.name ?? null,
+    categoryEmoji: node.category?.emoji ?? null,
+    upvoteCount: typeof node.upvoteCount === "number" ? node.upvoteCount : 0,
+    commentCount: typeof node.comments?.totalCount === "number" ? node.comments.totalCount : 0,
+    isAnswered: node.answer != null || node.answerChosenAt != null,
+    authorLogin: node.author?.login ?? null,
+    createdAt: node.createdAt,
+    updatedAt: node.updatedAt,
+  };
+}
+
+/** Quotes a discussion category name for the `category:"…"` search qualifier, escaping any embedded double quote. */
+function quoteDiscussionCategoryName(name: string): string {
+  return `"${name.trim().replace(/"/gu, '\\"')}"`;
+}
+
+/**
+ * FNXC:GithubPmDiscussions 2026-07-25-10:25:
+ * KB-005 search-query-fidelity contract (acceptance-critical): deterministically assembles the
+ * `query` string for `searchDiscussions` so it exactly matches GitHub's own Discussions-tab
+ * search-bar qualifiers -- always `repo:{owner}/{repo}`; `category:"Name"` (quoted, escaping
+ * embedded quotes) when `options.category` is set; `is:answered`/`is:unanswered` when
+ * `options.answered` is set; `sort:updated` for "activity" (the default) or `sort:created` for
+ * "newest"; the trimmed free-text `options.search` appended LAST. Exported standalone (not
+ * inlined in `searchDiscussions`) so the query-fidelity assertion this task requires can unit
+ * test it directly without mocking GraphQL, and so `discussion-routes.ts` can echo the exact
+ * same string back to the caller via the response's `query` field.
+ */
+export function buildDiscussionSearchQuery(owner: string, repo: string, options: GitHubDiscussionBrowseOptions = {}): string {
+  const parts: string[] = [`repo:${owner}/${repo}`];
+  if (options.category && options.category.trim()) parts.push(`category:${quoteDiscussionCategoryName(options.category)}`);
+  if (options.answered === "answered") parts.push("is:answered");
+  else if (options.answered === "unanswered") parts.push("is:unanswered");
+  parts.push(options.sort === "newest" ? "sort:created" : "sort:updated");
+  const freeText = options.search?.trim();
+  if (freeText) parts.push(freeText);
+  return parts.join(" ");
+}
 
 const GITHUB_REPOSITORY_FEATURES_QUERY = `query FusionGitHubPmRepositoryFeatures($owner: String!, $repo: String!) {
   repository(owner: $owner, name: $repo) {

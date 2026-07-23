@@ -8,6 +8,7 @@ import { IssuesPanel } from "./IssuesPanel.js";
 import { IssueWritePanel } from "./IssueWritePanel.js";
 import { LabelsPanel } from "./LabelsPanel.js";
 import { MilestonesPanel } from "./MilestonesPanel.js";
+import { DiscussionsPanel } from "./DiscussionsPanel.js";
 import { useRepoCapabilities } from "./useRepoCapabilities.js";
 import { mapRepoCapabilitiesToTabs, type TabGating } from "./tab-capabilities.js";
 import { TabCapabilityNotice } from "./TabCapabilityNotice.js";
@@ -211,6 +212,21 @@ function GitHubPmTabPanelBody({
   }
   if (tabId === "milestones") {
     return <MilestonesPanel repo={repo} context={context} confirmWrites={confirmWrites} />;
+  }
+  /*
+  FNXC:GithubPmDiscussions 2026-07-25-12:20:
+  KB-005 fills the `discussions` tabpanel with the real `DiscussionsPanel` (category rail +
+  search/sort/answered filters + result list), replacing its `TabPlaceholderPanel`. This is
+  the ONLY structural change KB-005 makes here: the other three tabs (projects/triage, and
+  issues/labels/milestones already filled by earlier tasks) keep their existing body,
+  `TAB_PLACEHOLDER_COPY` stays intact (including its now-unused `discussions` entry, left in
+  place for symmetry/rollback rather than deleted), and the tablist/repo-context header/status
+  badge/AuthDiagnosticsPanel are untouched. `DiscussionsPanel` is READ-ONLY (no write route,
+  no `confirmWrites` prop) and renders inside the SAME `github-pm-view__panel card` tabpanel
+  div -- no second card wrapper.
+  */
+  if (tabId === "discussions") {
+    return <DiscussionsPanel repo={repo} context={context} />;
   }
   return <TabPlaceholderPanel tabId={tabId} />;
 }

@@ -4,6 +4,7 @@ import {
   GITHUB_REST_BASE_URL,
   GitHubApiError,
   GitHubClient,
+  buildDiscussionSearchQuery,
   githubErrorToResponse,
   isGitHubApiError,
   normalizeGitHubLabelColor,
@@ -297,6 +298,180 @@ describe("GitHubClient discussions (FUSI-005)", () => {
     const client = new GitHubClient("token", fetchImpl);
 
     await expect(client.listDiscussions("acme", "widgets")).rejects.toMatchObject({ code: "network_error" });
+  });
+});
+
+describe("buildDiscussionSearchQuery (KB-005 search-query fidelity)", () => {
+  it("builds the base query with the default sort:updated when no options are given", () => {
+    expect(buildDiscussionSearchQuery("acme", "widgets")).toBe("repo:acme/widgets sort:updated");
+  });
+
+  it("quotes the category qualifier, escaping embedded quotes", () => {
+    expect(buildDiscussionSearchQuery("acme", "widgets", { category: "Q&A" })).toBe('repo:acme/widgets category:"Q&A" sort:updated');
+    expect(buildDiscussionSearchQuery("acme", "widgets", { category: 'Weird "Name"' })).toBe('repo:acme/widgets category:"Weird \\"Name\\"" sort:updated');
+  });
+
+  it("adds is:answered / is:unanswered qualifiers", () => {
+    expect(buildDiscussionSearchQuery("acme", "widgets", { answered: "answered" })).toBe("repo:acme/widgets is:answered sort:updated");
+    expect(buildDiscussionSearchQuery("acme", "widgets", { answered: "unanswered" })).toBe("repo:acme/widgets is:unanswered sort:updated");
+  });
+
+  it("maps sort:'newest' to sort:created and 'activity' (default) to sort:updated", () => {
+    expect(buildDiscussionSearchQuery("acme", "widgets", { sort: "newest" })).toBe("repo:acme/widgets sort:created");
+    expect(buildDiscussionSearchQuery("acme", "widgets", { sort: "activity" })).toBe("repo:acme/widgets sort:updated");
+  });
+
+  it("appends trimmed free text last, after every qualifier", () => {
+    expect(buildDiscussionSearchQuery("acme", "widgets", { category: "Ideas", answered: "unanswered", sort: "newest", search: "  dark mode  " })).toBe(
+      'repo:acme/widgets category:"Ideas" is:unanswered sort:created dark mode',
+    );
+  });
+
+  it("omits an empty/whitespace-only category rather than emitting an empty qualifier", () => {
+    expect(buildDiscussionSearchQuery("acme", "widgets", { category: "   " })).toBe("repo:acme/widgets sort:updated");
+  });
+});
+
+describe("GitHubClient.listDiscussionCategories (KB-005)", () => {
+  it("maps every field and filters out categories missing id/name", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      data: {
+        repository: {
+          discussionCategories: {
+            nodes: [
+              { id: "C1", name: "Q&A", slug: "q-a", emoji: "\ud83d\udcac", emojiHTML: "<div>ud83d</div>", isAnswerable: true, description: "Ask questions" },
+              { id: "C2", name: "Ideas", slug: "ideas", emoji: "\ud83d\udca1", emojiHTML: "<div>ud83d</div>", isAnswerable: false },
+              { name: "Missing id" },
+              { id: "C3" },
+            ],
+          },
+        },
+      },
+    })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const categories = await client.listDiscussionCategories("acme", "widgets");
+
+    expect(categories).toEqual([
+      { id: "C1", name: "Q&A", slug: "q-a", emoji: "\ud83d\udcac", emojiHTML: "<div>ud83d</div>", isAnswerable: true, description: "Ask questions" },
+      { id: "C2", name: "Ideas", slug: "ideas", emoji: "\ud83d\udca1", emojiHTML: "<div>ud83d</div>", isAnswerable: false, description: undefined },
+    ]);
+  });
+
+  it("maps a 403 to auth_error without leaking the token", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ message: "Bad credentials secret-token" }, 403)) as unknown as typeof fetch;
+    const client = new GitHubClient("secret-token", fetchImpl);
+    await expect(client.listDiscussionCategories("acme", "widgets")).rejects.toMatchObject({ code: "auth_error" });
+    await client.listDiscussionCategories("acme", "widgets").catch((error) => {
+      expect(String(error.message)).not.toContain("secret-token");
+    });
+  });
+
+  it("maps a 404 to not_found", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ message: "Not Found" }, 404)) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+    await expect(client.listDiscussionCategories("acme", "widgets")).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("maps a GraphQL errors[] payload (discussions disabled) to graphql_error", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ errors: [{ message: "Discussions are disabled for this repository" }] })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+    await expect(client.listDiscussionCategories("acme", "widgets")).rejects.toMatchObject({ code: "graphql_error" });
+  });
+});
+
+describe("GitHubClient.searchDiscussions (KB-005)", () => {
+  function discussionNode(overrides: Record<string, unknown> = {}) {
+    return {
+      number: 1,
+      title: "How do I configure X?",
+      url: "https://github.com/acme/widgets/discussions/1",
+      category: { name: "Q&A", emoji: "\ud83d\udcac", isAnswerable: true },
+      upvoteCount: 3,
+      comments: { totalCount: 5 },
+      answer: null,
+      answerChosenAt: null,
+      author: { login: "octocat" },
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-02T00:00:00Z",
+      ...overrides,
+    };
+  }
+
+  it("sends the built search query and type:DISCUSSION, mapping every field", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      data: { search: { nodes: [discussionNode()], pageInfo: { hasNextPage: false, endCursor: null } } },
+    })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const items = await client.searchDiscussions("acme", "widgets", { category: "Q&A", answered: "unanswered", sort: "newest", search: "config" });
+
+    expect(items).toEqual([
+      {
+        number: 1,
+        title: "How do I configure X?",
+        url: "https://github.com/acme/widgets/discussions/1",
+        categoryName: "Q&A",
+        categoryEmoji: "\ud83d\udcac",
+        upvoteCount: 3,
+        commentCount: 5,
+        isAnswered: false,
+        authorLogin: "octocat",
+        createdAt: "2026-01-01T00:00:00Z",
+        updatedAt: "2026-01-02T00:00:00Z",
+      },
+    ]);
+    const body = JSON.parse(String((fetchImpl.mock.calls[0][1] as RequestInit).body));
+    expect(body.variables.query).toBe(buildDiscussionSearchQuery("acme", "widgets", { category: "Q&A", answered: "unanswered", sort: "newest", search: "config" }));
+    expect(body.query).toContain("type: DISCUSSION");
+  });
+
+  it("derives isAnswered true from a present answer", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      data: { search: { nodes: [discussionNode({ answer: { id: "A1" } })], pageInfo: { hasNextPage: false, endCursor: null } } },
+    })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const items = await client.searchDiscussions("acme", "widgets");
+    expect(items[0].isAnswered).toBe(true);
+  });
+
+  it("derives isAnswered true from a present answerChosenAt even without an answer node", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      data: { search: { nodes: [discussionNode({ answerChosenAt: "2026-01-03T00:00:00Z" })], pageInfo: { hasNextPage: false, endCursor: null } } },
+    })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const items = await client.searchDiscussions("acme", "widgets");
+    expect(items[0].isAnswered).toBe(true);
+  });
+
+  it("paginates across endCursor pages", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: { search: { nodes: [discussionNode({ number: 1 })], pageInfo: { hasNextPage: true, endCursor: "cursor-1" } } } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { search: { nodes: [discussionNode({ number: 2 })], pageInfo: { hasNextPage: false, endCursor: null } } } }));
+    const client = new GitHubClient("token", fetchImpl as unknown as typeof fetch);
+
+    const items = await client.searchDiscussions("acme", "widgets");
+    expect(items.map((item) => item.number)).toEqual([1, 2]);
+  });
+
+  it("maps a 403 to auth_error without leaking the token", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ message: "Bad credentials secret-token" }, 403)) as unknown as typeof fetch;
+    const client = new GitHubClient("secret-token", fetchImpl);
+    await expect(client.searchDiscussions("acme", "widgets")).rejects.toMatchObject({ code: "auth_error" });
+  });
+
+  it("maps a 404 to not_found", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ message: "Not Found" }, 404)) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+    await expect(client.searchDiscussions("acme", "widgets")).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("maps a GraphQL errors[] payload to graphql_error", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ errors: [{ message: "Discussions are disabled" }] })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+    await expect(client.searchDiscussions("acme", "widgets")).rejects.toMatchObject({ code: "graphql_error" });
   });
 });
 

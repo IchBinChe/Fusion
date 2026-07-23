@@ -9,6 +9,7 @@ import { issuesRoutes } from "./issues-routes.js";
 import { issueWriteRoutes } from "./issue-write-routes.js";
 import { labelRoutes } from "./label-routes.js";
 import { milestoneRoutes } from "./milestone-routes.js";
+import { discussionRoutes } from "./discussion-routes.js";
 
 function response(status: number, body: Record<string, unknown>): PluginRouteResponse {
   return { status, body };
@@ -95,6 +96,11 @@ KB-003 adds the milestone management routes (list + create/update/state/delete/
 reassign-open-issues) onto the same aggregated route list -- same one-registration-point
 pattern, additive block kept separate from KB-002's sibling labels routes to avoid merge
 conflicts in this shared file.
+
+FNXC:GithubPmDiscussions 2026-07-25-11:10:
+KB-005 adds the discussion-browse READ routes (categories + search-backed list) onto the same
+aggregated route list -- same one-registration-point pattern. This is a read-only surface: no
+write route, no agent tool, no `confirmWrites` handling is introduced by this addition.
 */
 export const githubPmRoutes: PluginRouteDefinition[] = [
   { method: "GET", path: "/status", handler: getGitHubPmStatus, description: "Report GitHub PM plugin configuration status from settings presence only." },
@@ -107,4 +113,5 @@ export const githubPmRoutes: PluginRouteDefinition[] = [
   ...issueWriteRoutes,
   ...labelRoutes,
   ...milestoneRoutes,
+  ...discussionRoutes,
 ];

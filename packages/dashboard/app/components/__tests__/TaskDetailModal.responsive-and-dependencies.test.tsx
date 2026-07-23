@@ -901,6 +901,7 @@ describe("TaskDetailModal", () => {
         mobileBlock,
         ".task-detail-content .detail-actions-dropdown,\n  .task-detail-content .detail-move-dropdown",
       );
+      const desktopMoveDropdownBlock = getExactCssRuleBlock(css, ".detail-move-dropdown");
       const expandedChatBlock = getExactCssRuleBlock(css, ".task-detail-content--chat-expanded .modal-actions");
 
       /*
@@ -917,6 +918,13 @@ describe("TaskDetailModal", () => {
       expect(spacerBlock).toContain("min-width: 0;");
       expect(dropdownBlock).toContain("min-width: 0;");
       expect(dropdownBlock).toContain("flex-shrink: 1;");
+      // FNXC:TaskDetailModalResponsive 2026-07-22-17:12: The Actions + Move
+      // symptom regressed when Move grew into the spacer's middle region. This
+      // mobile-only contract leaves all surplus width to the spacer, making the
+      // move control trailing-aligned without changing desktop dropdown layout.
+      expect(mobileBlock).toMatch(/\.task-detail-content \.detail-move-dropdown\s*\{\s*flex:\s*0 1 auto;/);
+      expect(mobileBlock).not.toMatch(/\.task-detail-content \.detail-move-dropdown\s*\{\s*flex:\s*1 1 auto;/);
+      expect(desktopMoveDropdownBlock).not.toContain("flex:");
       expect(inReviewBlock).toContain("display: flex;");
       expect(inReviewBlock).toContain("flex-wrap: nowrap;");
       expect(inReviewBlock).toContain("min-width: 0;");
@@ -974,6 +982,38 @@ describe("TaskDetailModal", () => {
       expect(standardFooter).toBeTruthy();
       expect(standardFooter?.contains(screen.getByRole("button", { name: "Actions" }))).toBe(true);
       expect(standardFooter?.querySelector(".detail-move-btn")).toBeTruthy();
+
+      const footerChildren = Array.from(standardFooter?.children ?? []);
+      const actionsIndex = footerChildren.findIndex((child) => child.classList.contains("detail-actions-dropdown"));
+      const spacerIndex = footerChildren.findIndex((child) => child.classList.contains("modal-actions-spacer"));
+      const moveIndex = footerChildren.findIndex((child) => child.classList.contains("detail-move-dropdown"));
+
+      // The shared modal, embedded panel, dock, and mobile sheet all mount this
+      // canonical footer order: leading Actions, flexible spacer, trailing Move.
+      expect(actionsIndex).toBeGreaterThanOrEqual(0);
+      expect(spacerIndex).toBeGreaterThan(actionsIndex);
+      expect(moveIndex).toBeGreaterThan(spacerIndex);
+    });
+
+    it("keeps the triage footer usable when Actions is absent", () => {
+      const { container } = render(
+        <TaskDetailModal
+          initialTab="definition"
+          task={makeTask({ column: "triage" as Column })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+      const footer = container.querySelector(".modal-actions");
+
+      expect(footer?.querySelector(".detail-actions-dropdown")).toBeNull();
+      expect(footer?.querySelector(".modal-actions-spacer")).toBeTruthy();
+      expect(footer?.querySelector(".detail-move-dropdown .detail-move-btn")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Delete task" })).toBeTruthy();
     });
 
     it("modal-actions contains Delete and Pause buttons for non-done tasks (via Actions dropdown)", () => {

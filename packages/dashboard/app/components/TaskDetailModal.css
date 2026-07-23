@@ -3402,6 +3402,12 @@ Live and Feed Activity expansion overlays the content instead of reserving a too
   for overflow, so scoped tokenized packing, flex shrink guards, and label
   ellipsis let every text-bearing footer control yield while upward menus stay
   unclipped.
+
+  FNXC:TaskDetailModalResponsive 2026-07-22-17:12:
+  FN-8501 requires the flexible spacer—not the Move dropdown wrapper—to absorb
+  available mobile row space. Keeping the wrapper content-sized puts the primary
+  transition at the trailing edge while its controls retain the FN-8492 shrink
+  and ellipsis safeguards for dense review variants.
   */
   .task-detail-content .modal-actions {
     flex-wrap: nowrap;
@@ -3422,7 +3428,7 @@ Live and Feed Activity expansion overlays the content instead of reserving a too
   }
 
   .task-detail-content .detail-move-dropdown {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
   }
 
   .task-detail-content .detail-move-actions-in-review {

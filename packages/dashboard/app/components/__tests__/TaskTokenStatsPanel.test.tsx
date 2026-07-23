@@ -285,6 +285,38 @@ describe("TaskTokenStatsPanel", () => {
    * options, and assert the Execution Details label resolves to the leaf string
    * without i18next's "returned an object instead of string" fallback.
    */
+  /*
+  FNXC:TaskStatsProvenance 2026-07-22-14:45:
+  Duplicate triage (FN-8510/8511/8513/8514) needs task provenance visible in the UI:
+  the Stats tab must show source type, the parent task whose executor filed this task,
+  the creating agent, and the triage near-duplicate marker when recorded.
+  */
+  it("renders creation provenance including parent task, agent, and near-duplicate marker", () => {
+    render(<TaskTokenStatsPanel loading={false} tokenUsage={undefined} task={makeTask({
+      sourceType: "api",
+      sourceParentTaskId: "FN-8504",
+      sourceAgentId: "executor-9",
+      sourceMetadata: { nearDuplicateOf: "FN-8510", issueUrl: "https://github.com/Runfusion/Fusion/issues/2356" },
+    })} />);
+
+    expect(screen.getByText("Provenance")).toBeInTheDocument();
+    expect(screen.getByText("api")).toBeInTheDocument();
+    expect(screen.getByText("Parent task")).toBeInTheDocument();
+    expect(screen.getByText("FN-8504")).toBeInTheDocument();
+    expect(screen.getByText("Creating agent")).toBeInTheDocument();
+    expect(screen.getByText("executor-9")).toBeInTheDocument();
+    expect(screen.getByText("Flagged near-duplicate of")).toBeInTheDocument();
+    expect(screen.getByText("FN-8510")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "https://github.com/Runfusion/Fusion/issues/2356" }))
+      .toHaveAttribute("href", "https://github.com/Runfusion/Fusion/issues/2356");
+  });
+
+  it("omits the provenance section when the task has no recorded source", () => {
+    render(<TaskTokenStatsPanel loading={false} tokenUsage={undefined} task={makeTask()} />);
+
+    expect(screen.queryByText("Provenance")).toBeNull();
+  });
+
   it("renders the execution-mode label against the real locale bundle without an object-key crash", async () => {
     const instance = createInstance();
     await instance.use(initReactI18next).init({

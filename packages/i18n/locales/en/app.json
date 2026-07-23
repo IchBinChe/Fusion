@@ -7861,9 +7861,14 @@
     "provenance": {
       "createdBy": "Created by",
       "createdVia": "Created via",
+      "creatingAgent": "Creating agent",
+      "importedFrom": "Imported from",
+      "nearDuplicateOf": "Flagged near-duplicate of",
+      "parentTask": "Parent task",
       "parentTaskOf": "of",
       "createdToUndo": "Created to undo",
-      "undoTask": "Undo task"
+      "undoTask": "Undo task",
+      "title": "Provenance"
     },
     "recoveryState": "Recovery state",
     "refine": {

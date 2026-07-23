@@ -17,6 +17,8 @@ const appRoot = path.join(dashboardRoot, "app");
 const clientDistRoot = path.join(dashboardRoot, "dist", "client");
 const requireBrowser = process.argv.includes("--require-browser") || process.env.FUSION_BROWSER_SMOKE_REQUIRE === "1";
 const screenshotPath = process.env.FUSION_BROWSER_SMOKE_SCREENSHOT;
+const agentHeartbeatMobileScreenshotPath = process.env.FUSION_AGENT_HEARTBEAT_MOBILE_SCREENSHOT;
+const agentHeartbeatDesktopScreenshotPath = process.env.FUSION_AGENT_HEARTBEAT_DESKTOP_SCREENSHOT;
 
 function log(message) {
   console.log(`[dashboard-browser-smoke] ${message}`);
@@ -506,6 +508,20 @@ export function createSmokeHtml() {
       FNXC:CommandCenterTesting 2026-06-19-02:04:
       FN-6685 requires a real-Blink desktop and mobile gate for the FN-6683/FN-6684 recharts surfaces because jsdom cannot compute ResponsiveContainer parent height, min-content shrink, or overflow. This fixture mirrors Command Center tabpanel/card wrappers and includes populated pie/line plus empty states so emitted dashboard CSS owns the sizing chain under test.
       -->
+      <!-- FNXC:AgentHeartbeatControls 2026-07-23-14:20: Production-CSS smoke keeps durable per-agent and project controls visible at both viewports while task-worker cards leave no control shell. -->
+      <section class="agents-view" data-smoke="agent-heartbeat-controls" aria-label="Agent heartbeat controls">
+        <header class="view-header"><h2 class="view-header__title">Agents</h2><div class="agents-view-primary-actions"><button class="btn-icon agent-controls-trigger" type="button" aria-label="Controls">Controls</button></div></header>
+        <div class="agent-controls-bulk-actions" role="menu" aria-label="Bulk agent actions">
+          <button class="agent-detail-bulk-menu-item" type="button" role="menuitem" data-smoke="enable-all-heartbeats">Enable all heartbeats</button>
+          <button class="agent-detail-bulk-menu-item" type="button" role="menuitem" data-smoke="disable-all-heartbeats">Disable all heartbeats</button>
+        </div>
+        <div class="agent-board" data-smoke="agent-heartbeat-board">
+          <article class="agent-board-card"><div class="agent-board-name">Enabled durable agent</div><div class="agent-board-actions"><button class="btn btn-sm agent-heartbeat-toggle" type="button" aria-pressed="true" data-smoke="agent-heartbeat-toggle">Disable heartbeat</button></div></article>
+          <article class="agent-board-card"><div class="agent-board-name">Disabled durable agent</div><div class="agent-board-actions"><button class="btn btn-sm agent-heartbeat-toggle" type="button" aria-pressed="false" data-smoke="agent-heartbeat-toggle">Enable heartbeat</button></div></article>
+          <article class="agent-board-card" data-smoke="ephemeral-agent-card"><div class="agent-board-name">Task worker (excluded)</div><div class="agent-board-actions"></div></article>
+        </div>
+      </section>
+
       <section data-smoke="command-center-charts" hidden>
         <div class="command-center" data-testid="command-center">
           <header class="cc-header">
@@ -983,6 +999,31 @@ async function runSmokeChecks(page, pageUrl) {
   await loaded;
   await evaluate(page, "document.fonts ? document.fonts.ready.then(() => true) : true");
 
+  const collectAgentHeartbeatControlLayout = () => evaluate(page, `(() => {
+    const fixture = document.querySelector('[data-smoke="agent-heartbeat-controls"]');
+    const viewportWidth = window.innerWidth;
+    const controls = [...fixture.querySelectorAll('[data-smoke="agent-heartbeat-toggle"], [data-smoke="enable-all-heartbeats"], [data-smoke="disable-all-heartbeats"]')].map((control) => {
+      const rect = control.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, width: rect.width, height: rect.height };
+    });
+    const worker = fixture.querySelector('[data-smoke="ephemeral-agent-card"]');
+    return { viewportWidth, controls, workerToggleCount: worker.querySelectorAll('[data-smoke="agent-heartbeat-toggle"]').length, fixtureOverflow: fixture.scrollWidth - fixture.clientWidth, documentOverflow: document.documentElement.scrollWidth - viewportWidth };
+  })()`);
+
+  const mobileAgentHeartbeatLayout = await collectAgentHeartbeatControlLayout();
+  assertSmokeResult(
+    "agent heartbeat controls stay visible on mobile and omit ephemeral shells",
+    mobileAgentHeartbeatLayout.controls.length === 4 && mobileAgentHeartbeatLayout.controls.every((control) => control.width > 0 && control.height > 0 && control.left >= 0 && control.right <= mobileAgentHeartbeatLayout.viewportWidth + 1) && mobileAgentHeartbeatLayout.workerToggleCount === 0 && mobileAgentHeartbeatLayout.fixtureOverflow <= 1 && mobileAgentHeartbeatLayout.documentOverflow <= 1,
+    JSON.stringify(mobileAgentHeartbeatLayout),
+  );
+  if (agentHeartbeatMobileScreenshotPath) {
+    /* FNXC:AgentHeartbeatControls 2026-07-23-14:30: Optional proof captures document the durable-agent controls and omitted task-worker shell at the tested mobile viewport. */
+    await evaluate(page, "document.querySelector('[data-smoke=\"agent-heartbeat-controls\"]').scrollIntoView({ block: 'start' })");
+    const screenshot = await page.send("Page.captureScreenshot", { format: "png" });
+    await writeFile(agentHeartbeatMobileScreenshotPath, Buffer.from(screenshot.data, "base64"));
+    log(`saved agent heartbeat mobile screenshot to ${agentHeartbeatMobileScreenshotPath}`);
+  }
+
   const initialLayout = await evaluate(page, `(() => {
     const viewportWidth = window.innerWidth;
     const nav = document.querySelector('.mobile-nav-bar').getBoundingClientRect();
@@ -1425,6 +1466,19 @@ async function runSmokeChecks(page, pageUrl) {
     mobile: false,
   });
   await evaluate(page, "document.fonts ? document.fonts.ready.then(() => true) : true");
+  const desktopAgentHeartbeatLayout = await collectAgentHeartbeatControlLayout();
+  assertSmokeResult(
+    "agent heartbeat controls stay visible on desktop and omit ephemeral shells",
+    desktopAgentHeartbeatLayout.controls.length === 4 && desktopAgentHeartbeatLayout.controls.every((control) => control.width > 0 && control.height > 0 && control.left >= 0 && control.right <= desktopAgentHeartbeatLayout.viewportWidth + 1) && desktopAgentHeartbeatLayout.workerToggleCount === 0 && desktopAgentHeartbeatLayout.fixtureOverflow <= 1 && desktopAgentHeartbeatLayout.documentOverflow <= 1,
+    JSON.stringify(desktopAgentHeartbeatLayout),
+  );
+  if (agentHeartbeatDesktopScreenshotPath) {
+    await evaluate(page, "document.querySelector('[data-smoke=\"agent-heartbeat-controls\"]').scrollIntoView({ block: 'start' })");
+    const screenshot = await page.send("Page.captureScreenshot", { format: "png" });
+    await writeFile(agentHeartbeatDesktopScreenshotPath, Buffer.from(screenshot.data, "base64"));
+    log(`saved agent heartbeat desktop screenshot to ${agentHeartbeatDesktopScreenshotPath}`);
+  }
+
   const desktopQuickAddSaveLayout = await collectQuickAddSaveLayout();
   const frenchDesktopWidth = desktopQuickAddSaveLayout.find((layout) => layout.fixture === "quick-add-save-board-minimum-fr")?.saveWidth;
   const widestDesktopWidth = Math.max(...desktopQuickAddSaveLayout

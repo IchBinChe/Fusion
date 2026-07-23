@@ -989,6 +989,35 @@ describe("Advanced Settings", () => {
     });
   });
 
+  it("preserves the complete runtime config when shared heartbeat helper changes enabled state", async () => {
+    mockFetchAgent.mockResolvedValue(createMockAgent({
+      runtimeConfig: {
+        heartbeatIntervalMs: 30000,
+        heartbeatTimeoutMs: 120000,
+        maxConcurrentRuns: 2,
+        messageResponseMode: "on-heartbeat",
+        unknownRuntimeKey: "preserved",
+      },
+    }));
+    mockUpdateAgent.mockResolvedValue(createMockAgent() as any);
+    const user = userEvent.setup();
+    render(<AgentDetailView agentId="agent-001" onClose={vi.fn()} addToast={vi.fn()} />);
+    await navigateToSettings(user);
+    expect((await screen.findByLabelText("Heartbeat Enabled") as HTMLInputElement).checked).toBe(true);
+    await user.click(screen.getByLabelText("Heartbeat Enabled"));
+    await user.click(screen.getByText("Save Settings"));
+    await waitFor(() => expect(mockUpdateAgent).toHaveBeenCalledWith("agent-001", expect.objectContaining({
+      runtimeConfig: expect.objectContaining({
+        enabled: false,
+        heartbeatIntervalMs: 30000,
+        heartbeatTimeoutMs: 120000,
+        maxConcurrentRuns: 2,
+        messageResponseMode: "on-heartbeat",
+        unknownRuntimeKey: "preserved",
+      }),
+    }), undefined));
+  });
+
   it("defaults run-missed-heartbeat-on-startup toggle to disabled when runtimeConfig flag is missing", async () => {
     mockFetchAgent.mockResolvedValue(createMockAgent({
       runtimeConfig: {

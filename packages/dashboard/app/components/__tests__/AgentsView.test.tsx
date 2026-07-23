@@ -2937,6 +2937,74 @@ describe("AgentsView", () => {
     });
   });
 
+  describe("durable heartbeat enablement controls", () => {
+    it("uses the shared default-enabled contract and preserved config from list and board controls", async () => {
+      const durable = {
+        ...mockAgents[1],
+        runtimeConfig: { heartbeatIntervalMs: 900_000, heartbeatTimeoutMs: 120_000, maxConcurrentRuns: 3, unknownRuntimeKey: "preserved" },
+      };
+      const worker = { ...mockAgents[2], id: "agent-worker", name: "Task Worker", metadata: { agentKind: "task-worker" } };
+      mockFetchAgents.mockResolvedValue([durable, worker]);
+      mockFetchAgentStats.mockResolvedValue({ total: 2, byState: {}, byRole: {} });
+
+      renderView(<AgentsView addToast={mockAddToast} projectId={projectId} />);
+
+      fireEvent.click(await screen.findByTitle("Board view"));
+      const boardToggle = await screen.findByRole("button", { name: "Disable heartbeat for Test Agent 2" });
+      fireEvent.click(boardToggle);
+      await waitFor(() => {
+        expect(mockUpdateAgent).toHaveBeenCalledWith("agent-002", {
+          runtimeConfig: {
+            enabled: false,
+            heartbeatIntervalMs: 900_000,
+            heartbeatTimeoutMs: 120_000,
+            maxConcurrentRuns: 3,
+            unknownRuntimeKey: "preserved",
+          },
+        }, projectId);
+      });
+      expect(screen.queryByRole("button", { name: /heartbeat for Task Worker/i })).toBeNull();
+      expect(screen.queryByTestId("agent-detail-view")).toBeNull();
+
+      expect(screen.queryByRole("button", { name: /heartbeat for Task Worker/i })).toBeNull();
+      expect(boardToggle).toHaveAttribute("aria-pressed", "true");
+    });
+
+    it("renders recursive org controls and prevents a pending toggle from issuing duplicate PATCH requests", async () => {
+      let resolveUpdate: ((agent: Agent) => void) | undefined;
+      mockFetchOrgTree.mockResolvedValue([{ agent: { ...mockAgents[1], runtimeConfig: { enabled: false, heartbeatIntervalMs: 900_000 } }, children: [] }]);
+      mockUpdateAgent.mockImplementation(() => new Promise<Agent>((resolve) => { resolveUpdate = resolve; }));
+      renderView(<AgentsView addToast={mockAddToast} projectId={projectId} />);
+      fireEvent.click(screen.getByRole("button", { name: "Org Chart view" }));
+
+      const toggle = await screen.findByRole("button", { name: "Enable heartbeat for Test Agent 2" });
+      fireEvent.click(toggle);
+      fireEvent.click(toggle);
+      expect(mockUpdateAgent).toHaveBeenCalledTimes(1);
+      expect(toggle).toBeDisabled();
+      resolveUpdate?.(mockAgents[1]);
+    });
+
+    it("updates every eligible current-project durable agent through bulk controls despite filtered display", async () => {
+      const disabled = { ...mockAgents[1], id: "agent-disabled", name: "Disabled", runtimeConfig: { enabled: false, heartbeatIntervalMs: 900_000, unknownRuntimeKey: "keep" } };
+      const enabled = { ...mockAgents[2], id: "agent-enabled", name: "Enabled", runtimeConfig: { enabled: true, heartbeatIntervalMs: 1_800_000 } };
+      const worker = { ...mockAgents[3], id: "agent-worker", name: "Worker", metadata: { agentKind: "task-worker" }, runtimeConfig: { enabled: false } };
+      mockFetchAgents.mockResolvedValue([disabled, enabled, worker]);
+      mockFetchAgentStats.mockResolvedValue({ total: 3, byState: {}, byRole: {} });
+      renderView(<AgentsView addToast={mockAddToast} projectId={projectId} />);
+
+      await openControlsPanel();
+      fireEvent.click(screen.getByRole("menuitem", { name: /enable all heartbeats/i }));
+      await waitFor(() => expect(mockConfirm).toHaveBeenCalled());
+      await waitFor(() => {
+        expect(mockUpdateAgent).toHaveBeenCalledTimes(1);
+        expect(mockUpdateAgent).toHaveBeenCalledWith("agent-disabled", {
+          runtimeConfig: { enabled: true, heartbeatIntervalMs: 900_000, unknownRuntimeKey: "keep" },
+        }, projectId);
+      });
+    });
+  });
+
   describe("global heartbeat multiplier", () => {
     it("renders the global heartbeat speed control", async () => {
       mockFetchSettings.mockResolvedValue({ heartbeatMultiplier: 1 });

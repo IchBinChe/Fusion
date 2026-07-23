@@ -6,7 +6,6 @@ import { TaxonomyProposalPanel } from "./TaxonomyProposalPanel.js";
 import { GITHUB_PM_TABS, GitHubPmTabs, githubPmTabButtonId, githubPmTabPanelId, type GitHubPmTabId } from "./GitHubPmTabs.js";
 import { IssuesPanel } from "./IssuesPanel.js";
 import { IssueWritePanel } from "./IssueWritePanel.js";
-import { RepoPicker } from "./RepoPicker.js";
 import "./GitHubPmView.css";
 
 type StatusState = "loading" | "configured" | "unconfigured" | "error";
@@ -82,17 +81,12 @@ function StatusBadge({ state, message }: { state: StatusState; message?: string 
 /*
 FNXC:GitHubPm 2026-07-24-02:10:
 Repo-context header (FUSI-008). Shows the currently-selected repo, sourced via
-getSelectedRepo() above, or a "No repository selected" affordance.
-
-FNXC:GitHubPmRepoPicker 2026-07-24-07:45:
-FUSI-007 fills the previously-empty `github-pm-view__repo-picker-slot` seam with the real
-`RepoPicker` component (search/recents/manual owner/repo entry). This is the ONLY change made
-here -- the rest of the header/shell structure is untouched. `onSelect` updates `selectedRepo`
-via the parent's setter so the already-rendered value above reflects the new selection
-immediately, without a second round-trip to GET /repo-config (the picker's own POST
-/repo-picker/select call already persisted it).
+getSelectedRepo() above, or a "No repository selected" affordance. The empty
+`github-pm-view__repo-picker-slot` div is a deliberate, currently-unfilled
+mount point: FUSI-007's repo-picker UI attaches here without this shell being
+re-architected. Do not delete this slot even though it renders nothing today.
 */
-function RepoContextHeader({ selectedRepo, loading, onSelect, context }: { selectedRepo: string | null; loading: boolean; onSelect: (repo: string) => void; context?: PluginDashboardViewContext }) {
+function RepoContextHeader({ selectedRepo, loading }: { selectedRepo: string | null; loading: boolean }) {
   return (
     <div className="github-pm-view__repo-context" data-testid="github-pm-repo-context">
       <span className="github-pm-view__repo-context-label">Repository</span>
@@ -109,9 +103,8 @@ function RepoContextHeader({ selectedRepo, loading, onSelect, context }: { selec
           No repository selected
         </span>
       )}
-      <div className="github-pm-view__repo-picker-slot" data-testid="github-pm-repo-picker-slot">
-        <RepoPicker onSelect={onSelect} context={context} />
-      </div>
+      {/* Seam for FUSI-007's repo picker (search/recents/manual owner/repo entry). Intentionally empty. */}
+      <div className="github-pm-view__repo-picker-slot" data-testid="github-pm-repo-picker-slot" />
     </div>
   );
 }
@@ -275,12 +268,7 @@ export function GitHubPmView({ context }: { context?: PluginDashboardViewContext
         <StatusBadge state={status} message={statusMessage} />
       </header>
 
-      <RepoContextHeader
-        selectedRepo={repoContextValue}
-        loading={selectedRepoLoading}
-        onSelect={(repo) => setSelectedRepo(repo)}
-        context={context}
-      />
+      <RepoContextHeader selectedRepo={repoContextValue} loading={selectedRepoLoading} />
 
       {status === "unconfigured" ? (
         <p className="github-pm-view__meta" data-testid="github-pm-unconfigured-hint">

@@ -241,44 +241,6 @@ export interface GitHubMilestone {
   state: string;
 }
 
-/*
-FNXC:GithubPmRepoPicker 2026-07-24-07:00:
-FUSI-007 repo-picker read surface: `searchRepositories` (GitHub Search API, authenticated
-search naturally scopes results to public repos plus any private/org repos the token can
-see -- no `user:@me` qualifier needed) and `getRepository` (single bounded `GET
-/repos/{owner}/{repo}` lookup for manual-entry validation). Both are DELIBERATELY the only
-two repo-shaped reads this client gains here -- neither method touches the issues endpoints,
-so validating/selecting a repo with tens of thousands of issues never enumerates them; the
-cost is O(1) regardless of repo size.
-*/
-export interface GitHubRepoSummary {
-  fullName: string;
-  owner: string;
-  name: string;
-  private: boolean;
-  htmlUrl: string;
-  description: string | null;
-  defaultBranch?: string;
-}
-
-export interface GitHubRepoSearchOptions {
-  /** 1-based page number. Default 1. */
-  page?: number;
-  /** Default 25, clamped to GitHub's 100-item REST ceiling. */
-  perPage?: number;
-}
-
-export interface GitHubRepoSearchPage {
-  items: GitHubRepoSummary[];
-  totalCount: number;
-  /** GitHub's own `incomplete_results` flag: the search timed out server-side before scanning everything. */
-  incompleteResults: boolean;
-  page: number;
-  hasNextPage: boolean;
-  /** Present only when `hasNextPage` is true. */
-  nextPage?: number;
-}
-
 export interface GitHubLabel {
   id: string;
   name: string;
@@ -652,50 +614,6 @@ export class GitHubClient {
     const { data } = await this.requestJson<Array<{ number: number; title: string; state: string }>>(url);
     const raw = Array.isArray(data) ? data : [];
     return raw.map((milestone) => ({ number: milestone.number, title: milestone.title, state: milestone.state }));
-  }
-
-  /**
-   * FNXC:GithubPmRepoPicker 2026-07-24-07:00:
-   * FUSI-007: repo search via GitHub's Search API (`GET /search/repositories`), scoped to
-   * repos the resolved token can see -- authenticated search already includes accessible
-   * private/org repos alongside public ones, so no extra qualifier is required. Single-page
-   * REST read (mirrors `searchIssues`'s single-page shape): the caller drives paging, this
-   * method never accumulates multiple pages internally.
-   */
-  async searchRepositories(query: string, options: GitHubRepoSearchOptions = {}): Promise<GitHubRepoSearchPage> {
-    const page = normalizePageNumber(options.page);
-    const perPage = normalizePerPage(options.perPage);
-    const trimmed = query.trim();
-    const q = trimmed ? `${trimmed} in:name,description,readme` : trimmed;
-    const params = new URLSearchParams({ q, per_page: String(perPage), page: String(page) });
-    const url = `${GITHUB_REST_BASE_URL}/search/repositories?${params.toString()}`;
-    const { data } = await this.requestJson<GitHubRestRepoSearchResponse>(url);
-    const rawItems = Array.isArray(data.items) ? data.items : [];
-    const items = rawItems.map(mapRestRepoToSummary);
-    const totalCount = typeof data.total_count === "number" ? data.total_count : items.length;
-    const hasNextPage = items.length === perPage && page * perPage < Math.min(totalCount, 1000);
-    return {
-      items,
-      totalCount,
-      incompleteResults: data.incomplete_results === true,
-      page,
-      hasNextPage,
-      nextPage: hasNextPage ? page + 1 : undefined,
-    };
-  }
-
-  /**
-   * FNXC:GithubPmRepoPicker 2026-07-24-07:00:
-   * FUSI-007: manual-entry / select validation -- a single bounded `GET /repos/{owner}/{repo}`
-   * lookup. Never fetches issue counts or enumerates issues (that would make a repo with tens
-   * of thousands of issues expensive to validate); 404 surfaces as `not_found` and 401/403 as
-   * `auth_error` via `fetchThrottled`'s existing classification, so callers get a clean,
-   * non-raw-API-shaped error to render ("not found" vs "no access").
-   */
-  async getRepository(owner: string, repo: string): Promise<GitHubRepoSummary> {
-    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
-    const { data } = await this.requestJson<GitHubRestRepo>(url);
-    return mapRestRepoToSummary(data);
   }
 
   /**
@@ -1089,36 +1007,6 @@ interface GitHubRestSearchResponse {
   total_count?: number;
   incomplete_results?: boolean;
   items?: GitHubRestIssueFull[];
-}
-
-interface GitHubRestRepo {
-  full_name: string;
-  owner?: { login?: string };
-  name: string;
-  private?: boolean;
-  html_url: string;
-  description?: string | null;
-  default_branch?: string;
-}
-
-interface GitHubRestRepoSearchResponse {
-  total_count?: number;
-  incomplete_results?: boolean;
-  items?: GitHubRestRepo[];
-}
-
-/** FNXC:GithubPmRepoPicker 2026-07-24-07:00: shared REST-repo -> GitHubRepoSummary mapper used by both searchRepositories and getRepository. */
-function mapRestRepoToSummary(repo: GitHubRestRepo): GitHubRepoSummary {
-  const [ownerFromFullName, nameFromFullName] = (repo.full_name ?? "").split("/");
-  return {
-    fullName: repo.full_name,
-    owner: repo.owner?.login ?? ownerFromFullName ?? "",
-    name: repo.name ?? nameFromFullName ?? "",
-    private: repo.private === true,
-    htmlUrl: repo.html_url,
-    description: repo.description ?? null,
-    defaultBranch: repo.default_branch,
-  };
 }
 
 const ISSUE_LIST_DEFAULT_PER_PAGE = 25;

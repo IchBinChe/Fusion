@@ -28,12 +28,6 @@ import {
   TASK_PRIORITIES,
   THINKING_LEVELS,
   summarizeTitle,
-  builtinSeamPrompt,
-  renderTriagePolicyPlaceholders,
-  resolveAgentPrompt,
-  resolveEffectivePlannerHeartbeatPatrolEnabled,
-  resolvePlanningPromptFromIr,
-  resolveWorkflowIrById,
   type PromptOverrideMap,
 } from "@fusion/core";
 import type { SubtaskItem } from "./subtask-breakdown.js";
@@ -233,29 +227,32 @@ async function ensureNtfyHelpersReady(): Promise<void> {
 // ── Constants ───────────────────────────────────────────────────────────────
 
 /*
-FNXC:PlanningMode 2026-07-20-00:55:
-Planning Mode is user-terminated: each answered turn must produce one consequential, novel question with alternatives and trade-offs.
+FNXC:PlanningMode 2026-07-23-11:30:
+Planning Mode is a collaborative, user-terminated discovery session, not task triage. Its dedicated prompt must not inherit workflow or assigned-triage execution instructions, because those instructions can turn exploratory responses into executor specifications and child-task directives.
+
 The model may update the running plan but must never infer completion; only the visible Proceed with plan action can make a session terminal.
 */
-/** Planning system prompt for the AI agent */
-export const PLANNING_SYSTEM_PROMPT = `## Planning Mode interaction adapter
+/** Self-contained system prompt for the separate collaborative Planning Mode. */
+export const PLANNING_SYSTEM_PROMPT = `## Collaborative Planning Mode
 
-First analyze the codebase and active board with the available readonly tools, fn_task_list, and fn_task_show. Treat the workflow planning template above as the quality bar and PROMPT.md structure for the evolving plan, but do not write PROMPT.md or use write tools during this interview.
+Help the operator iteratively turn an idea into a clear, useful plan. First investigate relevant repository and active-board context with the available readonly tools, fn_task_list, and fn_task_show when that context can reduce uncertainty. Explore the problem before assuming a solution: identify assumptions, unknowns, constraints, affected surfaces, and meaningful risks. Compare viable approaches and their trade-offs. Discuss decomposition when it clarifies scope, sequencing, ownership, or deliverables, but do not automatically split work or direct the creation of child tasks.
 
-Start by producing a concrete initial plan and exactly one high-impact question. Author the operator-facing plan in Markdown: write the description as concise GitHub-flavored Markdown, while the structured change, acceptance, dependency, and deliverable fields become its Markdown sections and lists. After every answer, regenerate the plan and ask exactly one consequential next question. A refine turn uses the selected or free-text focus to choose that next question. The model never validates or terminates the session. Only the user can validate it through the visible Proceed with plan action.
+Build an evolving operator-facing plan, not an executor-ready task specification. Focus on intended outcomes, concrete deliverables, alternatives considered, and observable acceptance criteria. Do not produce task-specification bookkeeping or execution-process instructions such as task-size policy, commit guidance, no-code-change caveats, or task-creation directives. Author the operator-facing plan in Markdown: write the description as concise GitHub-flavored Markdown, while the structured change, acceptance, dependency, and deliverable fields become its Markdown sections and lists.
+
+Start by producing a concrete initial plan and exactly one high-impact question. After every answer, regenerate the plan and ask exactly one consequential next question. A refine turn uses the selected or free-text focus to choose that next question. The model never validates or terminates the session. Only the user can validate it through the visible Proceed with plan action.
 
 For every initial, answer, or refine turn respond only with JSON: {"type":"question","data":{"id":"unique-id","type":"single_select|multi_select","question":"...","description":"...","options":[{"id":"option-a","label":"...","description":"...","pros":["..."],"cons":["..."]},{"id":"option-b","label":"...","description":"...","pros":["..."],"cons":["..."]},{"id":"other","label":"...","isOther":true}],"runningPlan":{"title":"...","description":"...","proposedChanges":["specific change"],"acceptanceCriteria":["observable outcome"],"suggestedSize":"S|M|L","priority":"normal","suggestedDependencies":[],"keyDeliverables":["concrete work item"],"suggestedRefinements":["next focus 1","next focus 2"]}}}.
 
-Every turn must include the running-plan fields: only title, description, concrete proposedChanges, observable acceptanceCriteria, suggestedSize, optional priority, suggestedDependencies, concrete keyDeliverables, and concise suggestedRefinements informed by the idea and answers so far. Include every distinct, high-value unresolved refinement area; do not cap the list at three. Never use interview question text as a deliverable. Do not put PROMPT.md sections (Mission, Before → After, Steps, File Scope, Review Level, Completion Criteria, or Do NOT) in runningPlan or free text: triage writes PROMPT.md only after the operator proceeds with the plan. Proceed with plan serializes the plan as plan.md without priority or suggestedRefinements; priority remains a task field. Every question must provide at least two alternatives, each with non-empty pros and cons, plus exactly one Other/write-your-own option. Write every label, option, and Other label in the language of the user's original input. Incorporate free-text Other answers verbatim as steering context for the following question.`;
+Every turn must include the running-plan fields: only title, description, concrete proposedChanges, observable acceptanceCriteria, suggestedSize, optional priority, suggestedDependencies, concrete keyDeliverables, and concise suggestedRefinements informed by the idea and answers so far. Include every distinct, high-value unresolved refinement area; do not cap the list at three. Never use interview question text as a deliverable. Proceed with plan serializes the plan as plan.md without priority or suggestedRefinements; priority remains a task field. Every question must provide at least two alternatives, each with non-empty pros and cons, plus exactly one Other/write-your-own option. Write every label, option, and Other label in the language of the user's original input. Incorporate free-text Other answers verbatim as steering context for the following question.`;
 
 /*
-FNXC:PlanningMode 2026-07-20-14:30:
-Planning Mode must use the same workflow planning seam as triage for a newly added task, then layer its infinite JSON interview contract over that template. A catalog defaultContent is Settings UI documentation, not proof that an operator explicitly replaced the full system prompt.
+FNXC:PlanningMode 2026-07-23-11:35:
+The separate Planning Mode prompt has sole default authority. Workflow selection still resolves models and task creation, but workflow planning seams and triage assignments remain execution-task concerns and must never leak into collaborative planning turns.
 */
 export async function resolvePlanningModeSystemPrompt(
   store: TaskStore,
   promptOverrides?: PromptOverrideMap,
-  workflowId?: string,
+  _workflowId?: string,
 ): Promise<string> {
   const settings: Partial<Settings> = (await store.getSettings().catch(() => ({}))) ?? {};
   const overrides = promptOverrides ?? settings.promptOverrides;
@@ -264,23 +261,8 @@ export async function resolvePlanningModeSystemPrompt(
     && overrides["planning-system"].trim().length > 0
     ? overrides["planning-system"]
     : undefined;
-  if (explicitOverride) return explicitOverride;
 
-  const plannerHeartbeatPatrolEnabled = resolveEffectivePlannerHeartbeatPatrolEnabled(settings);
-  const assignedTriagePrompt = settings.agentPrompts?.roleAssignments?.triage
-    ? resolveAgentPrompt("triage", settings.agentPrompts, { plannerHeartbeatPatrolEnabled })
-    : "";
-  let workflowPrompt: string | undefined;
-  try {
-    const ir = await resolveWorkflowIrById(store, workflowId || settings.defaultWorkflowId || "builtin:coding");
-    workflowPrompt = resolvePlanningPromptFromIr(ir);
-  } catch {
-    // Resolve fail-soft below so a missing custom workflow cannot prevent planning.
-  }
-  const fallback = builtinSeamPrompt("planning")
-    || resolveAgentPrompt("triage", undefined, { plannerHeartbeatPatrolEnabled });
-  const base = assignedTriagePrompt || workflowPrompt || fallback;
-  return `${renderTriagePolicyPlaceholders(base, settings)}\n\n${PLANNING_SYSTEM_PROMPT}`;
+  return explicitOverride ?? PLANNING_SYSTEM_PROMPT;
 }
 
 

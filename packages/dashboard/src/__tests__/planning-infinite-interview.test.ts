@@ -60,10 +60,14 @@ function completePayload(): string {
   });
 }
 
+/** System prompts used by agent constructions in the current test. */
+let agentSystemPrompts: string[] = [];
+
 /** A scripted planning agent that records every prompt sent through the live session seam. */
 function installScriptedAgent(responses: string[]) {
   const prompts: string[] = [];
-  __setCreateFnAgent(vi.fn(async () => {
+  __setCreateFnAgent(vi.fn(async ({ systemPrompt }: { systemPrompt: string }) => {
+    agentSystemPrompts.push(systemPrompt);
     const messages: Array<{ role: string; content: string }> = [];
     return {
       session: {
@@ -101,6 +105,7 @@ const SECOND_QUESTION = {
 describe("reactive Planning Mode question contract", () => {
   beforeEach(() => {
     __resetPlanningState();
+    agentSystemPrompts = [];
   });
 
   it("preserves every valid suggested refinement category", () => {
@@ -165,6 +170,18 @@ describe("reactive Planning Mode question contract", () => {
     }
     expect(prompts.at(-1)).toMatch(/ask exactly one next question/i);
     expect(PLANNING_SYSTEM_PROMPT).toMatch(/Proceed with plan serializes the plan as plan\.md/i);
+  });
+
+  it("defines a collaborative planning contract rather than an execution-task specification", () => {
+    expect(PLANNING_SYSTEM_PROMPT).toMatch(/investigate relevant repository and active-board context/i);
+    expect(PLANNING_SYSTEM_PROMPT).toMatch(/assumptions, unknowns, constraints/i);
+    expect(PLANNING_SYSTEM_PROMPT).toMatch(/Compare viable approaches and their trade-offs/i);
+    expect(PLANNING_SYSTEM_PROMPT).toMatch(/Discuss decomposition/i);
+    expect(PLANNING_SYSTEM_PROMPT).toMatch(/concrete deliverables.*observable acceptance criteria/i);
+    expect(PLANNING_SYSTEM_PROMPT).toMatch(/not an executor-ready task specification/i);
+    expect(PLANNING_SYSTEM_PROMPT).toMatch(/do not automatically split work/i);
+    expect(PLANNING_SYSTEM_PROMPT).toMatch(/Do not produce task-specification bookkeeping.*commit guidance.*no-code-change caveats.*task-creation directives/i);
+    expect(PLANNING_SYSTEM_PROMPT).toMatch(/respond only with JSON/i);
   });
 
   it("repairs malformed select options and appends one localized Other option", () => {
@@ -407,6 +424,7 @@ describe("reactive Planning Mode question contract", () => {
     expect(prompts[1]).toContain("Use audit logs");
     expect(prompts[3]).toContain("Use audit logs");
     expect(prompts[3]).toContain("Add a staged rollout.");
+    expect(agentSystemPrompts).toEqual([PLANNING_SYSTEM_PROMPT, PLANNING_SYSTEM_PROMPT]);
     expect((await getSession(created.sessionId))?.pendingContextualComments).toBeUndefined();
   });
 
@@ -489,6 +507,46 @@ describe("reactive Planning Mode question contract", () => {
     expect(prompts[0]).toContain("Create the initial running plan");
     expect(prompts[0]).toContain("Build secure account recovery");
     expect(created.summary.description).not.toBe(created.firstQuestion.question);
+  });
+
+  it("uses the dedicated prompt in both initial and streaming agent creation paths", async () => {
+    const systemPrompts: string[] = [];
+    __setCreateFnAgent(vi.fn(async ({ systemPrompt }: { systemPrompt: string }) => {
+      systemPrompts.push(systemPrompt);
+      const messages: Array<{ role: string; content: string }> = [];
+      return {
+        session: {
+          state: { messages },
+          prompt: vi.fn(async () => {
+            messages.push({ role: "assistant", content: payload({ ...FIRST_QUESTION, runningPlan: normalizePlanningSummaryPayload({ title: "Dedicated prompt plan" }) }) });
+          }),
+          dispose: vi.fn(),
+        },
+      };
+    }) as never);
+    const leakingStore = {
+      ...MOCK_TASK_STORE,
+      getSettings: vi.fn(async () => ({
+        agentPrompts: {
+          roleAssignments: { triage: "execution-triage" },
+          templates: [{ id: "execution-triage", role: "triage", prompt: "PROMPT.md NO-CODE CREATE CHILD TASK" }],
+        },
+      })),
+    } as unknown as TaskStore;
+
+    await createSession("127.0.0.21", "Plan a safer sign-in flow", leakingStore, "/tmp/project");
+    const streamingSessionId = await createSessionWithAgent(
+      "127.0.0.22", "Plan a safer sign-in flow", "/tmp/project", leakingStore,
+      undefined, undefined, undefined, { workflowId: "WF-custom" },
+    );
+    planningStreamManager.consumeInitialTurn(streamingSessionId)?.();
+    await vi.waitFor(() => expect(systemPrompts).toHaveLength(2));
+
+    for (const systemPrompt of systemPrompts) {
+      expect(systemPrompt).toBe(PLANNING_SYSTEM_PROMPT);
+      expect(systemPrompt).not.toContain("PROMPT.md NO-CODE CREATE CHILD TASK");
+      expect(systemPrompt).toContain('"type":"question"');
+    }
   });
 
   it("uses a model-authored initial plan on the streaming first turn and exposes one question", async () => {

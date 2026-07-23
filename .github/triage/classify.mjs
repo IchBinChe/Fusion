@@ -127,7 +127,7 @@ function sanitise(text) {
   if (!text) return '';
   return text
     .replace(/<!--[\s\S]*?-->/g, ' ')        // HTML comments — invisible in the rendered UI
-    .replace(/[​-‍﻿⁠]/g, '') // zero-width characters
+    .replace(/[\u200B-\u200D\uFEFF\u2060]/g, '') // zero-width characters
     .slice(0, BODY_CHAR_LIMIT);
 }
 

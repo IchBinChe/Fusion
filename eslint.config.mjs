@@ -296,6 +296,9 @@ export default tseslint.config(
       "scripts/**/*.mjs",
       "**/*.cjs",
       "packages/cli-alias/**/*.js",
+      // FNXC:LintConfig 2026-07-24-00:00: .github/triage/*.mjs are first-party Node ESM scripts (issue-triage classifier) using process/fetch/console/setTimeout. ESLint flat-config globs without a leading **/ match only root files, so nested .github scripts otherwise resolve no Node globals and fail no-undef workspace-wide (KB-001).
+      ".github/**/*.mjs",
+      ".github/**/*.js",
     ],
     languageOptions: {
       ecmaVersion: "latest",

@@ -120,9 +120,23 @@ describe("KTD-8 adoption table — write-site census completeness (build-failing
 });
 
 describe("resolveLegacyStatusAdoption — every legacy (status) resumes owned", () => {
-  it("triage plan-review statuses resume the graph (writers deleted in U3)", () => {
-    for (const s of ["planning", "plan-review-unavailable"]) {
+  it("statuses whose writers U3 deleted resume the graph", () => {
+    for (const s of ["plan-review-unavailable", "triaged"]) {
       expect(resolveLegacyStatusAdoption(s)?.kind).toBe("resume-graph");
+    }
+  });
+
+  /*
+  FNXC:LegacyAdoption 2026-07-22-18:20 (FN-8504 incident — generalizes FN-8498):
+  Statuses with LIVE post-cutover writers are not legacy. The sweep runs on every store
+  open (active tasks withhold the drained marker), so a clearing action races live lanes:
+  FN-8504's replan planner wrote status:"planning" and a store-open adoption cleared it
+  ~100ms later, leaving a live planner rendered as an idle "Ready" card. Each of these has
+  its own crash-recovery owner; adoption must never touch them.
+  */
+  it("live-writer statuses are preserved — planning/queued/merge pipeline/stuck-killed (FN-8504)", () => {
+    for (const s of ["planning", "queued", "merging", "merging-pr", "merging-fix", "stuck-killed", "needs-replan"]) {
+      expect(resolveLegacyStatusAdoption(s)?.kind, s).toBe("preserve");
     }
   });
 
@@ -194,7 +208,7 @@ describe("planLegacyAdoption (U9b consumers)", () => {
   const NOW = "2026-07-19T04:40:00.000Z";
 
   it("clears every resume-graph status so the graph re-enters at its owning node", () => {
-    for (const status of ["planning", "plan-review-unavailable", "queued", "triaged"]) {
+    for (const status of ["plan-review-unavailable", "triaged"]) {
       const plan = planLegacyAdoption({ status }, NOW);
       expect(plan.action, status).toBe("resume-graph");
       // Clearing the legacy status IS the re-entry: the graph owns the node again.
@@ -217,6 +231,19 @@ describe("planLegacyAdoption (U9b consumers)", () => {
   it("never disturbs a preserve gate", () => {
     for (const status of ["awaiting-approval", "failed", "done", "blocked", "cancelled"]) {
       expect(planLegacyAdoption({ status }, NOW).action, status).toBe("skip");
+    }
+  });
+
+  /*
+  FNXC:LegacyAdoption 2026-07-22-18:20 (FN-8504 incident):
+  The end-to-end plan for a live-writer status must be a full skip — no clear, no stamp —
+  because the sweep can fire from any store open while the status is genuinely live.
+  */
+  it("skips live-writer statuses entirely — a live planner/merge/queue marker is never cleared (FN-8504)", () => {
+    for (const status of ["planning", "queued", "merging", "merging-pr", "merging-fix", "stuck-killed"]) {
+      const plan = planLegacyAdoption({ status }, NOW);
+      expect(plan.action, status).toBe("skip");
+      expect(plan.patch, status).toBeUndefined();
     }
   });
 
@@ -258,7 +285,7 @@ describe("planLegacyAdoption (U9b consumers)", () => {
   un-parked.
   */
   it("is idempotent — an already-adopted row is never re-adopted", () => {
-    const plan = planLegacyAdoption({ status: "planning", legacyAdoptedAt: NOW }, NOW);
+    const plan = planLegacyAdoption({ status: "plan-review-unavailable", legacyAdoptedAt: NOW }, NOW);
     expect(plan.action).toBe("skip");
     expect(plan.patch).toBeUndefined();
   });
@@ -405,7 +432,7 @@ describe("adoptLegacyTaskRowsOnOpen — paginates past the 500-row page cap", ()
     // 1101 legacy rows → 3 pages (500 + 500 + 101); a capped scan would strand 601.
     const rows: Array<Partial<Task> & { id: string }> = Array.from({ length: 1101 }, (_, i) => ({
       id: `task-${i + 1}`,
-      status: "planning",
+      status: "plan-review-unavailable",
     }));
     const { store, listCalls } = makeFakeStore(rows);
 
@@ -418,7 +445,7 @@ describe("adoptLegacyTaskRowsOnOpen — paginates past the 500-row page cap", ()
   });
 
   it("stops after one page when the census fits under the cap, and stays idempotent", async () => {
-    const rows = Array.from({ length: 3 }, (_, i) => ({ id: `task-${i + 1}`, status: "queued" }));
+    const rows = Array.from({ length: 3 }, (_, i) => ({ id: `task-${i + 1}`, status: "triaged" }));
     const { store, listCalls } = makeFakeStore(rows);
 
     expect(await adoptLegacyTaskRowsOnOpen(store)).toBe(3);
@@ -439,7 +466,7 @@ describe("adoptLegacyTaskRowsOnOpen — drained-marker completion short-circuit"
   it("writes the non-numeric marker after a clean drain (no mutating plan)", async () => {
     const rows = [
       { id: "task-1", status: "done" },                                    // preserve gate → skip
-      { id: "task-2", status: "planning", legacyAdoptedAt: "2026-07-19" }, // already adopted → skip
+      { id: "task-2", status: "plan-review-unavailable", legacyAdoptedAt: "2026-07-19" }, // already adopted → skip
       { id: "task-3" },                                                    // nothing legacy → skip
     ];
     const { store, listCalls, markerWrites } = makeFakeStore(rows, { backend: true });
@@ -453,17 +480,17 @@ describe("adoptLegacyTaskRowsOnOpen — drained-marker completion short-circuit"
   });
 
   it("skips the sweep entirely when the marker is present", async () => {
-    const rows = [{ id: "task-1", status: "planning" }];
+    const rows = [{ id: "task-1", status: "plan-review-unavailable" }];
     const { store, listCalls } = makeFakeStore(rows, { backend: true, markerPresent: true });
 
     expect(await adoptLegacyTaskRowsOnOpen(store)).toBe(0);
     expect(listCalls.length).toBe(0);
     // The (hypothetical) legacy row is untouched — marker presence means it cannot exist.
-    expect(rows[0].status).toBe("planning");
+    expect(rows[0].status).toBe("plan-review-unavailable");
   });
 
   it("a mutating drain adopts but does NOT write the marker that cycle", async () => {
-    const rows = [{ id: "task-1", status: "planning" }];
+    const rows = [{ id: "task-1", status: "plan-review-unavailable" }];
     const { store, markerWrites } = makeFakeStore(rows, { backend: true });
 
     expect(await adoptLegacyTaskRowsOnOpen(store)).toBe(1);
@@ -476,18 +503,18 @@ describe("adoptLegacyTaskRowsOnOpen — drained-marker completion short-circuit"
   });
 
   it("a userPaused legacy row withholds the marker without being mutated", async () => {
-    const rows = [{ id: "task-1", status: "planning", userPaused: true }];
+    const rows = [{ id: "task-1", status: "plan-review-unavailable", userPaused: true }];
     const { store, markerWrites } = makeFakeStore(rows, { backend: true });
 
     expect(await adoptLegacyTaskRowsOnOpen(store)).toBe(0);
     // Operator-paused rows are never adopted …
-    expect(rows[0].status).toBe("planning");
+    expect(rows[0].status).toBe("plan-review-unavailable");
     // … but they keep the census "not drained" so they stay adoptable after unpause.
     expect(markerWrites.length).toBe(0);
   });
 
   it("falls back to sweeping when the marker read fails (fail-open toward correctness)", async () => {
-    const rows = [{ id: "task-1", status: "planning" }];
+    const rows = [{ id: "task-1", status: "plan-review-unavailable" }];
     const { store } = makeFakeStore(rows, { backend: true, markerReadThrows: true });
 
     expect(await adoptLegacyTaskRowsOnOpen(store)).toBe(1);

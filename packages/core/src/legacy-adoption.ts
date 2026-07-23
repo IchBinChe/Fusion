@@ -9,11 +9,12 @@ fails the build if any lacks an adoption row here. So a status added during the
 cutover window fails the build instead of mass-parking rows `paused` at upgrade.
 
 Adoption action per legacy status (KTD-8), for the FOUNDATIONAL targets (U9 scope A):
-  - resume-graph   : clear the legacy triage-owned status so the graph re-enters
-                     cleanly at the owning node (planning → planning node,
-                     plan-review-unavailable → plan-review retry,
-                     queued/triaged → scheduler re-pickup). NOT needs-replan —
-                     that is a LIVE graph signal, preserved (see its table row).
+  - resume-graph   : clear a legacy status whose writers the cutover DELETED so the
+                     graph re-enters cleanly at the owning node
+                     (plan-review-unavailable → plan-review retry,
+                     triaged → scheduler re-pickup). NEVER a status with a live
+                     post-cutover writer — those are `preserve` (see the FN-8504
+                     incident note on the table).
   - preserve       : a live human/terminal gate the graph must NOT disturb
                      (awaiting-approval, awaiting-user-input, failed, error,
                      blocked, done, cancelled). Pausing is NOT a status: it is
@@ -55,8 +56,25 @@ export interface LegacyAdoptionAction {
  * build. `null`/`undefined` (no status) needs no row (nothing to adopt).
  */
 export const LEGACY_STATUS_ADOPTION: Readonly<Record<string, LegacyAdoptionAction>> = {
+  /*
+  FNXC:LegacyAdoption 2026-07-22-18:20 (FN-8504 incident — generalizes FN-8498):
+  A status with a LIVE post-cutover writer is NOT legacy and must be `preserve`, never
+  resume-graph/clear. The adoption sweep runs on EVERY store open (a DB with any active
+  task never records the drained marker — a mutating cycle withholds it), so a clearing
+  action races live lanes: FN-8504's replan planner wrote status:"planning" and ~100ms
+  later a store-open adoption cleared it (audit: task:reconcile-legacy-adoption,
+  priorStatus "planning"), leaving a live planner rendered as an idle "Ready" card and
+  invisible to every Running count. Live-writer statuses each have their own crash-
+  recovery owner, so preserve loses nothing:
+    - planning        → triage's startup stale-planning sweep clears crashed planners
+    - queued          → the scheduler re-evaluates queued rows every poll
+    - merging/-pr/-fix→ self-healing recoverInterruptedMergingTasks / stale-merge recovery
+    - stuck-killed    → restart-recovery-coordinator owns kill-park resume
+  Only statuses with NO live task-row writer may keep a clearing action
+  (plan-review-unavailable, triaged).
+  */
+  "planning": { kind: "preserve", note: "live triage planner status — triage's stale-planning sweep owns crash recovery" },
   // ── Triage plan-review statuses whose writers U3 deleted → graph re-entry ──
-  "planning": { kind: "resume-graph", note: "re-enter planning node" },
   "plan-review-unavailable": { kind: "resume-graph", note: "plan-review retry (leased)" },
   // ── Live graph signals with post-cutover writers — preserve, never clear ───
   /*
@@ -69,13 +87,13 @@ export const LEGACY_STATUS_ADOPTION: Readonly<Record<string, LegacyAdoptionActio
   after a restart). Preserve it: the status is self-resuming — triage picks it up as-is.
   */
   "needs-replan": { kind: "preserve", note: "live graph replan signal — triage todo-rediscovery consumes it" },
-  // ── Scheduler / dispatch transient states → re-pickup ─────────────────────
-  "queued": { kind: "resume-graph", note: "scheduler re-queue" },
+  // ── Scheduler / dispatch states — queued has live writers → preserve ──────
+  "queued": { kind: "preserve", note: "live scheduler capacity/dependency marker — scheduler re-evaluates each poll" },
   "triaged": { kind: "resume-graph", note: "scheduler re-pickup" },
-  // ── Merge substates (execute-seam/merge refinement DEFERRED to U9b) ───────
-  "merging": { kind: "resume-graph", note: "resume merge node (U9b refines)" },
-  "merging-pr": { kind: "resume-graph", note: "resume merge-pr node (U9b refines)" },
-  "merging-fix": { kind: "resume-graph", note: "resume merge-fix node (U9b refines)" },
+  // ── Merge substates — live merger writers → preserve (FN-8504 incident) ───
+  "merging": { kind: "preserve", note: "live merge-active status — self-healing owns stale-merge recovery" },
+  "merging-pr": { kind: "preserve", note: "live merge-active status — self-healing owns stale-merge recovery" },
+  "merging-fix": { kind: "preserve", note: "live merge-active status — self-healing owns stale-merge recovery" },
   // ── Live human / terminal gates — do NOT disturb ──────────────────────────
   "awaiting-approval": { kind: "preserve", note: "manual plan approval gate" },
   "awaiting-user-input": { kind: "preserve", note: "awaiting operator input" },
@@ -88,7 +106,8 @@ export const LEGACY_STATUS_ADOPTION: Readonly<Record<string, LegacyAdoptionActio
   "cancelled": { kind: "preserve", note: "operator-cancelled" },
   // ── Transient in-flight → clear so normal dispatch resumes ────────────────
   "cancelling": { kind: "clear", note: "transient cancel — clear on restart" },
-  "stuck-killed": { kind: "resume-graph", note: "stuck-detector kill — clear and re-dispatch" },
+  // stuck-killed has live writers (self-healing kill, restart-recovery-coordinator) → preserve.
+  "stuck-killed": { kind: "preserve", note: "live stuck-detector kill park — restart-recovery owns re-dispatch" },
 };
 
 /**

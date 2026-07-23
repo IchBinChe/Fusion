@@ -13,7 +13,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import * as fusionCore from "@fusion/core";
-import type { AgentState, AgentCapability, AgentUpdateInput, AgentLogEntry, Artifact, ArtifactCreateInput, ArtifactWithTask, Task, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore, WorkflowSettingDefinition, GoalStatus, WorkflowIrNode } from "@fusion/core";
+import type { AgentState, AgentCapability, AgentUpdateInput, AgentLogEntry, Artifact, ArtifactCreateInput, ArtifactWithTask, Task, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore, WorkflowSettingDefinition, GoalStatus, WorkflowIrNode, IdeationCandidate } from "@fusion/core";
 import { listTraits, isBuiltinWorkflowId, AgentStore, validateColumnAgentBindings, ColumnAgentBindingError, stripApprovalBypassFlags, WorkflowSettingRejectionError, resolveEffectiveSettingsById, resolveWorkflowIrById, findOrphanedSettingValues, BUILTIN_WORKFLOW_SETTINGS, MAX_TASK_LIST_TEXT_CHARS, formatCurrentTaskLine, normalizeWorkflowIcon, parseWorkflowIr, WorkflowIrError, assertColumnTraitsValid, ColumnTraitValidationError } from "@fusion/core";
 import { promoteHeldTask } from "./hold-release.js";
 import { computeCrossParentDiagnosticClaim, computeCrossParentDiagnosticClaimId, computeParentIntentClaimId, DASHBOARD_USER_ID, dailyMemoryPath, ensureOpenClawMemoryFiles, evaluateImplementationTaskBind, extractAgentProvisioningRequest, findSameAgentDuplicates, getMemoryBackendCapabilities, getProjectMemory, isEphemeralAgent, memoryLongTermPath, normalizeMessageParticipant, reconcileDeterministicDuplicate, resolveAgentProvisioningPolicy, resolveMemoryBackend, resolveResearchSettings, resolveTaskGithubTracking, runDeterministicDuplicateGuard, scheduleQmdProjectMemoryRefresh, searchProjectMemory, shouldSkipBackgroundQmdRefresh } from "@fusion/core";
@@ -3770,6 +3770,19 @@ const ideationToolResult = (text: string, details: Record<string, unknown>, isEr
   content: [{ type: "text" as const, text }], details, ...(isError ? { isError: true } : {}),
 });
 
+/*
+FNXC:Ideation 2026-07-23-12:13:
+Convergence requires a canonical candidate ID, so every shared agent-facing
+ideation response that exposes candidates must render their ID and provenance
+in text rather than leaving them discoverable only in structured details.
+*/
+const formatIdeationCandidate = (candidate: IdeationCandidate): string => [
+  `- ${candidate.id} (${candidate.origin})`,
+  `  Source reference: ${candidate.sourceRef ?? "none"}`,
+  "  Content:",
+  ...candidate.content.split("\n").map((line) => `    ${line}`),
+].join("\n");
+
 /** Create the persisted ideation surface shared by executor, triage, heartbeat, and chat. */
 export function createIdeationTools(store: TaskStore): ToolDefinition[] {
   /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -3788,7 +3801,11 @@ export function createIdeationTools(store: TaskStore): ToolDefinition[] {
     }),
     tool("fn_ideation_show", "Show Ideation Session", "Show one ideation session and its divergent candidates.", ideationShowParams, async ({ id }) => {
       const session = await store.getIdeationStore().getSessionWithCandidates(id);
-      return session ? ideationToolResult(`${session.id}: ${session.title}`, { session }) : ideationToolResult(`Ideation session ${id} not found`, { code: "IDEATION_SESSION_NOT_FOUND", sessionId: id }, true);
+      if (!session) return ideationToolResult(`Ideation session ${id} not found`, { code: "IDEATION_SESSION_NOT_FOUND", sessionId: id }, true);
+      const candidates = session.candidates.length
+        ? `Candidates (${session.candidates.length})\n${session.candidates.map(formatIdeationCandidate).join("\n")}`
+        : "Candidates (0): no divergent candidates recorded.";
+      return ideationToolResult(`${session.id}: ${session.title} (${session.status})\n${candidates}`, { session });
     }),
     tool("fn_ideation_start", "Start Ideation", "Create a bounded persisted ideation session.", ideationStartParams, async ({ title, prompt }) => {
       const session = await store.getIdeationStore().createSession({ title, prompt });
@@ -3798,7 +3815,7 @@ export function createIdeationTools(store: TaskStore): ToolDefinition[] {
       const ideation = store.getIdeationStore();
       const created = [];
       for (const candidate of candidates) created.push(await ideation.addCandidate(sessionId, candidate));
-      return ideationToolResult(`Recorded ${created.length} candidate${created.length === 1 ? "" : "s"}`, { candidates: created });
+      return ideationToolResult(`Recorded ${created.length} candidate${created.length === 1 ? "" : "s"}\n${created.map(formatIdeationCandidate).join("\n")}`, { candidates: created });
     }),
     tool("fn_ideation_converge", "Converge Ideation", "Select a candidate and atomically create or attach its canonical Mission handoff.", ideationConvergeParams, async ({ sessionId, candidateId, targetMissionId, targetFeatureId }) => {
       const session = await store.getIdeationStore().convergeSession(sessionId, candidateId, { targetMissionId, targetFeatureId });

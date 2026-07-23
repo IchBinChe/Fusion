@@ -1,6 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { PlanningModeModal } from "../PlanningModeModal";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { PlanningModeModal, resetPlanningAutoRetryAttemptsForTests } from "../PlanningModeModal";
 import { mockCreatePlanningDraft, mockFetchAiSession, mockFetchAiSessions, mockRespondToPlanning, mockRetryPlanningSession, mockStartPlanningStreaming, mockStopPlanningGeneration, mockValidatePlanningSession, mockCreateTaskFromPlanning, mockTasks, mockSummary } from "./PlanningModeModal.test-helpers";
 
 const mockViewportMode = vi.hoisted(() => vi.fn(() => "desktop" as "desktop" | "tablet" | "mobile"));
@@ -39,7 +39,30 @@ const summaryWithRefinements = {
 };
 
 describe("PlanningModeModal sequential flow", () => {
-  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); mockPlanningSse.events = null; mockViewportMode.mockReturnValue("desktop"); mockFetchAiSessions.mockResolvedValue([]); mockCreatePlanningDraft.mockResolvedValue({ sessionId: "draft-1", title: "Secure plan" }); mockStartPlanningStreaming.mockResolvedValue({ sessionId: "draft-1" }); mockRetryPlanningSession.mockResolvedValue({ success: true }); mockStopPlanningGeneration.mockResolvedValue({ success: true }); mockValidatePlanningSession.mockResolvedValue({ summary: mockSummary, validated: true }); mockCreateTaskFromPlanning.mockResolvedValue({ id: "FN-8442" }); });
+  beforeEach(() => {
+    vi.useRealTimers();
+    vi.clearAllMocks();
+    resetPlanningAutoRetryAttemptsForTests();
+    localStorage.clear();
+    mockPlanningSse.events = null;
+    mockViewportMode.mockReturnValue("desktop");
+    mockFetchAiSessions.mockResolvedValue([]);
+    mockCreatePlanningDraft.mockResolvedValue({ sessionId: "draft-1", title: "Secure plan" });
+    mockStartPlanningStreaming.mockResolvedValue({ sessionId: "draft-1" });
+    mockRetryPlanningSession.mockResolvedValue({ success: true });
+    mockStopPlanningGeneration.mockResolvedValue({ success: true });
+    mockValidatePlanningSession.mockResolvedValue({ summary: mockSummary, validated: true });
+    mockCreateTaskFromPlanning.mockResolvedValue({ id: "FN-8442" });
+  });
+
+  afterEach(() => {
+    cleanup();
+    mockPlanningSse.events = null;
+    localStorage.clear();
+    resetPlanningAutoRetryAttemptsForTests();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
 
   /*
   FNXC:PlanningRetry 2026-07-21-10:00:
@@ -130,7 +153,10 @@ describe("PlanningModeModal sequential flow", () => {
     await act(async () => Promise.resolve());
     expect(mockRetryPlanningSession).toHaveBeenCalledTimes(1);
 
-    resolveRetry({ success: true });
+    await act(async () => {
+      resolveRetry({ success: true });
+      await Promise.resolve();
+    });
   });
 
   it("ignores a stale errored load after a newer session is selected", async () => {
@@ -481,6 +507,53 @@ describe("PlanningModeModal sequential flow", () => {
 
     expect(await screen.findByTestId("planning-task-created")).toHaveTextContent("FN-8442");
     expect(mockCreateTaskFromPlanning).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId("planning-create-retry")).toBeNull();
+  });
+
+  it("settles a delayed active-create claim before a fresh session can own the next flow", async () => {
+    mockFetchAiSession.mockResolvedValue({
+      ...base,
+      status: "awaiting_input",
+      currentQuestion: JSON.stringify({ id: "q-1", type: "text", question: "Anything else?" }),
+      result: JSON.stringify(summaryWithRefinements),
+      inputPayload: "{}",
+    });
+    mockCreateTaskFromPlanning
+      .mockRejectedValueOnce(Object.assign(new Error("Planning task creation is already in progress"), { status: 409 }))
+      .mockRejectedValueOnce(Object.assign(new Error("Planning task creation is already in progress"), { status: 409 }))
+      .mockResolvedValueOnce({ id: "FN-8442" });
+
+    const { rerender } = renderSession();
+    fireEvent.click(await screen.findByRole("button", { name: "Proceed with plan" }));
+    vi.useFakeTimers();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockCreateTaskFromPlanning).toHaveBeenCalledTimes(2);
+    expect(screen.queryByTestId("planning-create-retry")).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+    });
+    expect(screen.getByTestId("planning-task-created")).toHaveTextContent("FN-8442");
+    expect(mockCreateTaskFromPlanning).toHaveBeenCalledTimes(3);
+    expect(vi.getTimerCount()).toBe(0);
+
+    mockFetchAiSession.mockResolvedValue({
+      ...base,
+      id: "session-2",
+      status: "awaiting_input",
+      currentQuestion: JSON.stringify({ id: "q-2", type: "text", question: "What should happen next?" }),
+      result: JSON.stringify(summaryWithRefinements),
+      inputPayload: "{}",
+    });
+    rerender(<PlanningModeModal isOpen onClose={vi.fn()} onTaskCreated={vi.fn()} onTasksCreated={vi.fn()} tasks={mockTasks} projectId="project-1" resumeSessionId="session-2" />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockFetchAiSession).toHaveBeenLastCalledWith("session-2");
+    expect(mockCreateTaskFromPlanning).toHaveBeenCalledTimes(3);
     expect(screen.queryByTestId("planning-create-retry")).toBeNull();
   });
 

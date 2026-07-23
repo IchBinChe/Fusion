@@ -90,6 +90,17 @@ state regenerated its full turn (agent rebuild + history replay) on every visit 
 module scope; success paths (question/summary/new session) still clear the entry.
 */
 const planningAutoRetryAttemptsBySession = new Map<string, number>();
+
+/*
+FNXC:PlanningTestIsolation 2026-07-23-09:15:
+Automatic retry budgets deliberately outlive ordinary modal remounts, so test cases using the
+same synthetic session ID need an explicit module-state reset at their isolation boundary. This
+narrow test seam must never be called by component cleanup or production navigation.
+*/
+export function resetPlanningAutoRetryAttemptsForTests(): void {
+  planningAutoRetryAttemptsBySession.clear();
+}
+
 const MAX_PLANNING_CREATE_CLAIM_RETRIES = 20;
 
 function isPlanningCreateClaimConflict(error: unknown): boolean {

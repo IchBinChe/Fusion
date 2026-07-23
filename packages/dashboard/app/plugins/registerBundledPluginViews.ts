@@ -81,6 +81,18 @@ async function loadLinearImportView(): Promise<{ default: PluginViewComponent }>
   return { default: component as PluginViewComponent };
 }
 
+async function loadGitHubPmView(): Promise<{ default: PluginViewComponent }> {
+  const moduleId = "@fusion-plugin-examples/github-pm/dashboard-view";
+  const exportName = "GitHubPmDashboardView";
+  const mod = await import("@fusion-plugin-examples/github-pm/dashboard-view") as unknown as Record<string, ComponentType<{ context?: PluginDashboardViewContext }>>;
+  const component = mod[exportName];
+  if (!component) {
+    console.warn(`[plugin-views] Missing export ${exportName} from ${moduleId}`);
+    return { default: createMissingPluginView(moduleId, exportName) };
+  }
+  return { default: component as PluginViewComponent };
+}
+
 /*
 FNXC:Quality 2026-07-14-21:50:
 Static host registry for Quality hub. Literal import() so Vite can code-split;
@@ -147,6 +159,12 @@ export function registerBundledPluginViews(): void {
     "fusion-plugin-linear-import",
     "linear-import",
     lazy(loadLinearImportView),
+  );
+
+  registerPluginView(
+    "fusion-plugin-github-pm",
+    "github-pm",
+    lazy(loadGitHubPmView),
   );
 
   registerPluginView(

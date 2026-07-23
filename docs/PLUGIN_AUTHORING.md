@@ -1018,6 +1018,12 @@ Use a direct `drizzle-orm` dependency for plugin-owned PostgreSQL tables and sco
 
 The repository gate `scripts/check-no-getdatabase.mjs` scans tracked plugin, dashboard, engine, and core paths. A legitimate transitional exception must be reviewed in `scripts/lib/getdatabase-allowlist.json` and pin the exact `file`, one-based `line`, and trimmed `snippet`; there is no file-level or inline exemption. New plugin feature code is not eligible for that allowlist.
 
+### Lightweight durable state without a plugin-owned table: the settings blob
+
+When a plugin needs only a small amount of durable, restart-surviving state (not a real relational table), it does not need to stand up its own PostgreSQL schema. Its own settings row (`central.plugin_installs.settings`, PostgreSQL-backed) already persists across restarts and is reachable from a route via `ctx.taskStore.getPluginStore().updatePluginSettings(ctx.pluginId, { ... })` (`PluginStore.updatePluginSettings` in `packages/core/src/plugin-store.ts`). `updatePluginSettings` **merges** onto existing settings and validates only **declared** schema keys by type, so declare every field you persist in `settingsSchema`.
+
+There is **no** object/json setting type (`PluginSettingType` is `string | number | boolean | enum | password | array`, see `packages/core/src/plugin-types.ts`). To persist a small keyed map (for example: per-entity preferences), serialize it as a **JSON string** into a declared `string` setting (`multiline: true` renders it as a textarea; mark its description as plugin-managed, not hand-edited) and decode it defensively — undefined, non-string, empty-string, and malformed JSON must all degrade to an empty/default value, never throw. See `plugins/fusion-plugin-github-pm/src/repo-config.ts` (corruption-tolerant decode + `normalizeRepoKey` canonicalization) and `src/repo-config-routes.ts` (read/write routes, `getPluginStore` probed defensively with a stable `500` fallback) for the reference implementation. Reach for a real plugin-owned PostgreSQL table (see "Durable data access" above) once the state stops being a small keyed blob — e.g. it needs relational queries, grows unbounded, or needs concurrent-write safety beyond a single merge.
+
 ### Logger Methods
 
 ```typescript

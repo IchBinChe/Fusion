@@ -168,6 +168,14 @@ export default defineConfig({
         __dirname,
         "../../plugins/fusion-plugin-linear-import/src/index.ts",
       ),
+      "@fusion-plugin-examples/github-pm/dashboard-view": resolve(
+        __dirname,
+        "../../plugins/fusion-plugin-github-pm/src/dashboard-view.tsx",
+      ),
+      "@fusion-plugin-examples/github-pm": resolve(
+        __dirname,
+        "../../plugins/fusion-plugin-github-pm/src/index.ts",
+      ),
       "@fusion-plugin-examples/quality/dashboard-view": resolve(
         __dirname,
         "../../plugins/fusion-plugin-quality/src/dashboard-view.tsx",

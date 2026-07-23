@@ -43,6 +43,7 @@ export const BUNDLED_PLUGIN_IDS = [
   "fusion-plugin-compound-engineering",
   "fusion-plugin-linear-import",
   "fusion-plugin-quality",
+  "fusion-plugin-github-pm",
 ] as const;
 
 export type BundledPluginId = (typeof BUNDLED_PLUGIN_IDS)[number];

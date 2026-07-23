@@ -116,3 +116,11 @@ packages/desktop/deploy/
 # vi.mock interception for imports nested inside the bundle; see the script
 # comment (scripts/build-engine-core-gate-bundle.mjs) for the full repro.
 packages/core/.gate-bundle/
+
+# Auto Claude generated files
+.auto-claude/
+.auto-claude-security.json
+.auto-claude-status
+.claude_settings.json
+.security-key
+logs/security/

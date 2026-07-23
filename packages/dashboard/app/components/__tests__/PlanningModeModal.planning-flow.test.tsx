@@ -273,6 +273,45 @@ describe("PlanningModeModal sequential flow", () => {
     expect(mockConnectPlanningStream).not.toHaveBeenCalled();
   });
 
+  it("batches contextual plan comments in selection order and keeps the normal plan actions", async () => {
+    mockFetchAiSession.mockResolvedValue({
+      ...base,
+      status: "awaiting_input",
+      currentQuestion: JSON.stringify({ id: "q-1", type: "text", question: "Anything else?" }),
+      result: JSON.stringify(summaryWithRefinements),
+      inputPayload: "{}",
+    });
+    mockRespondToPlanning.mockResolvedValue({ summary: summaryWithRefinements, currentQuestion: null });
+    renderSession();
+    const documentNode = await screen.findByTestId("planning-plan-markdown");
+    const selectQuote = (quote: string) => {
+      const walker = document.createTreeWalker(documentNode, NodeFilter.SHOW_TEXT);
+      let textNode: Node | null = walker.nextNode();
+      while (textNode && !textNode.textContent?.includes(quote)) textNode = walker.nextNode();
+      expect(textNode).not.toBeNull();
+      const range = document.createRange();
+      range.selectNodeContents(textNode!);
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+      fireEvent.mouseUp(documentNode);
+    };
+    selectQuote("Build authentication system");
+    fireEvent.click(screen.getByRole("button", { name: "Add comment to selection" }));
+    const suggestionInput = screen.getByLabelText("Suggestion");
+    fireEvent.change(suggestionInput, { target: { value: "Explain the audit path." } });
+    // Editor selections are not plan selections: the captured quote must remain the Markdown text.
+    suggestionInput.setSelectionRange(0, suggestionInput.value.length);
+    fireEvent.mouseUp(suggestionInput);
+    fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
+    expect(screen.getByTestId("planning-comment-tray")).toHaveTextContent("Explain the audit path.");
+    expect(screen.getByRole("button", { name: "Refine" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Proceed with plan" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Submit comments" }));
+    await waitFor(() => expect(mockRespondToPlanning).toHaveBeenCalledWith("session-1", {
+      contextualComments: [{ quote: expect.stringContaining("Build authentication system"), suggestion: "Explain the audit path." }],
+    }, "project-1"));
+  });
+
   it("rehydrates a restored idle session when another tab advances its question", async () => {
     mockFetchAiSession.mockResolvedValue({
       ...base,

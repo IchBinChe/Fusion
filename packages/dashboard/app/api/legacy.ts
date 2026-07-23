@@ -613,6 +613,7 @@ export {
 export type {
   PlanningSession,
   PlanningResponse,
+  PlanningContextualComment,
   PlanningStreamEvent,
   AgentOnboardingSummary,
   OnboardingMode,

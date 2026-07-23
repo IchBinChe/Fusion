@@ -887,8 +887,33 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
         throw badRequest("sessionId is required");
       }
 
-      if (!responses || typeof responses !== "object") {
+      if (!responses || typeof responses !== "object" || Array.isArray(responses)) {
         throw badRequest("responses is required and must be an object");
+      }
+
+      /*
+      FNXC:PlanningComments 2026-07-23-12:00:
+      Contextual review batches carry only captured plain-text quotes and operator suggestions.
+      Bound and normalize the narrow shape at the HTTP boundary so arbitrary nested prompt data
+      cannot enter the existing Planning Mode generation session.
+      */
+      if ("contextualComments" in responses) {
+        const comments = responses.contextualComments;
+        if (!Array.isArray(comments) || comments.length === 0 || comments.length > 20) {
+          throw badRequest("contextualComments must contain between 1 and 20 comments");
+        }
+        const normalized = comments.map((comment) => {
+          if (!comment || typeof comment !== "object" || Array.isArray(comment)) {
+            throw badRequest("Each contextual comment must be an object");
+          }
+          const quote = typeof comment.quote === "string" ? comment.quote.trim() : "";
+          const suggestion = typeof comment.suggestion === "string" ? comment.suggestion.trim() : "";
+          if (!quote || !suggestion || quote.length > 4_000 || suggestion.length > 2_000) {
+            throw badRequest("Each contextual comment needs a bounded quote and suggestion");
+          }
+          return { quote, suggestion };
+        });
+        req.body.responses = { contextualComments: normalized };
       }
 
       const { store: scopedStore } = await getProjectContext(req);

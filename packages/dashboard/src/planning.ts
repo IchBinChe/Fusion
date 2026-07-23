@@ -308,6 +308,8 @@ export interface DraftInputPayload {
   generationPurpose?: "initial_plan" | "plan_update" | "question";
   generationStartedAt?: string;
   generationReturnQuestion?: PlanningQuestion;
+  /** Contextual batch retained until its plan-update generation succeeds, so retry can replay it. */
+  pendingContextualComments?: ContextualComment[];
   clarificationEnabled?: boolean;
   /* FNXC:PlanningMode 2026-07-21-09:15: Keep old payloads source-compatible without reading or writing this retired mailbox dedupe marker. */
   lastMailboxNotifiedQuestionKey?: string;
@@ -414,6 +416,13 @@ interface Session {
   generationStartedAt?: string;
   /** Question restored when the user stops the active turn. */
   generationReturnQuestion?: PlanningQuestion;
+  /**
+   * FNXC:PlanningComments 2026-07-23-13:00:
+   * A contextual batch is a durable pending turn, not UI-only state. Retain its normalized
+   * quote/suggestion pairs until the revised summary is accepted so retry and rehydration replay
+   * precisely the requested plan update after the agent session is disposed.
+   */
+  pendingContextualComments?: ContextualComment[];
   /** Last terminal error for retry UX */
   error?: string;
   /** AI agent session for real-time interaction */
@@ -746,6 +755,7 @@ function persistSession(session: Session, status: "generating" | "awaiting_input
       ...(session.generationPurpose ? { generationPurpose: session.generationPurpose } : {}),
       ...(session.generationStartedAt ? { generationStartedAt: session.generationStartedAt } : {}),
       ...(session.generationReturnQuestion ? { generationReturnQuestion: session.generationReturnQuestion } : {}),
+      ...(session.pendingContextualComments ? { pendingContextualComments: session.pendingContextualComments } : {}),
     }),
     conversationHistory: JSON.stringify(session.history),
     currentQuestion: session.currentQuestion ? JSON.stringify(session.currentQuestion) : null,
@@ -906,6 +916,7 @@ function buildSessionFromRow(row: AiSessionRow): Session {
     generationReturnQuestion: payload.generationReturnQuestion && typeof payload.generationReturnQuestion === "object"
       ? normalizePlanningQuestion(payload.generationReturnQuestion, payload.initialPlan ?? row.title)
       : undefined,
+    pendingContextualComments: getContextualComments({ contextualComments: payload.pendingContextualComments }) ?? undefined,
     history,
     currentQuestion,
     lastNotifiedQuestionKey: currentQuestion ? `${row.id}:${currentQuestion.id}` : undefined,
@@ -2699,6 +2710,8 @@ async function continueAgentConversation(session: Session, message: string): Pro
       session.generationPurpose = undefined;
       session.generationStartedAt = undefined;
       session.generationReturnQuestion = undefined;
+      // The revised summary is now durable, so a later retry must not reapply this batch.
+      session.pendingContextualComments = undefined;
       session.currentQuestion = coerceQuestionResponse(parsed, session);
       await persistSession(session, "awaiting_input");
       planningStreamManager.broadcast(session.id, { type: "summary", data: session.summary });
@@ -2969,6 +2982,36 @@ function isRefineRequest(responses: Record<string, unknown>): boolean {
   return responses.refine === true;
 }
 
+type ContextualComment = { quote: string; suggestion: string };
+
+function getContextualComments(responses: Record<string, unknown>): ContextualComment[] | null {
+  if (!Array.isArray(responses.contextualComments)
+    || responses.contextualComments.length === 0
+    || responses.contextualComments.length > 20) return null;
+  const comments = responses.contextualComments.map((comment) => {
+    if (!comment || typeof comment !== "object" || Array.isArray(comment)) return null;
+    const { quote, suggestion } = comment as { quote?: unknown; suggestion?: unknown };
+    const normalizedQuote = typeof quote === "string" ? quote.trim() : "";
+    const normalizedSuggestion = typeof suggestion === "string" ? suggestion.trim() : "";
+    return normalizedQuote && normalizedQuote.length <= 4_000 && normalizedSuggestion && normalizedSuggestion.length <= 2_000
+      ? { quote: normalizedQuote, suggestion: normalizedSuggestion }
+      : null;
+  });
+  return comments.every((comment): comment is ContextualComment => comment !== null) ? comments : null;
+}
+
+export function formatContextualCommentsForAgent(summary: PlanningSummary, comments: ContextualComment[]): string {
+  return [
+    "The operator reviewed the running plan and submitted contextual comments.",
+    "Revise the running plan using every comment below, preserve unaffected content, and continue the established Planning Mode response contract.",
+    "Return the revised plan in Markdown and ask exactly one next question when more input is needed.",
+    "Current summary:",
+    JSON.stringify(summary),
+    "Contextual comments, in submitted order:",
+    ...comments.flatMap((comment, index) => [`${index + 1}. Selected quote: ${comment.quote}`, `Suggestion: ${comment.suggestion}`]),
+  ].join("\n\n");
+}
+
 function formatRefineRequestForAgent(summary: PlanningSummary, focus?: string): string {
   return [
     "The user clicked Refine Further on the planning summary.",
@@ -3054,7 +3097,21 @@ export async function submitResponse(
   let answeredQuestion: PlanningQuestion | undefined;
 
   try {
-    if (isRefineRequest(responses) && session.summary) {
+    const contextualComments = getContextualComments(responses);
+    if (contextualComments && session.summary) {
+      /*
+      FNXC:PlanningComments 2026-07-23-12:00:
+      Comment batches deliberately reuse the existing session, active-turn reservation, SSE, and
+      plan_update generation. They are not a second review authority or agent lifecycle.
+      */
+      beginPlanningGeneration(session, "plan_update");
+      session.currentQuestion = undefined;
+      session.error = undefined;
+      session.pendingContextualComments = contextualComments;
+      await persistSession(session, "generating");
+      await ensureSessionAgent(session, rootDir, session.history, promptOverrides, store);
+      await continueAgentConversation(session, formatContextualCommentsForAgent(session.summary, contextualComments));
+    } else if (isRefineRequest(responses) && session.summary) {
       // Refinement steers which question comes next; it is never an answer to the
       // currently displayed question and therefore must not create a history entry.
       beginPlanningGeneration(session, "question");
@@ -3186,7 +3243,10 @@ export async function retrySession(
     disposeSessionAgentForRetry(session);
 
     session.error = undefined;
-    session.summary = undefined;
+    const pendingContextualComments = session.pendingContextualComments;
+    // Keep the reviewed plan available while replaying a contextual batch; ordinary answer
+    // retries still rebuild their running summary from persisted interview history.
+    if (!pendingContextualComments) session.summary = undefined;
     /*
     FNXC:PlanningRetry 2026-07-14-00:00:
     A retry regenerates the last turn, so no question is awaiting input. Clearing here also
@@ -3198,6 +3258,18 @@ export async function retrySession(
     session.updatedAt = new Date();
     beginPlanningGeneration(session, session.history.length === 0 ? "initial_plan" : "plan_update");
     await persistSession(session, "generating");
+
+    if (pendingContextualComments) {
+      await ensureSessionAgent(session, rootDir, session.history, promptOverrides, store);
+      await continueAgentConversation(
+        session,
+        formatContextualCommentsForAgent(
+          session.summary ?? buildRunningSummary(session.initialPlan, session.history),
+          pendingContextualComments,
+        ),
+      );
+      return;
+    }
 
     if (session.history.length === 0) {
       await ensureSessionAgent(session, rootDir, [], promptOverrides, store);

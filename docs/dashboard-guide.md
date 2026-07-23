@@ -2254,3 +2254,7 @@ Productivity duration uses total agent-active time: planning (`cumulativePlannin
 ### Custom workflow column descriptions
 
 Custom workflow authors can add optional explanatory copy beneath each column name in the workflow editor. The description appears on selected, aggregate, and archived workflow board columns. Clearing it removes the custom metadata; columns then continue to use the standard lifecycle description when one exists.
+
+## Planning Mode contextual comments
+
+In plan review, select text inside the rendered plan and choose **Add comment to selection**. Enter a suggestion to capture the selected quote and suggestion as a pending contextual comment. You can remove individual comments before choosing **Submit comments**; Fusion sends the ordered batch through the existing Planning Mode revision generation, so the agent revises the quoted areas while preserving unaffected plan content. A successful revised-plan update clears the batch; a failed submission retains it for retry.

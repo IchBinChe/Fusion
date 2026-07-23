@@ -1761,6 +1761,78 @@ Tablet (769–1024) keeps the same two-pane shell as desktop but previously fell
   min-width: 0;
 }
 
+/*
+FNXC:PlanningComments 2026-07-23-12:00:
+Contextual comments remain transient review controls: render the capture/editor only after a
+selection, and render the tray only after a valid comment exists so an empty plan review keeps
+its established Refine and Proceed action hierarchy.
+*/
+.planning-add-comment {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-lg);
+}
+
+.planning-comment-editor,
+.planning-comment-tray {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+  min-width: 0;
+}
+
+.planning-comment-editor {
+  margin-top: var(--space-lg);
+  padding: var(--space-lg);
+  border: solid var(--btn-border-width) var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card);
+}
+
+.planning-comment-quote,
+.planning-comment-tray blockquote,
+.planning-comment-tray p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.planning-comment-quote,
+.planning-comment-tray blockquote {
+  padding-inline-start: var(--space-md);
+  border-inline-start: solid var(--btn-border-width) var(--todo);
+  color: var(--text-muted);
+}
+
+.planning-comment-tray {
+  flex: 1;
+}
+
+.planning-comment-tray ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.planning-comment-tray li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-sm);
+  align-items: start;
+}
+
+.planning-comment-tray li > p {
+  grid-column: 1;
+}
+
+.planning-comment-tray .btn-icon {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
 .planning-summary-actions-right {
   display: flex;
   gap: var(--space-sm);
@@ -1787,6 +1859,10 @@ Tablet (769–1024) keeps the same two-pane shell as desktop but previously fell
     min-height: calc(var(--space-2xl) + var(--space-md));
   }
 
+  .planning-comment-tray {
+    grid-column: 1 / -1;
+  }
+
   .planning-refine-menu {
     right: var(--space-lg);
     left: var(--space-lg);
@@ -1803,6 +1879,16 @@ Tablet embedded Planning keeps the desktop two-pane shell. The question Next act
 Refine/Proceed actions share one compact bottom baseline; equal footer/button heights, non-wrapping
 plan actions, and a token-sized bottom inset keep all three controls inline without extra space.
 */
+@media (max-width: 768px) {
+  .planning-comment-tray li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .planning-comment-editor {
+    padding: var(--space-md);
+  }
+}
+
 @media (min-width: 769px) and (max-width: 1024px) {
   /* FNXC:PlanningModeMobile 2026-07-20-10:30: tablet uses the same compact list destination as phone and short shells, so summary/compose detail cannot remain beside saved session rows. */
   .planning-modal-body--show-list {

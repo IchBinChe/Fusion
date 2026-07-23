@@ -42,6 +42,7 @@ import {
   type ModelInfo,
   type ConversationHistoryEntry,
   type AiSessionSummary,
+  type PlanningContextualComment,
 } from "../api";
 import { subscribeSse } from "../sse-bus";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
@@ -646,6 +647,27 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   non-whitespace text before submission.
   */
   const [refinementPrompt, setRefinementPrompt] = useState("");
+  const [contextualComments, setContextualComments] = useState<PlanningContextualComment[]>([]);
+  const [selectedPlanQuote, setSelectedPlanQuote] = useState<string | null>(null);
+  const [commentDraft, setCommentDraft] = useState("");
+  const [isCommentEditorOpen, setIsCommentEditorOpen] = useState(false);
+  const contextualCommentInFlightRef = useRef(false);
+  const contextualCommentSubmissionRef = useRef(false);
+  const planDocumentRef = useRef<HTMLDivElement>(null);
+  const commentInputRef = useRef<HTMLTextAreaElement>(null);
+  const addCommentTriggerRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    // A batch belongs to one visible session; never carry comments into another plan.
+    setContextualComments([]);
+    setSelectedPlanQuote(null);
+    setCommentDraft("");
+    setIsCommentEditorOpen(false);
+  }, [selectedSessionId]);
+
+  useEffect(() => {
+    if (isCommentEditorOpen) commentInputRef.current?.focus();
+  }, [isCommentEditorOpen]);
 
   useEffect(() => {
     if (isMobile && workspaceQuestion) {
@@ -1167,6 +1189,12 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           */
           runningSummaryRef.current = normalizedSummary;
           setRunningSummary(normalizedSummary);
+          setSelectedPlanQuote(null);
+          setIsCommentEditorOpen(false);
+          if (contextualCommentSubmissionRef.current) {
+            contextualCommentSubmissionRef.current = false;
+            setContextualComments([]);
+          }
           setView((previous) => previous.type === "question"
               ? { ...previous, session: { ...previous.session, summary: normalizedSummary } }
               : previous);
@@ -2561,6 +2589,61 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     }
   }, [connectToPlanningStream, projectId, refinementInstructions, t, view, workspaceQuestion]);
 
+  const capturePlanSelection = useCallback(() => {
+    const selection = window.getSelection();
+    const root = planDocumentRef.current;
+    if (!selection || selection.rangeCount === 0 || !root || !root.contains(selection.anchorNode) || !root.contains(selection.focusNode)) {
+      setSelectedPlanQuote(null);
+      return;
+    }
+    const quote = selection.toString().replace(/\s+/g, " ").trim();
+    setSelectedPlanQuote(quote || null);
+  }, []);
+
+  const handleAddContextualComment = useCallback(() => {
+    const quote = selectedPlanQuote;
+    const suggestion = commentDraft.trim();
+    if (!quote || !suggestion) return;
+    setContextualComments((comments) => [...comments, { quote, suggestion }]);
+    setCommentDraft("");
+    setSelectedPlanQuote(null);
+    setIsCommentEditorOpen(false);
+    window.getSelection()?.removeAllRanges();
+    addCommentTriggerRef.current?.focus();
+  }, [commentDraft, selectedPlanQuote]);
+
+  const handleSubmitContextualComments = useCallback(async () => {
+    const sessionId = currentSessionIdRef.current;
+    const summary = runningSummaryRef.current;
+    if (!sessionId || !summary || contextualComments.length === 0 || contextualCommentInFlightRef.current) return;
+    /* FNXC:PlanningComments 2026-07-23-12:00: A synchronous guard makes one batch one established plan-update turn despite rapid pointer or keyboard activation. */
+    contextualCommentInFlightRef.current = true;
+    contextualCommentSubmissionRef.current = true;
+    setError(null);
+    setGenerationActivity("plan_update");
+    setGenerationStartTime(Date.now());
+    setView({ type: "loading" });
+    if (!streamConnectionRef.current?.isConnected()) connectToPlanningStream(sessionId);
+    try {
+      const response = await respondToPlanning(sessionId, { contextualComments }, projectId);
+      const nextSummary = "type" in response ? null : response.summary;
+      if (nextSummary) {
+        const normalized = normalizePlanningSummary(nextSummary);
+        runningSummaryRef.current = normalized;
+        setRunningSummary(normalized);
+        contextualCommentSubmissionRef.current = false;
+        setContextualComments([]);
+        setView({ type: "plan_review", session: { sessionId, currentQuestion: null, summary: normalized }, summary: normalized });
+      }
+    } catch (err) {
+      contextualCommentSubmissionRef.current = false;
+      setError(getErrorMessage(err) || t("planning.failedSubmitResponse", "Failed to submit comments"));
+      setView({ type: "plan_review", session: { sessionId, currentQuestion: null, summary }, summary });
+    } finally {
+      contextualCommentInFlightRef.current = false;
+    }
+  }, [connectToPlanningStream, contextualComments, projectId, t]);
+
   const handleProceedWithPlan = useCallback(async () => {
     const sessionId = currentSessionIdRef.current;
     const summary = runningSummaryRef.current;
@@ -2793,14 +2876,65 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     <section id="planning-plan-panel" className="planning-plan-pane" data-testid="planning-plan-pane" aria-label={t("planning.currentPlan", "Current plan")}>
       <div className="planning-view-scroll planning-summary-scroll planning-plan-scroll" data-testid="planning-plan-scroll">
         <article className="planning-plan-document">
-          <MailboxMessageContent
-            className="planning-plan-markdown markdown-body"
-            content={formatPlanningPlanMd(summary)}
-            testId="planning-plan-markdown"
-          />
+          {/*
+          FNXC:PlanningComments 2026-07-23-13:00:
+          Contextual quotes must originate exclusively in rendered plan Markdown. The editor and
+          action controls remain outside this selection root so typing or selecting a suggestion
+          cannot replace the captured plan quote.
+          */}
+          <div
+            ref={planDocumentRef}
+            onMouseUp={capturePlanSelection}
+            onTouchEnd={capturePlanSelection}
+            onKeyUp={capturePlanSelection}
+          >
+            <MailboxMessageContent
+              className="planning-plan-markdown markdown-body"
+              content={formatPlanningPlanMd(summary)}
+              testId="planning-plan-markdown"
+            />
+          </div>
+          {selectedPlanQuote && !isCommentEditorOpen && (
+            <button
+              ref={addCommentTriggerRef}
+              type="button"
+              className="btn planning-add-comment"
+              onClick={() => setIsCommentEditorOpen(true)}
+            >
+              <MessageSquarePlus />
+              {t("planning.addComment", "Add comment to selection")}
+            </button>
+          )}
+          {isCommentEditorOpen && selectedPlanQuote && (
+            <div className="planning-comment-editor" role="dialog" aria-label={t("planning.addPlanComment", "Add plan comment")}>
+              <p className="planning-comment-quote">{selectedPlanQuote}</p>
+              <label className="planning-refine-menu-input">
+                <span>{t("planning.commentSuggestion", "Suggestion")}</span>
+                <textarea ref={commentInputRef} className="input" value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} />
+              </label>
+              <div className="planning-refine-menu-actions">
+                <button type="button" className="btn" onClick={() => { setCommentDraft(""); setIsCommentEditorOpen(false); addCommentTriggerRef.current?.focus(); }}>{t("common.cancel", "Cancel")}</button>
+                <button type="button" className="btn btn-primary" disabled={!commentDraft.trim()} onClick={handleAddContextualComment}>{t("planning.addComment", "Add comment")}</button>
+              </div>
+            </div>
+          )}
         </article>
       </div>
       <div className="planning-actions planning-summary-actions planning-plan-actions" data-testid="planning-plan-actions">
+        {contextualComments.length > 0 && (
+          <div className="planning-comment-tray" data-testid="planning-comment-tray">
+            <ul>
+              {contextualComments.map((comment, index) => (
+                <li key={`${comment.quote}-${index}`}>
+                  <blockquote>{comment.quote}</blockquote>
+                  <p>{comment.suggestion}</p>
+                  <button type="button" className="btn btn-icon" aria-label={t("planning.removeComment", "Remove comment")} onClick={() => setContextualComments((comments) => comments.filter((_, commentIndex) => commentIndex !== index))}><Trash2 /></button>
+                </li>
+              ))}
+            </ul>
+            <button type="button" className="btn btn-primary" disabled={contextualCommentInFlightRef.current} onClick={() => void handleSubmitContextualComments()}>{t("planning.submitComments", "Submit comments")}</button>
+          </div>
+        )}
         {isRefineMenuOpen && (
           <div
             id="planning-refine-menu"

@@ -22,12 +22,14 @@ import {
   createSession,
   createSessionWithAgent,
   formatInitialRunningPlanRequestForAgent,
+  formatContextualCommentsForAgent,
   formatResponseForAgent,
   getSession,
   normalizePlanningSummaryPayload,
   normalizePlanningQuestion,
   PLANNING_SYSTEM_PROMPT,
   planningStreamManager,
+  retrySession,
   rewindSession,
   submitResponse,
   validateSession,
@@ -120,6 +122,22 @@ describe("reactive Planning Mode question contract", () => {
     });
 
     expect(summary.suggestedRefinements).toEqual(refinementCategories);
+  });
+
+  it("formats contextual comments in order with their selected quotes", () => {
+    const message = formatContextualCommentsForAgent({
+      title: "Recovery plan",
+      description: "Keep accounts recoverable.",
+      keyDeliverables: [],
+      suggestedRefinements: [],
+    }, [
+      { quote: "Add audit events", suggestion: "Specify retention." },
+      { quote: "Deploy safely", suggestion: "Use a staged rollout." },
+    ]);
+
+    expect(message).toContain("1. Selected quote: Add audit events");
+    expect(message).toContain("Suggestion: Specify retention.");
+    expect(message.indexOf("Add audit events")).toBeLessThan(message.indexOf("Deploy safely"));
   });
 
   it("asks the model for all high-value categories without a three-category cap", () => {
@@ -346,6 +364,50 @@ describe("reactive Planning Mode question contract", () => {
 
     await validateSession(sessionId);
     expect(await getSession(sessionId)).toMatchObject({ validated: true, currentQuestion: undefined });
+  });
+
+  it("submits contextual comments through the existing plan-update session seam", async () => {
+    const prompts = installScriptedAgent([
+      payload(FIRST_QUESTION),
+      payload(SECOND_QUESTION),
+    ]);
+    const created = await createSession("127.0.0.18", "Build secure account recovery", MOCK_TASK_STORE, "/tmp/project");
+
+    await submitResponse(created.sessionId, {
+      contextualComments: [
+        { quote: "Use audit logs", suggestion: "Define retention." },
+        { quote: "Ship safely", suggestion: "Add a staged rollout." },
+      ],
+    }, "/tmp/project", undefined, MOCK_TASK_STORE);
+
+    expect(prompts.at(-1)).toContain("Use audit logs");
+    expect(prompts.at(-1)).toContain("Add a staged rollout.");
+    expect(prompts.at(-1)!.indexOf("Use audit logs")).toBeLessThan(prompts.at(-1)!.indexOf("Ship safely"));
+  });
+
+  it("replays a failed contextual batch when the session is retried", async () => {
+    const prompts = installScriptedAgent([
+      payload(FIRST_QUESTION),
+      "not valid planning JSON",
+      "still not valid planning JSON",
+      payload(SECOND_QUESTION),
+    ]);
+    const created = await createSession("127.0.0.19", "Build secure account recovery", MOCK_TASK_STORE, "/tmp/project");
+    const contextualComments = [
+      { quote: "Use audit logs", suggestion: "Define retention." },
+      { quote: "Ship safely", suggestion: "Add a staged rollout." },
+    ];
+
+    await submitResponse(created.sessionId, { contextualComments }, "/tmp/project", undefined, MOCK_TASK_STORE);
+    expect((await getSession(created.sessionId))?.pendingContextualComments).toEqual(contextualComments);
+
+    await retrySession(created.sessionId, "/tmp/project", undefined, MOCK_TASK_STORE);
+
+    expect(prompts).toHaveLength(4);
+    expect(prompts[1]).toContain("Use audit logs");
+    expect(prompts[3]).toContain("Use audit logs");
+    expect(prompts[3]).toContain("Add a staged rollout.");
+    expect((await getSession(created.sessionId))?.pendingContextualComments).toBeUndefined();
   });
 
   it("uses Refine to replace the active question without recording a fake answer", async () => {

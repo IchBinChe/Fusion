@@ -11,6 +11,16 @@ describe("PlanningModeModal sequential layout", () => {
     expect(css).toContain("planning-summary-actions");
   });
 
+  it("captures selections only from the rendered plan and provides accessible comment controls", () => {
+    const component = readFileSync(resolve(process.cwd(), "app/components/PlanningModeModal.tsx"), "utf8");
+    expect(component).toContain("planDocumentRef.current");
+    expect(component).toContain("root.contains(selection.anchorNode)");
+    expect(component).toContain("root.contains(selection.focusNode)");
+    expect(component).toContain("Add comment to selection");
+    expect(component).toContain("contextualComments");
+    expect(component).toContain("setContextualComments([])");
+  });
+
   it("keeps plan actions in a non-scrolling sibling footer with equal mobile columns", () => {
     const css = readFileSync(resolve(process.cwd(), "app/components/PlanningModeModal.css"), "utf8");
     expect(css).toMatch(/\.planning-actions\s*\{[^}]*flex-shrink\s*:\s*0\s*;/);

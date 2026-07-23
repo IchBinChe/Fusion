@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,19 +12,20 @@ FUSI-013 adds IssueDetailView.css and FUSI-012 adds IssuesPanel.css alongside Gi
 copy every plugin component CSS file by name from a FILE LIST rather than growing an
 ever-longer explicit src/dest pair, so each task just appends its filename to CSS_FILES
 and compositions compose cleanly regardless of merge order.
-*/
-/*
-FNXC:GithubPmLabels 2026-07-24-11:50:
-KB-002 appends LabelsPanel.css so the new labels-management panel's styling actually ships in
-the built dist/ output (dist assets are what the dashboard host loads at runtime -- an
-unlisted component CSS file silently never reaches production). This list was already missing
-other pre-existing component CSS files (AuthDiagnosticsPanel.css, IssueWritePanel.css,
-TabCapabilityNotice.css, TaxonomyProposalPanel.css) before this task; that is a separate,
-pre-existing gap tracked as a follow-up rather than expanded here.
-*/
-const CSS_FILES = ["GitHubPmView.css", "IssueDetailView.css", "IssuesPanel.css", "LabelsPanel.css"];
 
-for (const fileName of CSS_FILES) {
+FNXC:GithubPmIssues 2026-07-24-12:00:
+The explicit CSS_FILES allowlist above rotted: AuthDiagnosticsPanel.css, IssueWritePanel.css,
+TabCapabilityNotice.css, and TaxonomyProposalPanel.css were added to src/ (FUSI-014, FUSI-009,
+FUSI-017, taxonomy work) but never appended to the list, so those components shipped unstyled
+to the dashboard host (found while working KB-002/KB-004). Switched to a glob over every
+`*.css` file directly under src/ (single-level, no recursion) so future component stylesheets
+ship automatically without anyone needing to remember to edit this file.
+*/
+const cssFileNames = existsSync(srcDir)
+  ? readdirSync(srcDir).filter((name) => name.endsWith(".css"))
+  : [];
+
+for (const fileName of cssFileNames) {
   const src = join(srcDir, fileName);
   const dest = join(destDir, fileName);
   if (existsSync(src)) {

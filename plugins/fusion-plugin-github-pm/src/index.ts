@@ -88,6 +88,7 @@ export type {
   GitHubIssueSearchOptions,
   GitHubIssueSearchPage,
   GitHubMilestone,
+  GitHubRepositoryFeatures,
 } from "./github-client.js";
 export { GITHUB_TIMELINE_KEY_EVENTS } from "./github-client.js";
 export {
@@ -177,6 +178,19 @@ export {
   type RepoConfigMap,
 } from "./repo-config.js";
 export { repoConfigRoutes, getRepoConfig, putRepoConfig, selectRepoConfig } from "./repo-config-routes.js";
+export { resolveRepoCapabilities } from "./repo-capabilities.js";
+export type { RepoCapabilities, RepoCapabilityTabId, TabCapability, TabCapabilityReason, ResolveRepoCapabilitiesOptions } from "./repo-capabilities.js";
+export { repoCapabilitiesRoutes, getRepoCapabilities } from "./repo-capabilities-routes.js";
+/*
+FNXC:GithubPmCapabilities 2026-07-24-09:40:
+FUSI-009: `tab-capabilities.ts` has zero React/JSX dependency (only types + pure functions), so
+it is safe to re-export from this server entry point same as every other non-React module
+above. `useRepoCapabilities.ts` (a React hook) and `TabCapabilityNotice.tsx` (a JSX component)
+are deliberately NOT re-exported here -- per this file's FUSI-001 constraint ("Keep this server
+entry free of React/CSS imports"), any React-dependent module is imported directly by the
+client view (GitHubPmView.tsx) rather than funneled through this server barrel.
+*/
+export { mapRepoCapabilitiesToTabs, capabilityForTab, GITHUB_PM_CAPABILITY_TAB_ORDER, type TabGating } from "./tab-capabilities.js";
 export { issueRoutes, getIssueDetail, getIssueComments } from "./issue-routes.js";
 export { issuesRoutes, getIssuesList, getIssuesFilterOptions } from "./issues-routes.js";
 export { subscribeIssuesChanged, notifyIssuesChanged, type IssueMutationKind, type IssuesChangedDetail } from "./issues-events.js";

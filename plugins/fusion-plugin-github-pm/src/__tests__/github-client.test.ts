@@ -733,3 +733,51 @@ describe("GitHubClient comment writes (FUSI-014)", () => {
     await expect(client.createIssueComment("acme", "widgets", 5, "Hi")).rejects.toMatchObject({ status: 401, code: "auth_error" });
   });
 });
+
+describe("GitHubClient.getRepositoryFeatures (FUSI-009)", () => {
+  it("parses hasIssuesEnabled/hasDiscussionsEnabled/hasProjectsEnabled/viewerPermission from GraphQL", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        data: {
+          repository: {
+            hasIssuesEnabled: true,
+            hasDiscussionsEnabled: false,
+            hasProjectsEnabled: true,
+            viewerPermission: "WRITE",
+          },
+        },
+      }),
+    ) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const features = await client.getRepositoryFeatures("acme", "widgets");
+
+    expect(features).toEqual({
+      hasIssuesEnabled: true,
+      hasDiscussionsEnabled: false,
+      hasProjectsEnabled: true,
+      viewerPermission: "WRITE",
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(GITHUB_GRAPHQL_ENDPOINT, expect.objectContaining({ method: "POST" }));
+    const body = JSON.parse(String((fetchImpl.mock.calls[0][1] as RequestInit).body));
+    expect(body.variables).toEqual({ owner: "acme", repo: "widgets" });
+  });
+
+  it("maps a null repository (no access / not found) to a not_found GitHubApiError, not a bespoke error path", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ data: { repository: null } })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    await expect(client.getRepositoryFeatures("acme", "ghost")).rejects.toMatchObject({ status: 404, code: "not_found" });
+  });
+
+  it("issues exactly one GraphQL request (single cheap read, no per-tab probes)", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ data: { repository: { hasIssuesEnabled: true, hasDiscussionsEnabled: true, hasProjectsEnabled: true, viewerPermission: "ADMIN" } } }),
+    ) as unknown as typeof fetch;
+    const client = new GitHubClient("secret-tok", fetchImpl);
+
+    await client.getRepositoryFeatures("acme", "widgets");
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});

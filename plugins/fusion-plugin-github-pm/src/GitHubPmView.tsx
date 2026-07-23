@@ -3,9 +3,12 @@ import { AlertCircle, CheckCircle2, Github, Loader2 } from "lucide-react";
 import type { PluginDashboardViewContext } from "@fusion/dashboard/app/plugins/types";
 import { AuthDiagnosticsPanel } from "./AuthDiagnosticsPanel.js";
 import { TaxonomyProposalPanel } from "./TaxonomyProposalPanel.js";
-import { GITHUB_PM_TABS, GitHubPmTabs, githubPmTabButtonId, githubPmTabPanelId, type GitHubPmTabId } from "./GitHubPmTabs.js";
+import { GITHUB_PM_TABS, GitHubPmTabs, githubPmTabButtonId, githubPmTabPanelId, type GitHubPmTab, type GitHubPmTabId } from "./GitHubPmTabs.js";
 import { IssuesPanel } from "./IssuesPanel.js";
 import { IssueWritePanel } from "./IssueWritePanel.js";
+import { useRepoCapabilities } from "./useRepoCapabilities.js";
+import { mapRepoCapabilitiesToTabs, type TabGating } from "./tab-capabilities.js";
+import { TabCapabilityNotice } from "./TabCapabilityNotice.js";
 import "./GitHubPmView.css";
 
 type StatusState = "loading" | "configured" | "unconfigured" | "error";
@@ -146,7 +149,33 @@ tabpanel body -- the write surface lives with the list it keeps live, per the ta
 guidance. No second card wrapper: `IssueWritePanel` renders its own internal sections and
 sits inside the existing `github-pm-view__panel card` tabpanel div.
 */
-function GitHubPmTabPanelBody({ tabId, repo, context, confirmWrites }: { tabId: GitHubPmTabId; repo: string | null; context?: PluginDashboardViewContext; confirmWrites: boolean }) {
+/*
+FNXC:GithubPmCapabilities 2026-07-24-09:30:
+FUSI-009 Step 5: when a tab is gated OFF (disabled: true), its panel renders
+`TabCapabilityNotice` (the reason + fix path) INSTEAD of the tab's real feature/placeholder --
+never a blank pane. A tab that stays enabled with an informational "unknown" note (e.g.
+Projects on a fine-grained token) still renders its normal feature body; the note is only
+surfaced through the tab's title/aria-disabled affordance in that case, matching "never
+falsely block a tab" while still communicating the caveat. Panels stay mounted-but-hidden
+regardless of gating state (existing FUSI-008 invariant) -- gating only changes what a panel
+renders, never whether it stays mounted.
+*/
+function GitHubPmTabPanelBody({
+  tabId,
+  repo,
+  context,
+  confirmWrites,
+  gating,
+}: {
+  tabId: GitHubPmTabId;
+  repo: string | null;
+  context?: PluginDashboardViewContext;
+  confirmWrites: boolean;
+  gating?: TabGating;
+}) {
+  if (gating?.disabled) {
+    return <TabCapabilityNotice message={gating.message} fix={gating.fix} reason={gating.reason} />;
+  }
   if (tabId === "issues") {
     return (
       <>
@@ -255,6 +284,22 @@ export function GitHubPmView({ context }: { context?: PluginDashboardViewContext
 
   const repoContextValue = selectedRepo ?? defaultRepo;
 
+  /*
+  FNXC:GithubPmCapabilities 2026-07-24-09:35:
+  FUSI-009 Step 5 wiring: the SINGLE capability fetch for the currently-selected repo, and the
+  pure mapper turning its response into an ordered per-tab gating array. Every tab/panel below
+  reads from this one `tabGating` map -- no component independently re-checks scope/feature
+  state. `useRepoCapabilities` degrades a fetch failure to an all-tabs-available payload, so a
+  probe outage never hard-blocks the whole shell.
+  */
+  const { capabilities: repoCapabilities } = useRepoCapabilities(repoContextValue, context);
+  const tabGatingList = mapRepoCapabilitiesToTabs(repoCapabilities);
+  const tabGatingById = new Map<GitHubPmTabId, TabGating>(tabGatingList.map((gating) => [gating.id, gating]));
+  const gatedTabs: GitHubPmTab[] = GITHUB_PM_TABS.map((tab) => {
+    const gating = tabGatingById.get(tab.id);
+    return { ...tab, disabled: gating?.disabled ?? false, disabledReason: gating?.disabled ? gating.message : undefined };
+  });
+
   return (
     <section className="github-pm-view" aria-labelledby="github-pm-heading">
       <header className="github-pm-view__header">
@@ -277,7 +322,7 @@ export function GitHubPmView({ context }: { context?: PluginDashboardViewContext
       ) : null}
       {autonomy ? <p className="github-pm-view__meta">Default triage autonomy: {autonomy}</p> : null}
 
-      <GitHubPmTabs activeTab={activeTab} onChange={setActiveTab} />
+      <GitHubPmTabs tabs={gatedTabs} activeTab={activeTab} onChange={setActiveTab} />
 
       <div className="github-pm-view__panels">
         {GITHUB_PM_TABS.map((tab) => (
@@ -290,7 +335,13 @@ export function GitHubPmView({ context }: { context?: PluginDashboardViewContext
             data-testid={`github-pm-panel-${tab.id}`}
             hidden={tab.id !== activeTab}
           >
-            <GitHubPmTabPanelBody tabId={tab.id} repo={repoContextValue} context={context} confirmWrites={confirmWrites} />
+            <GitHubPmTabPanelBody
+              tabId={tab.id}
+              repo={repoContextValue}
+              context={context}
+              confirmWrites={confirmWrites}
+              gating={tabGatingById.get(tab.id)}
+            />
           </div>
         ))}
       </div>

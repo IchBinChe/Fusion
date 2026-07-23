@@ -259,6 +259,22 @@ export interface GitHubDiscussionListOptions {
 }
 
 /*
+FNXC:GitHubPmClient 2026-07-24-07:00:
+FUSI-009 repo-feature probe. One cheap GraphQL read of `repository { hasIssuesEnabled
+hasDiscussionsEnabled hasProjectsEnabled viewerPermission }` feeds the repo-context
+capability gating resolver (repo-capabilities.ts) so it can grey out a tab (e.g.
+Discussions) the repo itself doesn't support, independent of token scope. This stays a
+SINGLE read -- callers must not add a second per-tab GraphQL/REST probe on top of it.
+*/
+export interface GitHubRepositoryFeatures {
+  hasIssuesEnabled: boolean;
+  hasDiscussionsEnabled: boolean;
+  hasProjectsEnabled: boolean;
+  /** GitHub's own viewer-permission enum (ADMIN/WRITE/READ/etc.), when resolvable. */
+  viewerPermission?: string | null;
+}
+
+/*
 FNXC:GithubPmIssues 2026-07-24-05:00:
 FUSI-014 write-input types. Deliberately reuse `GitHubIssueDetail`/`GitHubIssueComment`
 (already declared above for FUSI-013's read path) as the RETURN shape of every write method
@@ -856,6 +872,36 @@ export class GitHubClient {
   }
 
   /**
+   * FNXC:GitHubPmClient 2026-07-24-07:00:
+   * FUSI-009: one cheap GraphQL read of the repo's feature flags (Issues/Discussions/Projects
+   * enabled) plus the viewer's permission level. A null `repository` (repo not found, or the
+   * token has no access -- GitHub returns `data.repository: null` rather than a top-level
+   * error for this case) maps to a `GitHubApiError(404, ..., "not_found")` through the SAME
+   * error path every other not-found case uses; this method never invents a bespoke error
+   * shape. Callers must not add a second per-tab feature probe on top of this single read.
+   */
+  async getRepositoryFeatures(owner: string, repo: string): Promise<GitHubRepositoryFeatures> {
+    const data = await this.graphql<{
+      repository?: {
+        hasIssuesEnabled?: boolean;
+        hasDiscussionsEnabled?: boolean;
+        hasProjectsEnabled?: boolean;
+        viewerPermission?: string | null;
+      } | null;
+    }>(GITHUB_REPOSITORY_FEATURES_QUERY, { owner, repo });
+    const repository = data.repository;
+    if (!repository) {
+      throw new GitHubApiError(404, `Repository ${owner}/${repo} was not found or is not accessible with the current token.`, "not_found");
+    }
+    return {
+      hasIssuesEnabled: repository.hasIssuesEnabled === true,
+      hasDiscussionsEnabled: repository.hasDiscussionsEnabled === true,
+      hasProjectsEnabled: repository.hasProjectsEnabled === true,
+      viewerPermission: repository.viewerPermission ?? null,
+    };
+  }
+
+  /**
    * FNXC:GitHubPmClient 2026-07-24-00:00:
    * Reads the `x-oauth-scopes` header from a cheap authenticated REST call so FUSI-002's
    * scope-diagnostics feature (e.g. detecting a missing `project` scope for Projects v2) has a
@@ -1089,6 +1135,15 @@ const GITHUB_DISCUSSIONS_QUERY = `query FusionGitHubPmDiscussions($owner: String
       nodes { number title createdAt category { name } }
       pageInfo { hasNextPage endCursor }
     }
+  }
+}`;
+
+const GITHUB_REPOSITORY_FEATURES_QUERY = `query FusionGitHubPmRepositoryFeatures($owner: String!, $repo: String!) {
+  repository(owner: $owner, name: $repo) {
+    hasIssuesEnabled
+    hasDiscussionsEnabled
+    hasProjectsEnabled
+    viewerPermission
   }
 }`;
 

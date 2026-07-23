@@ -2,6 +2,7 @@ import type { PluginContext, PluginRouteDefinition, PluginRouteResponse } from "
 import { hasPersonalAccessToken, resolveGitHubPmSettings } from "./settings.js";
 import { getGitHubAuthDiagnostics } from "./auth.js";
 import { repoConfigRoutes } from "./repo-config-routes.js";
+import { repoCapabilitiesRoutes } from "./repo-capabilities-routes.js";
 import { taxonomyRoutes } from "./taxonomy-routes.js";
 import { issueRoutes } from "./issue-routes.js";
 import { issuesRoutes } from "./issues-routes.js";
@@ -76,11 +77,16 @@ FNXC:GithubPmIssues 2026-07-24-05:10:
 FUSI-014 adds the issue WRITE routes (create/update/state/comment create+edit) onto the same
 aggregated route list -- the plugin's first write surface. Same one-registration-point pattern;
 no separate registration mechanism is introduced for mutations vs reads.
+
+FNXC:GithubPmCapabilities 2026-07-24-08:10:
+FUSI-009 adds the repo-context capability-gating route (`GET /repo/capabilities`) onto the
+same aggregated route list, mirroring the `repoConfigRoutes` spread precedent.
 */
 export const githubPmRoutes: PluginRouteDefinition[] = [
   { method: "GET", path: "/status", handler: getGitHubPmStatus, description: "Report GitHub PM plugin configuration status from settings presence only." },
   { method: "GET", path: "/auth/diagnostics", handler: getGitHubAuthDiagnosticsRoute, description: "Resolve the layered GitHub auth chain and report per-capability scope diagnostics (never the token value)." },
   ...repoConfigRoutes,
+  ...repoCapabilitiesRoutes,
   ...taxonomyRoutes,
   ...issueRoutes,
   ...issuesRoutes,

@@ -15,7 +15,6 @@ This package ships the skeleton:
 
 - The any-repo picker UI — later feature (FUSI-007), built on top of the per-repo config storage below (FUSI-004) and attaching into the view shell's repo-picker slot (FUSI-008).
 - Live issue/discussion/Projects v2/label/milestone CRUD — later Foundation-milestone tasks; each tab in the shell below is currently a labeled placeholder.
-- Per-tab capability gating / grey-out (FUSI-009) — the tab-bar's `disabled`/`disabledReason` fields exist but are unpopulated.
 - The dashboard view, routes, and tools do not call the GitHub client yet — that wiring lands in later slices now that both the auth resolver (FUSI-002) and the GitHub client (FUSI-003) can supply/consume a token.
 
 ## Dashboard view shell (FUSI-008)
@@ -23,10 +22,37 @@ This package ships the skeleton:
 `GitHubPmView.tsx` is the top-level, lazy-loaded dashboard view and the durable shell every later Foundation surface plugs into:
 
 - **Repo-context header** — shows the currently-selected repo (sourced from `GET /repo-config`'s `selectedRepo`, which wraps FUSI-004's `resolveSelectedRepo`, falling back to `/status`'s `defaultRepo`) or a "No repository selected" state. Includes an intentionally-empty mount slot (`.github-pm-view__repo-picker-slot`) for FUSI-007's repo picker.
-- **Tab bar** (`GitHubPmTabs.tsx`) — an accessible `role="tablist"`/`role="tab"` bar for the six declared surfaces: Issues, Labels, Milestones, Discussions, Projects, Triage. Keyboard-navigable (Left/Right/Home/End); a `disabled`/`disabledReason` field per tab is reserved for FUSI-009's capability gating.
+- **Tab bar** (`GitHubPmTabs.tsx`) — an accessible `role="tablist"`/`role="tab"` bar for the six declared surfaces: Issues, Labels, Milestones, Discussions, Projects, Triage. Keyboard-navigable (Left/Right/Home/End); a `disabled`/`disabledReason` field per tab is populated by FUSI-009's capability gating (see below).
 - **Tab panels** — one `role="tabpanel"` per tab, kept mounted at all times (visibility toggled via the `hidden` attribute, never conditionally unmounted) so each panel's local state survives a tab round-trip. Each panel currently renders placeholder copy naming the milestone that will fill it.
 - The settings-presence status badge and `AuthDiagnosticsPanel` (FUSI-002) continue to render inside the shell, unchanged.
 - All styling uses design tokens only (`GitHubPmView.css`) and adapts at the existing `@media (max-width: 48rem)` mobile breakpoint (the tab bar scrolls horizontally rather than clipping).
+
+## Capability gating (FUSI-009)
+
+After a repo is selected, the plugin resolves which of the six tab surfaces (Issues, Labels, Milestones, Discussions, Projects, Triage) that specific repo and the resolved token can actually support, and greys out any tab it can't with a clear reason and a fix path — never a raw GitHub API error.
+
+**Two independent inputs are composed into one capability model** (`src/repo-capabilities.ts`, `resolveRepoCapabilities`):
+
+1. **Repo feature flags** — `GitHubClient.getRepositoryFeatures(owner, repo)` (`src/github-client.ts`) issues ONE cheap GraphQL read of `repository { hasIssuesEnabled hasDiscussionsEnabled hasProjectsEnabled viewerPermission }`. A repo that doesn't exist or isn't accessible with the current token comes back as `data.repository: null`, which maps to a `GitHubApiError(404, …, "not_found")` through the same error path every other not-found case uses — no bespoke error shape.
+2. **Token scope capabilities** — FUSI-002's `getGitHubAuthDiagnostics` (`capabilities.issues|discussions|projects` ∈ `supported | missing | unknown`). This module never re-probes scopes itself; it consumes FUSI-002's single capability source.
+
+**Composition rules** (`resolveRepoCapabilities`, per-tab `{ available, reason?, message?, fix? }`):
+
+- **Not authenticated** → every tab `available:false`, reason `not-authenticated`, fix pointing at `gh auth login` / `GITHUB_TOKEN` / a PAT.
+- **Labels / Milestones / Triage** → always `available:true` once authenticated, independent of repo features or Issues/Discussions/Projects scope state.
+- **Issues** → disabled (`feature-disabled`) when the repo has Issues turned off; disabled (`missing-scope`) when the token's issues capability is `missing`.
+- **Discussions** → disabled (`feature-disabled`, "Discussions are not enabled for this repository.", fix: enable Discussions in the repo's Settings → Features) when the repo has Discussions turned off.
+- **Projects** → disabled (`missing-scope`) when the token's projects capability is `missing`, reusing FUSI-002's `warning.instructions` fix path verbatim. When the capability is `unknown` (a fine-grained PAT or GitHub App token whose classic scopes can't be introspected) the tab **stays available** with an informational note — it is never falsely blocked.
+- **Repo fetch error** (404 not found / 403 no access) → Issues and Discussions (the two repo-feature-dependent tabs) get `repo-access-error` with a fix path (verify the repo exists / the token has access) — never the raw GitHub error string.
+- **Network error** while probing repo features → degrades softly: the affected tabs stay available with a soft note; the resolver never throws.
+
+The resolver never includes the resolved token, and never leaks a raw/redacted GitHub API error string, in its output.
+
+**Route** — `GET /repo/capabilities?repo=&projectId=` (`src/repo-capabilities-routes.ts`) resolves `repo` from the query param, falling back to FUSI-004's `resolveSelectedRepo`. Returns `{ ok, repo, authenticated, tabs }`; an unresolvable repo returns `400 { code: "validation_error" }` before any GitHub call is made. The token is never echoed.
+
+**Client wiring** — `useRepoCapabilities(repo, context)` (`src/useRepoCapabilities.ts`) fetches that route and re-fetches whenever the selected repo (or project context) changes; a fetch failure degrades to an all-tabs-available synthetic payload rather than hard-blocking the whole shell. The pure mapper `mapRepoCapabilitiesToTabs` (`src/tab-capabilities.ts`, zero React/JSX dependency) turns the payload into the ordered per-tab gating array `GitHubPmView.tsx` renders — this mapper is the SINGLE place tab enable/disable is decided; no tab component independently re-checks scope/feature state.
+
+**Shell behavior** — a disabled tab in `GitHubPmTabs.tsx` is non-activatable (`aria-disabled`, `disabled`, muted styling, `title` set to its reason) both via click and keyboard navigation. When a disabled tab's panel is the active one, it renders `TabCapabilityNotice` (`src/TabCapabilityNotice.tsx` + `.css`) — the reason message and an ordered fix-path list — instead of the tab's feature body or a blank pane. Panels stay mounted-but-hidden regardless of gating state (the existing FUSI-008 invariant); gating only changes what a panel renders, never whether it stays mounted.
 
 ## Issues list — filters, search, sort, pagination (FUSI-012)
 
@@ -265,6 +291,7 @@ Plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`:
 - `GET /auth/diagnostics` — resolves the layered auth chain and returns per-capability scope diagnostics (see above). Does **not** return the resolved token/PAT value.
 - `GET /repo-config`, `PUT /repo-config`, `PUT /repo-config/select` — per-repo configuration storage (FUSI-004); see the section above.
 - `POST /taxonomy/propose`, `GET /taxonomy/proposals`, `PUT /taxonomy/proposals/accept`, `PUT /taxonomy/proposals/reject`, `PUT /taxonomy/proposals/edit` — versioned, reviewable taxonomy proposal generation (FUSI-005); see the section above.
+- `GET /repo/capabilities` — resolves the per-tab capability model (repo features + token scope) for the selected/queried repo (FUSI-009); see the section above.
 - `GET /issues/detail`, `GET /issues/comments` — read-only issue detail, timeline, and paginated comments (FUSI-013); see the section above.
 - `GET /issues/list`, `GET /issues/filter-options` — issue list/search/filter-dropdown reads (FUSI-012); see the section above.
 - `POST /issues/create`, `PUT /issues/update`, `PUT /issues/state`, `POST /issues/comments`, `PUT /issues/comments` — issue create/edit/comment/close-reopen writes (FUSI-014); each requires `confirmed: true` in the body when `confirmWrites` is ON (FUSI-017); see the section above.

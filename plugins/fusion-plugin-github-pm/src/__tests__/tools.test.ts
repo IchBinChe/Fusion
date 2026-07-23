@@ -1,6 +1,28 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PluginContext } from "@fusion/plugin-sdk";
-import { githubPmStatusTool, githubPmTools } from "../tools.js";
+import { githubPmCommentIssueTool, githubPmCreateIssueTool, githubPmEditIssueTool, githubPmSetIssueStateTool, githubPmStatusTool, githubPmTools } from "../tools.js";
+import { SELECTED_REPO_SETTING_ID } from "../repo-config.js";
+
+// FNXC:GithubPmIssues 2026-07-24-05:20: same deterministic gh-CLI suppression as issue-write-routes.test.ts.
+vi.mock("@fusion/core", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@fusion/core")>();
+  return { ...actual, isGhAvailable: () => false, isGhAuthenticated: () => false, runGhAsync: vi.fn() };
+});
+
+const originalGithubToken = process.env.GITHUB_TOKEN;
+
+beforeEach(() => {
+  delete process.env.GITHUB_TOKEN;
+});
+
+afterEach(() => {
+  if (originalGithubToken === undefined) delete process.env.GITHUB_TOKEN;
+  else process.env.GITHUB_TOKEN = originalGithubToken;
+});
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+}
 
 function ctx(settings: Record<string, unknown> = {}): PluginContext {
   return {
@@ -13,8 +35,14 @@ function ctx(settings: Record<string, unknown> = {}): PluginContext {
 }
 
 describe("github-pm plugin tools", () => {
-  it("registers the placeholder status tool", () => {
-    expect(githubPmTools.map((tool) => tool.name)).toEqual(["github_pm_status"]);
+  it("registers the status tool plus the FUSI-014 write tools", () => {
+    expect(githubPmTools.map((tool) => tool.name)).toEqual([
+      "github_pm_status",
+      "github_pm_create_issue",
+      "github_pm_edit_issue",
+      "github_pm_comment_issue",
+      "github_pm_set_issue_state",
+    ]);
   });
 
   it("reports not configured with no settings", async () => {
@@ -30,5 +58,64 @@ describe("github-pm plugin tools", () => {
     expect(result.content[0].text).not.toContain("ghp_super_secret");
     expect(JSON.stringify(result.details)).not.toContain("ghp_super_secret");
     expect(result.details).toMatchObject({ configured: true, defaultRepo: "acme/widgets" });
+  });
+});
+
+/*
+FNXC:GithubPmIssues 2026-07-24-05:20:
+FUSI-014 write-tool tests: each performs its mutation against a mocked fetch and returns a
+non-error result; an auth/permission error yields isError:true with a readable, token-free
+message.
+*/
+describe("github-pm write tools (FUSI-014)", () => {
+  it("github_pm_create_issue performs the mutation and returns a non-error result", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ number: 9, title: "New", state: "open", html_url: "https://x" })));
+    const result = await githubPmCreateIssueTool.execute({ repo: "acme/widgets", title: "New" }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("#9");
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_create_issue 400s (isError) on a missing title", async () => {
+    const result = await githubPmCreateIssueTool.execute({ repo: "acme/widgets" }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBe(true);
+  });
+
+  it("github_pm_edit_issue resolves the selected repo when omitted and returns the updated issue", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ number: 5, title: "Edited", state: "open", html_url: "https://x" })));
+    const result = await githubPmEditIssueTool.execute({ number: 5, title: "Edited" }, ctx({ [SELECTED_REPO_SETTING_ID]: "acme/widgets", personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("Edited");
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_comment_issue posts a comment", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ id: 1, user: { login: "octocat" }, body: "Hi" })));
+    const result = await githubPmCommentIssueTool.execute({ repo: "acme/widgets", number: 5, body: "Hi" }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("Commented");
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_set_issue_state closes with a reason", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ number: 5, title: "X", state: "closed", html_url: "https://x" })));
+    const result = await githubPmSetIssueStateTool.execute({ repo: "acme/widgets", number: 5, state: "closed", stateReason: "completed" }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("closed");
+    vi.unstubAllGlobals();
+  });
+
+  it("an unauthenticated repo/token yields isError:true with an actionable message", async () => {
+    const result = await githubPmCreateIssueTool.execute({ repo: "acme/widgets", title: "X" }, ctx({}));
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("not authenticated");
+  });
+
+  it("a mocked 403 permission error yields isError:true without leaking the token", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ message: "Resource not accessible by integration secret-tok" }, 403)));
+    const result = await githubPmCreateIssueTool.execute({ repo: "acme/widgets", title: "X" }, ctx({ personalAccessToken: "secret-tok" }));
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).not.toContain("secret-tok");
+    vi.unstubAllGlobals();
   });
 });

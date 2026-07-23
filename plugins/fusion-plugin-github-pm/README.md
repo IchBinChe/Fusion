@@ -188,6 +188,44 @@ Both routes resolve auth via `resolveGitHubAuth` (never a second token-read path
 
 **`IssueDetailView`** (`src/IssueDetailView.tsx` + `IssueDetailView.css`) renders on mount: a header (title, `#number`, open/closed state badge, external GitHub link, optional back affordance), the markdown body via `react-markdown` + `remark-gfm` (code blocks, images, GFM task lists — falling back to "No description provided." for an empty body), a metadata sidebar (state, author, labels-as-color chips, assignees, milestone — each section omitted, not rendered as an empty shell, when absent), a comment thread with a "Load more comments" button that fetches `GET /issues/comments` until `nextPage` is `null` (then the button is removed, not disabled — and never rendered at all for a zero-comment issue), and the key timeline events. Reflows to a single column at the existing `@media (max-width: 48rem)` breakpoint. Never renders the PAT/token value.
 
+## Issue write operations (FUSI-014)
+
+The plugin's first WRITE surface: authenticated create, edit (title/body), comment (add + edit), and close (with reason) / reopen, all round-trip-verifiable — every write returns GitHub's authoritative post-mutation object rather than a synthesized shape.
+
+**Client write methods** (`src/github-client.ts`), all routed through the existing `fetchThrottled` core (no second transport) via a new private `writeJson<T>(url, method, body)` helper:
+
+- `getIssue(owner, repo, number)` — round-trip read (already existed from FUSI-013; reused as the write methods' read counterpart).
+- `createIssue(owner, repo, { title, body?, labels?, assignees?, milestone? })` — `POST /repos/{owner}/{repo}/issues`.
+- `updateIssue(owner, repo, number, { title?, body? })` — `PATCH /repos/{owner}/{repo}/issues/{number}` (title/body only; state changes are a separate method).
+- `setIssueState(owner, repo, number, { state, stateReason? })` — same `PATCH` endpoint; close uses `state: "closed"` with an optional `stateReason` of `"completed"` or `"not_planned"`, reopen uses `state: "open"`.
+- `createIssueComment(owner, repo, number, body)` — `POST /repos/{owner}/{repo}/issues/{number}/comments`.
+- `updateIssueComment(owner, repo, commentId, body)` — `PATCH /repos/{owner}/{repo}/issues/comments/{commentId}` (keyed by the comment's own id, not the issue number).
+
+Every write method maps GitHub's response through the same REST→camelCase mapper `getIssue` uses (`GitHubIssueDetail` / `GitHubIssueComment`), so a caller renders create/update/state-change results identically to a read. 403/404/429 classification and token redaction are inherited unchanged from `fetchThrottled`.
+
+**Routes** (`src/issue-write-routes.ts`, plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`), each reading a JSON request body (mirroring `taxonomy-routes.ts`'s `readBody` pattern) and resolving repo/auth exactly like `issues-routes.ts`:
+
+- `POST /issues/create` — `{ repo?, title, body?, labels?, assignees?, milestone? }` → `{ ok, repo, issue }`. 400 on a missing title or unresolvable repo.
+- `PUT /issues/update` — `{ repo?, number, title?, body? }` → `{ ok, repo, issue }`. 400 unless at least one of `title`/`body` is supplied.
+- `PUT /issues/state` — `{ repo?, number, state: "open"|"closed", stateReason? }` → `{ ok, repo, issue }`. 400 on an invalid `state` or a `stateReason` other than `completed`/`not_planned` when closing.
+- `POST /issues/comments` — `{ repo?, number, body }` → `{ ok, repo, issueNumber, comment }`.
+- `PUT /issues/comments` — `{ repo?, commentId, body }` → `{ ok, repo, comment }`.
+
+Each route: 401s with an actionable `not_authenticated` message when auth doesn't resolve; maps `GitHubApiError` through `githubErrorToResponse` (403→`auth_error`, 404→`not_found`, 429→`rate_limited`); never echoes the token. **These routes never call `notifyIssuesChanged`** — that pub/sub is a browser-only signal owned exclusively by the UI layer below.
+
+**Agent tools** (`src/tools.ts`): `github_pm_create_issue`, `github_pm_edit_issue`, `github_pm_comment_issue`, `github_pm_set_issue_state` (close/reopen). Each resolves repo (explicit param, else the selected repo) and auth the same way the routes do, calls the matching client method, and returns a text summary plus the resulting issue/comment in `details`. An `isGitHubApiError` failure returns `isError: true` with the route's actionable message; the token is never echoed. Tools run server-side in the agent execution context and do **not** call `notifyIssuesChanged` — an agent-initiated write is picked up by any mounted `IssuesPanel` on its next natural re-fetch.
+
+**`IssueWritePanel`** (`src/IssueWritePanel.tsx` + `.css`), mounted in `GitHubPmView.tsx`'s issues tabpanel directly beneath `IssuesPanel`, gated on a resolved repo:
+
+- A "New issue" form (title required, body, comma-separated labels/assignees, optional milestone number).
+- An issue-number selector that loads the target issue via `GET /issues/detail`, seeding an edit-title/body form and a close-reason (`completed`/`not_planned`) + close/reopen button pair from its current state.
+- An add-comment form.
+- **Reuses `IssueDetailView`** (not forked) to render the selected issue's full state/comments/timeline once selected; a `detailRefreshNonce` counter is bumped after every successful write so the component remounts (via `key`) and reloads GitHub's authoritative post-write state.
+- **Live-refresh integration:** after every successful write, calls `notifyIssuesChanged({ repo, issueNumber, kind })` (`kind` ∈ `created`/`updated`/`commented`/`closed`/`reopened`) so the already-mounted, already-subscribed `IssuesPanel` re-fetches its current page. **Never** called on a failed write, and never from a route/tool.
+- **Optimistic updates with rollback:** each write snapshots prior local state and applies the change immediately (a session-local "creating…" row for create; an immediate open/closed toggle for close/reopen; an immediately-cleared textarea for comment; immediate title/body for edit). On success the optimistic value is replaced by GitHub's authoritative response. On failure the snapshot is restored verbatim and an `aria-live="assertive"` error banner renders the route's message — `notifyIssuesChanged` is **not** called on failure. Controls are disabled while their own write is pending.
+
+See `src/__tests__/github-client.test.ts`, `issue-write-routes.test.ts`, `tools.test.ts`, and `IssueWritePanel.test.tsx` for the mocked-fetch round-trip, validation, error-mapping, and optimistic-rollback coverage (including the required failed-create and failed-close rollback assertions and the notifyIssuesChanged emission/non-emission assertions).
+
 ## Setup
 
 1. Install or enable **GitHub PM** from Settings → Plugins / Plugin Manager.
@@ -216,10 +254,12 @@ Plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`:
 - `POST /taxonomy/propose`, `GET /taxonomy/proposals`, `PUT /taxonomy/proposals/accept`, `PUT /taxonomy/proposals/reject`, `PUT /taxonomy/proposals/edit` — versioned, reviewable taxonomy proposal generation (FUSI-005); see the section above.
 - `GET /issues/detail`, `GET /issues/comments` — read-only issue detail, timeline, and paginated comments (FUSI-013); see the section above.
 - `GET /issues/list`, `GET /issues/filter-options` — issue list/search/filter-dropdown reads (FUSI-012); see the section above.
+- `POST /issues/create`, `PUT /issues/update`, `PUT /issues/state`, `POST /issues/comments`, `PUT /issues/comments` — issue create/edit/comment/close-reopen writes (FUSI-014); see the section above.
 
 ## Agent tools
 
-- `github_pm_status` — returns configured/not-configured text derived from settings, exercising tool registration ahead of real issue-management tools landing in later milestone tasks.
+- `github_pm_status` — returns configured/not-configured text derived from settings.
+- `github_pm_create_issue`, `github_pm_edit_issue`, `github_pm_comment_issue`, `github_pm_set_issue_state` — issue write operations (FUSI-014); see the section above.
 
 ## Limitations and non-goals (FUSI-001/FUSI-002)
 

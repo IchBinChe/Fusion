@@ -5,6 +5,7 @@ import { repoConfigRoutes } from "./repo-config-routes.js";
 import { taxonomyRoutes } from "./taxonomy-routes.js";
 import { issueRoutes } from "./issue-routes.js";
 import { issuesRoutes } from "./issues-routes.js";
+import { issueWriteRoutes } from "./issue-write-routes.js";
 
 function response(status: number, body: Record<string, unknown>): PluginRouteResponse {
   return { status, body };
@@ -62,6 +63,11 @@ one-route-array-export-per-feature precedent.
 FNXC:GithubPmIssues 2026-07-24-03:15:
 FUSI-012 adds the read-only issues-list routes (list/search + filter-option lookups) onto the
 aggregated route list, same one-registration-point pattern as repoConfigRoutes.
+
+FNXC:GithubPmIssues 2026-07-24-05:10:
+FUSI-014 adds the issue WRITE routes (create/update/state/comment create+edit) onto the same
+aggregated route list -- the plugin's first write surface. Same one-registration-point pattern;
+no separate registration mechanism is introduced for mutations vs reads.
 */
 export const githubPmRoutes: PluginRouteDefinition[] = [
   { method: "GET", path: "/status", handler: getGitHubPmStatus, description: "Report GitHub PM plugin configuration status from settings presence only." },
@@ -70,4 +76,5 @@ export const githubPmRoutes: PluginRouteDefinition[] = [
   ...taxonomyRoutes,
   ...issueRoutes,
   ...issuesRoutes,
+  ...issueWriteRoutes,
 ];

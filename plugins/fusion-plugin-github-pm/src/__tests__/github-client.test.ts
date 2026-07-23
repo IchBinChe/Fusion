@@ -607,3 +607,129 @@ describe("GitHubClient token scopes", () => {
     expect(scopes.hasScope("project")).toBe(false);
   });
 });
+
+/*
+FNXC:GithubPmIssues 2026-07-24-05:00:
+FUSI-014 write-method tests: each asserts the exact method+URL+body issued (via `writeJson`,
+exercised for the first time here), the GitHub response mapped back into the expected
+camelCase shape, and that error classification (403 -> auth_error, 404 -> not_found) and
+token redaction are inherited from `fetchThrottled` unchanged -- no write method reimplements
+any of that.
+*/
+describe("GitHubClient.createIssue (FUSI-014)", () => {
+  it("POSTs the correct URL/body and maps the created issue", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      number: 42, title: "New issue", state: "open", body: "Details", html_url: "https://github.com/acme/widgets/issues/42",
+      user: { login: "octocat" }, labels: [{ name: "bug", color: "red" }], assignees: [{ login: "octocat" }],
+      milestone: { title: "v1", state: "open" }, comments: 0,
+    })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const issue = await client.createIssue("acme", "widgets", { title: "New issue", body: "Details", labels: ["bug"], assignees: ["octocat"], milestone: 1 });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(String(url)).toBe("https://api.github.com/repos/acme/widgets/issues");
+    expect((init as RequestInit).method).toBe("POST");
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ title: "New issue", body: "Details", labels: ["bug"], assignees: ["octocat"], milestone: 1 });
+    expect(issue).toMatchObject({ number: 42, title: "New issue", state: "open", bodyMarkdown: "Details" });
+  });
+
+  it("omits optional fields from the body when not supplied", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ number: 1, title: "Bare", state: "open", html_url: "https://x" })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    await client.createIssue("acme", "widgets", { title: "Bare" });
+
+    const [, init] = fetchImpl.mock.calls[0];
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ title: "Bare" });
+  });
+
+  it("maps a 403 to auth_error and never leaks the token", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ message: "Resource not accessible by integration" }, 403)) as unknown as typeof fetch;
+    const client = new GitHubClient("secret-tok", fetchImpl);
+
+    await expect(client.createIssue("acme", "widgets", { title: "X" })).rejects.toMatchObject({ status: 403, code: "auth_error" });
+    await client.createIssue("acme", "widgets", { title: "X" }).catch((error) => {
+      expect(String(error.message)).not.toContain("secret-tok");
+    });
+  });
+});
+
+describe("GitHubClient.updateIssue (FUSI-014)", () => {
+  it("PATCHes title/body and maps the updated issue", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ number: 5, title: "Edited", state: "open", body: "New body", html_url: "https://x" })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const issue = await client.updateIssue("acme", "widgets", 5, { title: "Edited", body: "New body" });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(String(url)).toBe("https://api.github.com/repos/acme/widgets/issues/5");
+    expect((init as RequestInit).method).toBe("PATCH");
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ title: "Edited", body: "New body" });
+    expect(issue).toMatchObject({ number: 5, title: "Edited", bodyMarkdown: "New body" });
+  });
+
+  it("maps a 404 to not_found", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ message: "Not Found" }, 404)) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+    await expect(client.updateIssue("acme", "ghost", 999, { title: "X" })).rejects.toMatchObject({ status: 404, code: "not_found" });
+  });
+});
+
+describe("GitHubClient.setIssueState (FUSI-014)", () => {
+  it("closes with a state_reason", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ number: 5, title: "X", state: "closed", state_reason: "completed", html_url: "https://x" })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const issue = await client.setIssueState("acme", "widgets", 5, { state: "closed", stateReason: "completed" });
+
+    const [, init] = fetchImpl.mock.calls[0];
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ state: "closed", state_reason: "completed" });
+    expect(issue.state).toBe("closed");
+  });
+
+  it("reopens without forcing a state_reason", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ number: 5, title: "X", state: "open", html_url: "https://x" })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const issue = await client.setIssueState("acme", "widgets", 5, { state: "open" });
+
+    const [, init] = fetchImpl.mock.calls[0];
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ state: "open" });
+    expect(issue.state).toBe("open");
+  });
+});
+
+describe("GitHubClient comment writes (FUSI-014)", () => {
+  it("createIssueComment POSTs to the issue's comments endpoint", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ id: 99, user: { login: "octocat" }, body: "Hello", created_at: "2026-01-01T00:00:00Z" })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const comment = await client.createIssueComment("acme", "widgets", 5, "Hello");
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(String(url)).toBe("https://api.github.com/repos/acme/widgets/issues/5/comments");
+    expect((init as RequestInit).method).toBe("POST");
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ body: "Hello" });
+    expect(comment).toMatchObject({ id: 99, bodyMarkdown: "Hello", author: { login: "octocat" } });
+  });
+
+  it("updateIssueComment PATCHes the comment-id endpoint (not issue-number-keyed)", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ id: 99, user: { login: "octocat" }, body: "Edited" })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const comment = await client.updateIssueComment("acme", "widgets", 99, "Edited");
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(String(url)).toBe("https://api.github.com/repos/acme/widgets/issues/comments/99");
+    expect((init as RequestInit).method).toBe("PATCH");
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ body: "Edited" });
+    expect(comment.bodyMarkdown).toBe("Edited");
+  });
+
+  it("maps errors and never leaks the token in comment writes", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ message: "Bad credentials secret-tok" }, 401)) as unknown as typeof fetch;
+    const client = new GitHubClient("secret-tok", fetchImpl);
+    await expect(client.createIssueComment("acme", "widgets", 5, "Hi")).rejects.toMatchObject({ status: 401, code: "auth_error" });
+  });
+});

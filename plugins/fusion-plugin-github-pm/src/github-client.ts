@@ -259,6 +259,37 @@ export interface GitHubDiscussionListOptions {
 }
 
 /*
+FNXC:GithubPmIssues 2026-07-24-05:00:
+FUSI-014 write-input types. Deliberately reuse `GitHubIssueDetail`/`GitHubIssueComment`
+(already declared above for FUSI-013's read path) as the RETURN shape of every write method
+below -- every mutation returns GitHub's authoritative post-write object (the round-trip
+proof the task requires), mapped through the same REST->camelCase mapper `getIssue` uses,
+so a caller never has to special-case "read shape" vs "write-result shape".
+*/
+
+export interface CreateIssueInput {
+  title: string;
+  body?: string;
+  /** Label names to apply on creation. */
+  labels?: string[];
+  /** Assignee logins to apply on creation. */
+  assignees?: string[];
+  /** A milestone number to attach on creation. */
+  milestone?: number;
+}
+
+export interface UpdateIssueInput {
+  title?: string;
+  body?: string;
+}
+
+export interface SetIssueStateInput {
+  state: "open" | "closed";
+  /** Only meaningful when closing; GitHub ignores state_reason when reopening. */
+  stateReason?: "completed" | "not_planned" | "reopened";
+}
+
+/*
 FNXC:GitHubPmClient 2026-07-24-01:00:
 FUSI-013 read-only issue-detail reads: getIssue/listIssueComments/listIssueTimeline.
 Comments deliberately paginate ONE PAGE AT A TIME (not accumulated via paginateRest)
@@ -438,6 +469,22 @@ export class GitHubClient {
     const response = await this.fetchThrottled(url, init);
     const data = await response.json() as T;
     return { data, response };
+  }
+
+  /**
+   * FNXC:GithubPmIssues 2026-07-24-05:00:
+   * FUSI-014's single JSON-body write helper: routes every POST/PATCH mutation through
+   * `fetchThrottled` (same typed-error classification + rate-limit backoff as every read
+   * method above) with a `Content-Type: application/json` body. No second transport is
+   * introduced -- this is the only place a write request is issued from.
+   */
+  private async writeJson<T>(url: string, method: "POST" | "PATCH", body: Record<string, unknown>): Promise<T> {
+    const { data } = await this.requestJson<T>(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return data;
   }
 
   /**
@@ -684,25 +731,77 @@ export class GitHubClient {
   async getIssue(owner: string, repo: string, number: number): Promise<GitHubIssueDetail> {
     const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${encodeURIComponent(String(number))}`;
     const { data: issue } = await this.requestJson<GitHubRestIssueDetail>(url);
-    if (issue.pull_request) {
-      throw new GitHubApiError(404, `#${number} is a pull request, not an issue.`, "not_found");
-    }
-    return {
-      number: issue.number,
-      title: issue.title,
-      state: issue.state === "closed" ? "closed" : "open",
-      bodyMarkdown: issue.body ?? "",
-      htmlUrl: issue.html_url,
-      author: toGitHubIssueUser(issue.user),
-      createdAt: issue.created_at,
-      updatedAt: issue.updated_at,
-      labels: (issue.labels ?? []).map(toGitHubIssueLabel).filter((label): label is GitHubIssueLabel => label !== null),
-      assignees: (issue.assignees ?? []).map(toGitHubIssueUser).filter((assignee): assignee is GitHubIssueUser => assignee !== null),
-      milestone: issue.milestone
-        ? { title: issue.milestone.title, state: issue.milestone.state, dueOn: issue.milestone.due_on ?? null }
-        : null,
-      commentCount: issue.comments ?? 0,
-    };
+    return mapRestIssueToDetail(issue, number);
+  }
+
+  /**
+   * FNXC:GithubPmIssues 2026-07-24-05:00:
+   * FUSI-014: `POST /repos/{owner}/{repo}/issues` -- creates a new issue and returns GitHub's
+   * authoritative post-write issue object (the round-trip proof), mapped through the same
+   * shape `getIssue` returns so a caller renders create/read results identically.
+   */
+  async createIssue(owner: string, repo: string, input: CreateIssueInput): Promise<GitHubIssueDetail> {
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues`;
+    const body: Record<string, unknown> = { title: input.title };
+    if (input.body !== undefined) body.body = input.body;
+    if (input.labels && input.labels.length > 0) body.labels = input.labels;
+    if (input.assignees && input.assignees.length > 0) body.assignees = input.assignees;
+    if (input.milestone !== undefined) body.milestone = input.milestone;
+    const issue = await this.writeJson<GitHubRestIssueDetail>(url, "POST", body);
+    return mapRestIssueToDetail(issue);
+  }
+
+  /**
+   * FNXC:GithubPmIssues 2026-07-24-05:00:
+   * FUSI-014: `PATCH /repos/{owner}/{repo}/issues/{number}` for title/body only -- close/reopen
+   * is a SEPARATE method (`setIssueState`) below, mirroring GitHub's own semantic split between
+   * editing content and changing lifecycle state even though both hit the same REST endpoint.
+   */
+  async updateIssue(owner: string, repo: string, number: number, patch: UpdateIssueInput): Promise<GitHubIssueDetail> {
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${encodeURIComponent(String(number))}`;
+    const body: Record<string, unknown> = {};
+    if (patch.title !== undefined) body.title = patch.title;
+    if (patch.body !== undefined) body.body = patch.body;
+    const issue = await this.writeJson<GitHubRestIssueDetail>(url, "PATCH", body);
+    return mapRestIssueToDetail(issue, number);
+  }
+
+  /**
+   * FNXC:GithubPmIssues 2026-07-24-05:00:
+   * FUSI-014: close (with an optional `state_reason` of "completed"/"not_planned") or reopen
+   * (state="open", state_reason ignored by GitHub but forwarded if the caller supplied
+   * "reopened" for symmetry) via the same `PATCH .../issues/{number}` endpoint `updateIssue`
+   * uses, kept as a distinct method so callers state intent explicitly.
+   */
+  async setIssueState(owner: string, repo: string, number: number, input: SetIssueStateInput): Promise<GitHubIssueDetail> {
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${encodeURIComponent(String(number))}`;
+    const body: Record<string, unknown> = { state: input.state };
+    if (input.stateReason !== undefined) body.state_reason = input.stateReason;
+    const issue = await this.writeJson<GitHubRestIssueDetail>(url, "PATCH", body);
+    return mapRestIssueToDetail(issue, number);
+  }
+
+  /**
+   * FNXC:GithubPmIssues 2026-07-24-05:00:
+   * FUSI-014: `POST /repos/{owner}/{repo}/issues/{number}/comments` -- returns the authoritative
+   * created comment, mapped through the same `GitHubIssueComment` shape `listIssueComments` uses.
+   */
+  async createIssueComment(owner: string, repo: string, number: number, body: string): Promise<GitHubIssueComment> {
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${encodeURIComponent(String(number))}/comments`;
+    const comment = await this.writeJson<GitHubRestComment>(url, "POST", { body });
+    return mapRestComment(comment);
+  }
+
+  /**
+   * FNXC:GithubPmIssues 2026-07-24-05:00:
+   * FUSI-014: `PATCH /repos/{owner}/{repo}/issues/comments/{comment_id}` -- note this endpoint
+   * is keyed by the comment's own id, NOT the issue number (GitHub's REST shape), so this
+   * method deliberately does not take an issue number parameter.
+   */
+  async updateIssueComment(owner: string, repo: string, commentId: number, body: string): Promise<GitHubIssueComment> {
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/comments/${encodeURIComponent(String(commentId))}`;
+    const comment = await this.writeJson<GitHubRestComment>(url, "PATCH", { body });
+    return mapRestComment(comment);
   }
 
   /**
@@ -842,6 +941,47 @@ function toGitHubIssueLabel(label: string | GitHubRestLabel): GitHubIssueLabel |
   if (typeof label === "string") return { name: label, color: "" };
   if (!label.name) return null;
   return { name: label.name, color: label.color ?? "", description: label.description ?? null };
+}
+
+/**
+ * FNXC:GithubPmIssues 2026-07-24-05:00:
+ * Shared REST-issue -> `GitHubIssueDetail` mapper, extracted from `getIssue`'s original inline
+ * mapping so every write method (`createIssue`/`updateIssue`/`setIssueState`) returns the SAME
+ * shape a read does -- the round-trip proof the task requires. `expectedNumber`, when supplied,
+ * rejects a pull_request-shaped payload exactly like `getIssue` originally did (creation never
+ * has this ambiguity, so it is omitted from `createIssue`'s call).
+ */
+function mapRestIssueToDetail(issue: GitHubRestIssueDetail, expectedNumber?: number): GitHubIssueDetail {
+  if (issue.pull_request) {
+    throw new GitHubApiError(404, `#${expectedNumber ?? issue.number} is a pull request, not an issue.`, "not_found");
+  }
+  return {
+    number: issue.number,
+    title: issue.title,
+    state: issue.state === "closed" ? "closed" : "open",
+    bodyMarkdown: issue.body ?? "",
+    htmlUrl: issue.html_url,
+    author: toGitHubIssueUser(issue.user),
+    createdAt: issue.created_at,
+    updatedAt: issue.updated_at,
+    labels: (issue.labels ?? []).map(toGitHubIssueLabel).filter((label): label is GitHubIssueLabel => label !== null),
+    assignees: (issue.assignees ?? []).map(toGitHubIssueUser).filter((assignee): assignee is GitHubIssueUser => assignee !== null),
+    milestone: issue.milestone
+      ? { title: issue.milestone.title, state: issue.milestone.state, dueOn: issue.milestone.due_on ?? null }
+      : null,
+    commentCount: issue.comments ?? 0,
+  };
+}
+
+/** Shared REST-comment -> `GitHubIssueComment` mapper, mirroring `listIssueComments`'s inline mapping. */
+function mapRestComment(comment: GitHubRestComment): GitHubIssueComment {
+  return {
+    id: comment.id,
+    author: toGitHubIssueUser(comment.user),
+    bodyMarkdown: comment.body ?? "",
+    createdAt: comment.created_at,
+    updatedAt: comment.updated_at,
+  };
 }
 
 /** Extracts the `page` query param from a REST pagination URL, e.g. one produced by parseNextLinkUrl. */

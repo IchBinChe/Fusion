@@ -180,3 +180,24 @@ export { repoConfigRoutes, getRepoConfig, putRepoConfig, selectRepoConfig } from
 export { issueRoutes, getIssueDetail, getIssueComments } from "./issue-routes.js";
 export { issuesRoutes, getIssuesList, getIssuesFilterOptions } from "./issues-routes.js";
 export { subscribeIssuesChanged, notifyIssuesChanged, type IssueMutationKind, type IssuesChangedDetail } from "./issues-events.js";
+/*
+FNXC:GithubPmIssues 2026-07-24-05:40:
+FUSI-014 re-exports: the write-input types (GitHubIssueDetail/GitHubIssueComment are already
+re-exported above from FUSI-013), the write-route array + handlers, and the new agent tools.
+Mirrors the taxonomy/repo-config/issues re-export precedent -- one export block per feature.
+*/
+export type { CreateIssueInput, UpdateIssueInput, SetIssueStateInput } from "./github-client.js";
+export {
+  issueWriteRoutes,
+  postIssueCreate,
+  putIssueUpdate,
+  putIssueState,
+  postIssueComment,
+  putIssueComment,
+} from "./issue-write-routes.js";
+export {
+  githubPmCreateIssueTool,
+  githubPmEditIssueTool,
+  githubPmCommentIssueTool,
+  githubPmSetIssueStateTool,
+} from "./tools.js";

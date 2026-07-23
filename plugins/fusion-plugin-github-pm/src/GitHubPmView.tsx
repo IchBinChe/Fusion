@@ -5,6 +5,7 @@ import { AuthDiagnosticsPanel } from "./AuthDiagnosticsPanel.js";
 import { TaxonomyProposalPanel } from "./TaxonomyProposalPanel.js";
 import { GITHUB_PM_TABS, GitHubPmTabs, githubPmTabButtonId, githubPmTabPanelId, type GitHubPmTabId } from "./GitHubPmTabs.js";
 import { IssuesPanel } from "./IssuesPanel.js";
+import { IssueWritePanel } from "./IssueWritePanel.js";
 import "./GitHubPmView.css";
 
 type StatusState = "loading" | "configured" | "unconfigured" | "error";
@@ -136,8 +137,22 @@ function TabPlaceholderPanel({ tabId }: { tabId: GitHubPmTabId }) {
   return <p className="github-pm-view__tab-placeholder-copy">{TAB_PLACEHOLDER_COPY[tabId]}</p>;
 }
 
+/*
+FNXC:GithubPmIssues 2026-07-24-05:30:
+FUSI-014 mounts `IssueWritePanel` directly beneath `IssuesPanel` inside the SAME `issues`
+tabpanel body -- the write surface lives with the list it keeps live, per the task's mount
+guidance. No second card wrapper: `IssueWritePanel` renders its own internal sections and
+sits inside the existing `github-pm-view__panel card` tabpanel div.
+*/
 function GitHubPmTabPanelBody({ tabId, repo, context }: { tabId: GitHubPmTabId; repo: string | null; context?: PluginDashboardViewContext }) {
-  if (tabId === "issues") return <IssuesPanel repo={repo} context={context} />;
+  if (tabId === "issues") {
+    return (
+      <>
+        <IssuesPanel repo={repo} context={context} />
+        <IssueWritePanel repo={repo} context={context} />
+      </>
+    );
+  }
   return <TabPlaceholderPanel tabId={tabId} />;
 }
 

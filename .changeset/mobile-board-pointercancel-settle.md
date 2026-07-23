@@ -2,6 +2,6 @@
 "@runfusion/fusion": patch
 ---
 
-summary: Fix the mobile board resting between columns after a drag and edge-column snap-back glitches during slow scrolls.
+summary: Fix mobile board drags resting between columns, edge-column snap-back glitches, and fling overshoot past the mostly-visible column.
 category: fix
-dev: useColumnScrollSnap now ignores pointercancel while the touch stream is still live (native scroll takeover); touchend remains the real finger lift, so gestures are neither orphaned nor idle-settled mid-drag.
+dev: useColumnScrollSnap now ignores pointercancel while the touch stream is still live (native scroll takeover), and settle targets the nearest column clamped to one column of progress from the gesture origin (resolveSettleTargetIndex) instead of always paging past it.

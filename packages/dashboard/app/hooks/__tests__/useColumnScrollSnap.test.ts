@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   isColumnCentered,
   resolvePanDirection,
-  resolveTargetIndexInScrollDirection,
+  resolveSettleTargetIndex,
   useColumnScrollSnap,
 } from "../useColumnScrollSnap";
 import { isMobileViewport } from "../useViewportMode";
@@ -123,38 +123,55 @@ describe("isColumnCentered", () => {
   });
 });
 
-describe("resolveTargetIndexInScrollDirection", () => {
-  it("forward from column 0 always goes right to column 1", () => {
-    const scroller = createScroller(3, 0);
-    expect(resolveTargetIndexInScrollDirection(scroller, [...scroller.children] as HTMLElement[], 1)).toBe(1);
+describe("resolveSettleTargetIndex", () => {
+  it("forward short swipe from column 0 commits to column 1", () => {
+    const scroller = createScroller(3, 8);
+    expect(resolveSettleTargetIndex(scroller, [...scroller.children] as HTMLElement[], 1, 0)).toBe(1);
   });
 
-  it("forward past column 0 center still goes right, never left", () => {
+  it("forward just past column 0 center still commits to column 1, never back", () => {
     const scroller = createScroller(3, 40);
-    // nearest may be 0; past its center → 1
-    expect(resolveTargetIndexInScrollDirection(scroller, [...scroller.children] as HTMLElement[], 1)).toBe(1);
+    expect(resolveSettleTargetIndex(scroller, [...scroller.children] as HTMLElement[], 1, 0)).toBe(1);
   });
 
-  it("forward when nearest is already column 1 stays on 1 if still approaching its center", () => {
+  /*
+  FNXC:BoardNavigation 2026-07-22-21:05:
+  Overshoot regression: a fling that decelerates with column 1 mostly on screen (viewport
+  center just past its center) must land on column 1 — the prior pager forced column 2.
+  */
+  it("forward fling that decelerated onto column 1 lands on column 1, not one further", () => {
+    const scroller = createScroller(3, 120);
+    expect(resolveSettleTargetIndex(scroller, [...scroller.children] as HTMLElement[], 1, 0)).toBe(1);
+  });
+
+  it("forward fling that carried to column 2 lands on column 2 (nearest wins)", () => {
+    const scroller = createScroller(3, 180);
+    expect(resolveSettleTargetIndex(scroller, [...scroller.children] as HTMLElement[], 1, 0)).toBe(2);
+  });
+
+  it("back short swipe from column 1 commits to column 0", () => {
+    const scroller = createScroller(3, COLUMN_WIDTH - 8);
+    expect(resolveSettleTargetIndex(scroller, [...scroller.children] as HTMLElement[], -1, 1)).toBe(0);
+  });
+
+  it("backward fling that decelerated onto column 1 lands on column 1, not one further", () => {
     const scroller = createScroller(3, 80);
-    const columns = [...scroller.children] as HTMLElement[];
-    const index = resolveTargetIndexInScrollDirection(scroller, columns, 1);
-    expect(index).toBeGreaterThanOrEqual(1);
-    expect(index).toBeLessThanOrEqual(2);
+    expect(resolveSettleTargetIndex(scroller, [...scroller.children] as HTMLElement[], -1, 2)).toBe(1);
   });
 
-  it("back from column 1 always goes left to column 0", () => {
-    const scroller = createScroller(3, COLUMN_WIDTH);
-    expect(resolveTargetIndexInScrollDirection(scroller, [...scroller.children] as HTMLElement[], -1)).toBe(0);
+  it("never settles against the locked direction from the origin column", () => {
+    // Rubber-band pulled the rest point back onto the origin column: still advance one.
+    const forward = createScroller(4, COLUMN_WIDTH);
+    expect(resolveSettleTargetIndex(forward, [...forward.children] as HTMLElement[], 1, 1)).toBe(2);
+    const backward = createScroller(4, COLUMN_WIDTH);
+    expect(resolveSettleTargetIndex(backward, [...backward.children] as HTMLElement[], -1, 1)).toBe(0);
   });
 
-  it("never returns a column against scroll direction from nearest", () => {
-    const scroller = createScroller(4, COLUMN_WIDTH);
-    const columns = [...scroller.children] as HTMLElement[];
-    // At col 1, scroll right → not 0
-    expect(resolveTargetIndexInScrollDirection(scroller, columns, 1)).toBeGreaterThanOrEqual(1);
-    // At col 1, scroll left → not 2+
-    expect(resolveTargetIndexInScrollDirection(scroller, columns, -1)).toBeLessThanOrEqual(1);
+  it("clamps at the board edges", () => {
+    const last = createScroller(3, COLUMN_WIDTH * 2);
+    expect(resolveSettleTargetIndex(last, [...last.children] as HTMLElement[], 1, 2)).toBe(2);
+    const first = createScroller(3, 0);
+    expect(resolveSettleTargetIndex(first, [...first.children] as HTMLElement[], -1, 0)).toBe(0);
   });
 });
 
@@ -259,6 +276,26 @@ describe("useColumnScrollSnap", () => {
     expect(scroller.scrollLeft).toBe(70);
 
     settleAfterMomentum();
+    expect(scroller.scrollLeft).toBe(COLUMN_WIDTH);
+  });
+
+  it("does not overshoot a fling that decelerates with the next column mostly on screen", () => {
+    const scroller = createScroller(3, 0);
+    renderHook(() => useColumnScrollSnap(scroller, { mobileOnly: true, isUserInteraction: () => true }));
+
+    act(() => {
+      dispatchPointerEvent(scroller, "pointerdown", 200);
+      dispatchPointerEvent(scroller, "pointermove", 150);
+      scroller.scrollLeft = 60;
+      scroller.dispatchEvent(new Event("scroll"));
+      dispatchPointerEvent(scroller, "pointerup", 150);
+      // Momentum carries just past column 1's center — column 1 is mostly on screen.
+      scroller.scrollLeft = 120;
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+    settleAfterMomentum();
+
+    // Regression: the directional pager previously pushed on to column 2 (scrollLeft 200).
     expect(scroller.scrollLeft).toBe(COLUMN_WIDTH);
   });
 

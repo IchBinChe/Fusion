@@ -126,42 +126,39 @@ export function resolvePanDirection(options: {
   return 0;
 }
 
+/*
+FNXC:BoardNavigation 2026-07-22-21:05:
+The prior directional pager targeted "one past nearest" whenever the viewport center had
+crossed the nearest column's center, so a fling that decelerated with a column mostly on
+screen still got pushed a further column — a visible overshoot. Settle now uses the classic
+paging rule: land on the NEAREST (mostly-on-screen) column, but guarantee at least one
+column of progress from the gesture's ORIGIN column in the locked direction, so a short
+deliberate swipe still commits to the next column and the settle never moves against travel.
+*/
 /**
- * Pick the column to land on given locked scroll direction and current viewport.
- * Always in the scroll direction — never the opposite column.
+ * Pick the column to land on at settle time.
  *
- * Moving right (dir +1): if still approaching nearest from the left, land on nearest;
- * otherwise land on nearest+1 (the next column on the right).
- * Moving left (dir -1): mirror.
+ * Nearest column wins (it is the one mostly on screen as momentum ends), clamped so a
+ * directional gesture always advances at least one column from `originIndex` and never
+ * settles against the locked scroll direction.
  */
-export function resolveTargetIndexInScrollDirection(
+export function resolveSettleTargetIndex(
   scroller: HTMLElement,
   columns: HTMLElement[],
   direction: number,
+  originIndex: number,
 ): number {
   if (columns.length <= 1) return 0;
   const nearest = nearestColumnIndex(scroller, columns);
   if (direction === 0) return nearest;
 
-  const scrollerRect = scroller.getBoundingClientRect();
-  const viewportWidth = scroller.clientWidth || scrollerRect.width;
-  const viewportCenter = scrollerRect.left + viewportWidth / 2;
-  const nearestRect = columns[nearest].getBoundingClientRect();
-  const nearestCenter = nearestRect.left + nearestRect.width / 2;
-
+  const origin = Math.min(Math.max(originIndex, 0), columns.length - 1);
   if (direction > 0) {
-    // Content scrolling right: next column on the right of travel.
-    if (viewportCenter + CENTER_TOLERANCE_PX < nearestCenter) {
-      return nearest;
-    }
-    return Math.min(columns.length - 1, nearest + 1);
+    // Content scrolling right: at least origin+1, otherwise wherever momentum landed.
+    return Math.max(nearest, Math.min(origin + 1, columns.length - 1));
   }
-
-  // Content scrolling left: next column on the left of travel.
-  if (viewportCenter - CENTER_TOLERANCE_PX > nearestCenter) {
-    return nearest;
-  }
-  return Math.max(0, nearest - 1);
+  // Content scrolling left: mirror.
+  return Math.min(nearest, Math.max(origin - 1, 0));
 }
 
 /**
@@ -195,8 +192,12 @@ function hardJumpScrollLeft(scroller: HTMLElement, targetLeft: number): void {
  * Mobile board: free-scroll + momentum, then hard-page only in the scroll direction.
  *
  * FNXC:BoardNavigation 2026-07-22-18:00:
- * Lock settle direction at finger-up from net gesture deltas. Target via
- * resolveTargetIndexInScrollDirection so snap never goes against scroll. Pin until next touch.
+ * Lock settle direction at finger-up from net gesture deltas. Pin until next touch.
+ *
+ * FNXC:BoardNavigation 2026-07-22-21:05:
+ * Target via resolveSettleTargetIndex: nearest (mostly-on-screen) column, clamped to at least
+ * one column of progress from the gesture's origin column — commits short swipes without
+ * overshooting a fling that already decelerated onto a column.
  */
 export function useColumnScrollSnap(
   scroller: HTMLElement | null,
@@ -246,6 +247,8 @@ export function useColumnScrollSnap(
     */
     let touchSequenceActive = false;
     let gestureStartScrollLeft = scroller.scrollLeft;
+    /** Column the viewport rested on when the gesture began — the paging baseline. */
+    let gestureStartColumnIndex = 0;
     let lastScrollLeft = scroller.scrollLeft;
     let gestureStartClientX: number | null = null;
     let lastClientX: number | null = null;
@@ -432,7 +435,7 @@ export function useColumnScrollSnap(
 
       const targetIndex = direction === 0
         ? nearestColumnIndex(scroller, columns)
-        : resolveTargetIndexInScrollDirection(scroller, columns, direction);
+        : resolveSettleTargetIndex(scroller, columns, direction, gestureStartColumnIndex);
       const targetLeft = scrollLeftToCenterColumn(scroller, columns[targetIndex]);
       applySnapTo(targetLeft);
     };
@@ -459,6 +462,7 @@ export function useColumnScrollSnap(
         lockedDirection = 0;
         sawHorizontalMovement = false;
         gestureStartScrollLeft = scroller.scrollLeft;
+        gestureStartColumnIndex = nearestColumnIndex(scroller, getSnapColumns(scroller));
         lastScrollLeft = scroller.scrollLeft;
         const clientX = getClientX(event);
         gestureStartClientX = clientX;
@@ -487,6 +491,7 @@ export function useColumnScrollSnap(
       sawHorizontalMovement = false;
       lockedDirection = 0;
       gestureStartScrollLeft = scroller.scrollLeft;
+      gestureStartColumnIndex = nearestColumnIndex(scroller, getSnapColumns(scroller));
       lastScrollLeft = scroller.scrollLeft;
       const clientX = getClientX(event);
       gestureStartClientX = clientX;

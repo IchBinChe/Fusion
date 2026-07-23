@@ -143,7 +143,15 @@ function CategoryEmoji({ emoji }: { emoji: string }) {
   );
 }
 
-export function DiscussionsPanel({ repo, context }: { repo: string | null; context?: PluginDashboardViewContext }) {
+/*
+FNXC:GithubPmDiscussions 2026-07-25-15:20:
+KB-006 adds an OPTIONAL `onSelectDiscussion` callback, mirroring IssuesPanel's
+`onSelectIssue` seam exactly: when supplied, a discussion row's title renders as a button
+that invokes the callback with the discussion's number (driving DiscussionDetailView
+selection in GitHubPmView.tsx) instead of an external GitHub link; when omitted, the row
+title stays an external link, same fallback shape IssuesPanel uses.
+*/
+export function DiscussionsPanel({ repo, context, onSelectDiscussion }: { repo: string | null; context?: PluginDashboardViewContext; onSelectDiscussion?: (discussionNumber: number) => void }) {
   const [categories, setCategories] = useState<DiscussionCategoryRow[]>([]);
   const [categoriesState, setCategoriesState] = useState<PanelDataState>("loading");
   const [categoriesError, setCategoriesError] = useState<string>();
@@ -356,9 +364,20 @@ export function DiscussionsPanel({ repo, context }: { repo: string | null; conte
             <ul className="discussions-panel__list" aria-live="polite" data-testid="discussions-panel-list">
               {items.map((item) => (
                 <li key={item.number} className="discussions-panel__row" data-testid={`discussion-row-${item.number}`}>
-                  <a className="discussions-panel__row-title" href={item.url} target="_blank" rel="noopener noreferrer">
-                    {item.title}
-                  </a>
+                  {onSelectDiscussion ? (
+                    <button
+                      type="button"
+                      className="discussions-panel__row-title"
+                      onClick={() => onSelectDiscussion(item.number)}
+                      data-testid={`discussion-row-select-${item.number}`}
+                    >
+                      {item.title}
+                    </button>
+                  ) : (
+                    <a className="discussions-panel__row-title" href={item.url} target="_blank" rel="noopener noreferrer">
+                      {item.title}
+                    </a>
+                  )}
                   <div className="discussions-panel__row-meta">
                     {item.categoryName ? (
                       <span className="discussions-panel__category-chip">

@@ -274,3 +274,30 @@ READ-ONLY feature -- no write route, no agent tool is added by this block.
 export { buildDiscussionSearchQuery } from "./github-client.js";
 export type { GitHubDiscussionCategory, GitHubDiscussionBrowseItem, GitHubDiscussionBrowseOptions } from "./github-client.js";
 export { discussionRoutes, getDiscussionCategories, getDiscussionsList } from "./discussion-routes.js";
+/*
+FNXC:GithubPmDiscussions 2026-07-25-16:00:
+KB-006 re-exports: the discussion DETAIL client types/methods (declared in github-client.ts,
+re-exported here following the KB-005 one-export-block-per-feature precedent), the new
+detail/comments/replies/post-comment route handlers (extending the SAME `discussionRoutes`
+array already re-exported above), and the add-discussion-comment agent tool.
+DiscussionDetailView.tsx/DiscussionDetailView.css are deliberately NOT re-exported here
+(React/CSS modules stay out of this server entry point per the FUSI-001 constraint noted at
+the top of this file).
+*/
+export type {
+  GitHubDiscussionUser,
+  GitHubDiscussionReply,
+  GitHubDiscussionComment,
+  GitHubDiscussionDetail,
+  GitHubDiscussionCommentsPage,
+  GitHubDiscussionRepliesPage,
+  CreateDiscussionCommentInput,
+  GitHubDiscussionCreatedComment,
+} from "./github-client.js";
+export {
+  getDiscussionDetailRoute,
+  getDiscussionCommentsRoute,
+  getDiscussionRepliesRoute,
+  postDiscussionComment,
+} from "./discussion-routes.js";
+export { githubPmAddDiscussionCommentTool } from "./tools.js";

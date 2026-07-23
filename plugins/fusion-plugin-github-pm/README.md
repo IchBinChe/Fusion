@@ -318,6 +318,35 @@ Both routes resolve auth exclusively via `resolveGitHubAuth` and map `GitHubApiE
 
 See `src/__tests__/github-client.test.ts`, `discussion-routes.test.ts`, and `DiscussionsPanel.test.tsx` for the category-mapping, search-query-fidelity (every filter-combination assertion), Q&A-only-answered-filter, and capability-gating coverage.
 
+## Discussion detail, threaded comments, and replies (KB-006)
+
+Selecting a discussion in `DiscussionsPanel` (via its optional `onSelectDiscussion` callback) mounts `DiscussionDetailView` in the SAME `discussions` tabpanel, toggling with the browse panel (mirroring the issues tab's panel↔detail toggle) — full discussion rendering plus GitHub's exact two-level comment→reply thread, with a top-level comment composer and a per-comment reply composer. Answer-marking and upvote-toggling remain out of scope (KB-007); this feature is read/reply only.
+
+**Client methods** (`src/github-client.ts`), additive alongside the KB-005 browse types (which stay unchanged):
+
+- `getDiscussionDetail(owner, repo, number)` — single fetch-on-mount GraphQL read: the discussion (`id`, title, body markdown, upvote count, category, author, timestamps, `answerChosenAt`) plus the first page of top-level comments, each already carrying its own first page of replies (GitHub Discussions are exactly two levels deep). Returns `null` when GitHub resolves the discussion to nothing (repo/number not found); a discussions-disabled/permission/GraphQL error **throws** rather than degrading (unlike `listDiscussions`) — there is no meaningful empty detail to render.
+- `listDiscussionComments(owner, repo, number, { after? })` — lazy subsequent top-level-comment page, cursor-based.
+- `listDiscussionCommentReplies(commentId, { after? })` — lazy subsequent reply page for ONE top-level comment, addressed directly by its GraphQL node id via GitHub's generic `node(id:)` field (no owner/repo/number needed — replies are scoped to their parent comment).
+- `addDiscussionComment({ discussionId, body, replyToId? })` — the `addDiscussionComment` mutation. Omits `replyToId` for a new top-level comment; supplies it (a top-level comment's node id) for a nested reply. Returns GitHub's authoritative created comment including its echoed `replyTo.id` — the parent-linkage round-trip proof, never fabricated client-side.
+
+**Routes** (`src/discussion-routes.ts`, extending the same file/array KB-005 established):
+
+- `GET /discussions/detail?repo=&number=` — bundles the discussion plus its first comment/reply page. 400 on a missing/invalid `number`; 404 `not_found` when the discussion doesn't resolve; any other GitHub error is mapped via `githubErrorToResponse` (surfaced, not degraded).
+- `GET /discussions/comments?repo=&number=&after=` — lazy subsequent top-level-comment page.
+- `GET /discussions/replies?commentId=&after=` — lazy subsequent reply page for one comment.
+- `POST /discussions/comments { repo?, discussionId, body, replyToId?, confirmed? }` — post a new top-level comment or a reply; gated by the SAME `requireConfirmation` write guard every other write route in this plugin uses (runs BEFORE any auth/client call, so an unconfirmed request performs zero GitHub API calls).
+
+**`DiscussionDetailView`** (`src/DiscussionDetailView.tsx` + `.css`), the plugin's ONLY discussion detail/reply surface (mounted once from `GitHubPmView.tsx`'s discussions tabpanel):
+
+- Renders the body (ReactMarkdown + remark-gfm, same as `IssueDetailView`), upvote count, category chip, and (for an answerable category) an answered/unanswered badge that never crashes on a `null` `answerChosenAt`.
+- Renders GitHub's two-level thread: top-level comments each with an indented reply list. A comment with zero replies shows no reply-load-more shell; a discussion with zero comments shows the composer only, no thread, no load-more shell.
+- "Load more comments" and each comment's "Load more replies" buttons are REMOVED (not disabled) once their cursor is exhausted, and never render when there is nothing to page — mirroring `IssueDetailView`'s no-orphaned-shell contract.
+- A top-level comment composer (always rendered) and a per-comment inline reply composer (toggled via a "Reply" button) both honor the `confirmWrites` gate exactly like `IssueWritePanel` — a confirm dialog (`useConfirm`) is shown when the gate is ON, and `confirmed: true` is sent in the request body when the operator confirms.
+
+**Agent tool** (`src/tools.ts`): `github_pm_add_discussion_comment` posts a new top-level comment or a reply (mirrors the FUSI-014/KB-002/KB-003 write-tool shape — confirmation gate before any client call, authoritative created-comment result reported via `textResult`, no browser pub/sub call from this server-side tool).
+
+See `src/__tests__/github-client.test.ts`, `discussion-routes.test.ts`, `DiscussionDetailView.test.tsx`, and `tools.test.ts` for the two-level-nesting mapping, cursor-pagination-to-exhaustion, parent-linkage invariant (top-level post sends no `replyToId`; a reply sends the exact parent id and GitHub's returned `replyToId` matches), and confirmation-gate coverage.
+
 ## Write confirmation (`confirmWrites`) (FUSI-017)
 
 A 2026-07-23 security audit found ZERO confirm/dryRun/requireConfirm gating anywhere in this plugin's write surfaces. `confirmWrites` closes that gap with one default-ON setting enforced identically across all three write layers (the same contract FUSI-015's future write routes/tools/UI must inherit):
@@ -398,6 +427,7 @@ Plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`:
 - `POST /issues/create`, `PUT /issues/update`, `PUT /issues/state`, `POST /issues/comments`, `PUT /issues/comments` — issue create/edit/comment/close-reopen writes (FUSI-014); each requires `confirmed: true` in the body when `confirmWrites` is ON (FUSI-017); see the section above.
 - `GET /labels/list` — label list with open-issue usage counts (KB-002); not gated. `POST /labels/create`, `PUT /labels/update`, `POST /labels/delete` — label create/update/delete (KB-002); each requires `confirmed: true` in the body when `confirmWrites` is ON; see the section above.
 - `GET /milestones/list`, `POST /milestones/create`, `PUT /milestones/update`, `PUT /milestones/state`, `POST /milestones/delete`, `POST /milestones/reassign-open-issues` — milestone list/create/edit/close-reopen/delete and close-with-open-issues reassignment (KB-003); each write requires `confirmed: true` in the body when `confirmWrites` is ON; see the section above.
+- `GET /discussions/categories`, `GET /discussions/list` — discussion category rail + search/sort/answered browse (KB-005); not gated. `GET /discussions/detail`, `GET /discussions/comments`, `GET /discussions/replies` — discussion detail plus lazy comment/reply pagination (KB-006); not gated. `POST /discussions/comments` — post a new top-level discussion comment or a reply (KB-006); requires `confirmed: true` in the body when `confirmWrites` is ON; see the Discussion detail section above.
 
 ## Agent tools
 
@@ -405,6 +435,7 @@ Plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`:
 - `github_pm_create_issue`, `github_pm_edit_issue`, `github_pm_comment_issue`, `github_pm_set_issue_state` — issue write operations (FUSI-014); each requires a `confirmed: true` parameter when `confirmWrites` is ON (FUSI-017); see the section above.
 - `github_pm_create_label`, `github_pm_update_label`, `github_pm_delete_label` — label write operations (KB-002); each requires a `confirmed: true` parameter when `confirmWrites` is ON; see the section above.
 - `github_pm_create_milestone`, `github_pm_update_milestone`, `github_pm_set_milestone_state`, `github_pm_delete_milestone` — milestone write operations (KB-003); each requires a `confirmed: true` parameter when `confirmWrites` is ON; see the Milestone management section above.
+- `github_pm_add_discussion_comment` — post a new top-level discussion comment, or a reply when `replyToId` is supplied (KB-006); requires a `confirmed: true` parameter when `confirmWrites` is ON; see the Discussion detail section above.
 
 ## Limitations and non-goals (FUSI-001/FUSI-002)
 

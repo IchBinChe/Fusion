@@ -1233,3 +1233,207 @@ describe("GitHubClient.deleteLabel (KB-002)", () => {
     await expect(client.deleteLabel("acme", "widgets", "bug")).rejects.toMatchObject({ status: 403, code: "auth_error" });
   });
 });
+
+/*
+FNXC:GithubPmDiscussions 2026-07-25-13:40:
+KB-006 tests: detail two-level nesting, comment/reply cursor pagination to exhaustion,
+GraphQL-error mapping on detail, and the add-discussion-comment parent-linkage contract
+(top-level post sends NO replyToId; a reply sends the exact parent id; the returned
+replyToId matches the requested parent).
+*/
+function discussionDetailNode(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "D_kwDOA1",
+    number: 7,
+    title: "How do I configure X?",
+    url: "https://github.com/acme/widgets/discussions/7",
+    body: "Please help.",
+    upvoteCount: 3,
+    author: { login: "octocat", avatarUrl: "https://a" },
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-02T00:00:00Z",
+    answerChosenAt: null,
+    category: { name: "Q&A", emoji: "?", isAnswerable: true },
+    comments: {
+      totalCount: 1,
+      pageInfo: { hasNextPage: false, endCursor: null },
+      nodes: [
+        {
+          id: "DC_1",
+          body: "Try this.",
+          upvoteCount: 2,
+          author: { login: "helper" },
+          createdAt: "2026-01-01T01:00:00Z",
+          replies: {
+            pageInfo: { hasNextPage: false, endCursor: null },
+            nodes: [{ id: "DR_1", body: "Thanks!", upvoteCount: 1, author: { login: "octocat" }, createdAt: "2026-01-01T02:00:00Z" }],
+          },
+        },
+      ],
+    },
+    ...overrides,
+  };
+}
+
+describe("GitHubClient.getDiscussionDetail (KB-006)", () => {
+  it("maps a two-level thread (comments each with their own replies), upvote counts, and a null answerChosenAt", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ data: { repository: { discussion: discussionDetailNode() } } })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const detail = await client.getDiscussionDetail("acme", "widgets", 7);
+
+    expect(detail).not.toBeNull();
+    expect(detail?.id).toBe("D_kwDOA1");
+    expect(detail?.upvoteCount).toBe(3);
+    expect(detail?.answerChosenAt).toBeNull();
+    expect(detail?.categoryName).toBe("Q&A");
+    expect(detail?.isAnswerable).toBe(true);
+    expect(detail?.comments).toHaveLength(1);
+    expect(detail?.comments[0].id).toBe("DC_1");
+    expect(detail?.comments[0].upvoteCount).toBe(2);
+    expect(detail?.comments[0].replies).toHaveLength(1);
+    expect(detail?.comments[0].replies[0].id).toBe("DR_1");
+    expect(detail?.comments[0].repliesNextCursor).toBeNull();
+    expect(detail?.commentsNextCursor).toBeNull();
+  });
+
+  it("maps a present answerChosenAt without crashing (Q&A discussion with a chosen answer)", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      data: { repository: { discussion: discussionDetailNode({ answerChosenAt: "2026-01-03T00:00:00Z" }) } },
+    })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const detail = await client.getDiscussionDetail("acme", "widgets", 7);
+    expect(detail?.answerChosenAt).toBe("2026-01-03T00:00:00Z");
+  });
+
+  it("returns null when the repository resolves but the discussion does not", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ data: { repository: { discussion: null } } })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const detail = await client.getDiscussionDetail("acme", "widgets", 999);
+    expect(detail).toBeNull();
+  });
+
+  it("maps a GraphQL errors[] payload to a thrown graphql_error (detail surfaces the error rather than degrading)", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ errors: [{ message: "Discussions are disabled for this repository" }] })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    await expect(client.getDiscussionDetail("acme", "widgets", 7)).rejects.toMatchObject({ code: "graphql_error" });
+  });
+});
+
+describe("GitHubClient.listDiscussionComments (KB-006)", () => {
+  it("follows pageInfo.endCursor across pages to exhaustion", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        data: {
+          repository: {
+            discussion: {
+              comments: {
+                pageInfo: { hasNextPage: true, endCursor: "cursor-1" },
+                nodes: [{ id: "DC_2", body: "page one", upvoteCount: 0, author: { login: "a" }, createdAt: "2026-01-01T00:00:00Z", replies: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } }],
+              },
+            },
+          },
+        },
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        data: {
+          repository: {
+            discussion: {
+              comments: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [{ id: "DC_3", body: "page two", upvoteCount: 0, author: { login: "b" }, createdAt: "2026-01-01T00:00:00Z", replies: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } }],
+              },
+            },
+          },
+        },
+      }));
+    const client = new GitHubClient("token", fetchImpl as unknown as typeof fetch);
+
+    const pageOne = await client.listDiscussionComments("acme", "widgets", 7);
+    expect(pageOne.comments.map((c) => c.id)).toEqual(["DC_2"]);
+    expect(pageOne.nextCursor).toBe("cursor-1");
+
+    const pageTwo = await client.listDiscussionComments("acme", "widgets", 7, { after: pageOne.nextCursor! });
+    expect(pageTwo.comments.map((c) => c.id)).toEqual(["DC_3"]);
+    expect(pageTwo.nextCursor).toBeNull();
+
+    const [, secondInit] = fetchImpl.mock.calls[1];
+    expect(JSON.parse((secondInit as RequestInit).body as string).variables.after).toBe("cursor-1");
+  });
+
+  it("defensively maps a missing comments connection to an empty page (no throw)", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ data: { repository: { discussion: null } } })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const page = await client.listDiscussionComments("acme", "widgets", 7);
+    expect(page).toEqual({ comments: [], nextCursor: null });
+  });
+});
+
+describe("GitHubClient.listDiscussionCommentReplies (KB-006)", () => {
+  it("follows pageInfo.endCursor across pages to exhaustion, addressed by comment node id", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        data: { node: { replies: { pageInfo: { hasNextPage: true, endCursor: "reply-cursor-1" }, nodes: [{ id: "DR_2", body: "r1", upvoteCount: 0, author: { login: "a" }, createdAt: "2026-01-01T00:00:00Z" }] } } },
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        data: { node: { replies: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ id: "DR_3", body: "r2", upvoteCount: 0, author: { login: "b" }, createdAt: "2026-01-01T00:00:00Z" }] } } },
+      }));
+    const client = new GitHubClient("token", fetchImpl as unknown as typeof fetch);
+
+    const pageOne = await client.listDiscussionCommentReplies("DC_1");
+    expect(pageOne.replies.map((r) => r.id)).toEqual(["DR_2"]);
+    expect(pageOne.nextCursor).toBe("reply-cursor-1");
+
+    const pageTwo = await client.listDiscussionCommentReplies("DC_1", { after: pageOne.nextCursor! });
+    expect(pageTwo.replies.map((r) => r.id)).toEqual(["DR_3"]);
+    expect(pageTwo.nextCursor).toBeNull();
+
+    const [firstUrl, firstInit] = fetchImpl.mock.calls[0];
+    expect(String(firstUrl)).toBe(GITHUB_GRAPHQL_ENDPOINT);
+    expect(JSON.parse((firstInit as RequestInit).body as string).variables.commentId).toBe("DC_1");
+  });
+});
+
+describe("GitHubClient.addDiscussionComment (KB-006 parent-linkage invariant)", () => {
+  it("sends NO replyToId for a top-level comment post", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      data: { addDiscussionComment: { comment: { id: "DC_9", body: "top level", upvoteCount: 0, author: { login: "octocat" }, createdAt: "2026-01-01T00:00:00Z", replyTo: null } } },
+    })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const comment = await client.addDiscussionComment({ discussionId: "D_1", body: "top level" });
+
+    const [, init] = fetchImpl.mock.calls[0];
+    const sentVariables = JSON.parse((init as RequestInit).body as string).variables;
+    expect(sentVariables.input).toEqual({ discussionId: "D_1", body: "top level" });
+    expect(Object.prototype.hasOwnProperty.call(sentVariables.input, "replyToId")).toBe(false);
+    expect(comment.replyToId).toBeNull();
+  });
+
+  it("sends the exact parent id for a reply, and the returned replyToId matches the requested parent", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      data: { addDiscussionComment: { comment: { id: "DC_10", body: "a reply", upvoteCount: 0, author: { login: "octocat" }, createdAt: "2026-01-01T00:00:00Z", replyTo: { id: "DC_1" } } } },
+    })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const comment = await client.addDiscussionComment({ discussionId: "D_1", body: "a reply", replyToId: "DC_1" });
+
+    const [, init] = fetchImpl.mock.calls[0];
+    const sentVariables = JSON.parse((init as RequestInit).body as string).variables;
+    expect(sentVariables.input).toEqual({ discussionId: "D_1", body: "a reply", replyToId: "DC_1" });
+    expect(comment.replyToId).toBe("DC_1");
+  });
+
+  it("throws a graphql_error when the mutation payload omits the created comment", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ data: { addDiscussionComment: { comment: null } } })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    await expect(client.addDiscussionComment({ discussionId: "D_1", body: "x" })).rejects.toMatchObject({ code: "graphql_error" });
+  });
+});
+
+

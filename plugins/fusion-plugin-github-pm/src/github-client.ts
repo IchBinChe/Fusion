@@ -569,6 +569,89 @@ export interface GitHubDiscussionBrowseOptions {
   maxItems?: number;
 }
 
+/*
+FNXC:GithubPmDiscussions 2026-07-25-13:00:
+KB-006 discussion DETAIL types -- a separate identity from the KB-005 browse types above (which
+stay unchanged). GitHub Discussions are exactly two levels deep: a discussion's `comments`
+connection holds top-level DiscussionComment nodes, each with its OWN `replies` connection
+(replies cannot themselves have replies). `id` fields here are GraphQL node ids (opaque
+base64-ish strings), required for `addDiscussionComment`'s `replyToId` parent-linkage input --
+never the same identity space as the REST-style numeric `number`.
+*/
+export interface GitHubDiscussionUser {
+  login: string;
+  avatarUrl?: string;
+}
+
+export interface GitHubDiscussionReply {
+  id: string;
+  author: GitHubDiscussionUser | null;
+  bodyMarkdown: string;
+  upvoteCount: number;
+  createdAt?: string;
+}
+
+export interface GitHubDiscussionComment {
+  id: string;
+  author: GitHubDiscussionUser | null;
+  bodyMarkdown: string;
+  upvoteCount: number;
+  createdAt?: string;
+  replies: GitHubDiscussionReply[];
+  /** Cursor for the NEXT page of replies under this comment, or null once its reply thread is exhausted. */
+  repliesNextCursor: string | null;
+}
+
+export interface GitHubDiscussionDetail {
+  /** GraphQL node id -- the `discussionId` `addDiscussionComment` requires for a NEW top-level comment. */
+  id: string;
+  number: number;
+  title: string;
+  bodyMarkdown: string;
+  url: string;
+  upvoteCount: number;
+  categoryName: string | null;
+  categoryEmoji: string | null;
+  isAnswerable: boolean;
+  authorLogin: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  /** Non-null only for a genuinely answered Q&A discussion; null for a non-Q&A discussion or an unanswered one -- the read model must not crash on either null or present. */
+  answerChosenAt: string | null;
+  commentCount: number;
+  comments: GitHubDiscussionComment[];
+  /** Cursor for the NEXT page of top-level comments, or null once the thread is exhausted. */
+  commentsNextCursor: string | null;
+}
+
+export interface GitHubDiscussionCommentsPage {
+  comments: GitHubDiscussionComment[];
+  nextCursor: string | null;
+}
+
+export interface GitHubDiscussionRepliesPage {
+  replies: GitHubDiscussionReply[];
+  nextCursor: string | null;
+}
+
+export interface CreateDiscussionCommentInput {
+  /** The discussion's GraphQL node id (`GitHubDiscussionDetail.id`). */
+  discussionId: string;
+  body: string;
+  /** The parent TOP-LEVEL comment's GraphQL node id. Omit entirely to post a new top-level comment. */
+  replyToId?: string;
+}
+
+export interface GitHubDiscussionCreatedComment {
+  id: string;
+  author: GitHubDiscussionUser | null;
+  bodyMarkdown: string;
+  upvoteCount: number;
+  createdAt?: string;
+  /** GitHub's authoritative echo of the parent id this reply was posted under, or null for a top-level comment -- the parent-linkage round-trip proof callers assert against. */
+  replyToId: string | null;
+}
+
 /**
  * FNXC:GitHubPmClient 2026-07-24-00:00:
  * Portable, plugin-owned GitHub API client. Constructor takes a token (may be undefined for
@@ -1162,6 +1245,104 @@ export class GitHubClient {
   }
 
   /**
+   * FNXC:GithubPmDiscussions 2026-07-25-13:10:
+   * KB-006: single fetch-on-mount read for the discussion detail view -- the discussion itself
+   * plus the FIRST page of top-level comments, each carrying its OWN first page of replies
+   * (GitHub Discussions are exactly two levels deep). Returns `null` when GitHub resolves the
+   * discussion to nothing (repo not found or number doesn't exist) so the route can map that
+   * to a 404, distinct from a thrown GraphQL/auth error. Unlike `listDiscussions`'s
+   * degrade-to-empty-array contract, a discussions-disabled/permission/graphql error here is
+   * allowed to THROW -- the detail view has no meaningful "empty" fallback (there is nothing
+   * else useful to render), so the caller (discussion-routes.ts) must surface the mapped error.
+   */
+  async getDiscussionDetail(owner: string, repo: string, number: number): Promise<GitHubDiscussionDetail | null> {
+    const data = await this.graphql<{
+      repository?: { discussion?: GitHubRestDiscussionDetailNode | null } | null;
+    }>(GITHUB_DISCUSSION_DETAIL_QUERY, { owner, repo, number, first: GRAPHQL_PAGE_SIZE, repliesFirst: GRAPHQL_PAGE_SIZE });
+    const node = data.repository?.discussion;
+    return node ? mapDiscussionDetailNode(node) : null;
+  }
+
+  /**
+   * FNXC:GithubPmDiscussions 2026-07-25-13:15:
+   * KB-006: lazy subsequent page of a discussion's TOP-LEVEL comments (page 1 ships bundled
+   * with `getDiscussionDetail`). Each returned comment still carries its own first page of
+   * replies -- long threads page comments and replies independently via separate cursors.
+   */
+  async listDiscussionComments(owner: string, repo: string, number: number, options: { after?: string } = {}): Promise<GitHubDiscussionCommentsPage> {
+    const data = await this.graphql<{
+      repository?: {
+        discussion?: {
+          comments?: {
+            nodes?: Array<GitHubRestDiscussionCommentNode | null>;
+            pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+          };
+        } | null;
+      } | null;
+    }>(GITHUB_DISCUSSION_COMMENTS_QUERY, { owner, repo, number, first: GRAPHQL_PAGE_SIZE, after: options.after ?? null, repliesFirst: GRAPHQL_PAGE_SIZE });
+    const connection = data.repository?.discussion?.comments;
+    const comments = (connection?.nodes ?? [])
+      .filter((node): node is GitHubRestDiscussionCommentNode => Boolean(node))
+      .map(mapDiscussionCommentNode);
+    return {
+      comments,
+      nextCursor: connection?.pageInfo?.hasNextPage === true ? connection?.pageInfo?.endCursor ?? null : null,
+    };
+  }
+
+  /**
+   * FNXC:GithubPmDiscussions 2026-07-25-13:20:
+   * KB-006: lazy subsequent page of a single top-level comment's replies, addressed directly
+   * by the comment's own GraphQL node id via GitHub's generic `node(id:)` field (replies are
+   * scoped to their parent comment, not to the discussion/repo, so no owner/repo/number is
+   * needed here -- mirrors how `updateIssueComment` is keyed by comment id alone).
+   */
+  async listDiscussionCommentReplies(commentId: string, options: { after?: string } = {}): Promise<GitHubDiscussionRepliesPage> {
+    const data = await this.graphql<{
+      node?: {
+        replies?: {
+          nodes?: Array<GitHubRestDiscussionReplyNode | null>;
+          pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+        };
+      } | null;
+    }>(GITHUB_DISCUSSION_REPLIES_QUERY, { commentId, first: GRAPHQL_PAGE_SIZE, after: options.after ?? null });
+    const connection = data.node?.replies;
+    const replies = (connection?.nodes ?? [])
+      .filter((node): node is GitHubRestDiscussionReplyNode => Boolean(node))
+      .map(mapDiscussionReplyNode);
+    return {
+      replies,
+      nextCursor: connection?.pageInfo?.hasNextPage === true ? connection?.pageInfo?.endCursor ?? null : null,
+    };
+  }
+
+  /**
+   * FNXC:GithubPmDiscussions 2026-07-25-13:25:
+   * KB-006: `addDiscussionComment` mutation -- posts a NEW top-level comment when `replyToId`
+   * is omitted, or a nested reply under that top-level comment id when supplied. Returns
+   * GitHub's authoritative created comment INCLUDING its echoed `replyTo.id`, which is the
+   * parent-linkage round-trip proof the acceptance criteria require (never fabricated
+   * client-side). A missing `comment` in the mutation payload is a GraphQL-shape violation,
+   * mapped to a `graphql_error` rather than silently returning an undefined-shaped result.
+   */
+  async addDiscussionComment(input: CreateDiscussionCommentInput): Promise<GitHubDiscussionCreatedComment> {
+    const data = await this.graphql<{
+      addDiscussionComment?: { comment?: GitHubRestDiscussionCreatedCommentNode | null } | null;
+    }>(GITHUB_ADD_DISCUSSION_COMMENT_MUTATION, {
+      input: {
+        discussionId: input.discussionId,
+        body: input.body,
+        ...(input.replyToId ? { replyToId: input.replyToId } : {}),
+      },
+    });
+    const comment = data.addDiscussionComment?.comment;
+    if (!comment) {
+      throw new GitHubApiError(502, "GitHub did not return the created discussion comment.", "graphql_error");
+    }
+    return mapDiscussionCreatedCommentNode(comment);
+  }
+
+  /**
    * FNXC:GitHubPmClient 2026-07-24-01:00:
    * FUSI-013: fetch a single issue's full detail. Rejects a pull_request-shaped payload
    * (GitHub's issues REST endpoint also serves PRs by number) with a not_found-style error
@@ -1685,6 +1866,203 @@ function mapDiscussionSearchNode(node: GitHubRestDiscussionSearchNode): GitHubDi
     authorLogin: node.author?.login ?? null,
     createdAt: node.createdAt,
     updatedAt: node.updatedAt,
+  };
+}
+
+/*
+FNXC:GithubPmDiscussions 2026-07-25-13:30:
+KB-006 detail/comments/replies/mutation query+mutation constants, node interfaces, and
+mappers -- placed with the other discussion query constants per this file's convention. The
+detail query and the comments-pagination query share the SAME per-comment `replies(first:
+$repliesFirst)` selection (comments always ship with their own first reply page); the
+replies-pagination query is separate and addresses a single comment directly via GitHub's
+generic `node(id:)` field with an inline `... on DiscussionComment` fragment, since replies
+paginate independently of which discussion/comment page they belong to.
+*/
+const GITHUB_DISCUSSION_DETAIL_QUERY = `query FusionGitHubPmDiscussionDetail($owner: String!, $repo: String!, $number: Int!, $first: Int!, $repliesFirst: Int!) {
+  repository(owner: $owner, name: $repo) {
+    discussion(number: $number) {
+      id
+      number
+      title
+      url
+      body
+      upvoteCount
+      author { login avatarUrl }
+      createdAt
+      updatedAt
+      answerChosenAt
+      category { name emoji isAnswerable }
+      comments(first: $first) {
+        totalCount
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          body
+          upvoteCount
+          author { login avatarUrl }
+          createdAt
+          replies(first: $repliesFirst) {
+            pageInfo { hasNextPage endCursor }
+            nodes { id body upvoteCount author { login avatarUrl } createdAt }
+          }
+        }
+      }
+    }
+  }
+}`;
+
+const GITHUB_DISCUSSION_COMMENTS_QUERY = `query FusionGitHubPmDiscussionComments($owner: String!, $repo: String!, $number: Int!, $first: Int!, $after: String, $repliesFirst: Int!) {
+  repository(owner: $owner, name: $repo) {
+    discussion(number: $number) {
+      comments(first: $first, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          body
+          upvoteCount
+          author { login avatarUrl }
+          createdAt
+          replies(first: $repliesFirst) {
+            pageInfo { hasNextPage endCursor }
+            nodes { id body upvoteCount author { login avatarUrl } createdAt }
+          }
+        }
+      }
+    }
+  }
+}`;
+
+const GITHUB_DISCUSSION_REPLIES_QUERY = `query FusionGitHubPmDiscussionReplies($commentId: ID!, $first: Int!, $after: String) {
+  node(id: $commentId) {
+    ... on DiscussionComment {
+      replies(first: $first, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { id body upvoteCount author { login avatarUrl } createdAt }
+      }
+    }
+  }
+}`;
+
+const GITHUB_ADD_DISCUSSION_COMMENT_MUTATION = `mutation FusionGitHubPmAddDiscussionComment($input: AddDiscussionCommentInput!) {
+  addDiscussionComment(input: $input) {
+    comment {
+      id
+      body
+      upvoteCount
+      author { login avatarUrl }
+      createdAt
+      replyTo { id }
+    }
+  }
+}`;
+
+interface GitHubRestDiscussionUserNode {
+  login?: string;
+  avatarUrl?: string;
+}
+
+interface GitHubRestDiscussionReplyNode {
+  id: string;
+  body?: string;
+  upvoteCount?: number;
+  author?: GitHubRestDiscussionUserNode | null;
+  createdAt?: string;
+}
+
+interface GitHubRestDiscussionCommentNode extends GitHubRestDiscussionReplyNode {
+  replies?: {
+    pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+    nodes?: Array<GitHubRestDiscussionReplyNode | null>;
+  };
+}
+
+interface GitHubRestDiscussionDetailNode {
+  id: string;
+  number: number;
+  title: string;
+  url: string;
+  body?: string;
+  upvoteCount?: number;
+  author?: GitHubRestDiscussionUserNode | null;
+  createdAt?: string;
+  updatedAt?: string;
+  answerChosenAt?: string | null;
+  category?: { name?: string; emoji?: string; isAnswerable?: boolean } | null;
+  comments?: {
+    totalCount?: number;
+    pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+    nodes?: Array<GitHubRestDiscussionCommentNode | null>;
+  };
+}
+
+interface GitHubRestDiscussionCreatedCommentNode extends GitHubRestDiscussionReplyNode {
+  replyTo?: { id?: string } | null;
+}
+
+function toGitHubDiscussionUser(node?: GitHubRestDiscussionUserNode | null): GitHubDiscussionUser | null {
+  return node && node.login ? { login: node.login, avatarUrl: node.avatarUrl } : null;
+}
+
+function mapDiscussionReplyNode(node: GitHubRestDiscussionReplyNode): GitHubDiscussionReply {
+  return {
+    id: node.id,
+    author: toGitHubDiscussionUser(node.author),
+    bodyMarkdown: node.body ?? "",
+    upvoteCount: typeof node.upvoteCount === "number" ? node.upvoteCount : 0,
+    createdAt: node.createdAt,
+  };
+}
+
+function mapDiscussionCommentNode(node: GitHubRestDiscussionCommentNode): GitHubDiscussionComment {
+  const repliesConnection = node.replies;
+  const replies = (repliesConnection?.nodes ?? [])
+    .filter((replyNode): replyNode is GitHubRestDiscussionReplyNode => Boolean(replyNode))
+    .map(mapDiscussionReplyNode);
+  return {
+    id: node.id,
+    author: toGitHubDiscussionUser(node.author),
+    bodyMarkdown: node.body ?? "",
+    upvoteCount: typeof node.upvoteCount === "number" ? node.upvoteCount : 0,
+    createdAt: node.createdAt,
+    replies,
+    repliesNextCursor: repliesConnection?.pageInfo?.hasNextPage === true ? repliesConnection?.pageInfo?.endCursor ?? null : null,
+  };
+}
+
+function mapDiscussionDetailNode(node: GitHubRestDiscussionDetailNode): GitHubDiscussionDetail {
+  const commentsConnection = node.comments;
+  const comments = (commentsConnection?.nodes ?? [])
+    .filter((commentNode): commentNode is GitHubRestDiscussionCommentNode => Boolean(commentNode))
+    .map(mapDiscussionCommentNode);
+  return {
+    id: node.id,
+    number: node.number,
+    title: node.title,
+    bodyMarkdown: node.body ?? "",
+    url: node.url,
+    upvoteCount: typeof node.upvoteCount === "number" ? node.upvoteCount : 0,
+    categoryName: node.category?.name ?? null,
+    categoryEmoji: node.category?.emoji ?? null,
+    isAnswerable: node.category?.isAnswerable === true,
+    authorLogin: node.author?.login ?? null,
+    createdAt: node.createdAt,
+    updatedAt: node.updatedAt,
+    answerChosenAt: node.answerChosenAt ?? null,
+    commentCount: typeof commentsConnection?.totalCount === "number" ? commentsConnection.totalCount : comments.length,
+    comments,
+    commentsNextCursor: commentsConnection?.pageInfo?.hasNextPage === true ? commentsConnection?.pageInfo?.endCursor ?? null : null,
+  };
+}
+
+function mapDiscussionCreatedCommentNode(node: GitHubRestDiscussionCreatedCommentNode): GitHubDiscussionCreatedComment {
+  return {
+    id: node.id,
+    author: toGitHubDiscussionUser(node.author),
+    bodyMarkdown: node.body ?? "",
+    upvoteCount: typeof node.upvoteCount === "number" ? node.upvoteCount : 0,
+    createdAt: node.createdAt,
+    replyToId: node.replyTo?.id ?? null,
   };
 }
 

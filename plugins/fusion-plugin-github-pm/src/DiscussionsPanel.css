@@ -184,6 +184,15 @@ mobile instead of squeezing into an unreadable sidebar.
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* FNXC:GithubPmDiscussions 2026-07-25-15:20: button-reset properties so this class renders
+     identically whether it's the external-link `<a>` (no onSelectDiscussion) or the
+     select-discussion `<button>` (KB-006) IssuesPanel's row-title mirrors this exact reset. */
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
 }
 
 .discussions-panel__row-title:hover,

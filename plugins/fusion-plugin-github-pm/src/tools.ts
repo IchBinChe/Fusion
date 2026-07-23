@@ -1,6 +1,7 @@
 import type { PluginContext, PluginToolDefinition, PluginToolResult } from "@fusion/plugin-sdk";
 import { hasPersonalAccessToken, resolveGitHubPmSettings } from "./settings.js";
 import { GitHubClient, isGitHubApiError, normalizeGitHubLabelColor } from "./github-client.js";
+import type { GitHubDiscussionCreatedComment } from "./github-client.js";
 import { resolveGitHubAuth } from "./auth.js";
 import { normalizeRepoKey, resolveSelectedRepo } from "./repo-config.js";
 
@@ -489,6 +490,56 @@ export const githubPmDeleteMilestoneTool: PluginToolDefinition = {
   },
 };
 
+/*
+FNXC:GithubPmDiscussions 2026-07-25-14:20:
+KB-006 agent-write tool: post a new top-level discussion comment (no `replyToId`) or a nested
+reply under `replyToId` (a top-level comment's GraphQL node id). Mirrors the FUSI-014/KB-002/
+KB-003 write-tool shape exactly: `requireToolConfirmation` runs BEFORE `resolveRepoAndClient`/
+any client call, and the authoritative created comment (including its echoed `replyTo.id`) is
+reported via `textResult` -- the parent-linkage round-trip proof, never fabricated client-side.
+This tool runs server-side in the agent execution context and deliberately does NOT call any
+browser-only pub/sub. `repo` is accepted for parity with every other tool here but is not
+actually required by the underlying `addDiscussionComment` mutation (GitHub addresses it
+entirely by `discussionId`/`replyToId` node ids) -- `resolveRepoAndClient` is still used so auth
+resolution is identical to every other tool in this file.
+*/
+export const githubPmAddDiscussionCommentTool: PluginToolDefinition = {
+  name: "github_pm_add_discussion_comment",
+  description: "Post a new top-level comment on a GitHub discussion, or a nested reply when replyToId (a top-level comment's node id) is supplied.",
+  parameters: {
+    type: "object",
+    properties: {
+      repo: { type: "string", description: "owner/repo. Omit to use the currently selected repo." },
+      discussionId: { type: "string", description: "The discussion's GraphQL node id (required)." },
+      body: { type: "string", description: "Comment body markdown (required)." },
+      replyToId: { type: "string", description: "The parent top-level comment's GraphQL node id. Omit to post a new top-level comment." },
+      confirmed: { type: "boolean", description: "Set true to confirm this write. Required when the plugin's 'Confirm writes' setting is on." },
+    },
+    required: ["discussionId", "body"],
+  },
+  execute: async (params, ctx: PluginContext) => {
+    const p = params as Record<string, unknown>;
+    const discussionId = typeof p.discussionId === "string" ? p.discussionId.trim() : "";
+    const body = typeof p.body === "string" ? p.body.trim() : "";
+    if (!discussionId || !body) return textResult("A non-empty 'discussionId' and 'body' are required to add a discussion comment.", undefined, true);
+    const replyToId = typeof p.replyToId === "string" && p.replyToId.trim() ? p.replyToId.trim() : undefined;
+    const confirmationBlocked = requireToolConfirmation(ctx, p.confirmed);
+    if (confirmationBlocked) return confirmationBlocked;
+    const resolved = await resolveRepoAndClient(ctx, p.repo);
+    if (isToolResult(resolved)) return resolved;
+    try {
+      const comment: GitHubDiscussionCreatedComment = await resolved.client.addDiscussionComment({ discussionId, body, replyToId });
+      return textResult(
+        comment.replyToId ? `Posted a reply under comment ${comment.replyToId}.` : "Posted a new top-level discussion comment.",
+        { comment },
+      );
+    } catch (error) {
+      if (isGitHubApiError(error)) return textResult(error.message, { code: error.code }, true);
+      return textResult("Discussion comment failed unexpectedly.", undefined, true);
+    }
+  },
+};
+
 export const githubPmTools: PluginToolDefinition[] = [
   githubPmStatusTool,
   githubPmCreateIssueTool,
@@ -502,4 +553,5 @@ export const githubPmTools: PluginToolDefinition[] = [
   githubPmUpdateMilestoneTool,
   githubPmSetMilestoneStateTool,
   githubPmDeleteMilestoneTool,
+  githubPmAddDiscussionCommentTool,
 ];

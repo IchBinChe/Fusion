@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PluginContext } from "@fusion/plugin-sdk";
-import { discussionRoutes, getDiscussionCategories, getDiscussionsList } from "../discussion-routes.js";
+import {
+  discussionRoutes,
+  getDiscussionCategories,
+  getDiscussionCommentsRoute,
+  getDiscussionDetailRoute,
+  getDiscussionRepliesRoute,
+  getDiscussionsList,
+  postDiscussionComment,
+} from "../discussion-routes.js";
 import { buildDiscussionSearchQuery } from "../github-client.js";
 import { SELECTED_REPO_SETTING_ID } from "../repo-config.js";
 
@@ -39,10 +47,14 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("github-pm discussion routes", () => {
-  it("registers exactly the two discussion routes", () => {
+  it("registers exactly the six discussion routes", () => {
     expect(discussionRoutes.map((r) => `${r.method} ${r.path}`)).toEqual([
       "GET /discussions/categories",
       "GET /discussions/list",
+      "GET /discussions/detail",
+      "GET /discussions/comments",
+      "GET /discussions/replies",
+      "POST /discussions/comments",
     ]);
   });
 
@@ -217,6 +229,153 @@ describe("github-pm discussion routes", () => {
       vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ message: "Bad credentials super-secret-pat" }, 401)));
       const ctx = ctxFor({ personalAccessToken: "super-secret-pat" });
       const result = await getDiscussionsList({ query: { repo: "acme/widgets" } }, ctx);
+      expect(JSON.stringify(result.body)).not.toContain("super-secret-pat");
+    });
+  });
+
+  describe("GET /discussions/detail (KB-006)", () => {
+    it("400s on a missing/invalid number", async () => {
+      const result = await getDiscussionDetailRoute({ query: { repo: "acme/widgets" } }, ctxFor({ personalAccessToken: "ghp_token" }));
+      expect(result).toMatchObject({ status: 400, body: { code: "validation_error" } });
+    });
+
+    it("401s when unauthenticated", async () => {
+      const result = await getDiscussionDetailRoute({ query: { repo: "acme/widgets", number: "7" } }, ctxFor({}));
+      expect(result).toMatchObject({ status: 401, body: { ok: false, authenticated: false, code: "not_authenticated" } });
+    });
+
+    it("bundles the discussion plus its first comment/reply page happy-path", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({
+        data: {
+          repository: {
+            discussion: {
+              id: "D_1", number: 7, title: "Q", url: "https://github.com/acme/widgets/discussions/7", body: "body", upvoteCount: 1,
+              author: { login: "octocat" }, createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z", answerChosenAt: null,
+              category: { name: "Q&A", emoji: "?", isAnswerable: true },
+              comments: { totalCount: 1, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [
+                { id: "DC_1", body: "c1", upvoteCount: 0, author: { login: "a" }, createdAt: "2026-01-01T00:00:00Z", replies: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } },
+              ] },
+            },
+          },
+        },
+      })));
+      const ctx = ctxFor({ personalAccessToken: "ghp_token" });
+      const result = await getDiscussionDetailRoute({ query: { repo: "acme/widgets", number: "7" } }, ctx);
+      expect(result.status).toBe(200);
+      expect((result.body as any).discussion.id).toBe("D_1");
+      expect((result.body as any).discussion.comments).toHaveLength(1);
+    });
+
+    it("404s when the discussion is not found", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ data: { repository: { discussion: null } } })));
+      const ctx = ctxFor({ personalAccessToken: "ghp_token" });
+      const result = await getDiscussionDetailRoute({ query: { repo: "acme/widgets", number: "999" } }, ctx);
+      expect(result).toMatchObject({ status: 404, body: { code: "not_found" } });
+    });
+
+    it("maps a GraphQL error through githubErrorToResponse rather than degrading", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ errors: [{ message: "Discussions are disabled" }] })));
+      const ctx = ctxFor({ personalAccessToken: "ghp_token" });
+      const result = await getDiscussionDetailRoute({ query: { repo: "acme/widgets", number: "7" } }, ctx);
+      expect(result).toMatchObject({ status: 400, body: { code: "graphql_error" } });
+    });
+  });
+
+  describe("GET /discussions/comments (KB-006 lazy pagination)", () => {
+    it("400s on a missing/invalid number", async () => {
+      const result = await getDiscussionCommentsRoute({ query: { repo: "acme/widgets" } }, ctxFor({ personalAccessToken: "ghp_token" }));
+      expect(result).toMatchObject({ status: 400, body: { code: "validation_error" } });
+    });
+
+    it("fetches a subsequent page by cursor", async () => {
+      const fetchImpl = vi.fn(async () => jsonResponse({
+        data: { repository: { discussion: { comments: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ id: "DC_2", body: "p2", upvoteCount: 0, author: { login: "a" }, createdAt: "2026-01-01T00:00:00Z", replies: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } }] } } } },
+      }));
+      vi.stubGlobal("fetch", fetchImpl);
+      const ctx = ctxFor({ personalAccessToken: "ghp_token" });
+      const result = await getDiscussionCommentsRoute({ query: { repo: "acme/widgets", number: "7", after: "cursor-1" } }, ctx);
+      expect(result.status).toBe(200);
+      expect((result.body as any).comments).toHaveLength(1);
+      expect((result.body as any).nextCursor).toBeNull();
+      const sentVariables = JSON.parse(String((fetchImpl.mock.calls[0][1] as RequestInit).body)).variables;
+      expect(sentVariables.after).toBe("cursor-1");
+    });
+  });
+
+  describe("GET /discussions/replies (KB-006 lazy pagination)", () => {
+    it("400s on a missing commentId", async () => {
+      const result = await getDiscussionRepliesRoute({ query: {} }, ctxFor({ personalAccessToken: "ghp_token" }));
+      expect(result).toMatchObject({ status: 400, body: { code: "validation_error" } });
+    });
+
+    it("fetches a subsequent reply page addressed by commentId", async () => {
+      const fetchImpl = vi.fn(async () => jsonResponse({
+        data: { node: { replies: { pageInfo: { hasNextPage: true, endCursor: "reply-cursor-2" }, nodes: [{ id: "DR_2", body: "r", upvoteCount: 0, author: { login: "a" }, createdAt: "2026-01-01T00:00:00Z" }] } } },
+      }));
+      vi.stubGlobal("fetch", fetchImpl);
+      const ctx = ctxFor({ personalAccessToken: "ghp_token" });
+      const result = await getDiscussionRepliesRoute({ query: { commentId: "DC_1", after: "reply-cursor-1" } }, ctx);
+      expect(result.status).toBe(200);
+      expect((result.body as any).replies).toHaveLength(1);
+      expect((result.body as any).nextCursor).toBe("reply-cursor-2");
+      const sentVariables = JSON.parse(String((fetchImpl.mock.calls[0][1] as RequestInit).body)).variables;
+      expect(sentVariables.commentId).toBe("DC_1");
+      expect(sentVariables.after).toBe("reply-cursor-1");
+    });
+  });
+
+  describe("POST /discussions/comments (KB-006 write route)", () => {
+    it("400s on a missing discussionId or empty body", async () => {
+      const result = await postDiscussionComment({ body: { body: "hi" } }, ctxFor({ personalAccessToken: "ghp_token" }));
+      expect(result).toMatchObject({ status: 400, body: { code: "validation_error" } });
+    });
+
+    it("blocks an unconfirmed write with confirmWrites on, performing ZERO auth/client calls", async () => {
+      const fetchImpl = vi.fn();
+      vi.stubGlobal("fetch", fetchImpl);
+      const ctx = ctxFor({ personalAccessToken: "ghp_token", confirmWrites: true });
+      const result = await postDiscussionComment({ body: { discussionId: "D_1", body: "hello" } }, ctx);
+      expect(result).toMatchObject({ status: 400, body: { code: "confirmation_required" } });
+      expect(fetchImpl).not.toHaveBeenCalled();
+    });
+
+    it("posts a top-level comment (no replyToId) when confirmed", async () => {
+      const fetchImpl = vi.fn(async () => jsonResponse({
+        data: { addDiscussionComment: { comment: { id: "DC_9", body: "hello", upvoteCount: 0, author: { login: "octocat" }, createdAt: "2026-01-01T00:00:00Z", replyTo: null } } },
+      }));
+      vi.stubGlobal("fetch", fetchImpl);
+      const ctx = ctxFor({ personalAccessToken: "ghp_token", confirmWrites: true });
+      const result = await postDiscussionComment({ body: { discussionId: "D_1", body: "hello", confirmed: true } }, ctx);
+      expect(result.status).toBe(200);
+      expect((result.body as any).comment.replyToId).toBeNull();
+      const sentVariables = JSON.parse(String((fetchImpl.mock.calls[0][1] as RequestInit).body)).variables;
+      expect(Object.prototype.hasOwnProperty.call(sentVariables.input, "replyToId")).toBe(false);
+    });
+
+    it("posts a reply with the exact parent replyToId when supplied", async () => {
+      const fetchImpl = vi.fn(async () => jsonResponse({
+        data: { addDiscussionComment: { comment: { id: "DC_10", body: "a reply", upvoteCount: 0, author: { login: "octocat" }, createdAt: "2026-01-01T00:00:00Z", replyTo: { id: "DC_1" } } } },
+      }));
+      vi.stubGlobal("fetch", fetchImpl);
+      const ctx = ctxFor({ personalAccessToken: "ghp_token", confirmWrites: false });
+      const result = await postDiscussionComment({ body: { discussionId: "D_1", body: "a reply", replyToId: "DC_1" } }, ctx);
+      expect(result.status).toBe(200);
+      expect((result.body as any).comment.replyToId).toBe("DC_1");
+      const sentVariables = JSON.parse(String((fetchImpl.mock.calls[0][1] as RequestInit).body)).variables;
+      expect(sentVariables.input.replyToId).toBe("DC_1");
+    });
+
+    it("maps a GitHubApiError through githubErrorToResponse", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ message: "Not Found" }, 404)));
+      const ctx = ctxFor({ personalAccessToken: "ghp_token", confirmWrites: false });
+      const result = await postDiscussionComment({ body: { discussionId: "D_1", body: "hello" } }, ctx);
+      expect(result).toMatchObject({ status: 404, body: { code: "not_found" } });
+    });
+
+    it("never echoes the token in any response body", async () => {
+      vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ message: "Bad credentials super-secret-pat" }, 401)));
+      const ctx = ctxFor({ personalAccessToken: "super-secret-pat", confirmWrites: false });
+      const result = await postDiscussionComment({ body: { discussionId: "D_1", body: "hello" } }, ctx);
       expect(JSON.stringify(result.body)).not.toContain("super-secret-pat");
     });
   });

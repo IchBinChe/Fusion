@@ -47,7 +47,7 @@ describe("github-pm plugin routes", () => {
     vi.unstubAllGlobals();
   });
 
-  it("registers the /status, /auth/diagnostics, FUSI-004 repo-config, FUSI-009 repo capabilities, FUSI-005 taxonomy, FUSI-013 issue-detail, FUSI-012 issues-list, FUSI-014 issue-write, KB-002 label, KB-003 milestone, and KB-005 discussion routes", () => {
+  it("registers the /status, /auth/diagnostics, FUSI-004 repo-config, FUSI-009 repo capabilities, FUSI-005 taxonomy, FUSI-013 issue-detail, FUSI-012 issues-list, FUSI-014 issue-write, KB-002 label, KB-003 milestone, KB-005 discussion, and KB-006 discussion-detail routes", () => {
     expect(githubPmRoutes.map((route) => `${route.method} ${route.path}`)).toEqual([
       "GET /status",
       "GET /auth/diagnostics",
@@ -81,6 +81,10 @@ describe("github-pm plugin routes", () => {
       "POST /milestones/reassign-open-issues",
       "GET /discussions/categories",
       "GET /discussions/list",
+      "GET /discussions/detail",
+      "GET /discussions/comments",
+      "GET /discussions/replies",
+      "POST /discussions/comments",
     ]);
   });
 });

@@ -9,6 +9,7 @@ import { IssueWritePanel } from "./IssueWritePanel.js";
 import { LabelsPanel } from "./LabelsPanel.js";
 import { MilestonesPanel } from "./MilestonesPanel.js";
 import { DiscussionsPanel } from "./DiscussionsPanel.js";
+import { DiscussionDetailView } from "./DiscussionDetailView.js";
 import { useRepoCapabilities } from "./useRepoCapabilities.js";
 import { mapRepoCapabilitiesToTabs, type TabGating } from "./tab-capabilities.js";
 import { TabCapabilityNotice } from "./TabCapabilityNotice.js";
@@ -172,12 +173,18 @@ function GitHubPmTabPanelBody({
   context,
   confirmWrites,
   gating,
+  selectedDiscussionNumber,
+  onSelectDiscussion,
+  onBackFromDiscussion,
 }: {
   tabId: GitHubPmTabId;
   repo: string | null;
   context?: PluginDashboardViewContext;
   confirmWrites: boolean;
   gating?: TabGating;
+  selectedDiscussionNumber: number | null;
+  onSelectDiscussion: (discussionNumber: number) => void;
+  onBackFromDiscussion: () => void;
 }) {
   if (gating?.disabled) {
     return <TabCapabilityNotice message={gating.message} fix={gating.fix} reason={gating.reason} />;
@@ -225,8 +232,30 @@ function GitHubPmTabPanelBody({
   no `confirmWrites` prop) and renders inside the SAME `github-pm-view__panel card` tabpanel
   div -- no second card wrapper.
   */
+  /*
+  FNXC:GithubPmDiscussions 2026-07-25-15:30:
+  KB-006 mounts `DiscussionDetailView` from the SAME `discussions` tabpanel, toggling between
+  the browse panel and the detail view via `selectedDiscussionNumber` -- exactly the
+  panel<->detail toggle FUSI-014's issues tab uses (mount once, no forked second surface). The
+  `DiscussionsPanel`'s `onSelectDiscussion` callback drives `selectedDiscussionNumber` in the
+  parent (`GitHubPmView`); `DiscussionDetailView`'s `onBack` clears it, returning to the browse
+  panel. Both stay mounted-but-hidden semantics do NOT apply here (this is an internal toggle
+  within an already-hidden-or-visible tabpanel, not the outer FUSI-008 tab mount contract).
+  */
   if (tabId === "discussions") {
-    return <DiscussionsPanel repo={repo} context={context} />;
+    if (repo && selectedDiscussionNumber !== null) {
+      return (
+        <DiscussionDetailView
+          key={selectedDiscussionNumber}
+          context={context}
+          repo={repo}
+          discussionNumber={selectedDiscussionNumber}
+          confirmWrites={confirmWrites}
+          onBack={onBackFromDiscussion}
+        />
+      );
+    }
+    return <DiscussionsPanel repo={repo} context={context} onSelectDiscussion={onSelectDiscussion} />;
   }
   return <TabPlaceholderPanel tabId={tabId} />;
 }
@@ -277,6 +306,13 @@ export function GitHubPmView({ context }: { context?: PluginDashboardViewContext
   treated as ON via the `?? true` fallback below, not as OFF.
   */
   const [confirmWrites, setConfirmWrites] = useState<boolean>(true);
+  /*
+  FNXC:GithubPmDiscussions 2026-07-25-15:30:
+  KB-006 selection state for the discussions tab's panel<->detail toggle. Reset to null
+  whenever the repo context changes so a stale discussion number from a previous repo never
+  leaks into a newly-selected repo's discussions tab.
+  */
+  const [selectedDiscussionNumber, setSelectedDiscussionNumber] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -327,6 +363,10 @@ export function GitHubPmView({ context }: { context?: PluginDashboardViewContext
   }, [context?.projectId]);
 
   const repoContextValue = selectedRepo ?? defaultRepo;
+
+  useEffect(() => {
+    setSelectedDiscussionNumber(null);
+  }, [repoContextValue]);
 
   /*
   FNXC:GithubPmCapabilities 2026-07-24-09:35:
@@ -385,6 +425,9 @@ export function GitHubPmView({ context }: { context?: PluginDashboardViewContext
               context={context}
               confirmWrites={confirmWrites}
               gating={tabGatingById.get(tab.id)}
+              selectedDiscussionNumber={selectedDiscussionNumber}
+              onSelectDiscussion={setSelectedDiscussionNumber}
+              onBackFromDiscussion={() => setSelectedDiscussionNumber(null)}
             />
           </div>
         ))}

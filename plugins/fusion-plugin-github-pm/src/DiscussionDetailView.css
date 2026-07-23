@@ -1,0 +1,264 @@
+/*
+FNXC:GithubPmDiscussions 2026-07-25-15:10:
+Component-scoped CSS for DiscussionDetailView.tsx. Tokens only (space/radius/shadow/color/
+status/duration/transition) -- no hardcoded px/hex/rgba, use color-mix(...) for translucency,
+per AGENTS.md's styling rule. Mirrors IssueDetailView.css's structural conventions (state
+badges, comment cards, load-more buttons, timeline-style meta rows) plus the SAME 48rem
+mobile breakpoint every sibling panel/detail-view CSS file uses, extended with reply-thread
+indentation (desktop AND mobile) and the composer/reply-form layout this view adds.
+*/
+
+.discussion-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.discussion-detail--loading,
+.discussion-detail--error {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--text-muted);
+}
+
+.discussion-detail--error {
+  color: var(--color-error);
+}
+
+.discussion-detail__spinner {
+  animation: discussion-detail-spin 1s linear infinite;
+}
+
+@keyframes discussion-detail-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.discussion-detail__header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.discussion-detail__back {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.discussion-detail__title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.discussion-detail__title {
+  margin: 0;
+  font-size: var(--font-size-lg);
+}
+
+.discussion-detail__number {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.discussion-detail__stat {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.discussion-detail__category-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  border-radius: var(--radius-pill);
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--font-size-sm);
+  border: var(--btn-border-width) solid var(--border);
+  color: var(--text-muted);
+}
+
+.discussion-detail__answered-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  border-radius: var(--radius-pill);
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  color: var(--text-muted);
+  border: var(--btn-border-width) solid var(--border);
+}
+
+.discussion-detail__answered-badge--answered {
+  color: var(--color-success);
+  border-color: color-mix(in srgb, var(--color-success) 40%, var(--border));
+}
+
+.discussion-detail__external-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  width: fit-content;
+}
+
+.discussion-detail__warning {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  margin: 0;
+  color: var(--color-warning);
+  font-weight: 600;
+}
+
+.discussion-detail__description {
+  border: var(--btn-border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+}
+
+.discussion-detail__empty-body {
+  margin: 0;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.discussion-detail__section-title {
+  margin: 0 0 var(--space-sm);
+  font-size: var(--font-size-md);
+}
+
+.discussion-detail__guidance {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.discussion-detail__comment-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.discussion-detail__comment {
+  border: var(--btn-border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm) var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.discussion-detail__comment-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-sm);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.discussion-detail__comment-author {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.discussion-detail__comment-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+/* Reply-thread indentation -- the ONE nesting level GitHub Discussions support. */
+.discussion-detail__reply-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 var(--space-lg);
+  border-left: var(--btn-border-width) solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.discussion-detail__reply {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding-left: var(--space-sm);
+}
+
+.discussion-detail__reply-toggle,
+.discussion-detail__load-more {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.discussion-detail__load-more--replies {
+  margin-left: var(--space-lg);
+}
+
+.discussion-detail__reply-form,
+.discussion-detail__composer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.discussion-detail__reply-form {
+  margin-left: var(--space-lg);
+  border: var(--btn-border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm);
+}
+
+.discussion-detail__reply-form-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.discussion-detail__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.discussion-detail__composer {
+  margin-top: var(--space-md);
+  border-top: var(--btn-border-width) solid var(--border);
+  padding-top: var(--space-md);
+}
+
+@media (max-width: 48rem) {
+  .discussion-detail__title-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .discussion-detail__comment-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-xs);
+  }
+
+  .discussion-detail__reply-list {
+    padding-left: var(--space-md);
+  }
+
+  .discussion-detail__load-more--replies,
+  .discussion-detail__reply-form {
+    margin-left: var(--space-md);
+  }
+}

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PluginContext } from "@fusion/plugin-sdk";
 import {
+  githubPmAddDiscussionCommentTool,
   githubPmCommentIssueTool,
   githubPmCreateIssueTool,
   githubPmCreateLabelTool,
@@ -63,6 +64,7 @@ describe("github-pm plugin tools", () => {
       "github_pm_update_milestone",
       "github_pm_set_milestone_state",
       "github_pm_delete_milestone",
+      "github_pm_add_discussion_comment",
     ]);
   });
 
@@ -452,6 +454,73 @@ describe("github-pm milestone tools (KB-003)", () => {
     const result = await githubPmCreateMilestoneTool.execute({ repo: "acme/widgets", title: "v3", confirmed: true }, ctx({ personalAccessToken: "secret-tok" }));
     expect(result.isError).toBe(true);
     expect(result.content[0].text).not.toContain("secret-tok");
+    vi.unstubAllGlobals();
+  });
+});
+
+/*
+FNXC:GithubPmDiscussions 2026-07-25-14:30:
+KB-006 agent-tool tests: top-level vs reply parent-linkage, and the missing-repo/auth error
+paths, mirroring the FUSI-014/KB-002/KB-003 write-tool test shape exactly.
+*/
+describe("github_pm_add_discussion_comment (KB-006)", () => {
+  it("400s (isError) on a missing discussionId or empty body", async () => {
+    const result = await githubPmAddDiscussionCommentTool.execute({ discussionId: "D_1" }, ctx({ personalAccessToken: "ghp_token", confirmWrites: false }));
+    expect(result.isError).toBe(true);
+  });
+
+  it("posts a top-level comment (no replyToId sent) and reports a null replyToId", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      data: { addDiscussionComment: { comment: { id: "DC_9", body: "hello", upvoteCount: 0, author: { login: "octocat" }, createdAt: "2026-01-01T00:00:00Z", replyTo: null } } },
+    }));
+    vi.stubGlobal("fetch", fetchImpl);
+    const result = await githubPmAddDiscussionCommentTool.execute(
+      { repo: "acme/widgets", discussionId: "D_1", body: "hello", confirmed: true },
+      ctx({ personalAccessToken: "ghp_token" }),
+    );
+    expect(result.isError).toBeFalsy();
+    expect(result.details).toMatchObject({ comment: { replyToId: null } });
+    const sentVariables = JSON.parse(String((fetchImpl.mock.calls[0][1] as RequestInit).body)).variables;
+    expect(Object.prototype.hasOwnProperty.call(sentVariables.input, "replyToId")).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it("posts a reply with the exact parent replyToId and reports the matching returned id (parent-linkage invariant)", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      data: { addDiscussionComment: { comment: { id: "DC_10", body: "a reply", upvoteCount: 0, author: { login: "octocat" }, createdAt: "2026-01-01T00:00:00Z", replyTo: { id: "DC_1" } } } },
+    }));
+    vi.stubGlobal("fetch", fetchImpl);
+    const result = await githubPmAddDiscussionCommentTool.execute(
+      { repo: "acme/widgets", discussionId: "D_1", body: "a reply", replyToId: "DC_1", confirmed: true },
+      ctx({ personalAccessToken: "ghp_token" }),
+    );
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("DC_1");
+    expect(result.details).toMatchObject({ comment: { replyToId: "DC_1" } });
+    const sentVariables = JSON.parse(String((fetchImpl.mock.calls[0][1] as RequestInit).body)).variables;
+    expect(sentVariables.input.replyToId).toBe("DC_1");
+    vi.unstubAllGlobals();
+  });
+
+  it("missing repo/selection yields isError:true with an actionable message", async () => {
+    const result = await githubPmAddDiscussionCommentTool.execute({ discussionId: "D_1", body: "hi", confirmed: true }, ctx({}));
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("No repository was specified");
+  });
+
+  it("unauthenticated yields isError:true with an actionable message", async () => {
+    const result = await githubPmAddDiscussionCommentTool.execute({ repo: "acme/widgets", discussionId: "D_1", body: "hi", confirmed: true }, ctx({}));
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("not authenticated");
+  });
+
+  it("blocks an unconfirmed write with confirmWrites ON, performing ZERO auth/client calls", async () => {
+    const fetchImpl = vi.fn();
+    vi.stubGlobal("fetch", fetchImpl);
+    const result = await githubPmAddDiscussionCommentTool.execute({ repo: "acme/widgets", discussionId: "D_1", body: "hi" }, ctx({ personalAccessToken: "ghp_token", confirmWrites: true }));
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("confirmation");
+    expect(fetchImpl).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
 });

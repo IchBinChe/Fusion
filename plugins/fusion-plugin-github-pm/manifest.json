@@ -39,6 +39,13 @@
       "label": "Per-repo configuration state (plugin-managed)",
       "description": "Plugin-managed serialized JSON holding each repository's autonomy mode, approved taxonomy version, and view preferences. Not intended for manual editing.",
       "group": "Repositories"
+    },
+    "taxonomyProposalState": {
+      "type": "string",
+      "multiline": true,
+      "label": "Taxonomy proposal state (plugin-managed)",
+      "description": "Plugin-managed serialized JSON holding each repository's versioned label/field/category taxonomy proposal drafts. Not intended for manual editing.",
+      "group": "Repositories"
     }
   },
   "dashboardViews": [

@@ -228,6 +228,77 @@ describe("GitHubClient GraphQL", () => {
   });
 });
 
+describe("GitHubClient discussions (FUSI-005)", () => {
+  it("lists discussions, folding category name into the same query", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      data: {
+        repository: {
+          discussions: {
+            nodes: [
+              { number: 1, title: "How do I configure X?", createdAt: "2026-01-01T00:00:00Z", category: { name: "Q&A" } },
+              { number: 2, title: "Feature idea: Y", createdAt: "2026-01-02T00:00:00Z", category: { name: "Ideas" } },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      },
+    })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const discussions = await client.listDiscussions("acme", "widgets");
+
+    expect(discussions).toEqual([
+      { number: 1, title: "How do I configure X?", category: "Q&A", createdAt: "2026-01-01T00:00:00Z" },
+      { number: 2, title: "Feature idea: Y", category: "Ideas", createdAt: "2026-01-02T00:00:00Z" },
+    ]);
+  });
+
+  it("treats a missing category as null rather than throwing", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      data: { repository: { discussions: { nodes: [{ number: 1, title: "Uncategorized", category: null }], pageInfo: { hasNextPage: false, endCursor: null } } } },
+    })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const discussions = await client.listDiscussions("acme", "widgets");
+
+    expect(discussions[0].category).toBeNull();
+  });
+
+  it("paginates across endCursor pages like listLabels", async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ data: { repository: { discussions: { nodes: [{ number: 1, title: "first", category: { name: "General" } }], pageInfo: { hasNextPage: true, endCursor: "cursor-1" } } } } }))
+      .mockResolvedValueOnce(jsonResponse({ data: { repository: { discussions: { nodes: [{ number: 2, title: "second", category: { name: "General" } }], pageInfo: { hasNextPage: false, endCursor: null } } } } }));
+    const client = new GitHubClient("token", fetchImpl as unknown as typeof fetch);
+
+    const discussions = await client.listDiscussions("acme", "widgets");
+
+    expect(discussions.map((discussion) => discussion.number)).toEqual([1, 2]);
+  });
+
+  it("degrades to an empty array (never throws) when the token lacks discussion scope", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ errors: [{ message: "Resource not accessible by integration" }] })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    await expect(client.listDiscussions("acme", "widgets")).resolves.toEqual([]);
+  });
+
+  it("degrades to an empty array on a 404 (repo has discussions disabled)", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ message: "Not Found" }, 404)) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    await expect(client.listDiscussions("acme", "widgets")).resolves.toEqual([]);
+  });
+
+  it("still throws on an unrelated failure (e.g. network_error), not silently swallowed", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("getaddrinfo ENOTFOUND");
+    }) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    await expect(client.listDiscussions("acme", "widgets")).rejects.toMatchObject({ code: "network_error" });
+  });
+});
+
 describe("GitHubClient token scopes", () => {
   it("reports project scope presence from x-oauth-scopes", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({}, 200, { "x-oauth-scopes": "repo, read:org, project" })) as unknown as typeof fetch;

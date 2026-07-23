@@ -40,6 +40,11 @@ describe("github-pm manifest", () => {
     expect(manifest.settingsSchema.repoConfigState.multiline).toBe(true);
   });
 
+  it("declares the FUSI-005 plugin-managed taxonomyProposalState setting as a multiline string, not a secret", () => {
+    expect(manifest.settingsSchema.taxonomyProposalState.type).toBe("string");
+    expect(manifest.settingsSchema.taxonomyProposalState.multiline).toBe(true);
+  });
+
   it("declares a single github-pm dashboard view", () => {
     expect(manifest.dashboardViews).toHaveLength(1);
     expect(manifest.dashboardViews[0]).toMatchObject({

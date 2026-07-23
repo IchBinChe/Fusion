@@ -14,7 +14,15 @@ describe("github-pm settings", () => {
       defaultAutonomy: "approve-all",
       selectedRepo: null,
       repoConfigs: {},
+      taxonomyProposals: {},
     });
+  });
+
+  it("surfaces the FUSI-005 taxonomy proposal state map from the settings blob", () => {
+    const resolved = resolveGitHubPmSettings({
+      taxonomyProposalState: JSON.stringify({ "owner/repo": { proposals: [{ version: 1, generatedAt: "2026-07-24T00:00:00.000Z", status: "draft", sourceStats: { issueCount: 1, discussionCount: 0, existingLabelCount: 1 }, labels: [], fields: [], categories: [] }] } }),
+    });
+    expect(resolved.taxonomyProposals["owner/repo"].proposals).toHaveLength(1);
   });
 
   it("surfaces the selected repo and per-repo config map from the settings blob (FUSI-004)", () => {

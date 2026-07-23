@@ -166,6 +166,27 @@ export interface GitHubTokenScopes {
   hasScope: (scope: string) => boolean;
 }
 
+export interface GitHubDiscussionListOptions {
+  /** Bounds total items returned across all GraphQL pages. Default: a single page. */
+  maxItems?: number;
+}
+
+/**
+ * FNXC:GitHubPmClient 2026-07-24-00:00:
+ * FUSI-005 read-only discussion-history input for the taxonomy generator. Mirrors
+ * GitHubIssueListItem's shape closely enough for the taxonomy aggregator to treat
+ * issues and discussions uniformly. `category` folds the discussion's category name
+ * into the same query (per the task's "fold discussion categories into the same
+ * query" instruction) so no second round-trip is needed to learn a repo's discussion
+ * taxonomy.
+ */
+export interface GitHubDiscussionListItem {
+  number: number;
+  title: string;
+  category: string | null;
+  createdAt?: string;
+}
+
 /**
  * FNXC:GitHubPmClient 2026-07-24-00:00:
  * Portable, plugin-owned GitHub API client. Constructor takes a token (may be undefined for
@@ -360,6 +381,51 @@ export class GitHubClient {
 
   /**
    * FNXC:GitHubPmClient 2026-07-24-00:00:
+   * FUSI-005: read-only discussion-history input for the taxonomy generator (Step 1).
+   * Mirrors `listLabels`'s GraphQL-cursor-pagination shape exactly, folding each
+   * discussion's category name into the same query per-node (no second round-trip).
+   * Discussions require the `repo`/`public_repo` scope (read:discussion in newer PAT
+   * models); when the token lacks it GitHub returns a GraphQL error (mapped by `graphql()`
+   * to a typed GitHubApiError with code `graphql_error`, or a REST-shaped `not_found`/
+   * `auth_error` for some token types) rather than a hard failure. This method degrades
+   * that to an empty array instead of throwing, so a taxonomy generation pass over a repo
+   * whose token can't see discussions still succeeds using issues+labels alone ("no
+   * discussion data", not "generation impossible").
+   */
+  async listDiscussions(owner: string, repo: string, options: GitHubDiscussionListOptions = {}): Promise<GitHubDiscussionListItem[]> {
+    const maxItems = options.maxItems ?? GRAPHQL_PAGE_SIZE;
+    try {
+      return await this.paginateGraphQl<GitHubDiscussionListItem>(async (after) => {
+        const data = await this.graphql<{
+          repository?: {
+            discussions?: {
+              nodes?: Array<{ number: number; title: string; createdAt?: string; category?: { name?: string } | null }>;
+              pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
+            };
+          };
+        }>(GITHUB_DISCUSSIONS_QUERY, { owner, repo, first: Math.min(GRAPHQL_PAGE_SIZE, maxItems), after: after ?? null });
+        const connection = data.repository?.discussions;
+        const nodes = (connection?.nodes ?? []).map((node) => ({
+          number: node.number,
+          title: node.title,
+          category: typeof node.category?.name === "string" ? node.category.name : null,
+          createdAt: node.createdAt,
+        }));
+        return {
+          nodes,
+          pageInfo: { hasNextPage: connection?.pageInfo?.hasNextPage === true, endCursor: connection?.pageInfo?.endCursor ?? null },
+        };
+      }, maxItems);
+    } catch (error) {
+      if (isGitHubApiError(error) && (error.code === "not_found" || error.code === "auth_error" || error.code === "graphql_error")) {
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * FNXC:GitHubPmClient 2026-07-24-00:00:
    * Reads the `x-oauth-scopes` header from a cheap authenticated REST call so FUSI-002's
    * scope-diagnostics feature (e.g. detecting a missing `project` scope for Projects v2) has a
    * primitive to build on. This module intentionally stops at exposing the header -- the
@@ -388,6 +454,15 @@ const GITHUB_LABELS_QUERY = `query FusionGitHubPmLabels($owner: String!, $repo: 
   repository(owner: $owner, name: $repo) {
     labels(first: $first, after: $after) {
       nodes { id name color description }
+      pageInfo { hasNextPage endCursor }
+    }
+  }
+}`;
+
+const GITHUB_DISCUSSIONS_QUERY = `query FusionGitHubPmDiscussions($owner: String!, $repo: String!, $first: Int!, $after: String) {
+  repository(owner: $owner, name: $repo) {
+    discussions(first: $first, after: $after) {
+      nodes { number title createdAt category { name } }
       pageInfo { hasNextPage endCursor }
     }
   }

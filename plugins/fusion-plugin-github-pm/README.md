@@ -98,6 +98,37 @@ If `ctx.taskStore.getPluginStore` is unavailable, the write routes return `500 {
 
 See `src/repo-config.ts` for the domain module (`RepoConfig`, `RepoConfigMap`, `normalizeRepoKey`, `defaultRepoConfig`, `parseRepoConfigs`, `serializeRepoConfigs`, `resolveRepoConfig`, `upsertRepoConfig`) and `src/__tests__/repo-config.test.ts` / `src/__tests__/repo-config-routes.test.ts` for the corruption-tolerance, immutability, and configure-A/switch-B/return-to-A restart-survival coverage.
 
+## Phase 1: Taxonomy proposal review (FUSI-005)
+
+Given the currently selected repo, the plugin can analyze its real issue/discussion/label history and propose a bespoke, **repo-specific** label/field/category taxonomy. This is Phase 1 of the AI Structure-Generation & Classification milestone; **Phase 2 (classifying new issues/discussions into the accepted taxonomy) is explicitly out of scope for this feature.**
+
+Four invariants hold everywhere in this feature (see the `FNXC:GithubPmTaxonomy` comments in `src/taxonomy-proposal.ts`, `src/taxonomy-store.ts`, and `src/taxonomy-routes.ts` for the full rationale):
+
+1. **Data-driven** — the proposal is derived from `aggregateRepoSignal`'s summary of the repo's actual observed labels (with usage frequency), issue titles, and discussion categories/titles. There is no hardcoded default taxonomy anywhere in the module.
+2. **Reviewable** — generating a proposal only ever creates a new **draft**; it is never applied automatically.
+3. **Reversible** — proposals are versioned per repo (`nextProposalVersion` increments per repo); a bad draft can be rejected or superseded by a fresh `propose` call without losing history.
+4. **No silent apply** — only the explicit **Accept** route can ever set `RepoConfig.approvedTaxonomyVersion` (the repo's active taxonomy). Propose, Edit, and Reject never touch it.
+
+**Data source.** `src/github-client.ts`'s `listIssues`/`listLabels` (FUSI-003) plus a new `listDiscussions` GraphQL method (folding each discussion's category into the same query) supply the repo's history. `listDiscussions` degrades to `[]` — never throws — when the resolved token lacks discussion access (missing scope, or discussions disabled on the repo), so a repo whose token can't see discussions still gets a proposal from issues + labels alone.
+
+**AI pass.** Generation flows exclusively through the engine-injected `ctx.createAiSession({ cwd, systemPrompt, tools: "readonly" })` factory (available on plugin **route** contexts only, not tool contexts) — the same seam used by `fusion-plugin-whatsapp-chat`. This is what makes the pass honor project `testMode`/mock and model-lane settings: no direct provider/model call exists anywhere in `src/taxonomy-proposal.ts`. When `ctx.createAiSession` is undefined (engine not loaded), `POST /taxonomy/propose` returns a typed `502 { code: "ai-unavailable" }` instead of throwing. An unparseable assistant response returns `502 { code: "parse-error" }`.
+
+**Persistence.** Mirrors FUSI-004's pattern exactly: a per-repo map of proposal history is stored as a serialized-JSON string setting (`taxonomyProposalState`, `src/taxonomy-store.ts`), corruption-tolerant on read (`parseTaxonomyState` degrades undefined/malformed/non-object input to `{}`, never throws), with a stable sorted-key serialization for deterministic round-trips.
+
+**Routes** (plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`, `src/taxonomy-routes.ts`):
+
+- `POST /taxonomy/propose` — body `{ repo? }` (falls back to the selected repo). Fetches history via the resolved token (`resolveGitHubAuth`, FUSI-002), runs the AI pass, and appends a new **draft** version. Does **not** touch `approvedTaxonomyVersion`.
+- `GET /taxonomy/proposals` — read-only. Query `?repo=` (or the selected repo). Returns `{ ok, repo, proposals, approvedTaxonomyVersion }`. No writes.
+- `PUT /taxonomy/proposals/accept` — body `{ repo?, version }`. The **only** route that mutates the active taxonomy: marks the version accepted in the proposal store AND sets `RepoConfig.approvedTaxonomyVersion = version` via `upsertRepoConfig`, in a single atomic `updatePluginSettings` write.
+- `PUT /taxonomy/proposals/reject` — body `{ repo?, version }`. Marks a version rejected. Does not change `approvedTaxonomyVersion`.
+- `PUT /taxonomy/proposals/edit` — body `{ repo?, version, proposal }`. Replaces a draft's labels/fields/categories/rationale, keeps status `draft`. Refuses (`409 { code: "not_draft" }`) to edit an accepted/rejected version.
+
+Every write route fails closed with `500 { code: "plugin_store_unavailable" }` when `ctx.taskStore.getPluginStore` is unavailable, and no route ever echoes the PAT/token.
+
+**Dashboard panel.** `TaxonomyProposalPanel` (mounted once beneath `AuthDiagnosticsPanel` in `GitHubPmView.tsx`) reads the currently selected repo, offers a **Propose taxonomy** action (disabled with inline guidance when no repo is selected), and renders each proposal version with a status badge (Draft / Accepted / Rejected / **Active**) plus **Accept / Reject / Edit** controls — the controls are only rendered for draft proposals, so no orphaned button shells remain once a proposal is accepted or rejected.
+
+**Restart durability.** Because both the taxonomy-proposal state and the repo-config's `approvedTaxonomyVersion` live in the same durable settings blob (`central.plugin_installs.settings`), an accepted taxonomy version survives a Fusion restart — verified by `src/__tests__/taxonomy-routes.test.ts`'s restart-survival test, which rebuilds a fresh `ctx` from only the captured settings blob.
+
 ## Setup
 
 1. Install or enable **GitHub PM** from Settings → Plugins / Plugin Manager.
@@ -114,6 +145,7 @@ See `src/repo-config.ts` for the domain module (`RepoConfig`, `RepoConfigMap`, `
 | `defaultAutonomy` | `enum` (`approve-all` \| `suggest` \| `auto`) | Defaults | Default AI triage autonomy level; defaults to `approve-all`. |
 | `selectedRepo` | `string` | Repositories | Plugin-managed last-selected repo (`owner/repo`, canonicalized). Written by the repo-config select route; not hand-edited. |
 | `repoConfigState` | `string` (multiline) | Repositories | Plugin-managed serialized-JSON `RepoConfigMap`. Written by the repo-config routes; not hand-edited. |
+| `taxonomyProposalState` | `string` (multiline) | Repositories | Plugin-managed serialized-JSON `TaxonomyProposalStateMap` (FUSI-005). Written by the taxonomy routes; not hand-edited. |
 
 ## Routes
 
@@ -122,6 +154,7 @@ Plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`:
 - `GET /status` — reports `{ ok, configured, autonomy, defaultRepo }` derived solely from settings presence. Does **not** call the GitHub API and does **not** echo the PAT.
 - `GET /auth/diagnostics` — resolves the layered auth chain and returns per-capability scope diagnostics (see above). Does **not** return the resolved token/PAT value.
 - `GET /repo-config`, `PUT /repo-config`, `PUT /repo-config/select` — per-repo configuration storage (FUSI-004); see the section above.
+- `POST /taxonomy/propose`, `GET /taxonomy/proposals`, `PUT /taxonomy/proposals/accept`, `PUT /taxonomy/proposals/reject`, `PUT /taxonomy/proposals/edit` — versioned, reviewable taxonomy proposal generation (FUSI-005); see the section above.
 
 ## Agent tools
 
@@ -136,7 +169,7 @@ Plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`:
 
 ## External Integration Evidence
 
-This plugin integrates the GitHub REST + GraphQL API (consumed as a SaaS HTTP API; no downloaded binary is added by this plugin) and, optionally, the `gh` CLI for auth detection.
+This plugin integrates the GitHub REST + GraphQL API (consumed as a SaaS HTTP API; no downloaded binary is added by this plugin) and, optionally, the `gh` CLI for auth detection. FUSI-005 adds one more GraphQL surface, `repository.discussions` (consumed via the client's existing `graphql<T>()` method; see <https://docs.github.com/en/graphql/reference/objects#repository> and <https://docs.github.com/en/graphql/reference/objects#discussion>), for taxonomy-proposal history aggregation. No new CLI/binary/daemon is added by this feature.
 
 - Canonical upstream repo URL: <https://github.com/cli/cli> (`gh` CLI, used by the layered auth resolver when installed and authenticated)
 - Docs / homepage URL: <https://docs.github.com/en/rest> and <https://docs.github.com/en/graphql>

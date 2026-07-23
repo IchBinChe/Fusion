@@ -68,7 +68,54 @@ export type {
   GitHubLabelListOptions,
   GitHubLabel,
   GitHubTokenScopes,
+  GitHubDiscussionListOptions,
+  GitHubDiscussionListItem,
 } from "./github-client.js";
+export {
+  aggregateRepoSignal,
+  buildProposalSystemPrompt,
+  buildProposalUserPrompt,
+  parseProposalResponse,
+  generateTaxonomyProposal,
+} from "./taxonomy-proposal.js";
+export type {
+  TaxonomyLabel,
+  TaxonomyField,
+  TaxonomyFieldType,
+  TaxonomyCategory,
+  TaxonomyProposal,
+  TaxonomyProposalContent,
+  TaxonomyProposalStatus,
+  TaxonomyProposalSourceStats,
+  RepoSignal,
+  RepoSignalInput,
+  LabelFrequency,
+  DiscussionCategorySummary,
+  ParseProposalResult,
+  GenerateTaxonomyProposalOptions,
+  GenerateTaxonomyProposalResult,
+} from "./taxonomy-proposal.js";
+export {
+  TAXONOMY_PROPOSAL_STATE_SETTING_ID,
+  parseTaxonomyState,
+  parseTaxonomyStateFromSettings,
+  serializeTaxonomyState,
+  getRepoProposals,
+  nextProposalVersion,
+  appendDraftProposal,
+  editDraftProposal,
+  setProposalStatus,
+  getProposal,
+} from "./taxonomy-store.js";
+export type { RepoTaxonomyProposals, TaxonomyProposalStateMap } from "./taxonomy-store.js";
+export {
+  taxonomyRoutes,
+  postTaxonomyPropose,
+  getTaxonomyProposals,
+  putTaxonomyAccept,
+  putTaxonomyReject,
+  putTaxonomyEdit,
+} from "./taxonomy-routes.js";
 /*
 FNXC:GithubPmAuth 2026-07-24-00:25:
 FUSI-003's GitHub client (and any future plugin route/tool) must consume the resolved

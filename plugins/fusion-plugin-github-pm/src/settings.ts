@@ -4,6 +4,7 @@ import {
   resolveSelectedRepo,
   type RepoConfigMap,
 } from "./repo-config.js";
+import { parseTaxonomyStateFromSettings, type TaxonomyProposalStateMap } from "./taxonomy-store.js";
 
 export const GITHUB_PM_PLUGIN_ID = "fusion-plugin-github-pm";
 
@@ -50,6 +51,20 @@ export const githubPmSettingsSchema: Record<string, PluginSettingSchema> = {
     description: "Plugin-managed serialized JSON holding each repository's autonomy mode, approved taxonomy version, and view preferences. Not intended for manual editing.",
     group: "Repositories",
   },
+  /*
+  FNXC:GithubPmTaxonomy 2026-07-24-00:10:
+  FUSI-005: a third plugin-managed settings-blob string holds the versioned taxonomy
+  proposal drafts per repo (see taxonomy-store.ts). Mirrors repoConfigState's contract
+  exactly -- serialized JSON, plugin-managed, never hand-edited, no secrets. Kept in
+  sync with the equivalent declaration in manifest.json.
+  */
+  taxonomyProposalState: {
+    type: "string",
+    multiline: true,
+    label: "Taxonomy proposal state (plugin-managed)",
+    description: "Plugin-managed serialized JSON holding each repository's versioned label/field/category taxonomy proposal drafts. Not intended for manual editing.",
+    group: "Repositories",
+  },
 };
 
 export type GitHubPmAutonomy = "approve-all" | "suggest" | "auto";
@@ -62,6 +77,8 @@ export interface GitHubPmPluginSettings {
   selectedRepo: string | null;
   /** FUSI-004: full per-repo config map decoded from the serialized-JSON settings blob. */
   repoConfigs: RepoConfigMap;
+  /** FUSI-005: full per-repo taxonomy proposal state decoded from the serialized-JSON settings blob. */
+  taxonomyProposals: TaxonomyProposalStateMap;
 }
 
 function optionalTrimmed(value: unknown): string | undefined {
@@ -87,6 +104,7 @@ export function resolveGitHubPmSettings(settings: Record<string, unknown>): GitH
     defaultAutonomy,
     selectedRepo: resolveSelectedRepo(settings),
     repoConfigs: parseRepoConfigsFromSettings(settings),
+    taxonomyProposals: parseTaxonomyStateFromSettings(settings),
   };
 }
 

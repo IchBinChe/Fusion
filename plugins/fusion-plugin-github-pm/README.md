@@ -13,7 +13,6 @@ This package ships the skeleton:
 
 **Not implemented yet** (deliberately out of scope for FUSI-001/FUSI-002/FUSI-008):
 
-- The any-repo picker UI — later feature (FUSI-007), built on top of the per-repo config storage below (FUSI-004) and attaching into the view shell's repo-picker slot (FUSI-008).
 - Live issue/discussion/Projects v2/label/milestone CRUD — later Foundation-milestone tasks; each tab in the shell below is currently a labeled placeholder.
 - Per-tab capability gating / grey-out (FUSI-009) — the tab-bar's `disabled`/`disabledReason` fields exist but are unpopulated.
 - The dashboard view, routes, and tools do not call the GitHub client yet — that wiring lands in later slices now that both the auth resolver (FUSI-002) and the GitHub client (FUSI-003) can supply/consume a token.
@@ -22,7 +21,7 @@ This package ships the skeleton:
 
 `GitHubPmView.tsx` is the top-level, lazy-loaded dashboard view and the durable shell every later Foundation surface plugs into:
 
-- **Repo-context header** — shows the currently-selected repo (sourced from `GET /repo-config`'s `selectedRepo`, which wraps FUSI-004's `resolveSelectedRepo`, falling back to `/status`'s `defaultRepo`) or a "No repository selected" state. Includes an intentionally-empty mount slot (`.github-pm-view__repo-picker-slot`) for FUSI-007's repo picker.
+- **Repo-context header** — shows the currently-selected repo (sourced from `GET /repo-config`'s `selectedRepo`, which wraps FUSI-004's `resolveSelectedRepo`, falling back to `/status`'s `defaultRepo`) or a "No repository selected" state. The `.github-pm-view__repo-picker-slot` mount seam now hosts the real repo picker (FUSI-007; see below).
 - **Tab bar** (`GitHubPmTabs.tsx`) — an accessible `role="tablist"`/`role="tab"` bar for the six declared surfaces: Issues, Labels, Milestones, Discussions, Projects, Triage. Keyboard-navigable (Left/Right/Home/End); a `disabled`/`disabledReason` field per tab is reserved for FUSI-009's capability gating.
 - **Tab panels** — one `role="tabpanel"` per tab, kept mounted at all times (visibility toggled via the `hidden` attribute, never conditionally unmounted) so each panel's local state survives a tab round-trip. Each panel currently renders placeholder copy naming the milestone that will fill it.
 - The settings-presence status badge and `AuthDiagnosticsPanel` (FUSI-002) continue to render inside the shell, unchanged.
@@ -138,6 +137,25 @@ If `ctx.taskStore.getPluginStore` is unavailable, the write routes return `500 {
 
 See `src/repo-config.ts` for the domain module (`RepoConfig`, `RepoConfigMap`, `normalizeRepoKey`, `defaultRepoConfig`, `parseRepoConfigs`, `serializeRepoConfigs`, `resolveRepoConfig`, `upsertRepoConfig`) and `src/__tests__/repo-config.test.ts` / `src/__tests__/repo-config-routes.test.ts` for the corruption-tolerance, immutability, and configure-A/switch-B/return-to-A restart-survival coverage.
 
+## Repo picker — search, recents, manual entry (FUSI-007)
+
+The `RepoPicker` component mounts into FUSI-008's `github-pm-view__repo-picker-slot` header seam (no other shell/tab-bar changes) and lets a user target **any** GitHub repository the resolved token can see: a debounced repo search, a persisted recently-used list, and a manual `owner/repo` entry field, all converging on the same select flow.
+
+**GitHubClient additions** (`src/github-client.ts`): `searchRepositories(query, options)` calls `GET /search/repositories`; authenticated GitHub search already scopes results to public repos plus any private/org repos the token can see, so no extra `user:@me`/org qualifier is needed. `getRepository(owner, repo)` calls a single bounded `GET /repos/{owner}/{repo}` for manual-entry/select validation — **neither method ever fetches issue counts or enumerates issues**, so validating/selecting a repo with tens of thousands of issues stays O(1).
+
+**Recents store** (`src/repo-picker-store.ts`): a fourth plugin-managed settings-blob string, `recentRepos`, mirrors `repo-config.ts`'s corruption-tolerant contract exactly — undefined/malformed JSON/non-array all decode to `[]` rather than throwing. The list is **capped at 10 entries** (`RECENT_REPOS_CAP`); recording an already-present repo (case-insensitively, via `normalizeRepoKey`) dedupes it and moves it to the front instead of growing the list, evicting the oldest entry past the cap.
+
+**Routes** (plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`, implemented in `src/repo-picker-routes.ts`):
+
+- `GET /repo-picker/search?q=` — dispatches `searchRepositories`; an empty/whitespace `q` returns `{ items: [] }` without calling GitHub. Errors map through `githubErrorToResponse`.
+- `GET /repo-picker/recents` — read-only from the settings blob; no GitHub call.
+- `POST /repo-picker/select` — body `{ repo }`. Validates via `normalizeRepoKey` (400 on malformed input) then `getRepository` (404 → a clear "Repository … was not found." message, 403/401 → a clear "You don't have access to … " message — never raw API JSON), then persists the selection and updates recents in **one atomic** `updatePluginSettings` call.
+- Selection persistence reuses FUSI-004's `SELECTED_REPO_SETTING_ID` / `resolveSelectedRepo` — there is no second selected-repo field. Every write route fails closed with `500 { code: "plugin_store_unavailable" }` when `ctx.taskStore.getPluginStore` is unavailable, matching the FUSI-004 routes exactly.
+
+**UI** (`src/RepoPicker.tsx` / `RepoPicker.css`): a single toggle button opens a popover with a debounced search box (results render only while a query is typed), a recents list (shown only when the query is empty), and a manual entry field — all three converge on the same `POST /repo-picker/select` call, so not-found/no-access errors render identically regardless of which path picked the repo. Styled with design tokens only (no hardcoded px/hex/rgba), reusing the existing `.btn`/`.btn-icon` primitives; the popover becomes a fixed full-width sheet at mobile widths (see the `@media (max-width: 48rem)` block in `RepoPicker.css`) instead of clipping off-screen. The token/PAT value is never rendered, logged, or echoed by this surface.
+
+See `src/__tests__/github-client.test.ts`, `src/__tests__/repo-picker-store.test.ts`, `src/__tests__/repo-picker-routes.test.ts`, and `src/__tests__/RepoPicker.test.tsx` for corruption-tolerance, cap/dedupe, restart-survival, and empty/error/populated-state coverage.
+
 ## Phase 1: Taxonomy proposal review (FUSI-005)
 
 Given the currently selected repo, the plugin can analyze its real issue/discussion/label history and propose a bespoke, **repo-specific** label/field/category taxonomy. This is Phase 1 of the AI Structure-Generation & Classification milestone; **Phase 2 (classifying new issues/discussions into the accepted taxonomy) is explicitly out of scope for this feature.**
@@ -250,11 +268,12 @@ See `settings.test.ts`, `manifest.test.ts`, `routes.test.ts`, `issue-write-route
 | Key | Type | Group | Notes |
 | --- | --- | --- | --- |
 | `personalAccessToken` | `password` | Authentication | Optional PAT override; highest-precedence auth source; never echoed back in route responses, tool results, or logs. |
-| `defaultRepo` | `string` | Defaults | `owner/repo` hint for the future repo picker (FUSI-004). |
+| `defaultRepo` | `string` | Defaults | `owner/repo` hint preselected in the repo picker (FUSI-007) until a repo is explicitly selected. |
 | `defaultAutonomy` | `enum` (`approve-all` \| `suggest` \| `auto`) | Defaults | Default AI triage autonomy level; defaults to `approve-all`. |
 | `selectedRepo` | `string` | Repositories | Plugin-managed last-selected repo (`owner/repo`, canonicalized). Written by the repo-config select route; not hand-edited. |
 | `repoConfigState` | `string` (multiline) | Repositories | Plugin-managed serialized-JSON `RepoConfigMap`. Written by the repo-config routes; not hand-edited. |
 | `taxonomyProposalState` | `string` (multiline) | Repositories | Plugin-managed serialized-JSON `TaxonomyProposalStateMap` (FUSI-005). Written by the taxonomy routes; not hand-edited. |
+| `recentRepos` | `string` (multiline) | Repositories | Plugin-managed serialized-JSON recent-repos list, capped at 10, most-recent-first (FUSI-007). Written by the repo-picker select route; not hand-edited. |
 | `confirmWrites` | `boolean` | Safety | Default `true` (ON). When ON, every write route/tool/UI dispatch requires explicit confirmation (FUSI-017); see the section above. |
 
 ## Routes
@@ -268,6 +287,7 @@ Plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`:
 - `GET /issues/detail`, `GET /issues/comments` — read-only issue detail, timeline, and paginated comments (FUSI-013); see the section above.
 - `GET /issues/list`, `GET /issues/filter-options` — issue list/search/filter-dropdown reads (FUSI-012); see the section above.
 - `POST /issues/create`, `PUT /issues/update`, `PUT /issues/state`, `POST /issues/comments`, `PUT /issues/comments` — issue create/edit/comment/close-reopen writes (FUSI-014); each requires `confirmed: true` in the body when `confirmWrites` is ON (FUSI-017); see the section above.
+- `GET /repo-picker/search`, `GET /repo-picker/recents`, `POST /repo-picker/select` — repo search, recents, and manual-entry select (FUSI-007); see the section above.
 
 ## Agent tools
 
@@ -278,7 +298,7 @@ Plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`:
 
 - No live GitHub REST/GraphQL calls beyond the single scope-probe request described above.
 - No host-owned `/api/github-pm/*` routes or core GitHub PM settings.
-- No repo picker UI yet; the per-repo config storage layer (FUSI-004) is the persistence foundation later picker/triage features build on.
+- No org-wide repo listing beyond GitHub's Search API result window (1,000 results); see the linked follow-up task for org-repo listing pagination beyond that limit.
 - No separate GitHub OAuth/login flow, and none will be added — auth layers exclusively on `gh` CLI / `GITHUB_TOKEN` / PAT setting.
 
 ## External Integration Evidence

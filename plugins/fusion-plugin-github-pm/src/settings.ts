@@ -5,6 +5,7 @@ import {
   type RepoConfigMap,
 } from "./repo-config.js";
 import { parseTaxonomyStateFromSettings, type TaxonomyProposalStateMap } from "./taxonomy-store.js";
+import { parseRecentReposFromSettings, type RecentRepoEntry } from "./repo-picker-store.js";
 
 export const GITHUB_PM_PLUGIN_ID = "fusion-plugin-github-pm";
 
@@ -49,6 +50,20 @@ export const githubPmSettingsSchema: Record<string, PluginSettingSchema> = {
     multiline: true,
     label: "Per-repo configuration state (plugin-managed)",
     description: "Plugin-managed serialized JSON holding each repository's autonomy mode, approved taxonomy version, and view preferences. Not intended for manual editing.",
+    group: "Repositories",
+  },
+  /*
+  FNXC:GitHubPmRepoPicker 2026-07-24-07:15:
+  FUSI-007: a fourth plugin-managed settings-blob string holds the capped, most-recent-first
+  recent-repos list (see repo-picker-store.ts). Mirrors repoConfigState/taxonomyProposalState's
+  contract exactly -- serialized JSON, plugin-managed, never hand-edited, no secrets. Kept in
+  sync with the equivalent declaration in manifest.json.
+  */
+  recentRepos: {
+    type: "string",
+    multiline: true,
+    label: "Recently used repositories (plugin-managed)",
+    description: "Plugin-managed serialized JSON holding the most recently selected repositories, most-recent-first, capped at 10 entries. Not intended for manual editing.",
     group: "Repositories",
   },
   /*
@@ -97,6 +112,8 @@ export interface GitHubPmPluginSettings {
   repoConfigs: RepoConfigMap;
   /** FUSI-005: full per-repo taxonomy proposal state decoded from the serialized-JSON settings blob. */
   taxonomyProposals: TaxonomyProposalStateMap;
+  /** FUSI-007: capped, most-recent-first recent-repos list decoded from the serialized-JSON settings blob. */
+  recentRepos: RecentRepoEntry[];
   /**
    * FNXC:GithubPmWriteGate 2026-07-24-06:00:
    * FUSI-017: default-ON write-confirmation gate. Missing/unset resolves to `true`; only an
@@ -129,6 +146,7 @@ export function resolveGitHubPmSettings(settings: Record<string, unknown>): GitH
     selectedRepo: resolveSelectedRepo(settings),
     repoConfigs: parseRepoConfigsFromSettings(settings),
     taxonomyProposals: parseTaxonomyStateFromSettings(settings),
+    recentRepos: parseRecentReposFromSettings(settings),
     /*
     FNXC:GithubPmWriteGate 2026-07-24-06:00:
     Missing/unset/anything-other-than-explicit-`false` resolves to ON (true). This is a

@@ -201,3 +201,28 @@ export {
   githubPmCommentIssueTool,
   githubPmSetIssueStateTool,
 } from "./tools.js";
+/*
+FNXC:GitHubPmRepoPicker 2026-07-24-07:30:
+FUSI-007 re-exports: the recents store (mirrors the repo-config.js re-export block above)
+and the repo-picker route array + handlers, plus the new GitHubClient repo-picker types.
+*/
+export {
+  RECENT_REPOS_CAP,
+  RECENT_REPOS_SETTING_ID,
+  parseRecentRepos,
+  parseRecentReposFromSettings,
+  recordRecentRepo,
+  serializeRecentRepos,
+  type RecentRepoEntry,
+} from "./repo-picker-store.js";
+export {
+  repoPickerRoutes,
+  getRepoPickerSearch,
+  getRepoPickerRecents,
+  postRepoPickerSelect,
+} from "./repo-picker-routes.js";
+export type {
+  GitHubRepoSummary,
+  GitHubRepoSearchOptions,
+  GitHubRepoSearchPage,
+} from "./github-client.js";

@@ -40,6 +40,13 @@
       "description": "Plugin-managed serialized JSON holding each repository's autonomy mode, approved taxonomy version, and view preferences. Not intended for manual editing.",
       "group": "Repositories"
     },
+    "recentRepos": {
+      "type": "string",
+      "multiline": true,
+      "label": "Recently used repositories (plugin-managed)",
+      "description": "Plugin-managed serialized JSON holding the most recently selected repositories, most-recent-first, capped at 10 entries. Not intended for manual editing.",
+      "group": "Repositories"
+    },
     "taxonomyProposalState": {
       "type": "string",
       "multiline": true,

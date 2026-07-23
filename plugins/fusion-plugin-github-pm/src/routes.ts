@@ -6,6 +6,7 @@ import { taxonomyRoutes } from "./taxonomy-routes.js";
 import { issueRoutes } from "./issue-routes.js";
 import { issuesRoutes } from "./issues-routes.js";
 import { issueWriteRoutes } from "./issue-write-routes.js";
+import { repoPickerRoutes } from "./repo-picker-routes.js";
 
 function response(status: number, body: Record<string, unknown>): PluginRouteResponse {
   return { status, body };
@@ -77,6 +78,12 @@ FUSI-014 adds the issue WRITE routes (create/update/state/comment create+edit) o
 aggregated route list -- the plugin's first write surface. Same one-registration-point pattern;
 no separate registration mechanism is introduced for mutations vs reads.
 */
+/*
+FNXC:GitHubPmRepoPicker 2026-07-24-07:30:
+FUSI-007 adds the repo-picker routes (GET /repo-picker/search, GET /repo-picker/recents,
+POST /repo-picker/select) onto the same aggregated route list, following the established
+one-route-array-export-per-feature precedent.
+*/
 export const githubPmRoutes: PluginRouteDefinition[] = [
   { method: "GET", path: "/status", handler: getGitHubPmStatus, description: "Report GitHub PM plugin configuration status from settings presence only." },
   { method: "GET", path: "/auth/diagnostics", handler: getGitHubAuthDiagnosticsRoute, description: "Resolve the layered GitHub auth chain and report per-capability scope diagnostics (never the token value)." },
@@ -85,4 +92,5 @@ export const githubPmRoutes: PluginRouteDefinition[] = [
   ...issueRoutes,
   ...issuesRoutes,
   ...issueWriteRoutes,
+  ...repoPickerRoutes,
 ];

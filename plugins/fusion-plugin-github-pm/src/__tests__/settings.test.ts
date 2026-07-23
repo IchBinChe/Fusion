@@ -15,6 +15,7 @@ describe("github-pm settings", () => {
       selectedRepo: null,
       repoConfigs: {},
       taxonomyProposals: {},
+      recentRepos: [],
       confirmWrites: true,
     });
   });

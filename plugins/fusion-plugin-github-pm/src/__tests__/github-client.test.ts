@@ -733,3 +733,69 @@ describe("GitHubClient comment writes (FUSI-014)", () => {
     await expect(client.createIssueComment("acme", "widgets", 5, "Hi")).rejects.toMatchObject({ status: 401, code: "auth_error" });
   });
 });
+
+describe("GitHubClient repo picker (FUSI-007)", () => {
+  it("searchRepositories issues one bounded Search API request and maps repo summaries", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      total_count: 2,
+      incomplete_results: false,
+      items: [
+        { full_name: "acme/widgets", owner: { login: "acme" }, name: "widgets", private: false, html_url: "https://github.com/acme/widgets", description: "Widgets", default_branch: "main" },
+        { full_name: "acme/gadgets", owner: { login: "acme" }, name: "gadgets", private: true, html_url: "https://github.com/acme/gadgets", description: null },
+      ],
+    })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const page = await client.searchRepositories("widgets");
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url] = fetchImpl.mock.calls[0];
+    expect(String(url)).toContain(`${GITHUB_REST_BASE_URL}/search/repositories?`);
+    expect(String(url)).toContain("q=widgets");
+    expect(page.items).toEqual([
+      { fullName: "acme/widgets", owner: "acme", name: "widgets", private: false, htmlUrl: "https://github.com/acme/widgets", description: "Widgets", defaultBranch: "main" },
+      { fullName: "acme/gadgets", owner: "acme", name: "gadgets", private: true, htmlUrl: "https://github.com/acme/gadgets", description: null, defaultBranch: undefined },
+    ]);
+    expect(page.totalCount).toBe(2);
+    expect(page.hasNextPage).toBe(false);
+  });
+
+  it("searchRepositories returns an empty page for zero matches without throwing", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ total_count: 0, incomplete_results: false, items: [] })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+    const page = await client.searchRepositories("no-such-repo-xyz");
+    expect(page.items).toEqual([]);
+    expect(page.totalCount).toBe(0);
+    expect(page.hasNextPage).toBe(false);
+  });
+
+  it("searchRepositories surfaces rate-limit/auth errors via the same typed classification as other reads", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ message: "API rate limit exceeded" }, 403, { "x-ratelimit-remaining": "0" })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl, { maxRetries: 0 });
+    await expect(client.searchRepositories("widgets")).rejects.toMatchObject({ code: "rate_limited" });
+  });
+
+  it("getRepository maps a successful lookup with a single request (never touches issues)", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ full_name: "acme/widgets", owner: { login: "acme" }, name: "widgets", private: false, html_url: "https://github.com/acme/widgets", description: "Widgets", default_branch: "main" })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const repo = await client.getRepository("acme", "widgets");
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    const [url] = fetchImpl.mock.calls[0];
+    expect(String(url)).toBe(`${GITHUB_REST_BASE_URL}/repos/acme/widgets`);
+    expect(repo).toEqual({ fullName: "acme/widgets", owner: "acme", name: "widgets", private: false, htmlUrl: "https://github.com/acme/widgets", description: "Widgets", defaultBranch: "main" });
+  });
+
+  it("getRepository maps a 404 to not_found (manual-entry 'repo does not exist' case)", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ message: "Not Found" }, 404)) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+    await expect(client.getRepository("acme", "ghost")).rejects.toMatchObject({ status: 404, code: "not_found" });
+  });
+
+  it("getRepository maps a 403 to auth_error (manual-entry 'no access' case)", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ message: "Resource not accessible by integration" }, 403)) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+    await expect(client.getRepository("acme", "private-repo")).rejects.toMatchObject({ status: 403, code: "auth_error" });
+  });
+});

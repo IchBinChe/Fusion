@@ -46,3 +46,26 @@ export default plugin;
 export { githubPmSettingsSchema, resolveGitHubPmSettings, hasPersonalAccessToken, GITHUB_PM_PLUGIN_ID } from "./settings.js";
 export { githubPmRoutes } from "./routes.js";
 export { githubPmTools } from "./tools.js";
+export {
+  GitHubClient,
+  GitHubApiError,
+  isGitHubApiError,
+  githubErrorToResponse,
+  redactSensitiveText,
+  parseNextLinkUrl,
+  GITHUB_REST_BASE_URL,
+  GITHUB_GRAPHQL_ENDPOINT,
+  GITHUB_API_VERSION,
+} from "./github-client.js";
+export type {
+  GitHubApiErrorCode,
+  GitHubClientOptions,
+  GitHubListPage,
+  GitHubPageInfo,
+  GitHubGraphQlConnection,
+  GitHubIssueListOptions,
+  GitHubIssueListItem,
+  GitHubLabelListOptions,
+  GitHubLabel,
+  GitHubTokenScopes,
+} from "./github-client.js";

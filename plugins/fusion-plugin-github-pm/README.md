@@ -11,11 +11,22 @@ This package ships the skeleton:
 - A placeholder `github_pm_status` agent tool.
 - A dashboard view showing configuration status and (as of FUSI-002) the authentication diagnostics panel described below.
 
-**Not implemented yet** (deliberately out of scope for FUSI-001/FUSI-002):
+**Not implemented yet** (deliberately out of scope for FUSI-001/FUSI-002/FUSI-008):
 
-- The any-repo picker UI — later feature, built on top of the per-repo config storage below (FUSI-004).
-- Live issue/discussion/Projects v2/label/milestone CRUD — later Foundation-milestone tasks.
+- The any-repo picker UI — later feature (FUSI-007), built on top of the per-repo config storage below (FUSI-004) and attaching into the view shell's repo-picker slot (FUSI-008).
+- Live issue/discussion/Projects v2/label/milestone CRUD — later Foundation-milestone tasks; each tab in the shell below is currently a labeled placeholder.
+- Per-tab capability gating / grey-out (FUSI-009) — the tab-bar's `disabled`/`disabledReason` fields exist but are unpopulated.
 - The dashboard view, routes, and tools do not call the GitHub client yet — that wiring lands in later slices now that both the auth resolver (FUSI-002) and the GitHub client (FUSI-003) can supply/consume a token.
+
+## Dashboard view shell (FUSI-008)
+
+`GitHubPmView.tsx` is the top-level, lazy-loaded dashboard view and the durable shell every later Foundation surface plugs into:
+
+- **Repo-context header** — shows the currently-selected repo (sourced from `GET /repo-config`'s `selectedRepo`, which wraps FUSI-004's `resolveSelectedRepo`, falling back to `/status`'s `defaultRepo`) or a "No repository selected" state. Includes an intentionally-empty mount slot (`.github-pm-view__repo-picker-slot`) for FUSI-007's repo picker.
+- **Tab bar** (`GitHubPmTabs.tsx`) — an accessible `role="tablist"`/`role="tab"` bar for the six declared surfaces: Issues, Labels, Milestones, Discussions, Projects, Triage. Keyboard-navigable (Left/Right/Home/End); a `disabled`/`disabledReason` field per tab is reserved for FUSI-009's capability gating.
+- **Tab panels** — one `role="tabpanel"` per tab, kept mounted at all times (visibility toggled via the `hidden` attribute, never conditionally unmounted) so each panel's local state survives a tab round-trip. Each panel currently renders placeholder copy naming the milestone that will fill it.
+- The settings-presence status badge and `AuthDiagnosticsPanel` (FUSI-002) continue to render inside the shell, unchanged.
+- All styling uses design tokens only (`GitHubPmView.css`) and adapts at the existing `@media (max-width: 48rem)` mobile breakpoint (the tab bar scrolls horizontally rather than clipping).
 
 ## GitHub client (REST + GraphQL)
 

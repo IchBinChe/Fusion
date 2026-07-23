@@ -3,6 +3,7 @@ import { AlertCircle, CheckCircle2, Github, Loader2 } from "lucide-react";
 import type { PluginDashboardViewContext } from "@fusion/dashboard/app/plugins/types";
 import { AuthDiagnosticsPanel } from "./AuthDiagnosticsPanel.js";
 import { TaxonomyProposalPanel } from "./TaxonomyProposalPanel.js";
+import { GITHUB_PM_TABS, GitHubPmTabs, githubPmTabButtonId, githubPmTabPanelId, type GitHubPmTabId } from "./GitHubPmTabs.js";
 import "./GitHubPmView.css";
 
 type StatusState = "loading" | "configured" | "unconfigured" | "error";
@@ -13,6 +14,12 @@ interface StatusResponse {
   configured?: boolean;
   autonomy?: string;
   defaultRepo?: string | null;
+}
+
+interface RepoConfigResponse {
+  ok?: boolean;
+  error?: string;
+  selectedRepo?: string | null;
 }
 
 const PLUGIN_BASE = "/api/plugins/fusion-plugin-github-pm";
@@ -39,12 +46,16 @@ selectedRepo, falling back to the plugin's configured defaultRepo when nothing h
 been explicitly selected yet -- there is no repo-picker UI in this view yet, so this
 is the best available signal of "the repo the operator means"). Read-only: this view
 never writes repo selection, it only reads it via GET /repo-config.
-*/
-interface RepoConfigResponse {
-  ok?: boolean;
-  selectedRepo?: string | null;
-}
 
+FNXC:GitHubPm 2026-07-24-02:00:
+FUSI-008 seam: the repo-context header sources its value from GET
+/repo-config's `selectedRepo` field, which is itself built server-side by
+FUSI-004's `resolveSelectedRepo(settings)` -- this view never reimplements
+selection persistence. A failed/errored repo-config fetch degrades quietly to
+"no repository selected" (falls back to /status's `defaultRepo` when present)
+rather than surfacing a second error banner; the /status error path already
+covers the plugin-configuration-broken case.
+*/
 async function getSelectedRepo(context?: PluginDashboardViewContext): Promise<string | null> {
   const response = await fetch(`${PLUGIN_BASE}/repo-config${projectQuery(context)}`);
   const json = (await response.json().catch(() => ({}))) as RepoConfigResponse;
@@ -64,6 +75,58 @@ function StatusBadge({ state, message }: { state: StatusState; message?: string 
 }
 
 /*
+FNXC:GitHubPm 2026-07-24-02:10:
+Repo-context header (FUSI-008). Shows the currently-selected repo, sourced via
+getSelectedRepo() above, or a "No repository selected" affordance. The empty
+`github-pm-view__repo-picker-slot` div is a deliberate, currently-unfilled
+mount point: FUSI-007's repo-picker UI attaches here without this shell being
+re-architected. Do not delete this slot even though it renders nothing today.
+*/
+function RepoContextHeader({ selectedRepo, loading }: { selectedRepo: string | null; loading: boolean }) {
+  return (
+    <div className="github-pm-view__repo-context" data-testid="github-pm-repo-context">
+      <span className="github-pm-view__repo-context-label">Repository</span>
+      {loading ? (
+        <span className="github-pm-view__repo-context-value github-pm-view__repo-context-value--loading">
+          <Loader2 aria-hidden="true" /> Loading…
+        </span>
+      ) : selectedRepo ? (
+        <span className="github-pm-view__repo-context-value" data-testid="github-pm-repo-context-selected">
+          {selectedRepo}
+        </span>
+      ) : (
+        <span className="github-pm-view__repo-context-value github-pm-view__repo-context-value--empty" data-testid="github-pm-repo-context-empty">
+          No repository selected
+        </span>
+      )}
+      {/* Seam for FUSI-007's repo picker (search/recents/manual owner/repo entry). Intentionally empty. */}
+      <div className="github-pm-view__repo-picker-slot" data-testid="github-pm-repo-picker-slot" />
+    </div>
+  );
+}
+
+const TAB_PLACEHOLDER_COPY: Record<GitHubPmTabId, string> = {
+  issues: "Issue list, detail, create/edit, comments, labels, and assignment arrive in the Issues Core milestone.",
+  labels: "Label management arrives alongside Issues Core.",
+  milestones: "Milestone management arrives alongside Issues Core.",
+  discussions: "Discussion browsing and reply management arrive in a later Foundation-milestone surface.",
+  projects: "Projects v2 board management arrives in a later Foundation-milestone surface.",
+  triage: "AI-assisted taxonomy proposal and classification review arrive in the AI Structure-Generation & Classification milestone.",
+};
+
+/*
+FNXC:GitHubPm 2026-07-24-02:15:
+Each tab panel stays MOUNTED at all times; only the `hidden` attribute toggles
+visibility. This is required so per-tab local state (inputs, scroll position,
+in-flight local UI state) survives a switch-away-and-back -- conditionally
+unmounting an inactive panel would destroy that state, which the FUSI-008
+acceptance criteria explicitly forbid.
+*/
+function TabPlaceholderPanel({ tabId }: { tabId: GitHubPmTabId }) {
+  return <p className="github-pm-view__tab-placeholder-copy">{TAB_PLACEHOLDER_COPY[tabId]}</p>;
+}
+
+/*
 FNXC:GitHubPm 2026-07-24-00:00:
 Placeholder view for FUSI-001. Renders a status badge from the plugin-owned
 /status route (settings-presence only, no live GitHub call) and explains that
@@ -77,6 +140,21 @@ settings-presence status badge above. This is the ONLY place
 AuthDiagnosticsPanel is rendered -- the repo picker/issues/discussions/Projects
 v2 surfaces in later FUSI tasks reuse this same view rather than duplicating
 the panel.
+
+FNXC:GitHubPm 2026-07-24-02:20:
+FUSI-008 turns this scaffold into the durable view SHELL every later
+Foundation surface plugs into: a repo-context header (reading the persisted
+selection via GET /repo-config, which wraps FUSI-004's resolveSelectedRepo)
+plus an accessible, token-styled tablist for the six declared surfaces
+(Issues, Labels, Milestones, Discussions, Projects, Triage). Two seams are
+deliberately left unfilled for downstream tasks rather than re-architected
+later: (1) `.github-pm-view__repo-picker-slot` in RepoContextHeader is
+FUSI-007's mount point for the real repo picker; (2) `GitHubPmTab.disabled` /
+`disabledReason` (see GitHubPmTabs.tsx) is FUSI-009's capability-gating seam
+to grey out a tab with a reason once repo/scope context makes a surface
+unusable. Tab panels stay mounted-but-hidden (never conditionally unmounted)
+so per-tab local state survives a tab round-trip. The status badge and
+AuthDiagnosticsPanel keep rendering unchanged, just relocated into the shell.
 */
 export function GitHubPmView({ context }: { context?: PluginDashboardViewContext }) {
   const [status, setStatus] = useState<StatusState>("loading");
@@ -84,6 +162,8 @@ export function GitHubPmView({ context }: { context?: PluginDashboardViewContext
   const [autonomy, setAutonomy] = useState<string>();
   const [defaultRepo, setDefaultRepo] = useState<string | null>(null);
   const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
+  const [selectedRepoLoading, setSelectedRepoLoading] = useState<boolean>(true);
+  const [activeTab, setActiveTab] = useState<GitHubPmTabId>(GITHUB_PM_TABS[0].id);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,13 +193,26 @@ export function GitHubPmView({ context }: { context?: PluginDashboardViewContext
 
   useEffect(() => {
     let cancelled = false;
-    getSelectedRepo(context).then((repo) => {
-      if (!cancelled) setSelectedRepo(repo);
-    });
+    setSelectedRepoLoading(true);
+    getSelectedRepo(context)
+      .then((repo) => {
+        if (cancelled) return;
+        setSelectedRepo(repo);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSelectedRepo(null);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setSelectedRepoLoading(false);
+      });
     return () => {
       cancelled = true;
     };
   }, [context?.projectId]);
+
+  const repoContextValue = selectedRepo ?? defaultRepo;
 
   return (
     <section className="github-pm-view" aria-labelledby="github-pm-heading">
@@ -134,20 +227,35 @@ export function GitHubPmView({ context }: { context?: PluginDashboardViewContext
         <StatusBadge state={status} message={statusMessage} />
       </header>
 
-      <div className="card github-pm-view__placeholder" role="status">
-        <p>
-          This is a scaffold. The repo picker, layered GitHub auth (gh CLI / GITHUB_TOKEN / PAT override), and full issue,
-          discussion, Projects v2, label, and milestone management are coming online in the Foundation milestone.
+      <RepoContextHeader selectedRepo={repoContextValue} loading={selectedRepoLoading} />
+
+      {status === "unconfigured" ? (
+        <p className="github-pm-view__meta" data-testid="github-pm-unconfigured-hint">
+          Add a default repository or personal access token in Plugin Manager settings to get started.
         </p>
-        {defaultRepo ? <p className="github-pm-view__meta">Default repository: {defaultRepo}</p> : null}
-        {autonomy ? <p className="github-pm-view__meta">Default triage autonomy: {autonomy}</p> : null}
-        {status === "unconfigured" ? (
-          <p className="github-pm-view__meta">Add a default repository or personal access token in Plugin Manager settings to get started.</p>
-        ) : null}
+      ) : null}
+      {autonomy ? <p className="github-pm-view__meta">Default triage autonomy: {autonomy}</p> : null}
+
+      <GitHubPmTabs activeTab={activeTab} onChange={setActiveTab} />
+
+      <div className="github-pm-view__panels">
+        {GITHUB_PM_TABS.map((tab) => (
+          <div
+            key={tab.id}
+            role="tabpanel"
+            id={githubPmTabPanelId(tab.id)}
+            aria-labelledby={githubPmTabButtonId(tab.id)}
+            className="github-pm-view__panel card"
+            data-testid={`github-pm-panel-${tab.id}`}
+            hidden={tab.id !== activeTab}
+          >
+            <TabPlaceholderPanel tabId={tab.id} />
+          </div>
+        ))}
       </div>
 
       <AuthDiagnosticsPanel context={context} />
-      <TaxonomyProposalPanel context={context} repo={selectedRepo ?? defaultRepo} />
+      <TaxonomyProposalPanel context={context} repo={repoContextValue} />
     </section>
   );
 }

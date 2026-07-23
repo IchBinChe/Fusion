@@ -855,7 +855,40 @@ Anthropic has three independent authentication/routing paths:
 
 Anthropic can be connected with a raw API key from both Model Onboarding and **Settings → Authentication**. Anthropic API-key auth appears as a separate **Anthropic API Key** card, while Claude subscription OAuth appears as **Anthropic Subscription** with Login/Logout controls. On Fusion desktop, Anthropic Subscription OAuth login URLs are delegated to the operating system browser instead of an Electron child window so the existing polling/callback flow can complete. `/api/auth/status` returns only masked key hints for the API-key card.
 
-### Authentication troubleshooting (mobile OAuth fallback)
+### CLI local OpenAI-compatible registry
+
+`fn onboard` can add a local/custom endpoint to pi's model registry without
+replacing existing fields. It writes to `~/.fusion/agent/models.json`, unless an
+existing legacy `~/.pi/agent/models.json` or `~/.pi/models.json` is selected by
+the compatibility resolver. For an unauthenticated server, omit `apiKey`:
+
+```json
+{
+  "providers": {
+    "local": {
+      "name": "Local server",
+      "api": "openai-completions",
+      "baseUrl": "http://localhost:8080/v1",
+      "models": [{
+        "id": "qwen3",
+        "reasoning": true,
+        "compat": {
+          "thinkingFormat": "qwen-chat-template",
+          "chatTemplateKwargs": {
+            "enable_thinking": { "$var": "thinking.enabled" }
+          }
+        }
+      }]
+    }
+  }
+}
+```
+
+Enable the Qwen option only when the upstream requires
+`chat_template_kwargs.enable_thinking`; the registry uses the schema-valid
+camel-case `compat.chatTemplateKwargs`, never a top-level compatibility field.
+
+## Authentication troubleshooting (mobile OAuth fallback)
 
 #### `/api/auth/login` response shape for device-code providers
 

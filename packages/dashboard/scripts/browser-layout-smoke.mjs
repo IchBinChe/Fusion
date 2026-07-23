@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 /* global WebSocket, URL, fetch, console, setTimeout, clearTimeout */
 
+import { Buffer } from "node:buffer";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { superviseSpawn } from "@fusion/core";
-import { readFile, readdir, rm, stat, mkdtemp } from "node:fs/promises";
+import { readFile, readdir, rm, stat, mkdtemp, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -15,6 +16,7 @@ const dashboardRoot = path.resolve(import.meta.dirname, "..");
 const appRoot = path.join(dashboardRoot, "app");
 const clientDistRoot = path.join(dashboardRoot, "dist", "client");
 const requireBrowser = process.argv.includes("--require-browser") || process.env.FUSION_BROWSER_SMOKE_REQUIRE === "1";
+const screenshotPath = process.env.FUSION_BROWSER_SMOKE_SCREENSHOT;
 
 function log(message) {
   console.log(`[dashboard-browser-smoke] ${message}`);
@@ -24,13 +26,15 @@ function fail(message) {
   throw new Error(message);
 }
 
+/*
+FNXC:GitHubImport 2026-07-23-13:05:
+The mobile GitHub action-bar regression measures emitted CSS, so every smoke invocation must
+rebuild the client before loading it. Reusing a stale dist/client artifact could make geometry
+assertions pass against styles predating the one-row compact-layout requirement.
+*/
 async function loadDashboardCss() {
-  try {
-    return await readEmittedClientCss();
-  } catch {
-    await runCommand("pnpm", ["--filter", "@fusion/dashboard", "build:client"], dashboardRoot);
-    return readEmittedClientCss();
-  }
+  await runCommand("pnpm", ["--filter", "@fusion/dashboard", "build:client"], dashboardRoot);
+  return readEmittedClientCss();
 }
 
 async function readEmittedClientCss() {
@@ -188,6 +192,29 @@ export function createSmokeHtml() {
   measure the shared ViewHeader flex geometry. Exercise the unread Inbox's tightest
   badge + Compose + Mark all read + Refresh row and both Compose + Refresh-only states.
   */
+  /*
+  FNXC:GitHubImport 2026-07-23-12:18:
+  FN-8548 mirrors the selected GitHub issue's four-action footer with the emitted dashboard CSS.
+  Blink must measure the production responsive contract at each supported phone width because jsdom
+  cannot detect wrapping, flex-track shrinkage, overflow, or touch-target geometry.
+  */
+  const githubImportMobileActionFixture = `
+    <section data-smoke="github-import-mobile-actions" aria-label="GitHub issue detail actions">
+      <div class="github-import-detail-actions" data-testid="github-import-detail-actions">
+        <form class="github-import-issue-comment-composer">
+          <textarea class="input github-import-issue-comment-composer__input" aria-label="Add comment"></textarea>
+          <button class="btn btn-primary github-import-issue-comment-composer__submit" type="submit">Add comment</button>
+        </form>
+        <div class="github-import-detail-action-row" data-testid="github-import-detail-action-row">
+          <button class="btn btn-danger github-import-issue-close" type="button">Close issue</button>
+          <button class="btn github-import-action" type="button">Plan</button>
+          <button class="btn github-import-action" type="button">Chat</button>
+          <button class="btn btn-primary github-import-action" type="button">Import as task</button>
+        </div>
+      </div>
+    </section>
+  `;
+
   const mailboxMobileHeaderFixtures = [
     ["unread-inbox", '<span class="mailbox-unread-badge">9</span><button class="btn btn-sm btn-primary" data-testid="mailbox-header-compose" type="button"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 2h10v10H2z"/></svg><span>Compose</span></button><button class="btn btn-sm btn-secondary" data-testid="mailbox-mark-all-read" type="button"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7l3 3 7-7"/></svg><span>Mark all read</span></button><button class="btn-icon" data-testid="mailbox-refresh" type="button" aria-label="Refresh"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7a5 5 0 1 0 2-4"/></svg></button>'],
     ["read-inbox", '<button class="btn btn-sm btn-primary" data-testid="mailbox-header-compose" type="button"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 2h10v10H2z"/></svg><span>Compose</span></button><button class="btn-icon" data-testid="mailbox-refresh" type="button" aria-label="Refresh"><svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 7a5 5 0 1 0 2-4"/></svg></button>'],
@@ -287,6 +314,8 @@ export function createSmokeHtml() {
       <section data-smoke="mailbox-mobile-header-fixtures" aria-label="Mailbox mobile header layout fixtures">
         ${mailboxMobileHeaderFixtures}
       </section>
+
+      ${githubImportMobileActionFixture}
 
       <footer class="executor-status-bar">
         <div class="executor-status-bar__segment">
@@ -1266,6 +1295,105 @@ async function runSmokeChecks(page, pageUrl) {
       && mailboxMobileHeaderLayout.find((layout) => layout.state === "mailbox-mobile-header-unread-inbox")?.titleLabelWidth > 0,
     JSON.stringify(mailboxMobileHeaderLayout),
   );
+
+  /*
+  FNXC:GitHubImport 2026-07-23-12:18:
+  Four GitHub issue actions must remain one contained, non-overlapping row at 320px, 390px, and
+  412px. This verifies the full labels and usable 44px minimum targets in a real browser instead
+  of relying on jsdom's zero-layout model or a CSS-source-only assertion.
+  */
+  for (const width of [320, 390, 412]) {
+    await page.send("Emulation.setDeviceMetricsOverride", {
+      width,
+      height: 844,
+      deviceScaleFactor: 2,
+      mobile: true,
+    });
+    await evaluate(page, "document.fonts ? document.fonts.ready.then(() => true) : true");
+    const githubImportActionsLayout = await evaluate(page, `(() => {
+      const bar = document.querySelector('[data-smoke="github-import-mobile-actions"] .github-import-detail-actions');
+      const actionRow = bar.querySelector('.github-import-detail-action-row');
+      const barRect = bar.getBoundingClientRect();
+      const actionRowRect = actionRow.getBoundingClientRect();
+      const composer = bar.querySelector('.github-import-issue-comment-composer');
+      const composerRect = composer.getBoundingClientRect();
+      const buttons = [...actionRow.querySelectorAll('button')].map((button) => {
+        const rect = button.getBoundingClientRect();
+        const style = getComputedStyle(button);
+        return {
+          label: button.innerText.trim(),
+          left: rect.left,
+          right: rect.right,
+          top: rect.top,
+          bottom: rect.bottom,
+          width: rect.width,
+          height: rect.height,
+          overflowX: button.scrollWidth - button.clientWidth,
+          overflowY: button.scrollHeight - button.clientHeight,
+          display: style.display,
+          visibility: style.visibility,
+          opacity: style.opacity,
+          textOverflow: style.textOverflow,
+        };
+      });
+      return {
+        composer: {
+          bottom: composerRect.bottom,
+          top: composerRect.top,
+        },
+        actionRow: {
+          left: actionRowRect.left,
+          right: actionRowRect.right,
+          top: actionRowRect.top,
+          bottom: actionRowRect.bottom,
+          overflowX: actionRow.scrollWidth - actionRow.clientWidth,
+          overflowY: actionRow.scrollHeight - actionRow.clientHeight,
+        },
+        bar: {
+          left: barRect.left,
+          right: barRect.right,
+          top: barRect.top,
+          bottom: barRect.bottom,
+          overflowX: bar.scrollWidth - bar.clientWidth,
+          overflowY: bar.scrollHeight - bar.clientHeight,
+        },
+        buttons,
+      };
+    })()`);
+    const expectedLabels = ["Close issue", "Plan", "Chat", "Import as task"];
+    assertSmokeResult(
+      `GitHub issue actions remain a visible one-row touch-safe layout at ${width}px`,
+      githubImportActionsLayout.buttons.length === expectedLabels.length
+        && githubImportActionsLayout.buttons.every((button, index, buttons) =>
+          button.label === expectedLabels[index]
+          && button.top === buttons[0].top
+          && button.bottom === buttons[0].bottom
+          && button.left >= githubImportActionsLayout.actionRow.left - 1
+          && button.right <= githubImportActionsLayout.actionRow.right + 1
+          && button.width >= 44
+          && button.height >= 44
+          && button.overflowX <= 1
+          && button.overflowY <= 1
+          && button.display !== "none"
+          && button.visibility !== "hidden"
+          && button.opacity !== "0"
+          && button.textOverflow !== "ellipsis")
+        && githubImportActionsLayout.buttons.every((button, index, buttons) =>
+          index === 0 || buttons[index - 1].right <= button.left + 1)
+        && githubImportActionsLayout.actionRow.overflowX <= 1
+        && githubImportActionsLayout.actionRow.overflowY <= 1
+        && githubImportActionsLayout.composer.bottom <= githubImportActionsLayout.actionRow.top + 1
+        && githubImportActionsLayout.bar.overflowX <= 1
+        && githubImportActionsLayout.bar.overflowY <= 1,
+      JSON.stringify(githubImportActionsLayout),
+    );
+
+    if (screenshotPath && width === 390) {
+      const screenshot = await page.send("Page.captureScreenshot", { format: "png" });
+      await writeFile(screenshotPath, Buffer.from(screenshot.data, "base64"));
+      log(`saved GitHub import mobile screenshot to ${screenshotPath}`);
+    }
+  }
 
   await page.send("Emulation.setDeviceMetricsOverride", {
     width: 412,

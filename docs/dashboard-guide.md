@@ -378,8 +378,14 @@ Use GitHub import on mobile:
 
 1. Open the compact Header actions or bottom **More** sheet and select **Import from GitHub**.
    Expected outcome: the same import workflow opens in the mobile modal layout.
+<!--
+FNXC:GitHubImportDocs 2026-07-23-13:20:
+The mobile issue detail preserves the complete Close issue, Plan, Chat, and Import as task action set
+on one touch-safe row. Labels may wrap inside their own actions rather than being hidden or moved to
+an inaccessible second row.
+-->
 2. Choose the repository, issue/PR tab, candidate row, and detail action. For GitHub issues, choose **Import as task** for direct tracked creation or **Plan** to start Planning Mode with the issue context.
-   Expected outcome: direct import creates the board task with the same GitHub provenance/tracking metadata as the desktop/tablet **Import Tasks** view; Plan opens the Planning Mode interview without source-issue tracking.
+   Expected outcome: direct import creates the board task with the same GitHub provenance/tracking metadata as the desktop/tablet **Import Tasks** view; Plan opens the Planning Mode interview without source-issue tracking. When all GitHub issue actions are available, their full labels remain on one touch-safe action row.
 3. While a candidate detail sheet is open, use the platform Back gesture or control.
    Expected outcome: the first Back dismisses only the issue, pull request, or GitLab detail and returns to the import candidate list; a second Back dismisses the import form.
 

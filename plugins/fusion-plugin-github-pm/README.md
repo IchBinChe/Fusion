@@ -140,6 +140,25 @@ Every write route fails closed with `500 { code: "plugin_store_unavailable" }` w
 
 **Restart durability.** Because both the taxonomy-proposal state and the repo-config's `approvedTaxonomyVersion` live in the same durable settings blob (`central.plugin_installs.settings`), an accepted taxonomy version survives a Fusion restart — verified by `src/__tests__/taxonomy-routes.test.ts`'s restart-survival test, which rebuilds a fresh `ctx` from only the captured settings blob.
 
+## Issue detail: markdown body, comments, timeline (FUSI-013)
+
+The read side of the Issues slice: a full issue detail surface built on three new read-only `GitHubClient` methods, two plugin routes, and a self-contained `IssueDetailView` component. This is deliberately additive and does **not** touch `GitHubPmView.tsx` (its tabbed-shell refactor is in-flight in FUSI-008); `IssueDetailView` exposes a `{ context, repo, issueNumber, onBack? }` prop seam for FUSI-008/FUSI-012 to mount later.
+
+**Client methods** (`src/github-client.ts`):
+
+- `getIssue(owner, repo, number)` — `GET /repos/{owner}/{repo}/issues/{number}`, mapped to `GitHubIssueDetail` (`bodyMarkdown`, `state`, `author`, `labels` with `color`, `assignees`, `milestone`, `commentCount`). Rejects a `pull_request`-shaped payload with a `not_found`-style `GitHubApiError` — this surface is issues-only.
+- `listIssueComments(owner, repo, number, { page?, perPage? })` — `GET .../comments`, returning **one page at a time** as `{ comments, nextPage }`; `nextPage` is derived from the REST `Link: rel="next"` header's `page` query value (`null` when absent). Comments are never eagerly accumulated across pages.
+- `listIssueTimeline(owner, repo, number, { maxItems? })` — paginates `GET .../timeline` via the existing `paginateRest` helper, then filters to the key events the detail view renders: `closed`, `reopened`, `labeled`, `unlabeled`, `referenced`, `cross-referenced`. Other event types (commented, assigned, renamed, …) are dropped.
+
+**Routes** (plugin-scoped, read-only, no plugin-store writes):
+
+- `GET /issues/detail?repo=&number=` — bundles `getIssue` + `listIssueTimeline` + the first comment page in one round trip: `{ ok, repo, issue, timeline, comments, commentsNextPage }`. `repo` falls back to the selected repo when omitted; 400 on a missing/invalid `repo` or non-positive `number`.
+- `GET /issues/comments?repo=&number=&page=` — subsequent comment pages for lazy loading: `{ ok, repo, comments, nextPage }` (default `page=1`).
+
+Both routes resolve auth via `resolveGitHubAuth` (never a second token-read path) and map `GitHubApiError` through `githubErrorToResponse`; the token value is never echoed in a response body.
+
+**`IssueDetailView`** (`src/IssueDetailView.tsx` + `IssueDetailView.css`) renders on mount: a header (title, `#number`, open/closed state badge, external GitHub link, optional back affordance), the markdown body via `react-markdown` + `remark-gfm` (code blocks, images, GFM task lists — falling back to "No description provided." for an empty body), a metadata sidebar (state, author, labels-as-color chips, assignees, milestone — each section omitted, not rendered as an empty shell, when absent), a comment thread with a "Load more comments" button that fetches `GET /issues/comments` until `nextPage` is `null` (then the button is removed, not disabled — and never rendered at all for a zero-comment issue), and the key timeline events. Reflows to a single column at the existing `@media (max-width: 48rem)` breakpoint. Never renders the PAT/token value.
+
 ## Setup
 
 1. Install or enable **GitHub PM** from Settings → Plugins / Plugin Manager.
@@ -166,6 +185,7 @@ Plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`:
 - `GET /auth/diagnostics` — resolves the layered auth chain and returns per-capability scope diagnostics (see above). Does **not** return the resolved token/PAT value.
 - `GET /repo-config`, `PUT /repo-config`, `PUT /repo-config/select` — per-repo configuration storage (FUSI-004); see the section above.
 - `POST /taxonomy/propose`, `GET /taxonomy/proposals`, `PUT /taxonomy/proposals/accept`, `PUT /taxonomy/proposals/reject`, `PUT /taxonomy/proposals/edit` — versioned, reviewable taxonomy proposal generation (FUSI-005); see the section above.
+- `GET /issues/detail`, `GET /issues/comments` — read-only issue detail, timeline, and paginated comments (FUSI-013); see the section above.
 
 ## Agent tools
 

@@ -171,6 +171,87 @@ export interface GitHubDiscussionListOptions {
   maxItems?: number;
 }
 
+/*
+FNXC:GitHubPmClient 2026-07-24-01:00:
+FUSI-013 read-only issue-detail reads: getIssue/listIssueComments/listIssueTimeline.
+Comments deliberately paginate ONE PAGE AT A TIME (not accumulated via paginateRest)
+so a long issue's thread lazy-loads from the UI ('Load more comments') instead of the
+client eagerly fetching every page up front -- the task's explicit "must lazy-load"
+requirement. listIssueTimeline filters GitHub's broad timeline event stream down to
+the handful of "key events" the detail view renders (closed/reopened/labeled/
+unlabeled/referenced/cross-referenced); everything else (commented, assigned,
+renamed, etc.) is dropped rather than surfaced as an unrecognized shape.
+*/
+
+export interface GitHubIssueUser {
+  login: string;
+  avatarUrl?: string;
+}
+
+export interface GitHubIssueLabel {
+  name: string;
+  color: string;
+  description?: string | null;
+}
+
+export interface GitHubIssueMilestone {
+  title: string;
+  state: string;
+  dueOn?: string | null;
+}
+
+export interface GitHubIssueDetail {
+  number: number;
+  title: string;
+  state: "open" | "closed";
+  bodyMarkdown: string;
+  htmlUrl: string;
+  author: GitHubIssueUser | null;
+  createdAt?: string;
+  updatedAt?: string;
+  labels: GitHubIssueLabel[];
+  assignees: GitHubIssueUser[];
+  milestone: GitHubIssueMilestone | null;
+  commentCount: number;
+}
+
+export interface GitHubIssueComment {
+  id: number;
+  author: GitHubIssueUser | null;
+  bodyMarkdown: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface GitHubIssueCommentsPage {
+  comments: GitHubIssueComment[];
+  /** Next 1-based page number to request, or null when this was the last page. */
+  nextPage: number | null;
+}
+
+export interface GitHubListIssueCommentsOptions {
+  page?: number;
+  perPage?: number;
+}
+
+export const GITHUB_TIMELINE_KEY_EVENTS = ["closed", "reopened", "labeled", "unlabeled", "referenced", "cross-referenced"] as const;
+
+export type GitHubTimelineEventType = (typeof GITHUB_TIMELINE_KEY_EVENTS)[number];
+
+export interface GitHubTimelineEvent {
+  id: string;
+  event: GitHubTimelineEventType;
+  actor?: GitHubIssueUser;
+  createdAt?: string;
+  label?: { name: string; color: string };
+  source?: { issueNumber?: number; htmlUrl?: string };
+}
+
+export interface GitHubListIssueTimelineOptions {
+  /** Bounds total raw timeline items scanned before filtering. Default: a single page (100). */
+  maxItems?: number;
+}
+
 /**
  * FNXC:GitHubPmClient 2026-07-24-00:00:
  * FUSI-005 read-only discussion-history input for the taxonomy generator. Mirrors
@@ -425,6 +506,87 @@ export class GitHubClient {
   }
 
   /**
+   * FNXC:GitHubPmClient 2026-07-24-01:00:
+   * FUSI-013: fetch a single issue's full detail. Rejects a pull_request-shaped payload
+   * (GitHub's issues REST endpoint also serves PRs by number) with a not_found-style error
+   * since this surface is issues-only -- callers should not render a PR through the issue view.
+   */
+  async getIssue(owner: string, repo: string, number: number): Promise<GitHubIssueDetail> {
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${encodeURIComponent(String(number))}`;
+    const { data: issue } = await this.requestJson<GitHubRestIssueDetail>(url);
+    if (issue.pull_request) {
+      throw new GitHubApiError(404, `#${number} is a pull request, not an issue.`, "not_found");
+    }
+    return {
+      number: issue.number,
+      title: issue.title,
+      state: issue.state === "closed" ? "closed" : "open",
+      bodyMarkdown: issue.body ?? "",
+      htmlUrl: issue.html_url,
+      author: toGitHubIssueUser(issue.user),
+      createdAt: issue.created_at,
+      updatedAt: issue.updated_at,
+      labels: (issue.labels ?? []).map(toGitHubIssueLabel).filter((label): label is GitHubIssueLabel => label !== null),
+      assignees: (issue.assignees ?? []).map(toGitHubIssueUser).filter((assignee): assignee is GitHubIssueUser => assignee !== null),
+      milestone: issue.milestone
+        ? { title: issue.milestone.title, state: issue.milestone.state, dueOn: issue.milestone.due_on ?? null }
+        : null,
+      commentCount: issue.comments ?? 0,
+    };
+  }
+
+  /**
+   * FNXC:GitHubPmClient 2026-07-24-01:00:
+   * FUSI-013: page-at-a-time comment fetch (NOT accumulated via paginateRest) so the
+   * IssueDetailView can lazy-load a long thread instead of loading it all up front.
+   * `nextPage` is derived from the REST `Link: rel="next"` header's `page` query param;
+   * absence of that header (or an unparsable page number) means this was the last page.
+   */
+  async listIssueComments(owner: string, repo: string, number: number, options: GitHubListIssueCommentsOptions = {}): Promise<GitHubIssueCommentsPage> {
+    const page = options.page ?? 1;
+    const perPage = options.perPage ?? REST_PAGE_SIZE;
+    const params = new URLSearchParams({ per_page: String(perPage), page: String(page) });
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${encodeURIComponent(String(number))}/comments?${params.toString()}`;
+    const { data, response } = await this.requestJson<GitHubRestComment[]>(url);
+    const comments = (Array.isArray(data) ? data : []).map((comment) => ({
+      id: comment.id,
+      author: toGitHubIssueUser(comment.user),
+      bodyMarkdown: comment.body ?? "",
+      createdAt: comment.created_at,
+      updatedAt: comment.updated_at,
+    }));
+    const nextUrl = parseNextLinkUrl(response.headers.get("Link"));
+    const nextPage = nextUrl ? parsePageParam(nextUrl) : null;
+    return { comments, nextPage };
+  }
+
+  /**
+   * FNXC:GitHubPmClient 2026-07-24-01:00:
+   * FUSI-013: paginate the full timeline (via `paginateRest`, reusing the existing Link-header
+   * cursor pagination) then filter down to the "key events" the detail view renders --
+   * closed/reopened/labeled/unlabeled/referenced/cross-referenced. Unrecognized event types
+   * (commented, assigned, renamed, etc.) are dropped, not surfaced as an unknown shape.
+   */
+  async listIssueTimeline(owner: string, repo: string, number: number, options: GitHubListIssueTimelineOptions = {}): Promise<GitHubTimelineEvent[]> {
+    const maxItems = options.maxItems ?? REST_PAGE_SIZE;
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${encodeURIComponent(String(number))}/timeline?per_page=${REST_PAGE_SIZE}`;
+    const raw = await this.paginateRest<GitHubRestTimelineEvent>(url, maxItems);
+    const keyEvents = new Set<string>(GITHUB_TIMELINE_KEY_EVENTS);
+    return raw
+      .filter((event) => typeof event.event === "string" && keyEvents.has(event.event))
+      .map((event) => ({
+        id: String(event.id ?? event.node_id ?? `${event.event}-${event.created_at ?? ""}`),
+        event: event.event as GitHubTimelineEventType,
+        actor: toGitHubIssueUser(event.actor) ?? undefined,
+        createdAt: event.created_at,
+        label: event.label ? { name: event.label.name, color: event.label.color } : undefined,
+        source: event.source
+          ? { issueNumber: event.source.issue?.number, htmlUrl: event.source.issue?.html_url }
+          : undefined,
+      }));
+  }
+
+  /**
    * FNXC:GitHubPmClient 2026-07-24-00:00:
    * Reads the `x-oauth-scopes` header from a cheap authenticated REST call so FUSI-002's
    * scope-diagnostics feature (e.g. detecting a missing `project` scope for Projects v2) has a
@@ -448,6 +610,79 @@ interface GitHubRestIssue {
   created_at?: string;
   updated_at?: string;
   pull_request?: unknown;
+}
+
+interface GitHubRestUser {
+  login?: string;
+  avatar_url?: string;
+}
+
+interface GitHubRestLabel {
+  name?: string;
+  color?: string;
+  description?: string | null;
+}
+
+interface GitHubRestMilestone {
+  title: string;
+  state: string;
+  due_on?: string | null;
+}
+
+interface GitHubRestIssueDetail {
+  number: number;
+  title: string;
+  state: string;
+  body?: string | null;
+  html_url: string;
+  user?: GitHubRestUser | null;
+  created_at?: string;
+  updated_at?: string;
+  labels?: Array<string | GitHubRestLabel>;
+  assignees?: GitHubRestUser[];
+  milestone?: GitHubRestMilestone | null;
+  comments?: number;
+  pull_request?: unknown;
+}
+
+interface GitHubRestComment {
+  id: number;
+  user?: GitHubRestUser | null;
+  body?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+interface GitHubRestTimelineEvent {
+  id?: number;
+  node_id?: string;
+  event?: string;
+  actor?: GitHubRestUser | null;
+  created_at?: string;
+  label?: { name: string; color: string };
+  source?: { issue?: { number?: number; html_url?: string } };
+}
+
+function toGitHubIssueUser(user: GitHubRestUser | null | undefined): GitHubIssueUser | null {
+  if (!user || typeof user.login !== "string" || !user.login) return null;
+  return { login: user.login, avatarUrl: user.avatar_url };
+}
+
+function toGitHubIssueLabel(label: string | GitHubRestLabel): GitHubIssueLabel | null {
+  if (typeof label === "string") return { name: label, color: "" };
+  if (!label.name) return null;
+  return { name: label.name, color: label.color ?? "", description: label.description ?? null };
+}
+
+/** Extracts the `page` query param from a REST pagination URL, e.g. one produced by parseNextLinkUrl. */
+function parsePageParam(url: string): number | null {
+  try {
+    const parsed = new URL(url);
+    const page = Number.parseInt(parsed.searchParams.get("page") ?? "", 10);
+    return Number.isFinite(page) && page > 0 ? page : null;
+  } catch {
+    return null;
+  }
 }
 
 const GITHUB_LABELS_QUERY = `query FusionGitHubPmLabels($owner: String!, $repo: String!, $first: Int!, $after: String) {

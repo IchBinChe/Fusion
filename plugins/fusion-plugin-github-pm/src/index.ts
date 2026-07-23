@@ -70,7 +70,18 @@ export type {
   GitHubTokenScopes,
   GitHubDiscussionListOptions,
   GitHubDiscussionListItem,
+  GitHubIssueUser,
+  GitHubIssueLabel,
+  GitHubIssueMilestone,
+  GitHubIssueDetail,
+  GitHubIssueComment,
+  GitHubIssueCommentsPage,
+  GitHubListIssueCommentsOptions,
+  GitHubTimelineEventType,
+  GitHubTimelineEvent,
+  GitHubListIssueTimelineOptions,
 } from "./github-client.js";
+export { GITHUB_TIMELINE_KEY_EVENTS } from "./github-client.js";
 export {
   aggregateRepoSignal,
   buildProposalSystemPrompt,
@@ -158,3 +169,4 @@ export {
   type RepoConfigMap,
 } from "./repo-config.js";
 export { repoConfigRoutes, getRepoConfig, putRepoConfig, selectRepoConfig } from "./repo-config-routes.js";
+export { issueRoutes, getIssueDetail, getIssueComments } from "./issue-routes.js";

@@ -22,7 +22,9 @@
   "dependencies": {
     "@fusion/core": "workspace:*",
     "@fusion/plugin-sdk": "workspace:*",
-    "lucide-react": "^0.542.0"
+    "lucide-react": "^0.542.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.6.3",

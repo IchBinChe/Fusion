@@ -299,6 +299,93 @@ describe("GitHubClient discussions (FUSI-005)", () => {
   });
 });
 
+describe("GitHubClient issue detail (FUSI-013)", () => {
+  it("getIssue maps REST fields to bodyMarkdown/labels/assignees/milestone/state", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      number: 42,
+      title: "Distinctive-Fixture bug",
+      state: "closed",
+      body: "## Repro\n- step 1",
+      html_url: "https://github.com/acme/widgets/issues/42",
+      user: { login: "octocat", avatar_url: "https://a" },
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-02T00:00:00Z",
+      labels: [{ name: "bug", color: "ff0000", description: "A bug" }],
+      assignees: [{ login: "hubot", avatar_url: "https://b" }],
+      milestone: { title: "v1", state: "open", due_on: "2026-02-01T00:00:00Z" },
+      comments: 3,
+    })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const issue = await client.getIssue("acme", "widgets", 42);
+
+    expect(issue).toEqual({
+      number: 42,
+      title: "Distinctive-Fixture bug",
+      state: "closed",
+      bodyMarkdown: "## Repro\n- step 1",
+      htmlUrl: "https://github.com/acme/widgets/issues/42",
+      author: { login: "octocat", avatarUrl: "https://a" },
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-02T00:00:00Z",
+      labels: [{ name: "bug", color: "ff0000", description: "A bug" }],
+      assignees: [{ login: "hubot", avatarUrl: "https://b" }],
+      milestone: { title: "v1", state: "open", dueOn: "2026-02-01T00:00:00Z" },
+      commentCount: 3,
+    });
+  });
+
+  it("getIssue rejects a pull_request-shaped payload", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ number: 2, title: "PR", state: "open", html_url: "u", pull_request: { url: "..." } })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    await expect(client.getIssue("acme", "widgets", 2)).rejects.toMatchObject({ status: 404, code: "not_found" });
+  });
+
+  it("listIssueComments returns one page and derives nextPage from the Link header", async () => {
+    const nextUrl = `${GITHUB_REST_BASE_URL}/repos/acme/widgets/issues/1/comments?per_page=100&page=2`;
+    const fetchImpl = vi.fn(async () => jsonResponse(
+      [{ id: 1, user: { login: "octocat" }, body: "comment 1", created_at: "2026-01-01T00:00:00Z" }],
+      200,
+      { Link: `<${nextUrl}>; rel="next"` },
+    )) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const page = await client.listIssueComments("acme", "widgets", 1);
+
+    expect(page.comments).toEqual([{ id: 1, author: { login: "octocat", avatarUrl: undefined }, bodyMarkdown: "comment 1", createdAt: "2026-01-01T00:00:00Z", updatedAt: undefined }]);
+    expect(page.nextPage).toBe(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("listIssueComments returns nextPage: null without a Link header (does not eagerly accumulate)", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse([{ id: 1, user: { login: "octocat" }, body: "only comment" }])) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const page = await client.listIssueComments("acme", "widgets", 1);
+
+    expect(page.nextPage).toBeNull();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("listIssueTimeline keeps only key event types and drops others", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse([
+      { id: 1, event: "closed", actor: { login: "octocat" }, created_at: "2026-01-01T00:00:00Z" },
+      { id: 2, event: "commented", actor: { login: "octocat" }, created_at: "2026-01-01T01:00:00Z" },
+      { id: 3, event: "labeled", actor: { login: "octocat" }, created_at: "2026-01-01T02:00:00Z", label: { name: "bug", color: "ff0000" } },
+      { id: 4, event: "cross-referenced", created_at: "2026-01-01T03:00:00Z", source: { issue: { number: 7, html_url: "https://github.com/acme/widgets/issues/7" } } },
+      { id: 5, event: "assigned", created_at: "2026-01-01T04:00:00Z" },
+    ])) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const events = await client.listIssueTimeline("acme", "widgets", 1);
+
+    expect(events.map((event) => event.event)).toEqual(["closed", "labeled", "cross-referenced"]);
+    expect(events[1].label).toEqual({ name: "bug", color: "ff0000" });
+    expect(events[2].source).toEqual({ issueNumber: 7, htmlUrl: "https://github.com/acme/widgets/issues/7" });
+  });
+});
+
 describe("GitHubClient token scopes", () => {
   it("reports project scope presence from x-oauth-scopes", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({}, 200, { "x-oauth-scopes": "repo, read:org, project" })) as unknown as typeof fetch;

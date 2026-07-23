@@ -13,7 +13,7 @@ This package ships the skeleton:
 
 **Not implemented yet** (deliberately out of scope for FUSI-001/FUSI-002):
 
-- Per-repo configuration storage and the any-repo picker — lands in FUSI-004.
+- The any-repo picker UI — later feature, built on top of the per-repo config storage below (FUSI-004).
 - Live issue/discussion/Projects v2/label/milestone CRUD — later Foundation-milestone tasks.
 - The dashboard view, routes, and tools do not call the GitHub client yet — that wiring lands in later slices now that both the auth resolver (FUSI-002) and the GitHub client (FUSI-003) can supply/consume a token.
 
@@ -80,6 +80,24 @@ The probe result is cached for 60 seconds, keyed by a SHA-256 fingerprint of the
   - When not authenticated: guidance to run `gh auth login`, set `GITHUB_TOKEN`, or add a PAT — never a "Log in with GitHub" button.
   - When the diagnostics probe itself fails (network/route error): a degraded state that does not crash the rest of the dashboard view.
 
+## Per-repo configuration storage (FUSI-004)
+
+The plugin persists a durable, per-repo configuration map — last-selected repo, AI triage autonomy mode, approved taxonomy version, and view preferences — so switching between repos preserves each repo's own context, and the state survives a Fusion restart.
+
+**Persistence mechanism.** Plugins have no bespoke KV/data-dir API. The durable store a plugin owns is its own settings blob in `central.plugin_installs.settings` (PostgreSQL-backed; see `packages/core/src/plugin-store.ts` `PluginStore.updatePluginSettings` and `packages/core/src/async-plugin-store.ts`). Because `PluginSettingType` has no object/json variant, the per-repo map is stored as a **serialized-JSON string setting** (`repoConfigState`) and the last selection as a plain **string setting** (`selectedRepo`). Both are plugin-managed — not intended for manual editing — and never contain secret/credential material; the PAT stays in its own `password` setting.
+
+Decoding is corruption-tolerant by design: `src/repo-config.ts`'s `parseRepoConfigs` degrades undefined, non-string, empty-string, or malformed JSON to an empty map instead of throwing. `normalizeRepoKey` canonicalizes `owner/repo` identifiers (trim + lowercase both segments) so `Owner/Repo` and `owner/repo` resolve to the same entry, and rejects malformed input.
+
+**Routes** (plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`, implemented in `src/repo-config-routes.ts`):
+
+- `GET /repo-config` — read-only. Returns `{ ok, selectedRepo, config, repoConfigs }` derived entirely from `ctx.settings` (no writes).
+- `PUT /repo-config` — body `{ repo, config }` (a partial `RepoConfig`). Validates `repo` via `normalizeRepoKey` (400 on invalid), merges the patch via `upsertRepoConfig`, and persists through `ctx.taskStore.getPluginStore().updatePluginSettings(ctx.pluginId, { repoConfigState: ... })`. Returns the resolved config for that repo.
+- `PUT /repo-config/select` — body `{ repo }`. Validates `repo`, persists `selectedRepo`, and ensures a config row exists for that repo (defaults upserted if absent) in the **same** write, avoiding a second round-trip.
+
+If `ctx.taskStore.getPluginStore` is unavailable, the write routes return `500 { code: "plugin_store_unavailable" }` instead of throwing.
+
+See `src/repo-config.ts` for the domain module (`RepoConfig`, `RepoConfigMap`, `normalizeRepoKey`, `defaultRepoConfig`, `parseRepoConfigs`, `serializeRepoConfigs`, `resolveRepoConfig`, `upsertRepoConfig`) and `src/__tests__/repo-config.test.ts` / `src/__tests__/repo-config-routes.test.ts` for the corruption-tolerance, immutability, and configure-A/switch-B/return-to-A restart-survival coverage.
+
 ## Setup
 
 1. Install or enable **GitHub PM** from Settings → Plugins / Plugin Manager.
@@ -94,6 +112,8 @@ The probe result is cached for 60 seconds, keyed by a SHA-256 fingerprint of the
 | `personalAccessToken` | `password` | Authentication | Optional PAT override; highest-precedence auth source; never echoed back in route responses, tool results, or logs. |
 | `defaultRepo` | `string` | Defaults | `owner/repo` hint for the future repo picker (FUSI-004). |
 | `defaultAutonomy` | `enum` (`approve-all` \| `suggest` \| `auto`) | Defaults | Default AI triage autonomy level; defaults to `approve-all`. |
+| `selectedRepo` | `string` | Repositories | Plugin-managed last-selected repo (`owner/repo`, canonicalized). Written by the repo-config select route; not hand-edited. |
+| `repoConfigState` | `string` (multiline) | Repositories | Plugin-managed serialized-JSON `RepoConfigMap`. Written by the repo-config routes; not hand-edited. |
 
 ## Routes
 
@@ -101,6 +121,7 @@ Plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`:
 
 - `GET /status` — reports `{ ok, configured, autonomy, defaultRepo }` derived solely from settings presence. Does **not** call the GitHub API and does **not** echo the PAT.
 - `GET /auth/diagnostics` — resolves the layered auth chain and returns per-capability scope diagnostics (see above). Does **not** return the resolved token/PAT value.
+- `GET /repo-config`, `PUT /repo-config`, `PUT /repo-config/select` — per-repo configuration storage (FUSI-004); see the section above.
 
 ## Agent tools
 
@@ -110,7 +131,7 @@ Plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`:
 
 - No live GitHub REST/GraphQL calls beyond the single scope-probe request described above.
 - No host-owned `/api/github-pm/*` routes or core GitHub PM settings.
-- No repo picker; `defaultRepo` is a plain string setting only.
+- No repo picker UI yet; the per-repo config storage layer (FUSI-004) is the persistence foundation later picker/triage features build on.
 - No separate GitHub OAuth/login flow, and none will be added — auth layers exclusively on `gh` CLI / `GITHUB_TOKEN` / PAT setting.
 
 ## External Integration Evidence

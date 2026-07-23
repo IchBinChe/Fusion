@@ -1,4 +1,9 @@
 import type { PluginSettingSchema } from "@fusion/plugin-sdk";
+import {
+  parseRepoConfigsFromSettings,
+  resolveSelectedRepo,
+  type RepoConfigMap,
+} from "./repo-config.js";
 
 export const GITHUB_PM_PLUGIN_ID = "fusion-plugin-github-pm";
 
@@ -24,6 +29,27 @@ export const githubPmSettingsSchema: Record<string, PluginSettingSchema> = {
     defaultValue: "approve-all",
     group: "Defaults",
   },
+  /*
+  FNXC:GithubPmRepoConfig 2026-07-24-00:00:
+  FUSI-004: two plugin-managed settings back the per-repo config store. Neither
+  is hand-edited by the user -- selectedRepo is written by the repo picker's
+  select action and repoConfigState is a serialized-JSON RepoConfigMap written
+  by the upsert/select routes (see repo-config-routes.ts). No secret material
+  is ever written into either field.
+  */
+  selectedRepo: {
+    type: "string",
+    label: "Last selected repository (plugin-managed)",
+    description: "The most recently selected repository in owner/repo form. Written automatically when you switch repos; not intended for manual editing.",
+    group: "Repositories",
+  },
+  repoConfigState: {
+    type: "string",
+    multiline: true,
+    label: "Per-repo configuration state (plugin-managed)",
+    description: "Plugin-managed serialized JSON holding each repository's autonomy mode, approved taxonomy version, and view preferences. Not intended for manual editing.",
+    group: "Repositories",
+  },
 };
 
 export type GitHubPmAutonomy = "approve-all" | "suggest" | "auto";
@@ -32,6 +58,10 @@ export interface GitHubPmPluginSettings {
   personalAccessToken?: string;
   defaultRepo?: string;
   defaultAutonomy: GitHubPmAutonomy;
+  /** FUSI-004: last-selected repo, canonicalized (owner/repo, lowercase), or null when unset. */
+  selectedRepo: string | null;
+  /** FUSI-004: full per-repo config map decoded from the serialized-JSON settings blob. */
+  repoConfigs: RepoConfigMap;
 }
 
 function optionalTrimmed(value: unknown): string | undefined {
@@ -55,6 +85,8 @@ export function resolveGitHubPmSettings(settings: Record<string, unknown>): GitH
     personalAccessToken: optionalTrimmed(settings.personalAccessToken),
     defaultRepo: optionalTrimmed(settings.defaultRepo),
     defaultAutonomy,
+    selectedRepo: resolveSelectedRepo(settings),
+    repoConfigs: parseRepoConfigsFromSettings(settings),
   };
 }
 

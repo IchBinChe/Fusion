@@ -94,3 +94,20 @@ export {
   type GitHubCapabilities,
   type GitHubAuthDiagnostics,
 } from "./auth.js";
+export {
+  normalizeRepoKey,
+  defaultRepoConfig,
+  parseRepoConfigs,
+  parseRepoConfigsFromSettings,
+  serializeRepoConfigs,
+  resolveRepoConfig,
+  upsertRepoConfig,
+  resolveSelectedRepo,
+  SELECTED_REPO_SETTING_ID,
+  REPO_CONFIG_STATE_SETTING_ID,
+  type RepoAutonomyMode,
+  type RepoViewPreferences,
+  type RepoConfig,
+  type RepoConfigMap,
+} from "./repo-config.js";
+export { repoConfigRoutes, getRepoConfig, putRepoConfig, selectRepoConfig } from "./repo-config-routes.js";

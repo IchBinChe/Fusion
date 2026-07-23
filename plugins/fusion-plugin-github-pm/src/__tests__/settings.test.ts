@@ -8,7 +8,22 @@ describe("github-pm settings", () => {
 
   it("trims whitespace and applies the default autonomy", () => {
     const resolved = resolveGitHubPmSettings({ personalAccessToken: "  ghp_abc  ", defaultRepo: " owner/repo " });
-    expect(resolved).toEqual({ personalAccessToken: "ghp_abc", defaultRepo: "owner/repo", defaultAutonomy: "approve-all" });
+    expect(resolved).toEqual({
+      personalAccessToken: "ghp_abc",
+      defaultRepo: "owner/repo",
+      defaultAutonomy: "approve-all",
+      selectedRepo: null,
+      repoConfigs: {},
+    });
+  });
+
+  it("surfaces the selected repo and per-repo config map from the settings blob (FUSI-004)", () => {
+    const resolved = resolveGitHubPmSettings({
+      selectedRepo: "Owner/Repo",
+      repoConfigState: JSON.stringify({ "owner/repo": { autonomyMode: "auto", approvedTaxonomyVersion: 1, viewPreferences: {}, updatedAt: "2026-07-24T00:00:00.000Z" } }),
+    });
+    expect(resolved.selectedRepo).toBe("owner/repo");
+    expect(resolved.repoConfigs["owner/repo"]?.autonomyMode).toBe("auto");
   });
 
   it("falls back to approve-all for an unknown autonomy value", () => {

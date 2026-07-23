@@ -37,7 +37,13 @@ describe("github-pm plugin routes", () => {
     vi.unstubAllGlobals();
   });
 
-  it("registers the /status and /auth/diagnostics routes", () => {
-    expect(githubPmRoutes.map((route) => `${route.method} ${route.path}`)).toEqual(["GET /status", "GET /auth/diagnostics"]);
+  it("registers the /status, /auth/diagnostics, and FUSI-004 repo-config routes", () => {
+    expect(githubPmRoutes.map((route) => `${route.method} ${route.path}`)).toEqual([
+      "GET /status",
+      "GET /auth/diagnostics",
+      "GET /repo-config",
+      "PUT /repo-config",
+      "PUT /repo-config/select",
+    ]);
   });
 });

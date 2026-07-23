@@ -34,6 +34,12 @@ describe("github-pm manifest", () => {
     expect(manifest.settingsSchema.defaultRepo.type).toBe("string");
   });
 
+  it("declares the FUSI-004 plugin-managed repo-config settings as strings, not secrets", () => {
+    expect(manifest.settingsSchema.selectedRepo.type).toBe("string");
+    expect(manifest.settingsSchema.repoConfigState.type).toBe("string");
+    expect(manifest.settingsSchema.repoConfigState.multiline).toBe(true);
+  });
+
   it("declares a single github-pm dashboard view", () => {
     expect(manifest.dashboardViews).toHaveLength(1);
     expect(manifest.dashboardViews[0]).toMatchObject({

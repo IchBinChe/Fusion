@@ -1,6 +1,7 @@
 import type { PluginContext, PluginRouteDefinition, PluginRouteResponse } from "@fusion/plugin-sdk";
 import { hasPersonalAccessToken, resolveGitHubPmSettings } from "./settings.js";
 import { getGitHubAuthDiagnostics } from "./auth.js";
+import { repoConfigRoutes } from "./repo-config-routes.js";
 
 function response(status: number, body: Record<string, unknown>): PluginRouteResponse {
   return { status, body };
@@ -35,7 +36,15 @@ export async function getGitHubAuthDiagnosticsRoute(_req: unknown, ctx: PluginCo
   return response(200, { ok: true, ...diagnostics });
 }
 
+/*
+FNXC:GithubPmRepoConfig 2026-07-24-00:00:
+FUSI-004 adds the per-repo config routes (GET/PUT /repo-config, PUT
+/repo-config/select) onto the plugin's aggregated route list so index.ts stays
+a single registration point (mirrors the linear-import precedent of one
+route-array export per plugin).
+*/
 export const githubPmRoutes: PluginRouteDefinition[] = [
   { method: "GET", path: "/status", handler: getGitHubPmStatus, description: "Report GitHub PM plugin configuration status from settings presence only." },
   { method: "GET", path: "/auth/diagnostics", handler: getGitHubAuthDiagnosticsRoute, description: "Resolve the layered GitHub auth chain and report per-capability scope diagnostics (never the token value)." },
+  ...repoConfigRoutes,
 ];

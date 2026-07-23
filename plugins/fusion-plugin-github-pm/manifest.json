@@ -26,6 +26,19 @@
       "enumValues": ["approve-all", "suggest", "auto"],
       "defaultValue": "approve-all",
       "group": "Defaults"
+    },
+    "selectedRepo": {
+      "type": "string",
+      "label": "Last selected repository (plugin-managed)",
+      "description": "The most recently selected repository in owner/repo form. Written automatically when you switch repos; not intended for manual editing.",
+      "group": "Repositories"
+    },
+    "repoConfigState": {
+      "type": "string",
+      "multiline": true,
+      "label": "Per-repo configuration state (plugin-managed)",
+      "description": "Plugin-managed serialized JSON holding each repository's autonomy mode, approved taxonomy version, and view preferences. Not intended for manual editing.",
+      "group": "Repositories"
     }
   },
   "dashboardViews": [

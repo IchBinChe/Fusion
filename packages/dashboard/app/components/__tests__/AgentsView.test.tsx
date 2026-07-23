@@ -910,6 +910,45 @@ describe("AgentsView", () => {
       expect(css).toContain(".agents-split-sidebar .agent-card-actions .agent-card-action-label {\n    display: none;\n  }");
     });
 
+    it("keeps long agent identities and populated health badges readable in split-sidebar cards", async () => {
+      const collisionAgent: Agent = {
+        ...mockAgents[1],
+        id: "agent-marketing-manager",
+        name: "Marketing Manager",
+        role: "custom",
+        state: "active",
+        runtimeConfig: { enabled: false },
+        metadata: {
+          skills: ["auto::skills/../../.agents/skills/brand-strategy/SKILL.md", "auto::skills/../../.agents/skills/campaign-analytics/SKILL.md"],
+        },
+      };
+      mockFetchAgents.mockResolvedValueOnce([collisionAgent]);
+      mockFetchAgentStats.mockResolvedValueOnce({ total: 1, byState: { active: 1 }, byRole: { custom: 1 } });
+
+      const { container } = renderView(<AgentsView addToast={mockAddToast} />);
+
+      const card = await waitFor(() => {
+        const renderedCard = container.querySelector<HTMLElement>(".agents-split-sidebar .agent-card");
+        expect(renderedCard).toBeTruthy();
+        return renderedCard!;
+      });
+
+      expect(within(card).getByText("Marketing Manager")).toBeInTheDocument();
+      expect(within(card).getByText("agent-marketing-manager")).toBeInTheDocument();
+      expect(within(card).getByText("active")).toBeInTheDocument();
+      expect(within(card).getByText("Heartbeat Disabled")).toBeInTheDocument();
+      expect(within(card).getByText("Custom")).toBeInTheDocument();
+      expect(within(card).getByText("brand-strategy")).toBeInTheDocument();
+      expect(within(card).getByText("campaign-analytics")).toBeInTheDocument();
+
+      const css = loadAllAppCss();
+      expect(css).toMatch(/\.agent-card-header\s*\{[^}]*flex-wrap:\s*wrap;[^}]*gap:\s*var\(--space-sm\);[^}]*\}/);
+      expect(css).toMatch(/\.agent-info\s*\{[^}]*flex:\s*1 1 auto;[^}]*min-width:\s*0;[^}]*\}/);
+      expect(css).toMatch(/\.agent-meta\s*\{[^}]*min-width:\s*0;[^}]*\}/);
+      expect(css).toMatch(/\.agent-name,\s*\.agent-id\s*\{[^}]*overflow-wrap:\s*anywhere;[^}]*\}/);
+      expect(css).toMatch(/\.agent-badges\s*\{[^}]*flex:\s*0 1 auto;[^}]*flex-wrap:\s*wrap;[^}]*min-width:\s*0;[^}]*\}/);
+    });
+
     it("opens matching detail view when clicking View Details button", async () => {
       renderView(<AgentsView addToast={mockAddToast} />);
 

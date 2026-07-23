@@ -1,0 +1,42 @@
+{
+  "id": "fusion-plugin-github-pm",
+  "name": "GitHub PM",
+  "version": "0.1.0",
+  "description": "GitHub-native project management for any repository: issues, discussions, Projects v2 boards, labels, and milestones from inside Fusion.",
+  "author": "Fusion",
+  "fusionVersion": ">=0.1.0",
+  "settingsSchema": {
+    "personalAccessToken": {
+      "type": "password",
+      "label": "GitHub personal access token",
+      "description": "Optional PAT override used only by this plugin for extra scopes (e.g. Projects v2). Auth falls back to the gh CLI or GITHUB_TOKEN when unset.",
+      "required": false,
+      "group": "Authentication"
+    },
+    "defaultRepo": {
+      "type": "string",
+      "label": "Default repository",
+      "description": "Optional default repository in owner/repo form to preselect in the repo picker.",
+      "group": "Defaults"
+    },
+    "defaultAutonomy": {
+      "type": "enum",
+      "label": "Default triage autonomy",
+      "description": "Default AI triage autonomy level for newly configured repositories.",
+      "enumValues": ["approve-all", "suggest", "auto"],
+      "defaultValue": "approve-all",
+      "group": "Defaults"
+    }
+  },
+  "dashboardViews": [
+    {
+      "viewId": "github-pm",
+      "label": "GitHub PM",
+      "componentPath": "./dashboard-view",
+      "icon": "Github",
+      "placement": "more",
+      "order": 60,
+      "description": "Manage any GitHub repository's issues, discussions, Projects v2 boards, labels, and milestones without leaving Fusion."
+    }
+  ]
+}

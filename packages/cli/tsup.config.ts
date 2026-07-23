@@ -70,6 +70,8 @@ const qualityPluginSrc = join(__dirname, "..", "..", "plugins", "fusion-plugin-q
 const qualityPluginDest = join(__dirname, "dist", "plugins", "fusion-plugin-quality");
 const linearImportPluginSrc = join(__dirname, "..", "..", "plugins", "fusion-plugin-linear-import");
 const linearImportPluginDest = join(__dirname, "dist", "plugins", "fusion-plugin-linear-import");
+const githubPmPluginSrc = join(__dirname, "..", "..", "plugins", "fusion-plugin-github-pm");
+const githubPmPluginDest = join(__dirname, "dist", "plugins", "fusion-plugin-github-pm");
 const pluginSdkCoreRuntimeShim = join(__dirname, "src", "plugin-sdk-core-runtime-shim.mjs");
 const dashboardClientStub = `<!doctype html>
 <html lang="en">
@@ -604,6 +606,12 @@ const cliBuildConfig = {
       pluginId: "fusion-plugin-linear-import",
       srcDir: linearImportPluginSrc,
       destDir: linearImportPluginDest,
+    });
+
+    await bundlePluginEntry({
+      pluginId: "fusion-plugin-github-pm",
+      srcDir: githubPmPluginSrc,
+      destDir: githubPmPluginDest,
     });
 
     await bundlePluginEntry({

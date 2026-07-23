@@ -166,6 +166,11 @@ describe("PlanningModeModal sequential flow", () => {
       resolveRetry({ success: true });
       await Promise.resolve();
     });
+
+    // Settlement releases the first owner. A later, distinct error may acquire the next
+    // bounded attempt; only the duplicate report while the promise was pending is coalesced.
+    mockConnectPlanningStream.mock.calls.at(-1)?.[2]?.onError?.("Later stream error");
+    await waitFor(() => expect(mockRetryPlanningSession).toHaveBeenCalledTimes(2));
   });
 
   it("ignores a stale errored load after a newer session is selected", async () => {

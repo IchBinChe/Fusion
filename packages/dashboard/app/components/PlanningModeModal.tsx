@@ -1421,6 +1421,16 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           viewRef.current = { type: "loading" };
           setView({ type: "loading" });
           setIsAutoRetrying(true);
+          /*
+          FNXC:PlanningRetry 2026-07-23-09:45:
+          A rejected automatic attempt has settled before its bounded successor is queued, so
+          release only its matching token first. The successor can then acquire ownership, while
+          duplicate SSE/poll reports still coalesce only during a genuinely pending invocation;
+          a stale callback cannot clear a newer session's owner.
+          */
+          if (options.retryToken && planningAutoRetryOwnerRef.current?.token === options.retryToken) {
+            planningAutoRetryOwnerRef.current = null;
+          }
           queueMicrotask(() => {
             if (currentSessionIdRef.current === retryTarget.sessionId) {
               void startPlanningAutoRetryRef.current(retryTarget.sessionId);

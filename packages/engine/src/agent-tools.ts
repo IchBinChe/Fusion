@@ -13,7 +13,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import * as fusionCore from "@fusion/core";
-import type { AgentState, AgentCapability, AgentUpdateInput, AgentLogEntry, Artifact, ArtifactCreateInput, ArtifactWithTask, Task, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore, WorkflowSettingDefinition, GoalStatus, WorkflowIrNode, IdeationCandidate } from "@fusion/core";
+import type { AgentState, AgentCapability, AgentUpdateInput, AgentLogEntry, Artifact, ArtifactCreateInput, ArtifactWithTask, Task, TaskDocument, TaskDocumentCreateInput, TaskStore, RunMutationContext, MessageStore, Message, SourceType, Settings, ResearchRun, ResearchRunStatus, TaskCreateInput, ReflectionStore, ApprovalRequestStore, ProjectSettings, ChatStore, WorkflowSettingDefinition, GoalStatus, WorkflowIrNode, IdeationCandidate, MissionWithHierarchy } from "@fusion/core";
 import { listTraits, isBuiltinWorkflowId, AgentStore, validateColumnAgentBindings, ColumnAgentBindingError, stripApprovalBypassFlags, WorkflowSettingRejectionError, resolveEffectiveSettingsById, resolveWorkflowIrById, findOrphanedSettingValues, BUILTIN_WORKFLOW_SETTINGS, MAX_TASK_LIST_TEXT_CHARS, formatCurrentTaskLine, normalizeWorkflowIcon, parseWorkflowIr, WorkflowIrError, assertColumnTraitsValid, ColumnTraitValidationError } from "@fusion/core";
 import { promoteHeldTask } from "./hold-release.js";
 import { computeCrossParentDiagnosticClaim, computeCrossParentDiagnosticClaimId, computeParentIntentClaimId, DASHBOARD_USER_ID, dailyMemoryPath, ensureOpenClawMemoryFiles, evaluateImplementationTaskBind, extractAgentProvisioningRequest, findSameAgentDuplicates, getMemoryBackendCapabilities, getProjectMemory, isEphemeralAgent, memoryLongTermPath, normalizeMessageParticipant, reconcileDeterministicDuplicate, resolveAgentProvisioningPolicy, resolveMemoryBackend, resolveResearchSettings, resolveTaskGithubTracking, runDeterministicDuplicateGuard, scheduleQmdProjectMemoryRefresh, searchProjectMemory, shouldSkipBackgroundQmdRefresh } from "@fusion/core";
@@ -3692,6 +3692,79 @@ const missionToolResult = (text: string, details: Record<string, unknown>, isErr
   content: [{ type: "text" as const, text }], details, ...(isError ? { isError: true } : {}),
 });
 const optionalText = (value: string | undefined) => value?.trim() || undefined;
+
+/*
+FNXC:MissionToolParity 2026-07-23-12:29:
+Engine-managed agent surfaces must render hierarchy IDs and statuses because downstream mission
+operations require those identifiers. Keep rich optional gate prose bounded in text while details
+retains the complete MissionStore hierarchy for programmatic callers.
+*/
+function formatMissionHierarchy(mission: MissionWithHierarchy): string {
+  const lines: string[] = [];
+  const renderBoundedField = (indent: string, label: string, value: string | undefined) => {
+    const trimmed = value?.trim();
+    if (!trimmed) return;
+    if (trimmed.length > 240) {
+      lines.push(`${indent}${label} ${trimmed.slice(0, 240)}… (truncated, ${trimmed.length} chars)`);
+      return;
+    }
+    lines.push(`${indent}${label} ${trimmed}`);
+  };
+
+  lines.push(`${mission.id}: ${mission.title}`);
+  lines.push(`Status: ${mission.status}`);
+  lines.push(`Created: ${mission.createdAt}`);
+  lines.push(`Updated: ${mission.updatedAt}`);
+  if (mission.description) lines.push(`Description: ${mission.description}`);
+  if (mission.baseBranch) lines.push(`Base branch: ${mission.baseBranch}`);
+  if (mission.eventCount !== undefined) lines.push(`Events: ${mission.eventCount}`);
+  lines.push("");
+
+  lines.push("Linked Goals:");
+  if ((mission.linkedGoals?.length ?? 0) === 0) {
+    lines.push("No linked goals.");
+  } else {
+    for (const goal of mission.linkedGoals ?? []) lines.push(`- ${goal.id}: ${goal.title} (${goal.status})`);
+  }
+  lines.push("");
+
+  if (mission.milestones.length === 0) {
+    lines.push("No milestones yet.");
+    return lines.join("\n");
+  }
+
+  lines.push("Milestones:");
+  for (const milestone of mission.milestones) {
+    const icon = milestone.status === "complete" ? "✓" : milestone.status === "active" ? "●" : "○";
+    lines.push(`  ${icon} ${milestone.id}: ${milestone.title} (${milestone.status})`);
+    renderBoundedField("    ", "AC:", milestone.acceptanceCriteria);
+    if (milestone.slices.length === 0) {
+      lines.push("    No slices.");
+      continue;
+    }
+
+    for (const slice of milestone.slices) {
+      const icon = slice.status === "complete" ? "✓" : slice.status === "active" ? "●" : "○";
+      const activated = slice.activatedAt ? ` [activated: ${slice.activatedAt}]` : "";
+      lines.push(`    ${icon} ${slice.id}: ${slice.title} (${slice.status})${activated}`);
+      renderBoundedField("      ", "Verification:", slice.verification);
+      if (slice.features.length === 0) {
+        lines.push("      No features.");
+        continue;
+      }
+
+      for (const feature of slice.features) {
+        const icon = feature.status === "done" ? "✓" : feature.status === "in-progress" ? "▸" : feature.status === "triaged" ? "●" : "○";
+        const taskLink = feature.taskId ? ` → ${feature.taskId}` : "";
+        lines.push(`      ${icon} ${feature.id}: ${feature.title} (${feature.status})${taskLink}`);
+        renderBoundedField("        ", "AC:", feature.acceptanceCriteria);
+      }
+    }
+  }
+
+  return lines.join("\n");
+}
+
 /* FNXC:MissionToolParity 2026-07-30-09:56: A supplied empty update value must remain an empty string so MissionStore can clear it, matching the pi-extension contract; only omitted values leave a field unchanged. */
 const updateFields = (params: Record<string, unknown>, fields: string[]) => Object.fromEntries(
   fields.filter((field) => params[field] !== undefined).map((field) => [field, (params[field] as string).trim()]),
@@ -3707,7 +3780,7 @@ export function createMissionTools(store: TaskStore): ToolDefinition[] {
   /* eslint-enable @typescript-eslint/no-explicit-any */
   return [
     tool("fn_mission_list", "List Missions", "List all missions with their current status.", missionListParams, async () => { const missions = await store.getMissionStore().listMissions(); return missionToolResult(missions.length ? `Missions (${missions.length})\n${missions.map((m) => `- ${m.id}: ${m.title} (${m.status})`).join("\n")}` : "No missions yet.", { missions, count: missions.length }); }),
-    tool("fn_mission_show", "Show Mission", "Show a mission with its full milestone, slice, and feature hierarchy.", missionShowParams, async ({ id }) => { const mission = await store.getMissionStore().getMissionWithHierarchy(id); return mission ? missionToolResult(`${mission.id}: ${mission.title}`, { mission }) : missionToolResult(`Mission ${id} not found`, { code: "MISSION_NOT_FOUND", missionId: id }, true); }),
+    tool("fn_mission_show", "Show Mission", "Show a mission with its full milestone, slice, and feature hierarchy.", missionShowParams, async ({ id }) => { const mission = await store.getMissionStore().getMissionWithHierarchy(id); return mission ? missionToolResult(formatMissionHierarchy(mission), { mission }) : missionToolResult(`Mission ${id} not found`, { code: "MISSION_NOT_FOUND", missionId: id }, true); }),
     tool("fn_mission_create", "Create Mission", "Create a high-level mission.", missionCreateParams, async (p) => { const ms = store.getMissionStore(); const mission = await ms.createMission({ title: p.title.trim(), description: optionalText(p.description), baseBranch: optionalText(p.baseBranch) }); const updated = p.autoAdvance === undefined ? mission : await ms.updateMission(mission.id, { autoAdvance: p.autoAdvance }); return missionToolResult(`Created ${updated.id}: ${updated.title}`, { mission: updated }); }),
     tool("fn_mission_update", "Update Mission", "Partially update a mission.", missionUpdateParams, async (p) => { const updates = updateFields(p, ["title", "description"]); if (!Object.keys(updates).length) return missionToolResult("No fields to update", {}, true); const mission = await store.getMissionStore().updateMission(p.id, updates); return missionToolResult(`Updated ${mission.id}: ${mission.title}`, { mission }); }),
     tool("fn_mission_delete", "Delete Mission", "Delete a mission and its hierarchy.", missionDeleteParams, async ({ id }) => { await store.getMissionStore().deleteMission(id); return missionToolResult(`Deleted ${id}`, { missionId: id }); }),

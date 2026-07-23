@@ -4,6 +4,7 @@ import type { PluginDashboardViewContext } from "@fusion/dashboard/app/plugins/t
 import { AuthDiagnosticsPanel } from "./AuthDiagnosticsPanel.js";
 import { TaxonomyProposalPanel } from "./TaxonomyProposalPanel.js";
 import { GITHUB_PM_TABS, GitHubPmTabs, githubPmTabButtonId, githubPmTabPanelId, type GitHubPmTabId } from "./GitHubPmTabs.js";
+import { IssuesPanel } from "./IssuesPanel.js";
 import "./GitHubPmView.css";
 
 type StatusState = "loading" | "configured" | "unconfigured" | "error";
@@ -121,9 +122,23 @@ visibility. This is required so per-tab local state (inputs, scroll position,
 in-flight local UI state) survives a switch-away-and-back -- conditionally
 unmounting an inactive panel would destroy that state, which the FUSI-008
 acceptance criteria explicitly forbid.
+
+FNXC:GithubPmIssues 2026-07-24-03:35:
+FUSI-012 fills the `issues` tabpanel with the real `IssuesPanel` (list + filters + search +
+sort + pagination), replacing its `TabPlaceholderPanel`. This is the ONLY structural change
+FUSI-012 makes here: the other five tabs (labels/milestones/discussions/projects/triage) keep
+their placeholder body, `TAB_PLACEHOLDER_COPY` stays intact (including its now-unused `issues`
+entry, left in place for symmetry/rollback rather than deleted), and the tablist/repo-context
+header/repo-picker slot/status badge/AuthDiagnosticsPanel are untouched. `IssuesPanel` renders
+inside the SAME `github-pm-view__panel card` tabpanel div -- no second card wrapper.
 */
 function TabPlaceholderPanel({ tabId }: { tabId: GitHubPmTabId }) {
   return <p className="github-pm-view__tab-placeholder-copy">{TAB_PLACEHOLDER_COPY[tabId]}</p>;
+}
+
+function GitHubPmTabPanelBody({ tabId, repo, context }: { tabId: GitHubPmTabId; repo: string | null; context?: PluginDashboardViewContext }) {
+  if (tabId === "issues") return <IssuesPanel repo={repo} context={context} />;
+  return <TabPlaceholderPanel tabId={tabId} />;
 }
 
 /*
@@ -249,7 +264,7 @@ export function GitHubPmView({ context }: { context?: PluginDashboardViewContext
             data-testid={`github-pm-panel-${tab.id}`}
             hidden={tab.id !== activeTab}
           >
-            <TabPlaceholderPanel tabId={tab.id} />
+            <GitHubPmTabPanelBody tabId={tab.id} repo={repoContextValue} context={context} />
           </div>
         ))}
       </div>

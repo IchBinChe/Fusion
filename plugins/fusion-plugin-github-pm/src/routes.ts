@@ -4,6 +4,7 @@ import { getGitHubAuthDiagnostics } from "./auth.js";
 import { repoConfigRoutes } from "./repo-config-routes.js";
 import { taxonomyRoutes } from "./taxonomy-routes.js";
 import { issueRoutes } from "./issue-routes.js";
+import { issuesRoutes } from "./issues-routes.js";
 
 function response(status: number, body: Record<string, unknown>): PluginRouteResponse {
   return { status, body };
@@ -57,6 +58,10 @@ FNXC:GithubPmIssues 2026-07-24-01:10:
 FUSI-013 adds the read-only issue-detail routes (GET /issues/detail, GET
 /issues/comments) onto the same aggregated route list, following the same
 one-route-array-export-per-feature precedent.
+
+FNXC:GithubPmIssues 2026-07-24-03:15:
+FUSI-012 adds the read-only issues-list routes (list/search + filter-option lookups) onto the
+aggregated route list, same one-registration-point pattern as repoConfigRoutes.
 */
 export const githubPmRoutes: PluginRouteDefinition[] = [
   { method: "GET", path: "/status", handler: getGitHubPmStatus, description: "Report GitHub PM plugin configuration status from settings presence only." },
@@ -64,4 +69,5 @@ export const githubPmRoutes: PluginRouteDefinition[] = [
   ...repoConfigRoutes,
   ...taxonomyRoutes,
   ...issueRoutes,
+  ...issuesRoutes,
 ];

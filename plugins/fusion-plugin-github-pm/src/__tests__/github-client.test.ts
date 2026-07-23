@@ -386,6 +386,196 @@ describe("GitHubClient issue detail (FUSI-013)", () => {
   });
 });
 
+describe("GitHubClient.listIssuesPage (FUSI-012)", () => {
+  it("maps filters/sort/direction/page/per_page into the request URL and returns one page", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse([
+      { number: 1, title: "Issue 1", state: "open", html_url: "https://github.com/acme/widgets/issues/1", labels: [{ name: "bug", color: "red" }], assignees: [{ login: "octocat", avatar_url: "https://x/a.png" }], milestone: { title: "v1" }, comments: 3 },
+    ], 200, { Link: '<https://api.github.com/x?page=3>; rel="next"' })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const result = await client.listIssuesPage("acme", "widgets", {
+      state: "open",
+      labels: "bug,ui",
+      assignee: "octocat",
+      milestone: 4,
+      sort: "updated",
+      direction: "asc",
+      page: 2,
+      perPage: 10,
+    });
+
+    const url = String(fetchImpl.mock.calls[0][0]);
+    expect(url).toContain("/repos/acme/widgets/issues?");
+    expect(url).toContain("state=open");
+    expect(url).toContain("labels=bug%2Cui");
+    expect(url).toContain("assignee=octocat");
+    expect(url).toContain("milestone=4");
+    expect(url).toContain("sort=updated");
+    expect(url).toContain("direction=asc");
+    expect(url).toContain("page=2");
+    expect(url).toContain("per_page=10");
+
+    expect(result.page).toBe(2);
+    expect(result.hasNextPage).toBe(true);
+    expect(result.nextPage).toBe(3);
+    expect(result.items).toEqual([{
+      number: 1,
+      title: "Issue 1",
+      state: "open",
+      htmlUrl: "https://github.com/acme/widgets/issues/1",
+      labels: [{ name: "bug", color: "red" }],
+      assignees: [{ login: "octocat", avatarUrl: "https://x/a.png" }],
+      milestoneTitle: "v1",
+      commentsCount: 3,
+      createdAt: undefined,
+      updatedAt: undefined,
+    }]);
+  });
+
+  it("derives hasNextPage: false when no Link rel=next header is present", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse([
+      { number: 1, title: "Only", state: "open", html_url: "https://github.com/acme/widgets/issues/1", labels: [] },
+    ])) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const result = await client.listIssuesPage("acme", "widgets");
+
+    expect(result.hasNextPage).toBe(false);
+    expect(result.nextPage).toBeUndefined();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("filters out pull-request-shaped results", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse([
+      { number: 1, title: "Real issue", state: "open", html_url: "https://github.com/acme/widgets/issues/1", labels: [] },
+      { number: 2, title: "A PR", state: "open", html_url: "https://github.com/acme/widgets/pull/2", labels: [], pull_request: { url: "..." } },
+    ])) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const result = await client.listIssuesPage("acme", "widgets");
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].number).toBe(1);
+  });
+
+  it("never accumulates multiple pages internally (exactly one fetch per call)", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse(
+      Array.from({ length: 100 }, (_, i) => ({ number: i + 1, title: `Issue ${i + 1}`, state: "open", html_url: "https://x", labels: [] })),
+      200,
+      { Link: '<https://api.github.com/x?page=2>; rel="next"' },
+    )) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const result = await client.listIssuesPage("acme", "widgets", { perPage: 100 });
+
+    expect(result.items).toHaveLength(100);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("GitHubClient.searchIssues (FUSI-012)", () => {
+  it("builds the correct q qualifier string, quoting values with spaces", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ total_count: 1, incomplete_results: false, items: [] })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    await client.searchIssues("acme", "widgets", {
+      q: "crash on load",
+      state: "open",
+      labels: ["bug", "needs triage"],
+      assignee: "octocat",
+      milestone: "v1 release",
+      sort: "comments",
+      order: "asc",
+      page: 1,
+      perPage: 30,
+    });
+
+    const url = String(fetchImpl.mock.calls[0][0]);
+    const q = new URL(url).searchParams.get("q");
+    expect(q).toBe('repo:acme/widgets is:issue state:open label:bug label:"needs triage" assignee:octocat milestone:"v1 release" crash on load');
+    expect(url).toContain("sort=comments");
+    expect(url).toContain("order=asc");
+  });
+
+  it("sets cappedAtLimit true once totalCount exceeds 1000", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ total_count: 1500, incomplete_results: false, items: [] })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const result = await client.searchIssues("acme", "widgets", { q: "bug" });
+
+    expect(result.totalCount).toBe(1500);
+    expect(result.cappedAtLimit).toBe(true);
+  });
+
+  it("sets cappedAtLimit true once page*perPage reaches the 1000 window even if totalCount is under 1000", async () => {
+    const items = Array.from({ length: 100 }, (_, i) => ({ number: i + 1, title: `Issue ${i + 1}`, state: "open", html_url: "https://x", labels: [] }));
+    const fetchImpl = vi.fn(async () => jsonResponse({ total_count: 950, incomplete_results: false, items })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const result = await client.searchIssues("acme", "widgets", { q: "bug", page: 10, perPage: 100 });
+
+    expect(result.cappedAtLimit).toBe(true);
+    expect(result.hasNextPage).toBe(false);
+  });
+
+  it("does not set cappedAtLimit under the 1000 boundary", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ total_count: 500, incomplete_results: false, items: [] })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const result = await client.searchIssues("acme", "widgets", { q: "bug" });
+
+    expect(result.cappedAtLimit).toBe(false);
+  });
+
+  it("maps items into the shared GitHubIssueSummary shape, filters PRs, and surfaces incompleteResults", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      total_count: 2,
+      incomplete_results: true,
+      items: [
+        { number: 1, title: "Real", state: "open", html_url: "https://x/1", labels: ["bug"], assignees: [], comments: 2 },
+        { number: 2, title: "PR", state: "open", html_url: "https://x/2", labels: [], pull_request: { url: "..." } },
+      ],
+    })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const result = await client.searchIssues("acme", "widgets", { q: "bug" });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ number: 1, commentsCount: 2, labels: [{ name: "bug", color: "ededed" }] });
+    expect(result.incompleteResults).toBe(true);
+  });
+
+  it("maps errors through GitHubApiError and never leaks the token", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ message: "Bad credentials secret-tok" }, 401)) as unknown as typeof fetch;
+    const client = new GitHubClient("secret-tok", fetchImpl);
+
+    await expect(client.searchIssues("acme", "widgets", { q: "bug" })).rejects.toMatchObject({ status: 401, code: "auth_error" });
+    await client.searchIssues("acme", "widgets", { q: "bug" }).catch((error) => {
+      expect(String(error.message)).not.toContain("secret-tok");
+    });
+  });
+});
+
+describe("GitHubClient.listMilestones (FUSI-012)", () => {
+  it("maps milestone fields correctly", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse([
+      { number: 1, title: "v1", state: "open", extraneous: true },
+      { number: 2, title: "v2", state: "closed" },
+    ])) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const milestones = await client.listMilestones("acme", "widgets");
+
+    expect(milestones).toEqual([
+      { number: 1, title: "v1", state: "open" },
+      { number: 2, title: "v2", state: "closed" },
+    ]);
+    const url = String(fetchImpl.mock.calls[0][0]);
+    expect(url).toContain("/repos/acme/widgets/milestones");
+    expect(url).toContain("state=all");
+  });
+});
+
 describe("GitHubClient token scopes", () => {
   it("reports project scope presence from x-oauth-scopes", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({}, 200, { "x-oauth-scopes": "repo, read:org, project" })) as unknown as typeof fetch;

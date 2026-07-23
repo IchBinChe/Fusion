@@ -80,6 +80,14 @@ export type {
   GitHubTimelineEventType,
   GitHubTimelineEvent,
   GitHubListIssueTimelineOptions,
+  GitHubIssueListPageOptions,
+  GitHubIssueLabelSummary,
+  GitHubIssueAssigneeSummary,
+  GitHubIssueSummary,
+  GitHubIssueListPage,
+  GitHubIssueSearchOptions,
+  GitHubIssueSearchPage,
+  GitHubMilestone,
 } from "./github-client.js";
 export { GITHUB_TIMELINE_KEY_EVENTS } from "./github-client.js";
 export {
@@ -170,3 +178,5 @@ export {
 } from "./repo-config.js";
 export { repoConfigRoutes, getRepoConfig, putRepoConfig, selectRepoConfig } from "./repo-config-routes.js";
 export { issueRoutes, getIssueDetail, getIssueComments } from "./issue-routes.js";
+export { issuesRoutes, getIssuesList, getIssuesFilterOptions } from "./issues-routes.js";
+export { subscribeIssuesChanged, notifyIssuesChanged, type IssueMutationKind, type IssuesChangedDetail } from "./issues-events.js";

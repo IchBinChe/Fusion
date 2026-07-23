@@ -37,7 +37,7 @@ describe("github-pm plugin routes", () => {
     vi.unstubAllGlobals();
   });
 
-  it("registers the /status, /auth/diagnostics, FUSI-004 repo-config, FUSI-005 taxonomy, and FUSI-013 issue routes", () => {
+  it("registers the /status, /auth/diagnostics, FUSI-004 repo-config, FUSI-005 taxonomy, FUSI-013 issue-detail, and FUSI-012 issues-list routes", () => {
     expect(githubPmRoutes.map((route) => `${route.method} ${route.path}`)).toEqual([
       "GET /status",
       "GET /auth/diagnostics",
@@ -51,6 +51,8 @@ describe("github-pm plugin routes", () => {
       "PUT /taxonomy/proposals/edit",
       "GET /issues/detail",
       "GET /issues/comments",
+      "GET /issues/list",
+      "GET /issues/filter-options",
     ]);
   });
 });

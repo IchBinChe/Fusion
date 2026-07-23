@@ -154,6 +154,93 @@ export interface GitHubLabelListOptions {
   maxItems?: number;
 }
 
+/*
+FNXC:GithubPmIssues 2026-07-24-03:00:
+FUSI-012 read-only, page-at-a-time issue-list reads: `listIssuesPage` (plain filter/sort REST
+issues-list) and `searchIssues` (GitHub Search API, only dispatched when a free-text term is
+supplied since the plain issues-list endpoint has no full-text search). Both are deliberately
+SEPARATE from `listIssues` above -- that method's accumulate-all contract is depended on
+byte-for-byte by `taxonomy-proposal.ts` and must never change. Neither new method accumulates
+multiple pages internally: each call returns exactly one page, so a 10k-issue repo never loads
+more than one page's worth of rows into the caller. The Search API's hard 1,000-result window
+is surfaced via `cappedAtLimit` on `GitHubIssueSearchPage` -- it is never silently truncated.
+*/
+
+export interface GitHubIssueListPageOptions {
+  state?: "open" | "closed" | "all";
+  /** Comma-joined label names, mirroring the REST `labels` query param. */
+  labels?: string;
+  assignee?: string;
+  /** A milestone number, or the literal "none"/"*" per GitHub's REST semantics. */
+  milestone?: string | number;
+  sort?: "created" | "updated" | "comments";
+  direction?: "asc" | "desc";
+  /** 1-based page number. Default 1. */
+  page?: number;
+  /** Default 25, clamped to GitHub's 100-item REST ceiling. */
+  perPage?: number;
+}
+
+export interface GitHubIssueLabelSummary {
+  name: string;
+  color: string;
+}
+
+export interface GitHubIssueAssigneeSummary {
+  login: string;
+  avatarUrl?: string;
+}
+
+/** Row-shaped issue summary shared by both `listIssuesPage` and `searchIssues`, so the list UI renders both identically. */
+export interface GitHubIssueSummary {
+  number: number;
+  title: string;
+  state: string;
+  htmlUrl: string;
+  labels: GitHubIssueLabelSummary[];
+  assignees: GitHubIssueAssigneeSummary[];
+  milestoneTitle?: string | null;
+  commentsCount: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface GitHubIssueListPage {
+  items: GitHubIssueSummary[];
+  page: number;
+  hasNextPage: boolean;
+  /** Present only when `hasNextPage` is true. */
+  nextPage?: number;
+}
+
+export interface GitHubIssueSearchOptions {
+  /** Free-text search terms, appended raw to the assembled qualifier string. */
+  q?: string;
+  state?: "open" | "closed" | "all";
+  /** Comma-joined or array-of label names; each becomes its own `label:` qualifier. */
+  labels?: string | string[];
+  assignee?: string;
+  milestone?: string | number;
+  sort?: "created" | "updated" | "comments";
+  order?: "asc" | "desc";
+  page?: number;
+  perPage?: number;
+}
+
+export interface GitHubIssueSearchPage extends GitHubIssueListPage {
+  totalCount: number;
+  /** GitHub's own `incomplete_results` flag: the search timed out server-side before scanning everything. */
+  incompleteResults: boolean;
+  /** True once the 1,000-result Search API window has been reached -- surfaced explicitly, never silently truncated. */
+  cappedAtLimit: boolean;
+}
+
+export interface GitHubMilestone {
+  number: number;
+  title: string;
+  state: string;
+}
+
 export interface GitHubLabel {
   id: string;
   name: string;
@@ -397,6 +484,89 @@ export class GitHubClient {
         createdAt: issue.created_at,
         updatedAt: issue.updated_at,
       }));
+  }
+
+  /**
+   * FNXC:GithubPmIssues 2026-07-24-03:00:
+   * Single-page REST issue-list read (state/labels/assignee/milestone/sort/direction --
+   * the same query params GitHub's own issues-list UI uses, so results match exactly).
+   * Returns exactly ONE page; `hasNextPage`/`nextPage` are derived from the `Link` header
+   * `rel="next"` cursor rather than a client-accumulated fetch loop. PRs are filtered out
+   * like `listIssues` does. Deliberately does not touch `listIssues`'s implementation.
+   */
+  async listIssuesPage(owner: string, repo: string, options: GitHubIssueListPageOptions = {}): Promise<GitHubIssueListPage> {
+    const page = normalizePageNumber(options.page);
+    const perPage = normalizePerPage(options.perPage);
+    const params = new URLSearchParams({
+      state: options.state ?? "open",
+      sort: options.sort ?? "created",
+      direction: options.direction ?? "desc",
+      per_page: String(perPage),
+      page: String(page),
+    });
+    if (options.labels) params.set("labels", options.labels);
+    if (options.assignee) params.set("assignee", options.assignee);
+    if (options.milestone !== undefined && options.milestone !== null && String(options.milestone).trim() !== "") {
+      params.set("milestone", String(options.milestone));
+    }
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues?${params.toString()}`;
+    const { data, response } = await this.requestJson<GitHubRestIssueFull[]>(url);
+    const raw = Array.isArray(data) ? data : [];
+    const items = raw.filter((issue) => !issue.pull_request).map(mapRestIssueToSummary);
+    const nextUrl = parseNextLinkUrl(response.headers.get("Link"));
+    return { items, page, hasNextPage: Boolean(nextUrl), nextPage: nextUrl ? page + 1 : undefined };
+  }
+
+  /**
+   * FNXC:GithubPmIssues 2026-07-24-03:00:
+   * Free-text issue search via GitHub's Search API (`GET /search/issues`) -- used ONLY when
+   * a `q` term is present, since the plain issues-list endpoint has no full-text search. The
+   * qualifier string combines `repo:`/`is:issue` plus the same state/label/assignee/milestone
+   * filters as `listIssuesPage` so results stay consistent between the two paths, quoting any
+   * value containing whitespace. The Search API hard-caps combined `page*per_page` at 1,000
+   * results; `cappedAtLimit` surfaces that explicitly rather than silently truncating.
+   */
+  async searchIssues(owner: string, repo: string, options: GitHubIssueSearchOptions = {}): Promise<GitHubIssueSearchPage> {
+    const page = normalizePageNumber(options.page);
+    const perPage = normalizePerPage(options.perPage);
+    const q = buildIssueSearchQuery(owner, repo, options);
+    const params = new URLSearchParams({
+      q,
+      sort: options.sort ?? "created",
+      order: options.order ?? "desc",
+      per_page: String(perPage),
+      page: String(page),
+    });
+    const url = `${GITHUB_REST_BASE_URL}/search/issues?${params.toString()}`;
+    const { data } = await this.requestJson<GitHubRestSearchResponse>(url);
+    const rawItems = Array.isArray(data.items) ? data.items : [];
+    const items = rawItems.filter((issue) => !issue.pull_request).map(mapRestIssueToSummary);
+    const totalCount = typeof data.total_count === "number" ? data.total_count : items.length;
+    const searchWindow = Math.min(totalCount, 1000);
+    const cappedAtLimit = totalCount > 1000 || page * perPage >= 1000;
+    const reachedWindowEnd = page * perPage >= searchWindow;
+    const hasNextPage = !reachedWindowEnd && items.length === perPage;
+    return {
+      items,
+      page,
+      hasNextPage,
+      nextPage: hasNextPage ? page + 1 : undefined,
+      totalCount,
+      incompleteResults: data.incomplete_results === true,
+      cappedAtLimit,
+    };
+  }
+
+  /**
+   * FNXC:GithubPmIssues 2026-07-24-03:00:
+   * Bounded milestones lookup for the issue-list filter dropdown (single page, capped at 100 --
+   * sufficient for a dropdown; not intended for exhaustive milestone enumeration).
+   */
+  async listMilestones(owner: string, repo: string): Promise<GitHubMilestone[]> {
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/milestones?state=all&per_page=100`;
+    const { data } = await this.requestJson<Array<{ number: number; title: string; state: string }>>(url);
+    const raw = Array.isArray(data) ? data : [];
+    return raw.map((milestone) => ({ number: milestone.number, title: milestone.title, state: milestone.state }));
   }
 
   /**
@@ -683,6 +853,85 @@ function parsePageParam(url: string): number | null {
   } catch {
     return null;
   }
+}
+
+/** Superset of GitHubRestIssue carrying the additional fields FUSI-012's row summary needs. */
+interface GitHubRestIssueFull extends GitHubRestIssue {
+  labels?: Array<string | { name?: string; color?: string }>;
+  assignees?: Array<{ login?: string; avatar_url?: string }>;
+  milestone?: { title?: string } | null;
+  comments?: number;
+}
+
+interface GitHubRestSearchResponse {
+  total_count?: number;
+  incomplete_results?: boolean;
+  items?: GitHubRestIssueFull[];
+}
+
+const ISSUE_LIST_DEFAULT_PER_PAGE = 25;
+const ISSUE_LIST_MAX_PER_PAGE = 100;
+
+function normalizePageNumber(page: number | undefined): number {
+  return Number.isFinite(page) && (page as number) > 0 ? Math.floor(page as number) : 1;
+}
+
+function normalizePerPage(perPage: number | undefined): number {
+  if (!Number.isFinite(perPage) || (perPage as number) <= 0) return ISSUE_LIST_DEFAULT_PER_PAGE;
+  return Math.min(Math.floor(perPage as number), ISSUE_LIST_MAX_PER_PAGE);
+}
+
+/**
+ * FNXC:GithubPmIssues 2026-07-24-03:00:
+ * Maps one raw REST issue (from either the plain issues-list endpoint or a Search API item --
+ * both share this shape) into the row-summary type both `listIssuesPage` and `searchIssues`
+ * return, so the list UI never has to special-case which backend served a given page.
+ */
+function mapRestIssueToSummary(issue: GitHubRestIssueFull): GitHubIssueSummary {
+  return {
+    number: issue.number,
+    title: issue.title,
+    state: issue.state,
+    htmlUrl: issue.html_url,
+    labels: (issue.labels ?? [])
+      .map((label) => (typeof label === "string" ? { name: label, color: "ededed" } : { name: label.name ?? "", color: label.color ?? "ededed" }))
+      .filter((label) => Boolean(label.name)),
+    assignees: (issue.assignees ?? [])
+      .map((assignee) => ({ login: assignee.login ?? "", avatarUrl: assignee.avatar_url }))
+      .filter((assignee) => Boolean(assignee.login)),
+    milestoneTitle: issue.milestone?.title ?? null,
+    commentsCount: typeof issue.comments === "number" ? issue.comments : 0,
+    createdAt: issue.created_at,
+    updatedAt: issue.updated_at,
+  };
+}
+
+function quoteSearchQualifierIfNeeded(value: string): string {
+  return /\s/.test(value) ? `"${value}"` : value;
+}
+
+/**
+ * FNXC:GithubPmIssues 2026-07-24-03:00:
+ * Assembles the `q` qualifier string for `searchIssues`: `repo:{owner}/{repo} is:issue` plus
+ * `state:`/`label:`(one per label)/`assignee:`/`milestone:` qualifiers mirroring the same
+ * filters `listIssuesPage` accepts, quoting any value containing whitespace, with the raw
+ * free-text `q` term appended last.
+ */
+function buildIssueSearchQuery(owner: string, repo: string, options: GitHubIssueSearchOptions): string {
+  const parts: string[] = [`repo:${owner}/${repo}`, "is:issue"];
+  if (options.state && options.state !== "all") parts.push(`state:${options.state}`);
+  const labels = Array.isArray(options.labels) ? options.labels : options.labels ? options.labels.split(",") : [];
+  for (const label of labels) {
+    const trimmed = label.trim();
+    if (trimmed) parts.push(`label:${quoteSearchQualifierIfNeeded(trimmed)}`);
+  }
+  if (options.assignee) parts.push(`assignee:${options.assignee}`);
+  if (options.milestone !== undefined && options.milestone !== null && String(options.milestone).trim() !== "") {
+    parts.push(`milestone:${quoteSearchQualifierIfNeeded(String(options.milestone))}`);
+  }
+  const freeText = options.q?.trim();
+  if (freeText) parts.push(freeText);
+  return parts.join(" ");
 }
 
 const GITHUB_LABELS_QUERY = `query FusionGitHubPmLabels($owner: String!, $repo: String!, $first: Int!, $after: String) {

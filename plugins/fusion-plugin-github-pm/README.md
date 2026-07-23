@@ -28,6 +28,35 @@ This package ships the skeleton:
 - The settings-presence status badge and `AuthDiagnosticsPanel` (FUSI-002) continue to render inside the shell, unchanged.
 - All styling uses design tokens only (`GitHubPmView.css`) and adapts at the existing `@media (max-width: 48rem)` mobile breakpoint (the tab bar scrolls horizontally rather than clipping).
 
+## Issues list — filters, search, sort, pagination (FUSI-012)
+
+The **Issues** tab (previously a placeholder) now renders `IssuesPanel`, a filterable/searchable/sortable, page-at-a-time issue list mounted via `{ repo, context }` — the only structural change FUSI-012 makes to `GitHubPmView.tsx`.
+
+**Client reads** (`src/github-client.ts`, additive — `listIssues`'s accumulate-all contract used by the taxonomy proposal aggregator is untouched):
+
+- `listIssuesPage(owner, repo, options)` — one REST page from `GET /repos/{owner}/{repo}/issues` (`state`/`labels`/`assignee`/`milestone`/`sort`/`direction`/`page`/`perPage`, default `perPage` 25, max 100). `hasNextPage`/`nextPage` derive from the `Link` header `rel="next"` cursor. Never accumulates pages internally.
+- `searchIssues(owner, repo, options)` — GitHub Search API (`GET /search/issues`), dispatched only when a free-text term is present (the plain issues-list endpoint has no full-text search). Builds a `repo:`/`is:issue`/`state:`/`label:`/`assignee:`/`milestone:` qualifier string (quoting values with spaces) plus the raw search term. Returns `totalCount`, `incompleteResults`, and `cappedAtLimit` (true once GitHub's hard 1,000-result search window is reached — surfaced explicitly, never silently truncated).
+- `listMilestones(owner, repo)` — single bounded page (`state=all`, `per_page=100`) for the milestone filter dropdown. The label filter reuses the existing `listLabels` (GraphQL) reader; no second label method was added.
+
+Both `listIssuesPage` and `searchIssues` map their raw REST items into the same `GitHubIssueSummary` shape (`number`, `title`, `state`, `htmlUrl`, `labels`, `assignees`, `milestoneTitle`, `commentsCount`, `createdAt`, `updatedAt`) so the panel renders both response paths identically.
+
+**Routes** (plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`, `src/issues-routes.ts`):
+
+- `GET /issues/list?repo=&state=&labels=&assignee=&milestone=&search=&sort=&direction=&page=&perPage=` — dispatches to `searchIssues` when `search` is non-empty, otherwise `listIssuesPage`. Repo resolves from the `repo` query param, falling back to `resolveSelectedRepo(ctx.settings)` (FUSI-004). Response: `{ ok, repo, mode: "list" | "search", items, page, perPage, hasNextPage, nextPage?, totalCount?, incompleteResults?, cappedAtLimit? }`. 400 on missing/invalid `repo` or a non-positive `page`/`perPage`. Auth resolves exclusively through `resolveGitHubAuth` (FUSI-002); the token is never echoed.
+- `GET /issues/filter-options?repo=` — `{ ok, repo, labels, milestones }` for the dropdowns. A missing-scope (401/403) label or milestone lookup degrades to an empty array rather than failing the whole request.
+
+**Live-update seam** (`src/issues-events.ts`) — a tiny, dependency-free module-level pub/sub (`subscribeIssuesChanged`/`notifyIssuesChanged`; a `Set` of listeners, not a `window` DOM event, so it works cleanly under jsdom/SSR). `IssuesPanel` subscribes on mount and, on a matching-repo mutation notification, re-fetches its CURRENT page instead of a full reload. This is the seam FUSI-013 (issue detail), FUSI-014 (write ops), and FUSI-015 (inline label/assignee/milestone mutation) — none built yet — will call `notifyIssuesChanged` into once they land.
+
+**`IssuesPanel` UI** (`src/IssuesPanel.tsx` / `IssuesPanel.css`):
+
+- Filter bar: state (open/closed/all, default open), toggleable label chips, a free-text assignee input, a milestone select, a debounced (350ms) free-text search box, and a sort (created/updated/comments) + direction toggle. Any filter change resets to page 1.
+- List rows: state badge, `#number`, clickable title (`onSelectIssue?(number)` prop stub for FUSI-013's later detail handoff, else links out to `htmlUrl`), label chips, assignee logins, comment count, relative updated-at.
+- Pagination is strictly page-based — Prev/Next issue a fresh, page-scoped fetch; pages are never accumulated client-side, so a 10k+-issue repo never loads more than one page's rows. When the Search API's 1,000-result cap is reached, an explicit "showing the first ~1,000 matching results" notice renders instead of silently truncating.
+- Distinct loading / empty ("no issues match these filters") / error (mapped message, never token text) / no-repo-selected ("select a repository") states. Zero labels/milestones render the dropdown with only its default "Any" option, not a broken empty shell.
+- Styling uses design tokens only (`--space-*`, `--radius-*`, color/semantic tokens, `color-mix(...)` for label-color translucency); the filter bar and row layout reflow at the existing `@media (max-width: 48rem)` breakpoint.
+
+`scripts/copy-css.mjs` now iterates a `CSS_FILES` list (`GitHubPmView.css`, `IssuesPanel.css`) rather than a single hardcoded src/dest pair, so this task's and future tasks' (e.g. FUSI-013's) CSS additions compose regardless of merge order.
+
 ## GitHub client (REST + GraphQL)
 
 `src/github-client.ts` (FUSI-003) is a self-contained, portable GitHub API client — no `@fusion/core` or `gh`-CLI dependency in its hot path — built for eventual upstream submission.
@@ -186,6 +215,7 @@ Plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`:
 - `GET /repo-config`, `PUT /repo-config`, `PUT /repo-config/select` — per-repo configuration storage (FUSI-004); see the section above.
 - `POST /taxonomy/propose`, `GET /taxonomy/proposals`, `PUT /taxonomy/proposals/accept`, `PUT /taxonomy/proposals/reject`, `PUT /taxonomy/proposals/edit` — versioned, reviewable taxonomy proposal generation (FUSI-005); see the section above.
 - `GET /issues/detail`, `GET /issues/comments` — read-only issue detail, timeline, and paginated comments (FUSI-013); see the section above.
+- `GET /issues/list`, `GET /issues/filter-options` — issue list/search/filter-dropdown reads (FUSI-012); see the section above.
 
 ## Agent tools
 

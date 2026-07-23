@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, CheckCircle2, Loader2, MessageSquarePlus, PenLine, PlusCircle, XCircle } from "lucide-react";
 import type { PluginDashboardViewContext } from "@fusion/dashboard/app/plugins/types";
+import { useConfirm } from "@fusion/dashboard/app/hooks/useConfirm";
 import { IssueDetailView } from "./IssueDetailView.js";
 import { notifyIssuesChanged } from "./issues-events.js";
 import "./IssueWritePanel.css";
@@ -76,15 +77,23 @@ async function loadIssueForEdit(context: PluginDashboardViewContext | undefined,
   return { number: result.issue.number, title: result.issue.title, bodyMarkdown: result.issue.bodyMarkdown, state: result.issue.state };
 }
 
+/*
+FNXC:GithubPmWriteGate 2026-07-24-06:30:
+FUSI-017: each write dispatcher below accepts an explicit `confirmed` boolean, forwarded into
+the request body only when true. The CALLER (the component below) decides whether to await
+the confirm dialog before invoking these -- these functions never show a dialog themselves,
+keeping the confirm-vs-dispatch decision and the actual network call cleanly separated.
+*/
 async function createIssue(
   context: PluginDashboardViewContext | undefined,
   repo: string,
   input: { title: string; body?: string; labels?: string[]; assignees?: string[]; milestone?: number },
+  confirmed: boolean,
 ): Promise<WriteIssue> {
   const result = await fetchJson<IssueWriteResponse>(`${PLUGIN_BASE}/issues/create${projectQuery(context)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ repo, ...input }),
+    body: JSON.stringify({ repo, ...input, ...(confirmed ? { confirmed: true } : {}) }),
   });
   if (!result.issue) throw new Error("Issue creation failed unexpectedly.");
   return { number: result.issue.number, title: result.issue.title, bodyMarkdown: result.issue.bodyMarkdown, state: result.issue.state };
@@ -95,11 +104,12 @@ async function updateIssue(
   repo: string,
   number: number,
   patch: { title?: string; body?: string },
+  confirmed: boolean,
 ): Promise<WriteIssue> {
   const result = await fetchJson<IssueWriteResponse>(`${PLUGIN_BASE}/issues/update${projectQuery(context)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ repo, number, ...patch }),
+    body: JSON.stringify({ repo, number, ...patch, ...(confirmed ? { confirmed: true } : {}) }),
   });
   if (!result.issue) throw new Error("Issue update failed unexpectedly.");
   return { number: result.issue.number, title: result.issue.title, bodyMarkdown: result.issue.bodyMarkdown, state: result.issue.state };
@@ -110,22 +120,23 @@ async function setIssueState(
   repo: string,
   number: number,
   state: "open" | "closed",
-  stateReason?: "completed" | "not_planned",
+  stateReason: "completed" | "not_planned" | undefined,
+  confirmed: boolean,
 ): Promise<WriteIssue> {
   const result = await fetchJson<IssueWriteResponse>(`${PLUGIN_BASE}/issues/state${projectQuery(context)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ repo, number, state, stateReason }),
+    body: JSON.stringify({ repo, number, state, stateReason, ...(confirmed ? { confirmed: true } : {}) }),
   });
   if (!result.issue) throw new Error("Issue state change failed unexpectedly.");
   return { number: result.issue.number, title: result.issue.title, bodyMarkdown: result.issue.bodyMarkdown, state: result.issue.state };
 }
 
-async function createComment(context: PluginDashboardViewContext | undefined, repo: string, number: number, body: string): Promise<void> {
+async function createComment(context: PluginDashboardViewContext | undefined, repo: string, number: number, body: string, confirmed: boolean): Promise<void> {
   const result = await fetchJson<CommentWriteResponse>(`${PLUGIN_BASE}/issues/comments${projectQuery(context)}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ repo, number, body }),
+    body: JSON.stringify({ repo, number, body, ...(confirmed ? { confirmed: true } : {}) }),
   });
   if (!result.comment) throw new Error("Comment creation failed unexpectedly.");
 }
@@ -143,7 +154,16 @@ function ErrorBanner({ message }: { message: string }) {
   );
 }
 
-export function IssueWritePanel({ context, repo }: { context?: PluginDashboardViewContext; repo: string | null }) {
+/*
+FNXC:GithubPmWriteGate 2026-07-24-06:30:
+FUSI-017: `confirmWrites` defaults to `true` (ON) when the prop is omitted/undefined, so a
+parent that fails to thread the /status flag (stale server, network hiccup) never silently
+un-gates the UI. The parent (GitHubPmView.tsx) reads the resolved value from GET /status and
+passes it down explicitly once loaded.
+*/
+export function IssueWritePanel({ context, repo, confirmWrites }: { context?: PluginDashboardViewContext; repo: string | null; confirmWrites?: boolean }) {
+  const gateWrites = confirmWrites !== false;
+  const { confirm } = useConfirm();
   // "New issue" form state.
   const [createTitle, setCreateTitle] = useState("");
   const [createBody, setCreateBody] = useState("");
@@ -215,6 +235,21 @@ export function IssueWritePanel({ context, repo }: { context?: PluginDashboardVi
   const handleCreate = useCallback(async (event: React.FormEvent) => {
     event.preventDefault();
     if (!repo || !createTitle.trim()) return;
+    /*
+    FNXC:GithubPmWriteGate 2026-07-24-06:30:
+    FUSI-017: gate BEFORE any pending/optimistic state change. Cancel returns here with ZERO
+    mutations, ZERO optimistic state, and ZERO notifyIssuesChanged -- the snapshot below is
+    never touched on cancel.
+    */
+    if (gateWrites) {
+      const proceed = await confirm({
+        title: "Create issue?",
+        message: `Create a new issue "${createTitle.trim()}" on ${repo}?`,
+        confirmLabel: "Create issue",
+        cancelLabel: "Cancel",
+      });
+      if (!proceed) return;
+    }
     setCreatePending(true);
     setCreateError(undefined);
     const snapshot = createdIssues;
@@ -228,7 +263,7 @@ export function IssueWritePanel({ context, repo }: { context?: PluginDashboardVi
         labels: splitCsv(createLabels),
         assignees: splitCsv(createAssignees),
         milestone: createMilestone.trim() ? Number.parseInt(createMilestone, 10) : undefined,
-      });
+      }, gateWrites);
       setCreatedIssues((prev) => prev.map((issue) => (issue.number === tempNumber ? created : issue)));
       notifyIssuesChanged({ repo, issueNumber: created.number, kind: "created" });
       setSelectedNumber(created.number);
@@ -247,17 +282,26 @@ export function IssueWritePanel({ context, repo }: { context?: PluginDashboardVi
     } finally {
       setCreatePending(false);
     }
-  }, [context, repo, createTitle, createBody, createLabels, createAssignees, createMilestone, createdIssues]);
+  }, [context, repo, createTitle, createBody, createLabels, createAssignees, createMilestone, createdIssues, gateWrites, confirm]);
 
   const handleEdit = useCallback(async (event: React.FormEvent) => {
     event.preventDefault();
     if (!repo || selectedNumber === null || !selectedIssue) return;
+    if (gateWrites) {
+      const proceed = await confirm({
+        title: "Save issue edit?",
+        message: `Save edits to issue #${selectedNumber} on ${repo}?`,
+        confirmLabel: "Save edit",
+        cancelLabel: "Cancel",
+      });
+      if (!proceed) return;
+    }
     setEditPending(true);
     setEditError(undefined);
     const snapshot = selectedIssue;
     setSelectedIssue({ ...snapshot, title: editTitle, bodyMarkdown: editBody });
     try {
-      const updated = await updateIssue(context, repo, selectedNumber, { title: editTitle, body: editBody });
+      const updated = await updateIssue(context, repo, selectedNumber, { title: editTitle, body: editBody }, gateWrites);
       setSelectedIssue(updated);
       notifyIssuesChanged({ repo, issueNumber: selectedNumber, kind: "updated" });
       setDetailRefreshNonce((prev) => prev + 1);
@@ -269,17 +313,26 @@ export function IssueWritePanel({ context, repo }: { context?: PluginDashboardVi
     } finally {
       setEditPending(false);
     }
-  }, [context, repo, selectedNumber, selectedIssue, editTitle, editBody]);
+  }, [context, repo, selectedNumber, selectedIssue, editTitle, editBody, gateWrites, confirm]);
 
   const handleComment = useCallback(async (event: React.FormEvent) => {
     event.preventDefault();
     if (!repo || selectedNumber === null || !commentBody.trim()) return;
+    if (gateWrites) {
+      const proceed = await confirm({
+        title: "Add comment?",
+        message: `Add this comment to issue #${selectedNumber} on ${repo}?`,
+        confirmLabel: "Add comment",
+        cancelLabel: "Cancel",
+      });
+      if (!proceed) return;
+    }
     setCommentPending(true);
     setCommentError(undefined);
     const snapshot = commentBody;
     setCommentBody("");
     try {
-      await createComment(context, repo, selectedNumber, snapshot.trim());
+      await createComment(context, repo, selectedNumber, snapshot.trim(), gateWrites);
       notifyIssuesChanged({ repo, issueNumber: selectedNumber, kind: "commented" });
       setDetailRefreshNonce((prev) => prev + 1);
     } catch (error) {
@@ -288,16 +341,26 @@ export function IssueWritePanel({ context, repo }: { context?: PluginDashboardVi
     } finally {
       setCommentPending(false);
     }
-  }, [context, repo, selectedNumber, commentBody]);
+  }, [context, repo, selectedNumber, commentBody, gateWrites, confirm]);
 
   const handleSetState = useCallback(async (targetState: "open" | "closed") => {
     if (!repo || selectedNumber === null || !selectedIssue) return;
+    if (gateWrites) {
+      const proceed = await confirm({
+        title: targetState === "closed" ? "Close issue?" : "Reopen issue?",
+        message: `${targetState === "closed" ? "Close" : "Reopen"} issue #${selectedNumber} on ${repo}?`,
+        confirmLabel: targetState === "closed" ? "Close issue" : "Reopen issue",
+        cancelLabel: "Cancel",
+        danger: targetState === "closed",
+      });
+      if (!proceed) return;
+    }
     setStatePending(true);
     setStateError(undefined);
     const snapshot = selectedIssue;
     setSelectedIssue({ ...snapshot, state: targetState });
     try {
-      const updated = await setIssueState(context, repo, selectedNumber, targetState, targetState === "closed" ? closeReason : undefined);
+      const updated = await setIssueState(context, repo, selectedNumber, targetState, targetState === "closed" ? closeReason : undefined, gateWrites);
       setSelectedIssue(updated);
       notifyIssuesChanged({ repo, issueNumber: selectedNumber, kind: targetState === "closed" ? "closed" : "reopened" });
       setDetailRefreshNonce((prev) => prev + 1);
@@ -307,7 +370,7 @@ export function IssueWritePanel({ context, repo }: { context?: PluginDashboardVi
     } finally {
       setStatePending(false);
     }
-  }, [context, repo, selectedNumber, selectedIssue, closeReason]);
+  }, [context, repo, selectedNumber, selectedIssue, closeReason, gateWrites, confirm]);
 
   if (!repo) {
     return (

@@ -16,6 +16,8 @@ interface StatusResponse {
   configured?: boolean;
   autonomy?: string;
   defaultRepo?: string | null;
+  /** FUSI-017: resolved confirmWrites gate flag; see GitHubPmView's confirmWrites state comment. */
+  confirmWrites?: boolean;
 }
 
 interface RepoConfigResponse {
@@ -144,12 +146,12 @@ tabpanel body -- the write surface lives with the list it keeps live, per the ta
 guidance. No second card wrapper: `IssueWritePanel` renders its own internal sections and
 sits inside the existing `github-pm-view__panel card` tabpanel div.
 */
-function GitHubPmTabPanelBody({ tabId, repo, context }: { tabId: GitHubPmTabId; repo: string | null; context?: PluginDashboardViewContext }) {
+function GitHubPmTabPanelBody({ tabId, repo, context, confirmWrites }: { tabId: GitHubPmTabId; repo: string | null; context?: PluginDashboardViewContext; confirmWrites: boolean }) {
   if (tabId === "issues") {
     return (
       <>
         <IssuesPanel repo={repo} context={context} />
-        <IssueWritePanel repo={repo} context={context} />
+        <IssueWritePanel repo={repo} context={context} confirmWrites={confirmWrites} />
       </>
     );
   }
@@ -194,6 +196,14 @@ export function GitHubPmView({ context }: { context?: PluginDashboardViewContext
   const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
   const [selectedRepoLoading, setSelectedRepoLoading] = useState<boolean>(true);
   const [activeTab, setActiveTab] = useState<GitHubPmTabId>(GITHUB_PM_TABS[0].id);
+  /*
+  FNXC:GithubPmWriteGate 2026-07-24-06:30:
+  FUSI-017: default true (ON) so a /status fetch that hasn't resolved yet (or ever fails to
+  resolve) never leaves the write UI un-gated. Overwritten to the server-resolved value once
+  /status responds; an absent `confirmWrites` field on the response (e.g. a stale server) is
+  treated as ON via the `?? true` fallback below, not as OFF.
+  */
+  const [confirmWrites, setConfirmWrites] = useState<boolean>(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -203,6 +213,7 @@ export function GitHubPmView({ context }: { context?: PluginDashboardViewContext
         if (cancelled) return;
         setAutonomy(result.autonomy);
         setDefaultRepo(result.defaultRepo ?? null);
+        setConfirmWrites(result.confirmWrites ?? true);
         if (result.configured) {
           setStatus("configured");
           setStatusMessage("GitHub PM configured");
@@ -279,7 +290,7 @@ export function GitHubPmView({ context }: { context?: PluginDashboardViewContext
             data-testid={`github-pm-panel-${tab.id}`}
             hidden={tab.id !== activeTab}
           >
-            <GitHubPmTabPanelBody tabId={tab.id} repo={repoContextValue} context={context} />
+            <GitHubPmTabPanelBody tabId={tab.id} repo={repoContextValue} context={context} confirmWrites={confirmWrites} />
           </div>
         ))}
       </div>

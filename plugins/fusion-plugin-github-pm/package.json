@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@fusion/core": "workspace:*",
+    "@fusion/dashboard": "workspace:*",
     "@fusion/plugin-sdk": "workspace:*",
     "lucide-react": "^0.542.0",
     "react-markdown": "^10.1.0",

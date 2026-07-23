@@ -59,6 +59,22 @@ function isToolResult(value: unknown): value is PluginToolResult {
   return typeof value === "object" && value !== null && "content" in value;
 }
 
+/*
+FNXC:GithubPmWriteGate 2026-07-24-06:20:
+FUSI-017 shared tool guard, mirrors requireConfirmation in issue-write-routes.ts. Resolves
+confirmWrites via resolveGitHubPmSettings(ctx.settings) and, when ON, requires an explicit
+params.confirmed === true; otherwise returns an isError:true textResult. Called from every
+one of the 4 write tools BEFORE resolveRepoAndClient/any client.* call, so an unconfirmed
+call performs ZERO auth resolution and ZERO GitHub API calls. github_pm_status is read-only
+and deliberately NOT gated.
+*/
+function requireToolConfirmation(ctx: PluginContext, confirmed: unknown): PluginToolResult | null {
+  const settings = resolveGitHubPmSettings(ctx.settings);
+  if (!settings.confirmWrites) return null;
+  if (confirmed === true) return null;
+  return textResult("This write requires confirmation. Re-run with confirmed:true, or disable 'Confirm writes' in GitHub PM plugin settings.", undefined, true);
+}
+
 export const githubPmCreateIssueTool: PluginToolDefinition = {
   name: "github_pm_create_issue",
   description: "Create a new GitHub issue with a title, optional body, labels, assignees, and milestone.",
@@ -71,12 +87,15 @@ export const githubPmCreateIssueTool: PluginToolDefinition = {
       labels: { type: "array", items: { type: "string" }, description: "Label names to apply." },
       assignees: { type: "array", items: { type: "string" }, description: "Assignee logins." },
       milestone: { type: "number", description: "Milestone number to attach." },
+      confirmed: { type: "boolean", description: "Set true to confirm this write. Required when the plugin's 'Confirm writes' setting is on." },
     },
     required: ["title"],
   },
   execute: async (params, ctx: PluginContext) => {
     const title = typeof (params as Record<string, unknown>).title === "string" ? ((params as Record<string, unknown>).title as string).trim() : "";
     if (!title) return textResult("A non-empty 'title' is required to create an issue.", undefined, true);
+    const confirmationBlocked = requireToolConfirmation(ctx, (params as Record<string, unknown>).confirmed);
+    if (confirmationBlocked) return confirmationBlocked;
     const resolved = await resolveRepoAndClient(ctx, (params as Record<string, unknown>).repo);
     if (isToolResult(resolved)) return resolved;
     try {
@@ -106,6 +125,7 @@ export const githubPmEditIssueTool: PluginToolDefinition = {
       number: { type: "number", description: "Issue number to edit (required)." },
       title: { type: "string", description: "New title." },
       body: { type: "string", description: "New body markdown." },
+      confirmed: { type: "boolean", description: "Set true to confirm this write. Required when the plugin's 'Confirm writes' setting is on." },
     },
     required: ["number"],
   },
@@ -114,6 +134,8 @@ export const githubPmEditIssueTool: PluginToolDefinition = {
     const number = typeof p.number === "number" ? p.number : NaN;
     if (!Number.isFinite(number) || number <= 0) return textResult("A positive integer 'number' is required to edit an issue.", undefined, true);
     if (typeof p.title !== "string" && typeof p.body !== "string") return textResult("At least one of 'title' or 'body' must be supplied.", undefined, true);
+    const confirmationBlocked = requireToolConfirmation(ctx, p.confirmed);
+    if (confirmationBlocked) return confirmationBlocked;
     const resolved = await resolveRepoAndClient(ctx, p.repo);
     if (isToolResult(resolved)) return resolved;
     try {
@@ -138,6 +160,7 @@ export const githubPmCommentIssueTool: PluginToolDefinition = {
       repo: { type: "string", description: "owner/repo. Omit to use the currently selected repo." },
       number: { type: "number", description: "Issue number to comment on (required)." },
       body: { type: "string", description: "Comment body markdown (required)." },
+      confirmed: { type: "boolean", description: "Set true to confirm this write. Required when the plugin's 'Confirm writes' setting is on." },
     },
     required: ["number", "body"],
   },
@@ -146,6 +169,8 @@ export const githubPmCommentIssueTool: PluginToolDefinition = {
     const number = typeof p.number === "number" ? p.number : NaN;
     const body = typeof p.body === "string" ? p.body.trim() : "";
     if (!Number.isFinite(number) || number <= 0 || !body) return textResult("A positive integer 'number' and a non-empty 'body' are required to comment.", undefined, true);
+    const confirmationBlocked = requireToolConfirmation(ctx, p.confirmed);
+    if (confirmationBlocked) return confirmationBlocked;
     const resolved = await resolveRepoAndClient(ctx, p.repo);
     if (isToolResult(resolved)) return resolved;
     try {
@@ -170,6 +195,7 @@ export const githubPmSetIssueStateTool: PluginToolDefinition = {
       number: { type: "number", description: "Issue number (required)." },
       state: { type: "string", enum: ["open", "closed"], description: "Target state (required)." },
       stateReason: { type: "string", enum: ["completed", "not_planned"], description: "Close reason, only meaningful when state is 'closed'." },
+      confirmed: { type: "boolean", description: "Set true to confirm this write. Required when the plugin's 'Confirm writes' setting is on." },
     },
     required: ["number", "state"],
   },
@@ -179,6 +205,8 @@ export const githubPmSetIssueStateTool: PluginToolDefinition = {
     const state = p.state === "open" || p.state === "closed" ? p.state : undefined;
     if (!Number.isFinite(number) || number <= 0 || !state) return textResult("A positive integer 'number' and state 'open' or 'closed' are required.", undefined, true);
     const stateReason = typeof p.stateReason === "string" && CLOSE_STATE_REASONS.has(p.stateReason) ? (p.stateReason as "completed" | "not_planned") : undefined;
+    const confirmationBlocked = requireToolConfirmation(ctx, p.confirmed);
+    if (confirmationBlocked) return confirmationBlocked;
     const resolved = await resolveRepoAndClient(ctx, p.repo);
     if (isToolResult(resolved)) return resolved;
     try {

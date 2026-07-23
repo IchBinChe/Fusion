@@ -18,6 +18,16 @@ describe("github-pm plugin routes", () => {
     expect(result).toMatchObject({ status: 200, body: { ok: true, configured: false, autonomy: "approve-all", defaultRepo: null } });
   });
 
+  it("FUSI-017: /status reports confirmWrites true by default (unset settings)", async () => {
+    const result = await getGitHubPmStatus({}, ctx({}));
+    expect(result.body).toMatchObject({ confirmWrites: true });
+  });
+
+  it("FUSI-017: /status reports confirmWrites false only when explicitly disabled", async () => {
+    const result = await getGitHubPmStatus({}, ctx({ confirmWrites: false }));
+    expect(result.body).toMatchObject({ confirmWrites: false });
+  });
+
   it("reports configured when a default repo is set", async () => {
     const result = await getGitHubPmStatus({}, ctx({ defaultRepo: "acme/widgets" }));
     expect(result).toMatchObject({ status: 200, body: { ok: true, configured: true, defaultRepo: "acme/widgets" } });

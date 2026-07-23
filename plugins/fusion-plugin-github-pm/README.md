@@ -226,6 +226,18 @@ Each route: 401s with an actionable `not_authenticated` message when auth doesn'
 
 See `src/__tests__/github-client.test.ts`, `issue-write-routes.test.ts`, `tools.test.ts`, and `IssueWritePanel.test.tsx` for the mocked-fetch round-trip, validation, error-mapping, and optimistic-rollback coverage (including the required failed-create and failed-close rollback assertions and the notifyIssuesChanged emission/non-emission assertions).
 
+## Write confirmation (`confirmWrites`) (FUSI-017)
+
+A 2026-07-23 security audit found ZERO confirm/dryRun/requireConfirm gating anywhere in this plugin's write surfaces. `confirmWrites` closes that gap with one default-ON setting enforced identically across all three write layers (the same contract FUSI-015's future write routes/tools/UI must inherit):
+
+- **Setting** — `confirmWrites` (boolean, default `true`/ON), declared in `src/settings.ts`'s `githubPmSettingsSchema` and mirrored in `manifest.json`. Resolution: missing/unset/any non-`false` value resolves to ON; only an explicit `false` turns it off. Group: Safety.
+- **Routes** (all 5 write routes in `issue-write-routes.ts`) — when `confirmWrites` resolves ON, the request body must include `confirmed: true`, checked by a single shared `requireConfirmation(body, ctx)` guard run **after** input validation but **before** `requireClient`/any GitHub API call. Missing/false `confirmed` returns `HTTP 400 { ok:false, code:"confirmation_required", error:<actionable> }` with zero GitHub calls made. When `confirmWrites` is OFF, the route behaves exactly as it did before FUSI-017 (the `confirmed` field is ignored).
+- **Agent tools** (all 4 write tools in `tools.ts`) — each declares a `confirmed: { type: "boolean" }` parameter. A single shared `requireToolConfirmation(ctx, confirmed)` guard runs before `resolveRepoAndClient`/any GitHub API call; when ON and `confirmed !== true`, the tool returns `textResult(<actionable message>, undefined, isError: true)` with zero GitHub calls. `github_pm_status` (read-only) is not gated.
+- **UI** (`IssueWritePanel.tsx`) — `GitHubPmView.tsx` reads the resolved `confirmWrites` flag from `GET /status` (defaulting to `true`/ON if the field is ever absent, so a stale server never silently un-gates the UI) and passes it down as a prop. Before every write dispatch (create, edit, comment, close, reopen) when ON, the panel awaits the dashboard's shared `useConfirm()` hook (`@fusion/dashboard/app/hooks/useConfirm`, reused via the dashboard package's `./app/hooks/useConfirm` export subpath — not forked); cancelling performs zero mutations, zero optimistic state changes, and never emits `notifyIssuesChanged`. Confirming sends the request with `confirmed: true` added to the body. When OFF, the panel dispatches directly with no dialog, exactly as it did before FUSI-017.
+- **Read routes/tools stay ungated** — `/status`, `/auth/diagnostics`, `/repo-config*`, `/taxonomy*`, the `/issues` list/detail/comment reads, and `github_pm_status` are not mutations and are never gated by `confirmWrites`.
+
+See `settings.test.ts`, `manifest.test.ts`, `routes.test.ts`, `issue-write-routes.test.ts`, `tools.test.ts`, and `IssueWritePanel.test.tsx` for the confirmWrites-ON-blocks-with-zero-GitHub-calls, confirmWrites-OFF-preserves-FUSI-014-behavior, and confirm-dialog cancel/confirm coverage.
+
 ## Setup
 
 1. Install or enable **GitHub PM** from Settings → Plugins / Plugin Manager.
@@ -243,6 +255,7 @@ See `src/__tests__/github-client.test.ts`, `issue-write-routes.test.ts`, `tools.
 | `selectedRepo` | `string` | Repositories | Plugin-managed last-selected repo (`owner/repo`, canonicalized). Written by the repo-config select route; not hand-edited. |
 | `repoConfigState` | `string` (multiline) | Repositories | Plugin-managed serialized-JSON `RepoConfigMap`. Written by the repo-config routes; not hand-edited. |
 | `taxonomyProposalState` | `string` (multiline) | Repositories | Plugin-managed serialized-JSON `TaxonomyProposalStateMap` (FUSI-005). Written by the taxonomy routes; not hand-edited. |
+| `confirmWrites` | `boolean` | Safety | Default `true` (ON). When ON, every write route/tool/UI dispatch requires explicit confirmation (FUSI-017); see the section above. |
 
 ## Routes
 
@@ -254,12 +267,12 @@ Plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`:
 - `POST /taxonomy/propose`, `GET /taxonomy/proposals`, `PUT /taxonomy/proposals/accept`, `PUT /taxonomy/proposals/reject`, `PUT /taxonomy/proposals/edit` — versioned, reviewable taxonomy proposal generation (FUSI-005); see the section above.
 - `GET /issues/detail`, `GET /issues/comments` — read-only issue detail, timeline, and paginated comments (FUSI-013); see the section above.
 - `GET /issues/list`, `GET /issues/filter-options` — issue list/search/filter-dropdown reads (FUSI-012); see the section above.
-- `POST /issues/create`, `PUT /issues/update`, `PUT /issues/state`, `POST /issues/comments`, `PUT /issues/comments` — issue create/edit/comment/close-reopen writes (FUSI-014); see the section above.
+- `POST /issues/create`, `PUT /issues/update`, `PUT /issues/state`, `POST /issues/comments`, `PUT /issues/comments` — issue create/edit/comment/close-reopen writes (FUSI-014); each requires `confirmed: true` in the body when `confirmWrites` is ON (FUSI-017); see the section above.
 
 ## Agent tools
 
 - `github_pm_status` — returns configured/not-configured text derived from settings.
-- `github_pm_create_issue`, `github_pm_edit_issue`, `github_pm_comment_issue`, `github_pm_set_issue_state` — issue write operations (FUSI-014); see the section above.
+- `github_pm_create_issue`, `github_pm_edit_issue`, `github_pm_comment_issue`, `github_pm_set_issue_state` — issue write operations (FUSI-014); each requires a `confirmed: true` parameter when `confirmWrites` is ON (FUSI-017); see the section above.
 
 ## Limitations and non-goals (FUSI-001/FUSI-002)
 

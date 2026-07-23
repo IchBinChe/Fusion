@@ -15,7 +15,25 @@ describe("github-pm settings", () => {
       selectedRepo: null,
       repoConfigs: {},
       taxonomyProposals: {},
+      confirmWrites: true,
     });
+  });
+
+  it("FUSI-017: confirmWrites defaults ON when unset", () => {
+    expect(resolveGitHubPmSettings({}).confirmWrites).toBe(true);
+  });
+
+  it("FUSI-017: confirmWrites stays ON for an explicit true", () => {
+    expect(resolveGitHubPmSettings({ confirmWrites: true }).confirmWrites).toBe(true);
+  });
+
+  it("FUSI-017: confirmWrites turns OFF only for an explicit false", () => {
+    expect(resolveGitHubPmSettings({ confirmWrites: false }).confirmWrites).toBe(false);
+  });
+
+  it("FUSI-017: confirmWrites resolves ON for any non-false value (string/number junk)", () => {
+    expect(resolveGitHubPmSettings({ confirmWrites: "false" as unknown as boolean }).confirmWrites).toBe(true);
+    expect(resolveGitHubPmSettings({ confirmWrites: 0 as unknown as boolean }).confirmWrites).toBe(true);
   });
 
   it("surfaces the FUSI-005 taxonomy proposal state map from the settings blob", () => {
@@ -59,5 +77,10 @@ describe("github-pm settings", () => {
     expect(githubPmSettingsSchema.personalAccessToken.type).toBe("password");
     expect(githubPmSettingsSchema.defaultRepo.type).toBe("string");
     expect(githubPmSettingsSchema.defaultAutonomy.type).toBe("enum");
+  });
+
+  it("FUSI-017: declares confirmWrites as a boolean setting defaulting ON", () => {
+    expect(githubPmSettingsSchema.confirmWrites.type).toBe("boolean");
+    expect(githubPmSettingsSchema.confirmWrites.defaultValue).toBe(true);
   });
 });

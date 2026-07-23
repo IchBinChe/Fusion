@@ -2,6 +2,7 @@ import type { PluginContext, PluginRouteDefinition, PluginRouteResponse } from "
 import { GitHubClient, githubErrorToResponse, isGitHubApiError } from "./github-client.js";
 import { resolveGitHubAuth } from "./auth.js";
 import { normalizeRepoKey, resolveSelectedRepo } from "./repo-config.js";
+import { resolveGitHubPmSettings } from "./settings.js";
 
 /*
 FNXC:GithubPmIssues 2026-07-24-05:10:
@@ -59,6 +60,27 @@ function splitOwnerRepo(repo: string): [string, string] {
   return [owner, name];
 }
 
+/*
+FNXC:GithubPmWriteGate 2026-07-24-06:10:
+FUSI-017 shared route guard. Resolves confirmWrites via resolveGitHubPmSettings(ctx.settings)
+and, when ON, requires an explicit body.confirmed === true; otherwise returns a 400
+confirmation_required response. Called from every one of the 5 write handlers BEFORE
+requireClient/any client.* call, so an unconfirmed request performs ZERO auth resolution and
+ZERO GitHub API calls -- the security invariant this task establishes. Read-only routes
+(issue-routes.ts, issues-routes.ts, repo-config-routes.ts, taxonomy-routes.ts) are
+deliberately NOT gated; this guard is only ever wired into mutation handlers.
+*/
+function requireConfirmation(body: Record<string, unknown>, ctx: PluginContext): PluginRouteResponse | null {
+  const settings = resolveGitHubPmSettings(ctx.settings);
+  if (!settings.confirmWrites) return null;
+  if (body.confirmed === true) return null;
+  return response(400, {
+    ok: false,
+    error: "This write requires confirmation. Re-send with confirmed:true, or disable 'Confirm writes' in GitHub PM plugin settings.",
+    code: "confirmation_required",
+  });
+}
+
 async function requireClient(ctx: PluginContext): Promise<GitHubClient | PluginRouteResponse> {
   const auth = await resolveGitHubAuth(ctx.settings);
   if (!auth.authenticated || !auth.token) {
@@ -94,6 +116,9 @@ export async function postIssueCreate(req: unknown, ctx: PluginContext): Promise
     return response(400, { ok: false, error: "repo (or a selected repo) and a non-empty title are required.", code: "validation_error" });
   }
 
+  const confirmationBlocked = requireConfirmation(body, ctx);
+  if (confirmationBlocked) return confirmationBlocked;
+
   const client = await requireClient(ctx);
   if (isRouteResponse(client)) return client;
 
@@ -126,6 +151,9 @@ export async function putIssueUpdate(req: unknown, ctx: PluginContext): Promise<
     return response(400, { ok: false, error: "At least one of title or body must be supplied.", code: "validation_error" });
   }
 
+  const confirmationBlocked = requireConfirmation(body, ctx);
+  if (confirmationBlocked) return confirmationBlocked;
+
   const client = await requireClient(ctx);
   if (isRouteResponse(client)) return client;
 
@@ -154,6 +182,9 @@ export async function putIssueState(req: unknown, ctx: PluginContext): Promise<P
     return response(400, { ok: false, error: "stateReason must be 'completed' or 'not_planned' when closing.", code: "validation_error" });
   }
 
+  const confirmationBlocked = requireConfirmation(body, ctx);
+  if (confirmationBlocked) return confirmationBlocked;
+
   const client = await requireClient(ctx);
   if (isRouteResponse(client)) return client;
 
@@ -179,6 +210,9 @@ export async function postIssueComment(req: unknown, ctx: PluginContext): Promis
     return response(400, { ok: false, error: "repo (or a selected repo), a positive integer number, and a non-empty body are required.", code: "validation_error" });
   }
 
+  const confirmationBlocked = requireConfirmation(body, ctx);
+  if (confirmationBlocked) return confirmationBlocked;
+
   const client = await requireClient(ctx);
   if (isRouteResponse(client)) return client;
 
@@ -200,6 +234,9 @@ export async function putIssueComment(req: unknown, ctx: PluginContext): Promise
   if (!repo || commentId === null || !commentBody) {
     return response(400, { ok: false, error: "repo (or a selected repo), a positive integer commentId, and a non-empty body are required.", code: "validation_error" });
   }
+
+  const confirmationBlocked = requireConfirmation(body, ctx);
+  if (confirmationBlocked) return confirmationBlocked;
 
   const client = await requireClient(ctx);
   if (isRouteResponse(client)) return client;

@@ -25,6 +25,14 @@ export async function getGitHubPmStatus(_req: unknown, ctx: PluginContext): Prom
     configured: hasPersonalAccessToken(ctx.settings) || Boolean(settings.defaultRepo),
     autonomy: settings.defaultAutonomy,
     defaultRepo: settings.defaultRepo ?? null,
+    /*
+    FNXC:GithubPmWriteGate 2026-07-24-06:00:
+    FUSI-017: expose the resolved confirmWrites flag so the browser (IssueWritePanel) knows
+    whether to show a confirm dialog before dispatching a write. Always the resolved boolean
+    (never omitted), so a client that reads this field literally never has to guess; a client
+    that fails to read /status at all still defaults to ON client-side as a second safety net.
+    */
+    confirmWrites: settings.confirmWrites,
   });
 }
 

@@ -65,6 +65,24 @@ export const githubPmSettingsSchema: Record<string, PluginSettingSchema> = {
     description: "Plugin-managed serialized JSON holding each repository's versioned label/field/category taxonomy proposal drafts. Not intended for manual editing.",
     group: "Repositories",
   },
+  /*
+  FNXC:GithubPmWriteGate 2026-07-24-06:00:
+  FUSI-017 security audit (2026-07-23) found ZERO confirm/dryRun gating anywhere in this
+  plugin's write surfaces (5 HTTP routes + 4 agent tools + the IssueWritePanel UI). This
+  setting is the single default-ON gate enforced identically across all three layers: a
+  write route/tool with confirmWrites resolved ON rejects the mutation (HTTP 400
+  confirmation_required / isError tool result) unless the caller explicitly sends
+  confirmed:true, with ZERO GitHub calls made before that rejection. Default is ON
+  (missing/unset resolves to true) so an operator who never touches this setting is safe
+  by default; only an explicit `false` disables the gate.
+  */
+  confirmWrites: {
+    type: "boolean",
+    label: "Confirm writes",
+    description: "When on (default), every GitHub write (create/edit/comment/close/reopen issue) requires explicit confirmation before it reaches GitHub -- routes and agent tools reject an unconfirmed write, and the UI shows a confirm dialog. Turn off to allow writes to proceed immediately.",
+    defaultValue: true,
+    group: "Safety",
+  },
 };
 
 export type GitHubPmAutonomy = "approve-all" | "suggest" | "auto";
@@ -79,6 +97,12 @@ export interface GitHubPmPluginSettings {
   repoConfigs: RepoConfigMap;
   /** FUSI-005: full per-repo taxonomy proposal state decoded from the serialized-JSON settings blob. */
   taxonomyProposals: TaxonomyProposalStateMap;
+  /**
+   * FNXC:GithubPmWriteGate 2026-07-24-06:00:
+   * FUSI-017: default-ON write-confirmation gate. Missing/unset resolves to `true`; only an
+   * explicit `false` disables it. See resolveGitHubPmSettings for the exact rule.
+   */
+  confirmWrites: boolean;
 }
 
 function optionalTrimmed(value: unknown): string | undefined {
@@ -105,6 +129,13 @@ export function resolveGitHubPmSettings(settings: Record<string, unknown>): GitH
     selectedRepo: resolveSelectedRepo(settings),
     repoConfigs: parseRepoConfigsFromSettings(settings),
     taxonomyProposals: parseTaxonomyStateFromSettings(settings),
+    /*
+    FNXC:GithubPmWriteGate 2026-07-24-06:00:
+    Missing/unset/anything-other-than-explicit-`false` resolves to ON (true). This is a
+    security-invariant default: an operator who never visits plugin settings must still get
+    the confirmation gate. Only `settings.confirmWrites === false` turns it off.
+    */
+    confirmWrites: settings.confirmWrites === false ? false : true,
   };
 }
 

@@ -68,9 +68,11 @@ non-error result; an auth/permission error yields isError:true with a readable, 
 message.
 */
 describe("github-pm write tools (FUSI-014)", () => {
-  it("github_pm_create_issue performs the mutation and returns a non-error result", async () => {
+  // FUSI-017: confirmWrites explicitly OFF below to assert the exact FUSI-014 unconfirmed
+  // behavior is preserved byte-for-byte when the gate is disabled.
+  it("github_pm_create_issue performs the mutation and returns a non-error result (confirmWrites OFF)", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ number: 9, title: "New", state: "open", html_url: "https://x" })));
-    const result = await githubPmCreateIssueTool.execute({ repo: "acme/widgets", title: "New" }, ctx({ personalAccessToken: "ghp_token" }));
+    const result = await githubPmCreateIssueTool.execute({ repo: "acme/widgets", title: "New" }, ctx({ personalAccessToken: "ghp_token", confirmWrites: false }));
     expect(result.isError).toBeFalsy();
     expect(result.content[0].text).toContain("#9");
     vi.unstubAllGlobals();
@@ -81,39 +83,122 @@ describe("github-pm write tools (FUSI-014)", () => {
     expect(result.isError).toBe(true);
   });
 
-  it("github_pm_edit_issue resolves the selected repo when omitted and returns the updated issue", async () => {
+  it("github_pm_edit_issue resolves the selected repo when omitted and returns the updated issue (confirmWrites OFF)", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ number: 5, title: "Edited", state: "open", html_url: "https://x" })));
-    const result = await githubPmEditIssueTool.execute({ number: 5, title: "Edited" }, ctx({ [SELECTED_REPO_SETTING_ID]: "acme/widgets", personalAccessToken: "ghp_token" }));
+    const result = await githubPmEditIssueTool.execute({ number: 5, title: "Edited" }, ctx({ [SELECTED_REPO_SETTING_ID]: "acme/widgets", personalAccessToken: "ghp_token", confirmWrites: false }));
     expect(result.isError).toBeFalsy();
     expect(result.content[0].text).toContain("Edited");
     vi.unstubAllGlobals();
   });
 
-  it("github_pm_comment_issue posts a comment", async () => {
+  it("github_pm_comment_issue posts a comment (confirmWrites OFF)", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ id: 1, user: { login: "octocat" }, body: "Hi" })));
-    const result = await githubPmCommentIssueTool.execute({ repo: "acme/widgets", number: 5, body: "Hi" }, ctx({ personalAccessToken: "ghp_token" }));
+    const result = await githubPmCommentIssueTool.execute({ repo: "acme/widgets", number: 5, body: "Hi" }, ctx({ personalAccessToken: "ghp_token", confirmWrites: false }));
     expect(result.isError).toBeFalsy();
     expect(result.content[0].text).toContain("Commented");
     vi.unstubAllGlobals();
   });
 
-  it("github_pm_set_issue_state closes with a reason", async () => {
+  it("github_pm_set_issue_state closes with a reason (confirmWrites OFF)", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ number: 5, title: "X", state: "closed", html_url: "https://x" })));
-    const result = await githubPmSetIssueStateTool.execute({ repo: "acme/widgets", number: 5, state: "closed", stateReason: "completed" }, ctx({ personalAccessToken: "ghp_token" }));
+    const result = await githubPmSetIssueStateTool.execute({ repo: "acme/widgets", number: 5, state: "closed", stateReason: "completed" }, ctx({ personalAccessToken: "ghp_token", confirmWrites: false }));
     expect(result.isError).toBeFalsy();
     expect(result.content[0].text).toContain("closed");
     vi.unstubAllGlobals();
   });
 
-  it("an unauthenticated repo/token yields isError:true with an actionable message", async () => {
-    const result = await githubPmCreateIssueTool.execute({ repo: "acme/widgets", title: "X" }, ctx({}));
+  it("an unauthenticated repo/token yields isError:true with an actionable message (confirmWrites OFF)", async () => {
+    const result = await githubPmCreateIssueTool.execute({ repo: "acme/widgets", title: "X" }, ctx({ confirmWrites: false }));
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("not authenticated");
   });
 
-  it("a mocked 403 permission error yields isError:true without leaking the token", async () => {
+  it("a mocked 403 permission error yields isError:true without leaking the token (confirmWrites OFF)", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ message: "Resource not accessible by integration secret-tok" }, 403)));
-    const result = await githubPmCreateIssueTool.execute({ repo: "acme/widgets", title: "X" }, ctx({ personalAccessToken: "secret-tok" }));
+    const result = await githubPmCreateIssueTool.execute({ repo: "acme/widgets", title: "X" }, ctx({ personalAccessToken: "secret-tok", confirmWrites: false }));
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).not.toContain("secret-tok");
+    vi.unstubAllGlobals();
+  });
+
+  /*
+  FNXC:GithubPmWriteGate 2026-07-24-06:20:
+  FUSI-017: confirmWrites ON gates every one of the 4 write tools. Missing `confirmed` blocks
+  with isError:true and ZERO fetch calls; confirmed:true lets the write proceed identically
+  to the OFF-path tests above.
+  */
+  it("github_pm_create_issue: confirmWrites ON + missing confirmed → isError, zero fetch calls", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const result = await githubPmCreateIssueTool.execute({ repo: "acme/widgets", title: "New" }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("requires confirmation");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_create_issue: confirmWrites ON + confirmed:true → the write proceeds", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ number: 9, title: "New", state: "open", html_url: "https://x" })));
+    const result = await githubPmCreateIssueTool.execute({ repo: "acme/widgets", title: "New", confirmed: true }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("#9");
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_edit_issue: confirmWrites ON + missing confirmed → isError, zero fetch calls", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const result = await githubPmEditIssueTool.execute({ number: 5, title: "Edited" }, ctx({ [SELECTED_REPO_SETTING_ID]: "acme/widgets", personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_edit_issue: confirmWrites ON + confirmed:true → the write proceeds", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ number: 5, title: "Edited", state: "open", html_url: "https://x" })));
+    const result = await githubPmEditIssueTool.execute({ number: 5, title: "Edited", confirmed: true }, ctx({ [SELECTED_REPO_SETTING_ID]: "acme/widgets", personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("Edited");
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_comment_issue: confirmWrites ON + missing confirmed → isError, zero fetch calls", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const result = await githubPmCommentIssueTool.execute({ repo: "acme/widgets", number: 5, body: "Hi" }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_comment_issue: confirmWrites ON + confirmed:true → the write proceeds", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ id: 1, user: { login: "octocat" }, body: "Hi" })));
+    const result = await githubPmCommentIssueTool.execute({ repo: "acme/widgets", number: 5, body: "Hi", confirmed: true }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("Commented");
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_set_issue_state: confirmWrites ON + missing confirmed → isError, zero fetch calls", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const result = await githubPmSetIssueStateTool.execute({ repo: "acme/widgets", number: 5, state: "closed", stateReason: "completed" }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_set_issue_state: confirmWrites ON + confirmed:true → the write proceeds", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ number: 5, title: "X", state: "closed", html_url: "https://x" })));
+    const result = await githubPmSetIssueStateTool.execute({ repo: "acme/widgets", number: 5, state: "closed", stateReason: "completed", confirmed: true }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("closed");
+    vi.unstubAllGlobals();
+  });
+
+  it("confirmWrites ON + confirmed:true never leaks the token, even on a mocked auth failure", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ message: "Resource not accessible by integration secret-tok" }, 403)));
+    const result = await githubPmCreateIssueTool.execute({ repo: "acme/widgets", title: "X", confirmed: true }, ctx({ personalAccessToken: "secret-tok" }));
     expect(result.isError).toBe(true);
     expect(result.content[0].text).not.toContain("secret-tok");
     vi.unstubAllGlobals();

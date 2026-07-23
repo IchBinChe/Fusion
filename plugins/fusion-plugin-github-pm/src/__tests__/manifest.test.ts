@@ -3,6 +3,7 @@ import { validatePluginManifest } from "@fusion/core";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { githubPmSettingsSchema } from "../settings.js";
 
 const manifestPath = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "manifest.json");
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -52,5 +53,18 @@ describe("github-pm manifest", () => {
       componentPath: "./dashboard-view",
       placement: "more",
     });
+  });
+
+  it("FUSI-017: declares confirmWrites as a boolean setting defaulting ON", () => {
+    expect(manifest.settingsSchema.confirmWrites.type).toBe("boolean");
+    expect(manifest.settingsSchema.confirmWrites.defaultValue).toBe(true);
+  });
+
+  it("FUSI-017: manifest.json settingsSchema keys stay in parity with settings.ts's githubPmSettingsSchema", () => {
+    expect(Object.keys(manifest.settingsSchema).sort()).toEqual(Object.keys(githubPmSettingsSchema).sort());
+    for (const key of Object.keys(githubPmSettingsSchema)) {
+      expect(manifest.settingsSchema[key].type).toBe(githubPmSettingsSchema[key].type);
+      expect(manifest.settingsSchema[key].defaultValue).toEqual(githubPmSettingsSchema[key].defaultValue);
+    }
   });
 });

@@ -50,6 +50,10 @@
     "./app/plugins/types": {
       "types": "./app/plugins/types.ts",
       "import": "./app/plugins/types.ts"
+    },
+    "./app/hooks/useConfirm": {
+      "types": "./app/hooks/useConfirm.ts",
+      "import": "./app/hooks/useConfirm.ts"
     }
   },
   "publishConfig": {

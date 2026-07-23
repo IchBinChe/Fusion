@@ -1048,6 +1048,93 @@ describe("embedded-lifecycle: startup timeout (P1 #24)", () => {
   });
 });
 
+describe("embedded-lifecycle: Windows fatal recovery", () => {
+  it("restarts an owned cluster on its resolved port when no port was configured", async () => {
+    const dataDir = makeDataDir();
+    writeFileSync(join(dataDir, "PG_VERSION"), "15\n");
+    const records: Record<string, unknown>[] = [];
+    const logs: string[] = [];
+    class RecordingEmbeddedPostgres {
+      constructor(options: Record<string, unknown>) {
+        records.push(options);
+      }
+      initialise = vi.fn(async () => {});
+      start = vi.fn(async () => {});
+      stop = vi.fn(async () => {});
+    }
+    __setEmbeddedPostgresCtorForTests(RecordingEmbeddedPostgres as never);
+    const lifecycle = new EmbeddedPostgresLifecycle({
+      ...baseOptions(dataDir),
+      startTimeoutMs: 100,
+      onLog: (message) => logs.push(message),
+    });
+    const internal = lifecycle as unknown as {
+      running: boolean;
+      ownsProcess: boolean;
+      resolvedPort: number;
+      pg: { stop: () => Promise<void> };
+      ensureDatabase: () => Promise<void>;
+      recoverWindowsFatalOnce: () => Promise<void>;
+    };
+    internal.running = true;
+    internal.ownsProcess = true;
+    internal.resolvedPort = 55491;
+    internal.pg = { stop: vi.fn(async () => {}) };
+    internal.ensureDatabase = async () => {};
+
+    try {
+      await internal.recoverWindowsFatalOnce();
+      expect(records).toHaveLength(1);
+      expect(records[0]?.port).toBe(55491);
+      expect(lifecycle.getConnectionUrl()).toContain(":55491/");
+      expect(logs).toContain("embedded postgres: Windows owned-cluster recovery completed; existing pools may reconnect");
+    } finally {
+      await lifecycle.stop();
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it("uses the normal startup timeout to report a stalled recovery", async () => {
+    vi.useFakeTimers();
+    const dataDir = makeDataDir();
+    writeFileSync(join(dataDir, "PG_VERSION"), "15\n");
+    const errors: string[] = [];
+    class StalledEmbeddedPostgres {
+      initialise = vi.fn(async () => {});
+      start = vi.fn(async () => new Promise<void>(() => {}));
+      stop = vi.fn(async () => {});
+    }
+    __setEmbeddedPostgresCtorForTests(StalledEmbeddedPostgres as never);
+    const lifecycle = new EmbeddedPostgresLifecycle({
+      ...baseOptions(dataDir),
+      startTimeoutMs: 25,
+      onError: (message) => errors.push(String(message)),
+    });
+    const internal = lifecycle as unknown as {
+      running: boolean;
+      ownsProcess: boolean;
+      resolvedPort: number;
+      pg: { stop: () => Promise<void> };
+      recoverWindowsFatalOnce: () => Promise<void>;
+    };
+    internal.running = true;
+    internal.ownsProcess = true;
+    internal.resolvedPort = 55492;
+    internal.pg = { stop: vi.fn(async () => {}) };
+
+    try {
+      const recovery = internal.recoverWindowsFatalOnce();
+      await vi.advanceTimersByTimeAsync(25);
+      await recovery;
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toMatch(/recovery failed after one retry/i);
+      expect(errors[0]).toMatch(/start timed out after 25ms/i);
+    } finally {
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("embedded-lifecycle: readPortFromPostmasterPid (P1 code-review fix)", () => {
   it("reads the TCP port from PostgreSQL's real line 4 (index 3) postmaster.pid layout", () => {
     const dir = mkdtempSync(join(tmpdir(), "fusion-embedded-pid-"));

@@ -11,6 +11,12 @@ See the [2026-07-14 PostgreSQL runtime cutover review](./postgres-migration-revi
 
 ## Embedded PostgreSQL startup resources
 
+### Windows owned-cluster recovery (FN-8522)
+
+- Windows readiness uses bounded TCP probes. Runner-log reads are diagnostic open/read/close snapshots only; Fusion keeps no persistent runner-log handle, so PostgreSQL can retain its own `pg_ctl` log without a Fusion-induced sharing-violation retry.
+- Each Windows PostgreSQL child gets the bundled native `bin` directory prepended to its own case-insensitive `PATH`; Fusion does not mutate the dashboard process environment.
+- After readiness, an **owned** cluster that logs the complete `0xC0000142` backend exception plus PostgreSQL shutdown sequence gets one lifecycle-scoped restart on the same initialized data directory and port. Joiners are never restarted or stopped. A second incident, shutdown, or failed recovery is terminal and leaves the original data directory intact.
+
 - The zero-config embedded PostgreSQL lifecycle uses mmap-backed primary shared memory to avoid exhausted SysV shared-memory IDs on constrained hosts.
 - The supported, tested constrained-host floor is **64MB `/dev/shm`**. Both `fn serve` and boot smoke inherit this lifecycle default; an explicit later PostgreSQL `-c shared_memory_type=…` flag remains an operator override.
 

@@ -19,7 +19,7 @@ import { WorkflowOptionalStepsDropdown } from "./WorkflowOptionalStepsDropdown";
 import { WorkflowIcon } from "./WorkflowIcon";
 import { PendingAttachmentPreviews } from "./PendingAttachmentPreviews";
 import { getPriorityColorVar, getPriorityIcon, getPriorityLabel } from "../utils/priorityIndicator";
-import { validateQuickAddStartWorkflow, workflowSupportsQuickAddStart, resolveQuickAddStartTargetColumn, type ValidatedQuickAddWorkflow } from "../utils/quickAddStart";
+import { validateQuickAddStartWorkflow, workflowSupportsQuickAddStart, resolveQuickAddStartInitialColumn, resolveQuickAddStartTargetColumn, type ValidatedQuickAddWorkflow } from "../utils/quickAddStart";
 
 const STORAGE_KEY = "kb-quick-entry-text";
 const ALLOWED_TASK_ATTACHMENT_TYPES = new Set([
@@ -372,7 +372,8 @@ export function QuickEntryBox({ onCreate, onMoveTask, addToast, tasks = [], avai
   const selectedQuickEntryWorkflowIcon = selectedQuickEntryWorkflow?.icon;
   const selectedWorkflowForCreate = workflowId === undefined ? undefined : quickEntryWorkflowId;
   const validatedStartWorkflow = useMemo(() => validateQuickAddStartWorkflow(selectedQuickEntryWorkflow), [selectedQuickEntryWorkflow]);
-  const canQuickAddStart = Boolean(onMoveTask && validatedStartWorkflow && workflowSupportsQuickAddStart(validatedStartWorkflow));
+  const startInitialColumn = validatedStartWorkflow ? resolveQuickAddStartInitialColumn(validatedStartWorkflow) : null;
+  const canQuickAddStart = Boolean(validatedStartWorkflow && workflowSupportsQuickAddStart(validatedStartWorkflow) && (startInitialColumn || onMoveTask));
   const canOpenQuickAddStartMenu = canQuickAddStart && Boolean(description.trim()) && !isSubmitting;
 
   useEffect(() => {
@@ -794,6 +795,7 @@ export function QuickEntryBox({ onCreate, onMoveTask, addToast, tasks = [], avai
 
     const originalDescription = description;
     const startWorkflow = startIntentRef.current;
+    const startInitialColumn = startWorkflow ? resolveQuickAddStartInitialColumn(startWorkflow) : null;
     setDescription("");
     try {
       /*
@@ -803,6 +805,7 @@ export function QuickEntryBox({ onCreate, onMoveTask, addToast, tasks = [], avai
       const createdTask = await onCreate({
         description: trimmed,
         ...(startWorkflow ? { workflowId: startWorkflow.id } : selectedWorkflowForCreate !== undefined ? { workflowId: selectedWorkflowForCreate } : {}),
+        ...(startInitialColumn ? { column: startInitialColumn as ColumnId } : {}),
         dependencies: dependencies.length ? dependencies : undefined,
         ...(selectedAgentId ? { assignedAgentId: selectedAgentId } : {}),
         modelPresetId: selectedPresetId,
@@ -832,12 +835,12 @@ export function QuickEntryBox({ onCreate, onMoveTask, addToast, tasks = [], avai
         acknowledgedDuplicates: overrides?.acknowledgedDuplicates,
       });
       /*
-      FNXC:QuickAddStart 2026-07-22-16:10:
-      Start snapshots the exact validated workflow before duplicate confirmation. A returned task
-      must prove its id, column, and matching workflow identity before host promotion; otherwise
-      creation remains successful and Save/Enter behavior is unchanged.
+      FNXC:QuickAddStart 2026-07-22-17:45:
+      Coding (Ideas) Start submits its validated Todo destination in the original create request.
+      Custom hold workflows retain their returned-task promotion path; unprovable targets stay
+      create-only, so Save/Enter and malformed metadata never guess a transition.
       */
-      if (startWorkflow && createdTask && typeof createdTask === "object"
+      if (startWorkflow && !startInitialColumn && createdTask && typeof createdTask === "object"
         && typeof createdTask.id === "string" && createdTask.id.trim()
         && typeof createdTask.column === "string" && createdTask.column.trim()
         && typeof (createdTask as Task & { workflowId?: unknown }).workflowId === "string"

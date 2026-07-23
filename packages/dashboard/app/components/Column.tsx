@@ -457,9 +457,15 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktree
     (input: TaskCreateInput) => {
       if (!onQuickCreate) return Promise.resolve();
       if (workflowMode) {
+        /*
+        FNXC:QuickAddStart 2026-07-22-17:45:
+        The Quick Add Start intent may carry a workflow-validated initial Todo column.
+        Preserve that explicit create destination; ordinary Save has no column and continues
+        to inherit this rendered intake column.
+        */
         return onQuickCreate({
           ...input,
-          column,
+          column: input.column ?? column,
           ...(input.workflowId !== undefined ? { workflowId: input.workflowId } : (workflowId ? { workflowId } : {})),
         });
       }

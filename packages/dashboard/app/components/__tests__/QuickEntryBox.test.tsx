@@ -5485,7 +5485,7 @@ describe("QuickEntryBox", () => {
     const enterDescription = () => fireEvent.change(screen.getByTestId("quick-entry-input"), { target: { value: "Start this task" } });
     const openStartByContextMenu = () => fireEvent.contextMenu(screen.getByTestId("quick-entry-save"));
 
-    it("opens Start from mouse right-click and promotes from the returned created column", async () => {
+    it("creates Coding Ideas Start in Todo from mouse right-click without a follow-up move", async () => {
       mockDesktopViewport();
       const onCreate = vi.fn().mockResolvedValue({ ...CREATED_TASK, id: "FN-start", column: "ideas", workflowId: ideasWorkflow.id });
       const onMoveTask = vi.fn().mockResolvedValue({});
@@ -5496,8 +5496,8 @@ describe("QuickEntryBox", () => {
       await screen.findByTestId("quick-entry-save-start");
       fireEvent.click(screen.getByRole("menuitem", { name: "Start" }));
 
-      await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ description: "Start this task", workflowId: ideasWorkflow.id })));
-      await waitFor(() => expect(onMoveTask).toHaveBeenCalledWith("FN-start", "todo"));
+      await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ description: "Start this task", workflowId: ideasWorkflow.id, column: "todo" })));
+      expect(onMoveTask).not.toHaveBeenCalled();
     });
 
     it("opens Start after touch and pen long-press, suppresses the compatibility click, and cancels moved/up/cancelled pointers", async () => {
@@ -5514,17 +5514,22 @@ describe("QuickEntryBox", () => {
       fireEvent.click(save);
       expect(onCreate).not.toHaveBeenCalled();
       fireEvent.click(screen.getByRole("menuitem", { name: "Start" }));
-      await waitFor(() => expect(onMoveTask).toHaveBeenCalledWith("FN-touch", "todo"));
+      await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ workflowId: ideasWorkflow.id, column: "todo" })));
+      expect(onMoveTask).not.toHaveBeenCalled();
       await waitFor(() => expect(save).not.toBeDisabled());
       touchRender.unmount();
 
-      const { unmount } = renderQuickEntryBox({ onCreate: vi.fn(), onMoveTask: vi.fn(), workflowId: ideasWorkflow.id, workflowOptions: [ideasWorkflow] });
+      const penOnCreate = vi.fn().mockResolvedValue({ ...CREATED_TASK, id: "FN-pen", column: "todo", workflowId: ideasWorkflow.id });
+      const penOnMoveTask = vi.fn();
+      const { unmount } = renderQuickEntryBox({ onCreate: penOnCreate, onMoveTask: penOnMoveTask, workflowId: ideasWorkflow.id, workflowOptions: [ideasWorkflow] });
       fireEvent.change(screen.getByTestId("quick-entry-input"), { target: { value: "Pen task" } });
       const penSave = screen.getAllByTestId("quick-entry-save").at(-1)!;
       fireEvent.pointerDown(penSave, { pointerType: "pen", pointerId: 2, clientX: 20, clientY: 20 });
       await act(async () => { vi.advanceTimersByTime(550); });
       expect(screen.getByTestId("quick-entry-save-start")).toBeInTheDocument();
-      fireEvent.pointerLeave(penSave, { pointerType: "pen", pointerId: 2 });
+      fireEvent.click(screen.getByRole("menuitem", { name: "Start" }));
+      await waitFor(() => expect(penOnCreate).toHaveBeenCalledWith(expect.objectContaining({ workflowId: ideasWorkflow.id, column: "todo" })));
+      expect(penOnMoveTask).not.toHaveBeenCalled();
       unmount();
 
       const cancelled = renderQuickEntryBox({ onMoveTask: vi.fn(), workflowId: ideasWorkflow.id, workflowOptions: [ideasWorkflow] });
@@ -5555,8 +5560,8 @@ describe("QuickEntryBox", () => {
       rerender(<QuickEntryBox onCreate={onCreate} onMoveTask={onMoveTask} addToast={vi.fn()} projectId={TEST_PROJECT_ID} tasks={mockTasks} availableModels={MOCK_MODELS} workflowId={ideasWorkflow.id} workflowOptions={[{ ...ideasWorkflow, name: "Refreshed", columns: [{ id: "ideas", name: "Ideas", flags: { hold: true } }, { id: "refreshed-target", name: "Refreshed target", flags: {} }] }]} />);
       fireEvent.click(screen.getByRole("button", { name: "Create anyway" }));
 
-      await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ workflowId: ideasWorkflow.id })));
-      await waitFor(() => expect(onMoveTask).toHaveBeenCalledWith("FN-duplicate", "todo"));
+      await waitFor(() => expect(onCreate).toHaveBeenCalledWith(expect.objectContaining({ workflowId: ideasWorkflow.id, column: "todo" })));
+      expect(onMoveTask).not.toHaveBeenCalled();
     });
 
     it("has no Start shell for unrelated or malformed workflow metadata and keeps Save create-only", async () => {
@@ -5576,7 +5581,7 @@ describe("QuickEntryBox", () => {
       expect(screen.getByTestId("quick-entry-save")).not.toHaveAttribute("aria-haspopup");
     });
 
-    it("treats void, invalid, mismatched, no-target, and move failures as the documented create-only/error paths", async () => {
+    it("treats void and invalid create results as create-only paths without a move", async () => {
       const cases = [
         undefined,
         { ...CREATED_TASK, id: "", column: "ideas", workflowId: ideasWorkflow.id },
@@ -5597,14 +5602,6 @@ describe("QuickEntryBox", () => {
         unmount();
       }
 
-      const addToast = vi.fn();
-      const onMoveTask = vi.fn().mockRejectedValue(new Error("move failed"));
-      renderQuickEntryBox({ onCreate: vi.fn().mockResolvedValue({ ...CREATED_TASK, id: "FN-error", column: "ideas", workflowId: ideasWorkflow.id }), onMoveTask, addToast, workflowId: ideasWorkflow.id, workflowOptions: [ideasWorkflow] });
-      enterDescription();
-      openStartByContextMenu();
-      await screen.findByTestId("quick-entry-save-start");
-      fireEvent.click(screen.getByRole("menuitem", { name: "Start" }));
-      await waitFor(() => expect(addToast).toHaveBeenCalledWith("move failed", "error"));
     });
   });
 

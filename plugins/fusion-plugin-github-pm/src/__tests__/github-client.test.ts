@@ -6,6 +6,7 @@ import {
   GitHubClient,
   githubErrorToResponse,
   isGitHubApiError,
+  normalizeGitHubLabelColor,
   parseNextLinkUrl,
 } from "../github-client.js";
 
@@ -779,5 +780,173 @@ describe("GitHubClient.getRepositoryFeatures (FUSI-009)", () => {
     await client.getRepositoryFeatures("acme", "widgets");
 
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+});
+
+/*
+FNXC:GithubPmLabels 2026-07-24-10:10:
+KB-002 label CRUD + usage-count client method tests. Mirrors the FUSI-014 write-method test
+shape above: exact method+URL+body assertions, authoritative-object mapping, error
+classification inheritance, and token-redaction. Every test injects a mocked fetch; none
+touches api.github.com.
+*/
+describe("normalizeGitHubLabelColor (KB-002)", () => {
+  it("strips a leading # and lowercases", () => {
+    expect(normalizeGitHubLabelColor("#D73A4A")).toBe("d73a4a");
+    expect(normalizeGitHubLabelColor("d73a4a")).toBe("d73a4a");
+  });
+
+  it("rejects invalid colors", () => {
+    expect(normalizeGitHubLabelColor("red")).toBeNull();
+    expect(normalizeGitHubLabelColor("#d73a4")).toBeNull();
+    expect(normalizeGitHubLabelColor("#d73a4az")).toBeNull();
+    expect(normalizeGitHubLabelColor("")).toBeNull();
+  });
+});
+
+describe("GitHubClient.listLabelsRest (KB-002)", () => {
+  it("GETs the REST labels endpoint and maps name/color/description", async () => {
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse([{ name: "bug", color: "d73a4a", description: "Something isn't working" }, { name: "docs", color: "0075ca", description: null }]),
+    ) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const labels = await client.listLabelsRest("acme", "widgets");
+
+    expect(String(fetchImpl.mock.calls[0][0])).toBe("https://api.github.com/repos/acme/widgets/labels?per_page=100");
+    expect(labels).toEqual([
+      { name: "bug", color: "d73a4a", description: "Something isn't working" },
+      { name: "docs", color: "0075ca", description: null },
+    ]);
+  });
+});
+
+describe("GitHubClient.getLabelUsageCount (KB-002)", () => {
+  it("issues the correct search query and returns total_count", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ total_count: 3, items: [] })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const count = await client.getLabelUsageCount("acme", "widgets", "bug");
+
+    const url = new URL(String(fetchImpl.mock.calls[0][0]));
+    expect(url.pathname).toBe("/search/issues");
+    expect(url.searchParams.get("q")).toBe('repo:acme/widgets is:issue is:open label:bug');
+    expect(url.searchParams.get("per_page")).toBe("1");
+    expect(count).toBe(3);
+  });
+
+  it("quotes a label name containing whitespace", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ total_count: 0, items: [] })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    await client.getLabelUsageCount("acme", "widgets", "good first issue");
+
+    const url = new URL(String(fetchImpl.mock.calls[0][0]));
+    expect(url.searchParams.get("q")).toBe('repo:acme/widgets is:issue is:open label:"good first issue"');
+  });
+});
+
+describe("GitHubClient.createLabel (KB-002)", () => {
+  it("POSTs name/color/description and returns the authoritative created label", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ name: "bug", color: "d73a4a", description: "desc" })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const label = await client.createLabel("acme", "widgets", { name: "bug", color: "#D73A4A", description: "desc" });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(String(url)).toBe("https://api.github.com/repos/acme/widgets/labels");
+    expect((init as RequestInit).method).toBe("POST");
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ name: "bug", color: "d73a4a", description: "desc" });
+    expect(label).toEqual({ name: "bug", color: "d73a4a", description: "desc" });
+  });
+
+  it("rejects an invalid color before issuing any request", async () => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    await expect(client.createLabel("acme", "widgets", { name: "bug", color: "not-a-color" })).rejects.toMatchObject({ status: 400, code: "invalid_color" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("maps a 422 duplicate-name response via the inherited classifier", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ message: "Validation Failed" }, 422)) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    await expect(client.createLabel("acme", "widgets", { name: "bug", color: "d73a4a" })).rejects.toMatchObject({ status: 422, code: "github_api_error" });
+  });
+
+  it("maps a 403 to auth_error and never leaks the token", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ message: "Resource not accessible by integration" }, 403)) as unknown as typeof fetch;
+    const client = new GitHubClient("secret-tok", fetchImpl);
+
+    await expect(client.createLabel("acme", "widgets", { name: "bug", color: "d73a4a" })).rejects.toMatchObject({ status: 403, code: "auth_error" });
+  });
+});
+
+describe("GitHubClient.updateLabel (KB-002)", () => {
+  it("sends new_name on rename (never delete+recreate)", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ name: "bug-report", color: "d73a4a", description: "desc" })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const label = await client.updateLabel("acme", "widgets", "bug", { newName: "bug-report" });
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(String(url)).toBe("https://api.github.com/repos/acme/widgets/labels/bug");
+    expect((init as RequestInit).method).toBe("PATCH");
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ new_name: "bug-report" });
+    expect(label.name).toBe("bug-report");
+  });
+
+  it("recolors and re-describes without a rename", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ name: "bug", color: "0075ca", description: "new desc" })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    await client.updateLabel("acme", "widgets", "bug", { color: "#0075CA", description: "new desc" });
+
+    const [, init] = fetchImpl.mock.calls[0];
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({ color: "0075ca", description: "new desc" });
+  });
+
+  it("rejects an invalid color before issuing any request", async () => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    await expect(client.updateLabel("acme", "widgets", "bug", { color: "zzzzzz" })).rejects.toMatchObject({ status: 400, code: "invalid_color" });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("maps a 404 to not_found (unknown label)", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ message: "Not Found" }, 404)) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    await expect(client.updateLabel("acme", "widgets", "ghost", { color: "d73a4a" })).rejects.toMatchObject({ status: 404, code: "not_found" });
+  });
+});
+
+describe("GitHubClient.deleteLabel (KB-002)", () => {
+  it("DELETEs the label endpoint and tolerates a 204 empty body", async () => {
+    const fetchImpl = vi.fn(async () => new Response(null, { status: 204 })) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const result = await client.deleteLabel("acme", "widgets", "bug");
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(String(url)).toBe("https://api.github.com/repos/acme/widgets/labels/bug");
+    expect((init as RequestInit).method).toBe("DELETE");
+    expect(result).toEqual({ deleted: true });
+  });
+
+  it("maps a 404 to not_found (unknown label)", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ message: "Not Found" }, 404)) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    await expect(client.deleteLabel("acme", "widgets", "ghost")).rejects.toMatchObject({ status: 404, code: "not_found" });
+  });
+
+  it("maps a 403 to auth_error and never leaks the token", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ message: "Resource not accessible by integration" }, 403)) as unknown as typeof fetch;
+    const client = new GitHubClient("secret-tok", fetchImpl);
+
+    await expect(client.deleteLabel("acme", "widgets", "bug")).rejects.toMatchObject({ status: 403, code: "auth_error" });
   });
 });

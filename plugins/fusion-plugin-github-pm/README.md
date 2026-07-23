@@ -264,6 +264,41 @@ A 2026-07-23 security audit found ZERO confirm/dryRun/requireConfirm gating anyw
 
 See `settings.test.ts`, `manifest.test.ts`, `routes.test.ts`, `issue-write-routes.test.ts`, `tools.test.ts`, and `IssueWritePanel.test.tsx` for the confirmWrites-ON-blocks-with-zero-GitHub-calls, confirmWrites-OFF-preserves-FUSI-014-behavior, and confirm-dialog cancel/confirm coverage.
 
+## Label management (KB-002)
+
+A dedicated label-management screen: full label CRUD with a color picker and open-issue usage counts, inheriting the FUSI-017 `confirmWrites` gate exactly.
+
+**Client methods** (`src/github-client.ts`), REST-based and name-keyed (a SEPARATE identity from the existing GraphQL `listLabels`, which keeps feeding FUSI-005's taxonomy generator unchanged):
+
+- `listLabelsRest(owner, repo)` — `GET /repos/{owner}/{repo}/labels?per_page=100`, paginated via the shared `paginateRest` Link-header cursor. Returns `{ name, color, description }[]`.
+- `getLabelUsageCount(owner, repo, name)` — `GET /search/issues?q=repo:{owner}/{repo}+is:issue+is:open+label:"{name}"&per_page=1`, returning the Search API's `total_count` (items are never read/mapped, only the count).
+- `createLabel(owner, repo, { name, color, description? })` — `POST /repos/{owner}/{repo}/labels`. Returns the authoritative created label.
+- `updateLabel(owner, repo, currentName, { newName?, color?, description? })` — `PATCH /repos/{owner}/{repo}/labels/{currentName}`, sending GitHub's `new_name` on a rename (never delete+recreate, so existing issue associations are preserved). Returns the authoritative updated label.
+- `deleteLabel(owner, repo, name)` — `DELETE /repos/{owner}/{repo}/labels/{name}`, tolerating GitHub's `204 No Content` response. Returns `{ deleted: true }`.
+- `normalizeGitHubLabelColor(color)` — shared validator: strips an optional leading `#`, lowercases, and validates `/^[0-9a-f]{6}$/`; returns `null` on any invalid input. `createLabel`/`updateLabel` throw a `GitHubApiError(400, ..., "invalid_color")` (never issuing a request) when a supplied color fails this check; the same function is imported and reused by the color picker below for client-side validation.
+
+**Routes** (`src/label-routes.ts`, plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`):
+
+- `GET /labels/list` — **not gated** (read-only). Resolves the repo (400 when unresolved), lists labels via `listLabelsRest`, then resolves each label's `usageCount` with bounded concurrency (cap of 5 in-flight requests). A per-label 401/403/rate-limited usage lookup degrades that ONE label's `usageCount` to `null` rather than failing the whole list (mirrors `getIssuesFilterOptions`'s degrade pattern). Returns `{ ok, repo, labels: [{ name, color, description, usageCount }] }`.
+- `POST /labels/create` — `{ repo?, name, color, description?, confirmed? }` → `{ ok, repo, label }`. 400 `validation_error` on a missing name/color; 400 `invalid_color` on a color that fails `normalizeGitHubLabelColor` (checked before the confirmation gate/any GitHub call).
+- `PUT /labels/update` — `{ repo?, name, newName?, color?, description?, confirmed? }` → `{ ok, repo, label }`. 400 unless at least one of `newName`/`color`/`description` is supplied; 400 `invalid_color` on an invalid color.
+- `POST /labels/delete` — `{ repo?, name, confirmed? }` → `{ ok, repo, deleted: name }`.
+
+Every write handler calls the shared `requireConfirmation(body, ctx)` guard (identical FUSI-017 contract as `issue-write-routes.ts`) **before** `requireClient`/any GitHub call — an unconfirmed write with `confirmWrites` ON returns `HTTP 400 { code: "confirmation_required" }` with zero GitHub calls. `GitHubApiError`s map through the shared `githubErrorToResponse` (403→`auth_error`, 404→`not_found`, 422 duplicate-name→the underlying GitHub message).
+
+**Agent tools** (`src/tools.ts`): `github_pm_create_label`, `github_pm_update_label`, `github_pm_delete_label`. Each resolves repo/auth like the issue write tools, validates required args and color validity, calls `requireToolConfirmation(ctx, confirmed)` before any GitHub call, and returns a text summary plus the resulting label in `details`. An `isGitHubApiError` failure or invalid input returns `isError: true` with a token-free, actionable message.
+
+**`LabelsPanel`** (`src/LabelsPanel.tsx` + `.css`), mounted in `GitHubPmView.tsx`'s `labels` tabpanel (replacing its placeholder) — the ONLY component that renders label-management controls:
+
+- A table of every repo label: an inline-styled color swatch (the label's actual dynamic hex — the one justified inline-color exception to the project's design-token CSS rule), name, description (blank cell when absent), and open-issue usage count (`usageCount === null` renders as a neutral `—` placeholder). An empty repo renders an empty-state message with the create form still visible — never an orphaned empty table shell.
+- A **create form** (name, description, and the shared `ColorPicker` sub-component: GitHub's default palette as one-click swatches plus a free hex input with a live preview swatch; `onChange` only ever fires with a value that passes `normalizeGitHubLabelColor`, so an invalid hex is rejected client-side and never propagated).
+- A per-row **edit** control opening an inline form pre-filled with the label's current name/color/description (the SAME `ColorPicker`); submitting sends `newName` **only** when the name actually changed, so a plain recolor/re-describe never triggers GitHub's rename path.
+- A per-row **delete** control that opens the shared `useConfirm()` dialog (the same primitive `IssueWritePanel.tsx` uses) with a message stating the label's usage count (e.g. "This label is used by 3 open issues. Deleting it removes it from those issues. Delete \"bug\"?") before dispatching; Cancel performs zero mutations.
+- **Confirmation gate:** when `confirmWrites` is ON (read from the `confirmWrites` prop, sourced from `GET /status` the same way `IssueWritePanel` reads it), every create/edit/delete dispatch first awaits the confirm dialog and sends `confirmed: true`.
+- **Optimistic updates with rollback:** each write snapshots the prior label list and applies the change immediately (append on create, patch the row on edit, remove on delete). On success the list is re-fetched so GitHub's authoritative object and refreshed usage counts land. On failure the snapshot is restored verbatim and an `aria-live="assertive"` error banner renders the route's message.
+
+See `src/__tests__/github-client.test.ts`, `label-routes.test.ts`, `tools.test.ts`, and `LabelsPanel.test.tsx` for the color-validity, rename-preserves-associations (`new_name` assertion), confirm-gate (zero-GitHub-calls-when-unconfirmed), usage-count-degrade-on-403, and optimistic-rollback (create + delete) coverage.
+
 ## Setup
 
 1. Install or enable **GitHub PM** from Settings → Plugins / Plugin Manager.
@@ -295,11 +330,13 @@ Plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`:
 - `GET /issues/detail`, `GET /issues/comments` — read-only issue detail, timeline, and paginated comments (FUSI-013); see the section above.
 - `GET /issues/list`, `GET /issues/filter-options` — issue list/search/filter-dropdown reads (FUSI-012); see the section above.
 - `POST /issues/create`, `PUT /issues/update`, `PUT /issues/state`, `POST /issues/comments`, `PUT /issues/comments` — issue create/edit/comment/close-reopen writes (FUSI-014); each requires `confirmed: true` in the body when `confirmWrites` is ON (FUSI-017); see the section above.
+- `GET /labels/list` — label list with open-issue usage counts (KB-002); not gated. `POST /labels/create`, `PUT /labels/update`, `POST /labels/delete` — label create/update/delete (KB-002); each requires `confirmed: true` in the body when `confirmWrites` is ON; see the section above.
 
 ## Agent tools
 
 - `github_pm_status` — returns configured/not-configured text derived from settings.
 - `github_pm_create_issue`, `github_pm_edit_issue`, `github_pm_comment_issue`, `github_pm_set_issue_state` — issue write operations (FUSI-014); each requires a `confirmed: true` parameter when `confirmWrites` is ON (FUSI-017); see the section above.
+- `github_pm_create_label`, `github_pm_update_label`, `github_pm_delete_label` — label write operations (KB-002); each requires a `confirmed: true` parameter when `confirmWrites` is ON; see the section above.
 
 ## Limitations and non-goals (FUSI-001/FUSI-002)
 

@@ -6,6 +6,7 @@ import { TaxonomyProposalPanel } from "./TaxonomyProposalPanel.js";
 import { GITHUB_PM_TABS, GitHubPmTabs, githubPmTabButtonId, githubPmTabPanelId, type GitHubPmTab, type GitHubPmTabId } from "./GitHubPmTabs.js";
 import { IssuesPanel } from "./IssuesPanel.js";
 import { IssueWritePanel } from "./IssueWritePanel.js";
+import { LabelsPanel } from "./LabelsPanel.js";
 import { useRepoCapabilities } from "./useRepoCapabilities.js";
 import { mapRepoCapabilitiesToTabs, type TabGating } from "./tab-capabilities.js";
 import { TabCapabilityNotice } from "./TabCapabilityNotice.js";
@@ -114,6 +115,8 @@ function RepoContextHeader({ selectedRepo, loading }: { selectedRepo: string | n
 
 const TAB_PLACEHOLDER_COPY: Record<GitHubPmTabId, string> = {
   issues: "Issue list, detail, create/edit, comments, labels, and assignment arrive in the Issues Core milestone.",
+  // FNXC:GithubPmLabels 2026-07-24-11:20: KB-002 fills the `labels` tabpanel with LabelsPanel below;
+  // this entry is left in place (unused) for rollback/symmetry, same convention FUSI-012 used for `issues`.
   labels: "Label management arrives alongside Issues Core.",
   milestones: "Milestone management arrives alongside Issues Core.",
   discussions: "Discussion browsing and reply management arrive in a later Foundation-milestone surface.",
@@ -183,6 +186,17 @@ function GitHubPmTabPanelBody({
         <IssueWritePanel repo={repo} context={context} confirmWrites={confirmWrites} />
       </>
     );
+  }
+  /*
+  FNXC:GithubPmLabels 2026-07-24-11:20:
+  KB-002 fills the `labels` tabpanel with the real LabelsPanel (table + create/edit forms +
+  delete-confirmation dialog), replacing its TabPlaceholderPanel -- the ONLY structural change
+  this task makes here. The other four tabs (milestones/discussions/projects/triage) keep their
+  placeholder body untouched, and LabelsPanel renders inside the SAME `github-pm-view__panel
+  card` tabpanel div -- no second card wrapper.
+  */
+  if (tabId === "labels") {
+    return <LabelsPanel repo={repo} context={context} confirmWrites={confirmWrites} />;
   }
   return <TabPlaceholderPanel tabId={tabId} />;
 }

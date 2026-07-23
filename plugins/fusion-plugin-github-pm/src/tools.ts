@@ -1,6 +1,6 @@
 import type { PluginContext, PluginToolDefinition, PluginToolResult } from "@fusion/plugin-sdk";
 import { hasPersonalAccessToken, resolveGitHubPmSettings } from "./settings.js";
-import { GitHubClient, isGitHubApiError } from "./github-client.js";
+import { GitHubClient, isGitHubApiError, normalizeGitHubLabelColor } from "./github-client.js";
 import { resolveGitHubAuth } from "./auth.js";
 import { normalizeRepoKey, resolveSelectedRepo } from "./repo-config.js";
 
@@ -219,10 +219,134 @@ export const githubPmSetIssueStateTool: PluginToolDefinition = {
   },
 };
 
+/*
+FNXC:GithubPmLabels 2026-07-24-10:40:
+KB-002 label agent tools: create/update/delete, mirroring the FUSI-014 write-tool shape exactly
+(requireToolConfirmation BEFORE resolveRepoAndClient/any client call, isGitHubApiError mapping,
+token never echoed). The color validity check (normalizeGitHubLabelColor) runs BEFORE the
+confirmation gate, same ordering as label-routes.ts's write handlers.
+*/
+export const githubPmCreateLabelTool: PluginToolDefinition = {
+  name: "github_pm_create_label",
+  description: "Create a new GitHub label with a name, a 6-hex-digit color, and an optional description.",
+  parameters: {
+    type: "object",
+    properties: {
+      repo: { type: "string", description: "owner/repo. Omit to use the currently selected repo." },
+      name: { type: "string", description: "Label name (required)." },
+      color: { type: "string", description: "Six hex digits, with or without a leading '#' (required), e.g. 'd73a4a'." },
+      description: { type: "string", description: "Label description." },
+      confirmed: { type: "boolean", description: "Set true to confirm this write. Required when the plugin's 'Confirm writes' setting is on." },
+    },
+    required: ["name", "color"],
+  },
+  execute: async (params, ctx: PluginContext) => {
+    const p = params as Record<string, unknown>;
+    const name = typeof p.name === "string" ? p.name.trim() : "";
+    const rawColor = typeof p.color === "string" ? p.color : "";
+    if (!name || !rawColor) return textResult("A non-empty 'name' and 'color' are required to create a label.", undefined, true);
+    const color = normalizeGitHubLabelColor(rawColor);
+    if (!color) return textResult(`Invalid label color "${rawColor}". Use six hex digits, e.g. "d73a4a".`, undefined, true);
+    const confirmationBlocked = requireToolConfirmation(ctx, p.confirmed);
+    if (confirmationBlocked) return confirmationBlocked;
+    const resolved = await resolveRepoAndClient(ctx, p.repo);
+    if (isToolResult(resolved)) return resolved;
+    try {
+      const label = await resolved.client.createLabel(resolved.owner, resolved.repo, {
+        name,
+        color,
+        description: typeof p.description === "string" ? p.description : undefined,
+      });
+      return textResult(`Created label "${label.name}" (#${label.color}).`, { label });
+    } catch (error) {
+      if (isGitHubApiError(error)) return textResult(error.message, { code: error.code }, true);
+      return textResult("Label creation failed unexpectedly.", undefined, true);
+    }
+  },
+};
+
+export const githubPmUpdateLabelTool: PluginToolDefinition = {
+  name: "github_pm_update_label",
+  description: "Rename (preserving issue associations via new_name), recolor, and/or re-describe an existing GitHub label.",
+  parameters: {
+    type: "object",
+    properties: {
+      repo: { type: "string", description: "owner/repo. Omit to use the currently selected repo." },
+      name: { type: "string", description: "Current label name (required)." },
+      newName: { type: "string", description: "New label name. Sent as GitHub's new_name so issue associations are preserved." },
+      color: { type: "string", description: "New six-hex-digit color, with or without a leading '#'." },
+      description: { type: "string", description: "New description." },
+      confirmed: { type: "boolean", description: "Set true to confirm this write. Required when the plugin's 'Confirm writes' setting is on." },
+    },
+    required: ["name"],
+  },
+  execute: async (params, ctx: PluginContext) => {
+    const p = params as Record<string, unknown>;
+    const name = typeof p.name === "string" ? p.name.trim() : "";
+    if (!name) return textResult("A non-empty 'name' is required to update a label.", undefined, true);
+    const newName = typeof p.newName === "string" ? p.newName : undefined;
+    const rawColor = typeof p.color === "string" ? p.color : undefined;
+    const description = typeof p.description === "string" ? p.description : undefined;
+    if (newName === undefined && rawColor === undefined && description === undefined) {
+      return textResult("At least one of 'newName', 'color', or 'description' must be supplied.", undefined, true);
+    }
+    let color: string | undefined;
+    if (rawColor !== undefined) {
+      const normalized = normalizeGitHubLabelColor(rawColor);
+      if (!normalized) return textResult(`Invalid label color "${rawColor}". Use six hex digits, e.g. "d73a4a".`, undefined, true);
+      color = normalized;
+    }
+    const confirmationBlocked = requireToolConfirmation(ctx, p.confirmed);
+    if (confirmationBlocked) return confirmationBlocked;
+    const resolved = await resolveRepoAndClient(ctx, p.repo);
+    if (isToolResult(resolved)) return resolved;
+    try {
+      const label = await resolved.client.updateLabel(resolved.owner, resolved.repo, name, { newName, color, description });
+      return textResult(`Updated label "${label.name}" (#${label.color}).`, { label });
+    } catch (error) {
+      if (isGitHubApiError(error)) return textResult(error.message, { code: error.code }, true);
+      return textResult("Label update failed unexpectedly.", undefined, true);
+    }
+  },
+};
+
+export const githubPmDeleteLabelTool: PluginToolDefinition = {
+  name: "github_pm_delete_label",
+  description: "Delete an existing GitHub label by name. Removes it from any open issues it was applied to.",
+  parameters: {
+    type: "object",
+    properties: {
+      repo: { type: "string", description: "owner/repo. Omit to use the currently selected repo." },
+      name: { type: "string", description: "Label name to delete (required)." },
+      confirmed: { type: "boolean", description: "Set true to confirm this write. Required when the plugin's 'Confirm writes' setting is on." },
+    },
+    required: ["name"],
+  },
+  execute: async (params, ctx: PluginContext) => {
+    const p = params as Record<string, unknown>;
+    const name = typeof p.name === "string" ? p.name.trim() : "";
+    if (!name) return textResult("A non-empty 'name' is required to delete a label.", undefined, true);
+    const confirmationBlocked = requireToolConfirmation(ctx, p.confirmed);
+    if (confirmationBlocked) return confirmationBlocked;
+    const resolved = await resolveRepoAndClient(ctx, p.repo);
+    if (isToolResult(resolved)) return resolved;
+    try {
+      await resolved.client.deleteLabel(resolved.owner, resolved.repo, name);
+      return textResult(`Deleted label "${name}".`, { deleted: name });
+    } catch (error) {
+      if (isGitHubApiError(error)) return textResult(error.message, { code: error.code }, true);
+      return textResult("Label deletion failed unexpectedly.", undefined, true);
+    }
+  },
+};
+
 export const githubPmTools: PluginToolDefinition[] = [
   githubPmStatusTool,
   githubPmCreateIssueTool,
   githubPmEditIssueTool,
   githubPmCommentIssueTool,
   githubPmSetIssueStateTool,
+  githubPmCreateLabelTool,
+  githubPmUpdateLabelTool,
+  githubPmDeleteLabelTool,
 ];

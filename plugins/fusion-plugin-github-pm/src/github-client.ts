@@ -26,7 +26,15 @@ export type GitHubApiErrorCode =
   | "rate_limited"
   | "graphql_error"
   | "network_error"
-  | "github_api_error";
+  | "github_api_error"
+  /*
+  FNXC:GithubPmLabels 2026-07-24-10:00:
+  KB-002 label-color validation code. A create/update label call whose color fails the
+  6-hex-digit check (see normalizeGitHubLabelColor below) throws THIS BEFORE any GitHub
+  request is issued -- an invalid color must never reach GitHub. Routes/tools map it to a
+  400 the same way every other GitHubApiError maps through githubErrorToResponse.
+  */
+  | "invalid_color";
 
 /**
  * FNXC:GitHubPmClient 2026-07-24-00:00:
@@ -70,6 +78,20 @@ export function redactSensitiveText(message: string, secrets: string[] = []): st
     if (secret) redacted = redacted.split(secret).join("[redacted]");
   }
   return redacted.replace(/\b(token|key|secret)[-_:=][A-Za-z0-9._-]+/giu, "$1-[redacted]");
+}
+
+/*
+FNXC:GithubPmLabels 2026-07-24-10:00:
+KB-002 shared color normalizer/validator: strips an optional leading '#', lowercases, and
+validates against GitHub's documented 6-hex-digit label color format. Returns null on any
+invalid input so callers (createLabel/updateLabel, and the LabelsPanel color picker which
+imports this same function) reject an invalid color BEFORE it ever reaches a GitHub request.
+*/
+const GITHUB_LABEL_COLOR_PATTERN = /^[0-9a-f]{6}$/;
+
+export function normalizeGitHubLabelColor(color: string): string | null {
+  const stripped = color.trim().replace(/^#/u, "").toLowerCase();
+  return GITHUB_LABEL_COLOR_PATTERN.test(stripped) ? stripped : null;
 }
 
 function delay(ms: number): Promise<void> {
@@ -246,6 +268,45 @@ export interface GitHubLabel {
   name: string;
   color: string;
   description?: string | null;
+}
+
+/*
+FNXC:GithubPmLabels 2026-07-24-10:00:
+KB-002 label CRUD types. Deliberately a SEPARATE REST-backed identity from the GraphQL
+`listLabels`/`GitHubLabel` pair above (which feeds FUSI-005's taxonomy generator and must
+keep its exact signature). `GitHubRestLabel` (the REST list/CRUD return shape) has no GraphQL
+`id` -- REST label CRUD is keyed by NAME, so every method below takes/returns `name` as the
+identity and never depends on a GraphQL node id.
+*/
+export interface GitHubRestLabelSummary {
+  name: string;
+  color: string;
+  description?: string | null;
+}
+
+export interface CreateLabelInput {
+  name: string;
+  /** 6 hex digits, with or without a leading '#'. Validated via normalizeGitHubLabelColor before any request is sent. */
+  color: string;
+  description?: string;
+}
+
+export interface UpdateLabelInput {
+  /**
+   * FNXC:GithubPmLabels 2026-07-24-10:00:
+   * KB-002: GitHub's REST `PATCH .../labels/{name}` endpoint takes a `new_name` field to
+   * rename a label WITHOUT deleting/recreating it -- this is what preserves the label's
+   * existing issue associations across a rename (GitHub's own documented behavior). This
+   * method must never implement a rename as delete+create.
+   */
+  newName?: string;
+  color?: string;
+  description?: string;
+}
+
+export interface GitHubLabelWithUsage extends GitHubRestLabelSummary {
+  /** Open-issue count for this label (Search API `total_count`), or null when unavailable (e.g. rate-limited/403 degrade). */
+  usageCount: number | null;
 }
 
 export interface GitHubTokenScopes {
@@ -694,6 +755,94 @@ export class GitHubClient {
   }
 
   /**
+   * FNXC:GithubPmLabels 2026-07-24-10:00:
+   * KB-002: REST label list, `GET /repos/{owner}/{repo}/labels?per_page=100`, paginated via
+   * the shared `paginateRest` Link-header cursor (same helper `listIssues` uses). This is a
+   * SEPARATE read path from the GraphQL `listLabels` above -- REST is name-keyed, which is
+   * what CRUD identity needs, and this method's signature/callers are independent of FUSI-005's
+   * taxonomy generator (which keeps using the GraphQL method unchanged).
+   */
+  async listLabelsRest(owner: string, repo: string): Promise<GitHubRestLabelSummary[]> {
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/labels?per_page=${REST_PAGE_SIZE}`;
+    const raw = await this.paginateRest<GitHubRestLabelFull>(url, Number.MAX_SAFE_INTEGER);
+    return raw.map(mapRestLabel);
+  }
+
+  /**
+   * FNXC:GithubPmLabels 2026-07-24-10:00:
+   * KB-002: per-label OPEN-issue usage count via the Search API's `total_count`
+   * (`GET /search/issues?q=repo:{owner}/{repo}+is:issue+is:open+label:"{name}"&per_page=1`).
+   * `per_page=1` keeps this cheap -- only the count is read, never `items`. Reuses
+   * `quoteSearchQualifierIfNeeded` so a label name containing whitespace is quoted exactly
+   * like `buildIssueSearchQuery`'s `label:` qualifier already does for issue-list filtering.
+   */
+  async getLabelUsageCount(owner: string, repo: string, name: string): Promise<number> {
+    const q = `repo:${owner}/${repo} is:issue is:open label:${quoteSearchQualifierIfNeeded(name)}`;
+    const params = new URLSearchParams({ q, per_page: "1" });
+    const url = `${GITHUB_REST_BASE_URL}/search/issues?${params.toString()}`;
+    const { data } = await this.requestJson<GitHubRestSearchResponse>(url);
+    return typeof data.total_count === "number" ? data.total_count : 0;
+  }
+
+  /**
+   * FNXC:GithubPmLabels 2026-07-24-10:00:
+   * KB-002: `POST /repos/{owner}/{repo}/labels` -- creates a label and returns GitHub's
+   * authoritative created object (the round-trip proof), mapped through the same
+   * `GitHubRestLabelSummary` shape `listLabelsRest` returns. The color is validated/normalized
+   * BEFORE any request is sent -- an invalid color never reaches GitHub.
+   */
+  async createLabel(owner: string, repo: string, input: CreateLabelInput): Promise<GitHubRestLabelSummary> {
+    const color = normalizeGitHubLabelColor(input.color);
+    if (!color) {
+      throw new GitHubApiError(400, `Invalid label color "${input.color}". Use six hex digits, e.g. "d73a4a".`, "invalid_color");
+    }
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/labels`;
+    const body: Record<string, unknown> = { name: input.name, color };
+    if (input.description !== undefined) body.description = input.description;
+    const label = await this.writeJson<GitHubRestLabelFull>(url, "POST", body);
+    return mapRestLabel(label);
+  }
+
+  /**
+   * FNXC:GithubPmLabels 2026-07-24-10:00:
+   * KB-002: `PATCH /repos/{owner}/{repo}/labels/{currentName}`. A rename sends GitHub's
+   * `new_name` field (never delete+recreate) so existing issue associations are preserved --
+   * see UpdateLabelInput.newName's doc comment for the exact GitHub contract this relies on.
+   * Returns the authoritative updated label (round-trip proof).
+   */
+  async updateLabel(owner: string, repo: string, currentName: string, patch: UpdateLabelInput): Promise<GitHubRestLabelSummary> {
+    let color: string | undefined;
+    if (patch.color !== undefined) {
+      const normalized = normalizeGitHubLabelColor(patch.color);
+      if (!normalized) {
+        throw new GitHubApiError(400, `Invalid label color "${patch.color}". Use six hex digits, e.g. "d73a4a".`, "invalid_color");
+      }
+      color = normalized;
+    }
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/labels/${encodeURIComponent(currentName)}`;
+    const body: Record<string, unknown> = {};
+    if (patch.newName !== undefined) body.new_name = patch.newName;
+    if (color !== undefined) body.color = color;
+    if (patch.description !== undefined) body.description = patch.description;
+    const label = await this.writeJson<GitHubRestLabelFull>(url, "PATCH", body);
+    return mapRestLabel(label);
+  }
+
+  /**
+   * FNXC:GithubPmLabels 2026-07-24-10:00:
+   * KB-002: `DELETE /repos/{owner}/{repo}/labels/{name}`. GitHub returns `204 No Content` on
+   * success -- this calls `fetchThrottled` directly (not `requestJson`/`writeJson`, both of
+   * which unconditionally parse a JSON body) so an empty 204 response body is tolerated rather
+   * than throwing a JSON-parse error. Still routes through the SAME throttled/error-classifying
+   * transport every other method uses -- no second transport is introduced.
+   */
+  async deleteLabel(owner: string, repo: string, name: string): Promise<{ deleted: true }> {
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/labels/${encodeURIComponent(name)}`;
+    await this.fetchThrottled(url, { method: "DELETE" });
+    return { deleted: true };
+  }
+
+  /**
    * FNXC:GitHubPmClient 2026-07-24-00:00:
    * FUSI-005: read-only discussion-history input for the taxonomy generator (Step 1).
    * Mirrors `listLabels`'s GraphQL-cursor-pagination shape exactly, folding each
@@ -944,6 +1093,13 @@ interface GitHubRestMilestone {
   due_on?: string | null;
 }
 
+/** KB-002: raw REST label shape (list + create/update responses share this). */
+interface GitHubRestLabelFull {
+  name?: string;
+  color?: string;
+  description?: string | null;
+}
+
 interface GitHubRestIssueDetail {
   number: number;
   title: string;
@@ -976,6 +1132,15 @@ interface GitHubRestTimelineEvent {
   created_at?: string;
   label?: { name: string; color: string };
   source?: { issue?: { number?: number; html_url?: string } };
+}
+
+/**
+ * FNXC:GithubPmLabels 2026-07-24-10:00:
+ * KB-002: shared REST-label -> `GitHubRestLabelSummary` mapper used by `listLabelsRest`,
+ * `createLabel`, and `updateLabel` so every label read/write returns the SAME shape.
+ */
+function mapRestLabel(label: GitHubRestLabelFull): GitHubRestLabelSummary {
+  return { name: label.name ?? "", color: label.color ?? "", description: label.description ?? null };
 }
 
 function toGitHubIssueUser(user: GitHubRestUser | null | undefined): GitHubIssueUser | null {

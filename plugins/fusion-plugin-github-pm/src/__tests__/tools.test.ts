@@ -1,6 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PluginContext } from "@fusion/plugin-sdk";
-import { githubPmCommentIssueTool, githubPmCreateIssueTool, githubPmEditIssueTool, githubPmSetIssueStateTool, githubPmStatusTool, githubPmTools } from "../tools.js";
+import {
+  githubPmCommentIssueTool,
+  githubPmCreateIssueTool,
+  githubPmCreateLabelTool,
+  githubPmDeleteLabelTool,
+  githubPmEditIssueTool,
+  githubPmSetIssueStateTool,
+  githubPmStatusTool,
+  githubPmTools,
+  githubPmUpdateLabelTool,
+} from "../tools.js";
 import { SELECTED_REPO_SETTING_ID } from "../repo-config.js";
 
 // FNXC:GithubPmIssues 2026-07-24-05:20: same deterministic gh-CLI suppression as issue-write-routes.test.ts.
@@ -35,13 +45,16 @@ function ctx(settings: Record<string, unknown> = {}): PluginContext {
 }
 
 describe("github-pm plugin tools", () => {
-  it("registers the status tool plus the FUSI-014 write tools", () => {
+  it("registers the status tool plus the FUSI-014 write tools and the KB-002 label tools", () => {
     expect(githubPmTools.map((tool) => tool.name)).toEqual([
       "github_pm_status",
       "github_pm_create_issue",
       "github_pm_edit_issue",
       "github_pm_comment_issue",
       "github_pm_set_issue_state",
+      "github_pm_create_label",
+      "github_pm_update_label",
+      "github_pm_delete_label",
     ]);
   });
 
@@ -199,6 +212,123 @@ describe("github-pm write tools (FUSI-014)", () => {
   it("confirmWrites ON + confirmed:true never leaks the token, even on a mocked auth failure", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ message: "Resource not accessible by integration secret-tok" }, 403)));
     const result = await githubPmCreateIssueTool.execute({ repo: "acme/widgets", title: "X", confirmed: true }, ctx({ personalAccessToken: "secret-tok" }));
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).not.toContain("secret-tok");
+    vi.unstubAllGlobals();
+  });
+});
+
+/*
+FNXC:GithubPmLabels 2026-07-24-10:40:
+KB-002 label tool tests: each performs its mutation against a mocked fetch and returns a
+non-error result; invalid args, an unconfirmed write (gate ON), and an auth/permission error
+all yield isError:true with a readable, token-free message.
+*/
+describe("github-pm label tools (KB-002)", () => {
+  it("github_pm_create_label performs the mutation and returns a non-error result (confirmWrites OFF)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ name: "bug", color: "d73a4a", description: "desc" })));
+    const result = await githubPmCreateLabelTool.execute({ repo: "acme/widgets", name: "bug", color: "#D73A4A", description: "desc" }, ctx({ personalAccessToken: "ghp_token", confirmWrites: false }));
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("bug");
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_create_label is isError on a missing name/color", async () => {
+    const result = await githubPmCreateLabelTool.execute({ repo: "acme/widgets", name: "bug" }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBe(true);
+  });
+
+  it("github_pm_create_label is isError on an invalid color, with zero fetch calls", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const result = await githubPmCreateLabelTool.execute({ repo: "acme/widgets", name: "bug", color: "not-a-color", confirmed: true }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_create_label: confirmWrites ON + missing confirmed → isError, zero fetch calls", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const result = await githubPmCreateLabelTool.execute({ repo: "acme/widgets", name: "bug", color: "d73a4a" }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("requires confirmation");
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_create_label: confirmWrites ON + confirmed:true → the write proceeds", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ name: "bug", color: "d73a4a", description: null })));
+    const result = await githubPmCreateLabelTool.execute({ repo: "acme/widgets", name: "bug", color: "d73a4a", confirmed: true }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBeFalsy();
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_update_label sends new_name on rename and resolves the selected repo when omitted (confirmWrites OFF)", async () => {
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      expect(JSON.parse(String(init?.body))).toEqual({ new_name: "bug-report" });
+      return jsonResponse({ name: "bug-report", color: "d73a4a", description: null });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await githubPmUpdateLabelTool.execute({ name: "bug", newName: "bug-report" }, ctx({ [SELECTED_REPO_SETTING_ID]: "acme/widgets", personalAccessToken: "ghp_token", confirmWrites: false }));
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("bug-report");
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_update_label is isError when no field is supplied", async () => {
+    const result = await githubPmUpdateLabelTool.execute({ name: "bug" }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBe(true);
+  });
+
+  it("github_pm_update_label: confirmWrites ON + missing confirmed → isError, zero fetch calls", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const result = await githubPmUpdateLabelTool.execute({ name: "bug", color: "d73a4a" }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_update_label: confirmWrites ON + confirmed:true → the write proceeds", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ name: "bug", color: "0075ca", description: null })));
+    const result = await githubPmUpdateLabelTool.execute({ repo: "acme/widgets", name: "bug", color: "0075ca", confirmed: true }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBeFalsy();
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_delete_label deletes and reports success (confirmWrites OFF)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    const result = await githubPmDeleteLabelTool.execute({ repo: "acme/widgets", name: "bug" }, ctx({ personalAccessToken: "ghp_token", confirmWrites: false }));
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("Deleted");
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_delete_label is isError on a missing name", async () => {
+    const result = await githubPmDeleteLabelTool.execute({ repo: "acme/widgets" }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBe(true);
+  });
+
+  it("github_pm_delete_label: confirmWrites ON + missing confirmed → isError, zero fetch calls", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const result = await githubPmDeleteLabelTool.execute({ repo: "acme/widgets", name: "bug" }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_delete_label: confirmWrites ON + confirmed:true → the write proceeds", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    const result = await githubPmDeleteLabelTool.execute({ repo: "acme/widgets", name: "bug", confirmed: true }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBeFalsy();
+    vi.unstubAllGlobals();
+  });
+
+  it("a mocked 403 permission error on a label tool yields isError:true without leaking the token", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ message: "Resource not accessible by integration secret-tok" }, 403)));
+    const result = await githubPmCreateLabelTool.execute({ repo: "acme/widgets", name: "bug", color: "d73a4a" }, ctx({ personalAccessToken: "secret-tok", confirmWrites: false }));
     expect(result.isError).toBe(true);
     expect(result.content[0].text).not.toContain("secret-tok");
     vi.unstubAllGlobals();

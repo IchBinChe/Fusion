@@ -1,0 +1,228 @@
+.labels-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.labels-panel__empty-state {
+  margin: 0;
+  color: var(--text-muted);
+  padding: var(--space-md) 0;
+}
+
+.labels-panel__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  border: var(--btn-border-width) solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+}
+
+.labels-panel__section-title {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--font-size-md);
+}
+
+.labels-panel__form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-sm);
+}
+
+.labels-panel__form--inline {
+  padding: var(--space-sm) 0;
+}
+
+.labels-panel__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  font-size: var(--font-size-sm);
+}
+
+.labels-panel__field input {
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.labels-panel__field input:focus-visible {
+  box-shadow: var(--focus-ring-strong);
+  outline: none;
+}
+
+.labels-panel__spinner {
+  animation: labels-panel-spin 1s linear infinite;
+}
+
+@keyframes labels-panel-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.labels-panel__status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.labels-panel__status--error {
+  color: var(--color-error);
+}
+
+.labels-panel__error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  margin: 0;
+  color: var(--color-error);
+  font-weight: 600;
+}
+
+/*
+FNXC:GithubPmLabels 2026-07-24-11:10:
+KB-002 color-picker styling. Palette swatch buttons and the live preview swatch render a
+GitHub label's actual (or the operator's in-progress) hex color -- the one deliberate,
+justified inline-color exception per the project's design-token rule, since that color is
+dynamic data, never a fixed design choice.
+*/
+.labels-panel__color-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 14rem;
+}
+
+.labels-panel__color-picker-label {
+  width: 100%;
+  font-size: var(--font-size-sm);
+}
+
+.labels-panel__color-swatches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.labels-panel__color-swatch-button {
+  width: var(--space-lg);
+  height: var(--space-lg);
+  border-radius: var(--radius-sm);
+  border: var(--border-width) solid var(--border-color);
+  padding: 0;
+  cursor: pointer;
+}
+
+.labels-panel__color-swatch-button--active {
+  box-shadow: var(--focus-ring-strong);
+}
+
+.labels-panel__color-picker input {
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  width: 7rem;
+}
+
+.labels-panel__color-picker input:focus-visible {
+  box-shadow: var(--focus-ring-strong);
+  outline: none;
+}
+
+.labels-panel__color-preview {
+  display: inline-block;
+  width: var(--space-lg);
+  height: var(--space-lg);
+  border-radius: var(--radius-sm);
+  border: var(--border-width) solid var(--border-color);
+}
+
+.labels-panel__color-error {
+  width: 100%;
+  color: var(--color-error);
+  font-size: var(--font-size-2xs);
+}
+
+.labels-panel__table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.labels-panel__table th,
+.labels-panel__table td {
+  text-align: left;
+  padding: var(--space-xs) var(--space-sm);
+  border-bottom: var(--border-width) solid var(--border-color);
+  vertical-align: middle;
+}
+
+.labels-panel__description-cell {
+  color: var(--text-muted);
+}
+
+.labels-panel__swatch {
+  display: inline-block;
+  width: var(--space-md);
+  height: var(--space-md);
+  border-radius: var(--radius-pill);
+  border: var(--border-width) solid var(--border-color);
+}
+
+.labels-panel__row-actions {
+  display: flex;
+  gap: var(--space-xs);
+  white-space: nowrap;
+}
+
+@media (max-width: 48rem) {
+  .labels-panel__form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .labels-panel__color-picker {
+    min-width: 0;
+  }
+
+  .labels-panel__table,
+  .labels-panel__table thead,
+  .labels-panel__table tbody,
+  .labels-panel__table th,
+  .labels-panel__table td,
+  .labels-panel__table tr {
+    display: block;
+    width: 100%;
+  }
+
+  .labels-panel__table thead {
+    display: none;
+  }
+
+  .labels-panel__table tr {
+    border-bottom: var(--border-width) solid var(--border-color);
+    padding: var(--space-sm) 0;
+  }
+
+  .labels-panel__table td {
+    border-bottom: none;
+    padding: var(--space-xs) 0;
+  }
+
+  .labels-panel__row-actions {
+    justify-content: flex-start;
+  }
+}

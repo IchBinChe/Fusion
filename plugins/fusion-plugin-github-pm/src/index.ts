@@ -53,6 +53,7 @@ export {
   githubErrorToResponse,
   redactSensitiveText,
   parseNextLinkUrl,
+  normalizeGitHubLabelColor,
   GITHUB_REST_BASE_URL,
   GITHUB_GRAPHQL_ENDPOINT,
   GITHUB_API_VERSION,
@@ -89,6 +90,10 @@ export type {
   GitHubIssueSearchPage,
   GitHubMilestone,
   GitHubRepositoryFeatures,
+  GitHubRestLabelSummary,
+  CreateLabelInput,
+  UpdateLabelInput,
+  GitHubLabelWithUsage,
 } from "./github-client.js";
 export { GITHUB_TIMELINE_KEY_EVENTS } from "./github-client.js";
 export {
@@ -214,4 +219,23 @@ export {
   githubPmEditIssueTool,
   githubPmCommentIssueTool,
   githubPmSetIssueStateTool,
+} from "./tools.js";
+/*
+FNXC:GithubPmLabels 2026-07-24-11:40:
+KB-002 re-exports: the label-routes array + handlers and the three new label agent tools.
+Mirrors the FUSI-014 issue-write re-export block precedent exactly -- one export block per
+feature. LabelsPanel.tsx/LabelsPanel.css are deliberately NOT re-exported here (React/CSS
+modules stay out of this server entry point per the FUSI-001 constraint noted above).
+*/
+export {
+  labelRoutes,
+  getLabelsList,
+  postLabelCreate,
+  putLabelUpdate,
+  postLabelDelete,
+} from "./label-routes.js";
+export {
+  githubPmCreateLabelTool,
+  githubPmUpdateLabelTool,
+  githubPmDeleteLabelTool,
 } from "./tools.js";

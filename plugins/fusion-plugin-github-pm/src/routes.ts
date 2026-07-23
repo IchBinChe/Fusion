@@ -7,6 +7,7 @@ import { taxonomyRoutes } from "./taxonomy-routes.js";
 import { issueRoutes } from "./issue-routes.js";
 import { issuesRoutes } from "./issues-routes.js";
 import { issueWriteRoutes } from "./issue-write-routes.js";
+import { labelRoutes } from "./label-routes.js";
 
 function response(status: number, body: Record<string, unknown>): PluginRouteResponse {
   return { status, body };
@@ -81,6 +82,12 @@ no separate registration mechanism is introduced for mutations vs reads.
 FNXC:GithubPmCapabilities 2026-07-24-08:10:
 FUSI-009 adds the repo-context capability-gating route (`GET /repo/capabilities`) onto the
 same aggregated route list, mirroring the `repoConfigRoutes` spread precedent.
+
+FNXC:GithubPmLabels 2026-07-24-10:20:
+KB-002 adds the label-management routes (list-with-usage-counts + create/update/delete) onto
+the same aggregated route list -- the plugin's second write surface after FUSI-014's issue
+writes, following the exact same one-registration-point pattern (no separate registration
+mechanism for label mutations).
 */
 export const githubPmRoutes: PluginRouteDefinition[] = [
   { method: "GET", path: "/status", handler: getGitHubPmStatus, description: "Report GitHub PM plugin configuration status from settings presence only." },
@@ -91,4 +98,5 @@ export const githubPmRoutes: PluginRouteDefinition[] = [
   ...issueRoutes,
   ...issuesRoutes,
   ...issueWriteRoutes,
+  ...labelRoutes,
 ];

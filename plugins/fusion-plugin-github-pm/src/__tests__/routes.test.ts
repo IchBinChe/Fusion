@@ -69,6 +69,10 @@ describe("github-pm plugin routes", () => {
       "PUT /issues/state",
       "POST /issues/comments",
       "PUT /issues/comments",
+      "GET /labels/list",
+      "POST /labels/create",
+      "PUT /labels/update",
+      "POST /labels/delete",
     ]);
   });
 });

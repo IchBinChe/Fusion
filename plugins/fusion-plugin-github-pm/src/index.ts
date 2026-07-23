@@ -69,3 +69,28 @@ export type {
   GitHubLabel,
   GitHubTokenScopes,
 } from "./github-client.js";
+/*
+FNXC:GithubPmAuth 2026-07-24-00:25:
+FUSI-003's GitHub client (and any future plugin route/tool) must consume the resolved
+token through this single resolver -- never read process.env.GITHUB_TOKEN or shell out
+to gh a second time. Re-export the resolver + scope-probe + diagnostics surface here so
+those consumers can `import { resolveGitHubAuth, resolveGitHubToken } from "@fusion-plugin-examples/github-pm"`
+instead of duplicating auth logic.
+*/
+export {
+  resolveGitHubAuth,
+  resolveGitHubToken,
+  probeGitHubScopes,
+  probeGitHubScopesCached,
+  resetScopeProbeCache,
+  mapScopesToCapabilities,
+  getGitHubAuthDiagnostics,
+  fingerprintToken,
+  type GitHubAuthSource,
+  type GitHubAuthResult,
+  type GitHubScopeProbeStatus,
+  type GitHubScopeProbeResult,
+  type CapabilityState,
+  type GitHubCapabilities,
+  type GitHubAuthDiagnostics,
+} from "./auth.js";

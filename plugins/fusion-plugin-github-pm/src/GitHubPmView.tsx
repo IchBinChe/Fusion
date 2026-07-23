@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, CheckCircle2, Github, Loader2 } from "lucide-react";
 import type { PluginDashboardViewContext } from "@fusion/dashboard/app/plugins/types";
+import { AuthDiagnosticsPanel } from "./AuthDiagnosticsPanel.js";
 import "./GitHubPmView.css";
 
 type StatusState = "loading" | "configured" | "unconfigured" | "error";
@@ -47,6 +48,14 @@ Placeholder view for FUSI-001. Renders a status badge from the plugin-owned
 /status route (settings-presence only, no live GitHub call) and explains that
 the repo picker + issue management surfaces land in later Foundation-milestone
 tasks (FUSI-002/003/004). Never renders the raw personalAccessToken value.
+
+FNXC:GithubPmAuth 2026-07-24-00:35:
+FUSI-002 mounts the layered-auth diagnostics panel (source + per-capability
+scope support, with an actionable 'project' scope warning) directly below the
+settings-presence status badge above. This is the ONLY place
+AuthDiagnosticsPanel is rendered -- the repo picker/issues/discussions/Projects
+v2 surfaces in later FUSI tasks reuse this same view rather than duplicating
+the panel.
 */
 export function GitHubPmView({ context }: { context?: PluginDashboardViewContext }) {
   const [status, setStatus] = useState<StatusState>("loading");
@@ -104,6 +113,8 @@ export function GitHubPmView({ context }: { context?: PluginDashboardViewContext
           <p className="github-pm-view__meta">Add a default repository or personal access token in Plugin Manager settings to get started.</p>
         ) : null}
       </div>
+
+      <AuthDiagnosticsPanel context={context} />
     </section>
   );
 }

@@ -2,6 +2,66 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
+## 0.73.0-beta.4
+
+### Highlights
+- Workflows now fully drive the board — cards move through your custom columns, not a fixed six-column layout
+- Pick a beta or stable update channel in Settings or via `fn update --channel`
+- Max concurrency now caps planning, execution, and review together, simplifying board capacity limits
+- Planning Mode rebuilt into a validated, always-visible interview — you approve the plan explicitly instead of guessing when it's 'done'
+- In-app report screenshots and activity traces are now scrubbed before filing, closing a path/token leak
+
+### New
+- Add beta and stable release channels with a persisted `updateChannel` setting
+- Unify max concurrency across planning/execution/review; simplified board capacity indicators
+- Rebuild Planning Mode as a sequential Q&A + plan-review flow with focus-steered refine and an always-visible running plan
+- Quality hub shows task verification videos when review artifacts are enabled; auto-generate short feature-video artifacts for user-facing deliverables
+- Add review artifact controls and deliverable galleries (`reviewArtifacts` policy)
+- Add guided in-app Bug, Feedback, Idea, and Help reporting with GitHub Issues/Discussions targeting, roadmap dedup, and optional screenshots
+- Agent chat now investigates the live codebase with tools before answering architecture/code questions
+- Dashboard chat agents can edit files and run bash with full coding workspace tools
+- Add mission auto-merge override so a mission's features share one branch and PR
+- Add durable configuration revision history with rollback, now surfaced in Settings
+- Add portable secret-scrubbed org export/import (`fn org-export` / `fn org-import`)
+- Add persisted ideation sessions with atomic promotion into Mission roadmap features; Ideation is now a top-level experimental view
+- Add mailbox approval for ephemeral agent follow-up tasks; require approved mission lineage for autonomous task creation/delegation
+- Add Aurora, Calm, and Dawn dashboard color themes, filterable by name
+- Add photo/file attachments to Quick Add and Main Chat; native structure previews and attachments in Chat and Mail
+- Let plugins declaratively provide project MCP servers; show WhatsApp pairing QR in plugin settings
+- Add conditional (CAS) task-document writes and append-only corrections for archived-task documents
+- Add a gesture-only Quick Add Start action; add optional descriptions to custom workflow board columns
+- Task Stats now shows creation provenance (source type, parent task, creating agent, duplicate flags)
+
+### Fixed
+- Board columns, move validation, and status badges now derive from your workflow's actual columns instead of a hardcoded set; merge lands cards in your custom Merging column
+- Workflows without a merge step finish in their completion column instead of stalling one column short; built-in workflows no longer bounce cards back to Todo, and hold nodes no longer crash the PR workflow
+- Fix tasks with no saved workflow selection being unable to move between columns
+- Recover in-review tasks stranded by a restart mid-review instead of failing them; orphaned review steps now fail-for-re-review instead of being silently skipped
+- Fix stale worktree/checkout recovery so approved task scope and committed work survive review and pooled-checkout reassignment
+- Prevent duplicate follow-up tasks from retried steps or diagnostic near-duplicates across parent tasks
+- Show SQLite→PostgreSQL migration status on the dashboard; fix several PostgreSQL startup/permission/connection races (Windows connection cap, ICU symlink repair, concurrent project init, migration-marker false positives)
+- Planning Mode: numerous fixes for scroll/refresh/resume/timer/mobile behavior, duplicate generations, stale JSON errors, and question/plan sync during the interview rewrite
+- Fix manual scrolling during generation across task chat, agent logs, chat, Planner Chat, and Workflow live logs
+- Mobile Kanban swipes now always settle on exactly one centered column (multiple follow-up hardening fixes)
+- Fix Chat View 'Latest' button shift, pinned-chat sections, and message edit Save duplication
+- Fix Grok/OMP/Claude CLI runtime routing, ACP process cleanup listener growth, and MCP bridge packaging
+- Fix Codex/Claude usage reporting (weekly quota window, unauthenticated CLI false timeout)
+- Fix GitHub/GitLab issue-form auto-translation, duplicate-import detection, and transport selection for Discussions
+- Fix task token counts inflated by resumed sessions; include planning-lane time/tokens in cost totals
+- Restore PostgreSQL activity-log lifecycle entries and archived shared-branch landing proof
+- Fix plugin route/enable-state consistency and single onLoad per process; fix workflow-definition ID collisions
+- Various task-detail/board UI sizing, theming, and layout fixes (icon sizing across breakpoints, Report menu opacity, cost badge placement, Ideas board fixes)
+
+### Breaking
+- Remove the Planning Mode deepening checkpoint and fixed interview depth caps; plans are now validated explicitly by the user instead of an AI completion signal
+
+### Security
+- Scrub top-level report `activityTrace` before filing so paths and tokens never reach the reporting pipeline
+
+### Internal
+- Review gates now run exclusively as workflow-graph nodes; the in-session step reviewer and its RETHINK rewind path are deleted
+- Bump bundled pi runtime to 0.81.1 for newer models, providers, and session reliability
+
 ## 0.73.0-beta.3
 
 ### Highlights

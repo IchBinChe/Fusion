@@ -318,6 +318,80 @@ describe("useColumnScrollSnap", () => {
     expect(scroller.scrollLeft).toBe(COLUMN_WIDTH);
   });
 
+  /*
+  FNXC:BoardNavigation 2026-07-22-20:10:
+  iOS/Android fire pointercancel when native scrolling claims the touch, while touchmove/touchend
+  keep flowing. An early pointercancel must not orphan the gesture (board resting mid-column until
+  the next tap), and it must not arm the idle settle while the finger is still down (mid-drag
+  snap-back fighting a slow scroll, worst at the edge columns).
+  */
+  it("still settles after native scroll takeover cancels the pointer stream early", () => {
+    const scroller = createScroller(3, 0);
+    renderHook(() => useColumnScrollSnap(scroller, { mobileOnly: true, isUserInteraction: () => true }));
+
+    act(() => {
+      scroller.dispatchEvent(new Event("touchstart"));
+      dispatchPointerEvent(scroller, "pointerdown", 200);
+      // Native pan claims the gesture before 12px of finger travel.
+      dispatchPointerEvent(scroller, "pointercancel", 195);
+      // Touch stream continues: finger drags the board to a mid-column rest, then lifts.
+      scroller.scrollLeft = 40;
+      scroller.dispatchEvent(new Event("scroll"));
+      scroller.dispatchEvent(new Event("touchend"));
+    });
+    settleAfterMomentum();
+
+    // Regression: the orphaned gesture previously left the board resting at 40 until a tap.
+    expect(scroller.scrollLeft).toBe(COLUMN_WIDTH);
+    expect(isColumnCentered(scroller, [...scroller.children] as HTMLElement[])).toBe(true);
+  });
+
+  it("does not snap mid-drag when the finger pauses after pointercancel", () => {
+    const scroller = createScroller(3, COLUMN_WIDTH * 2);
+    renderHook(() => useColumnScrollSnap(scroller, { mobileOnly: true, isUserInteraction: () => true }));
+
+    act(() => {
+      scroller.dispatchEvent(new Event("touchstart"));
+      dispatchPointerEvent(scroller, "pointerdown", 100);
+      dispatchPointerEvent(scroller, "pointercancel", 100);
+      // Slow scroll away from the last column, then the finger pauses while still down.
+      scroller.scrollLeft = COLUMN_WIDTH * 2 - 20;
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+    act(() => {
+      vi.advanceTimersByTime(120);
+    });
+    // Regression: the idle settle previously fired mid-drag and snapped back to the edge column.
+    expect(scroller.scrollLeft).toBe(COLUMN_WIDTH * 2 - 20);
+
+    act(() => {
+      scroller.scrollLeft = COLUMN_WIDTH + 50;
+      scroller.dispatchEvent(new Event("scroll"));
+      scroller.dispatchEvent(new Event("touchend"));
+    });
+    settleAfterMomentum();
+
+    expect(scroller.scrollLeft).toBe(COLUMN_WIDTH);
+    expect(isColumnCentered(scroller, [...scroller.children] as HTMLElement[])).toBe(true);
+  });
+
+  it("still fully cancels on pointercancel when no touch stream is active", () => {
+    const scroller = createScroller(3, 0);
+    renderHook(() => useColumnScrollSnap(scroller, { mobileOnly: true, isUserInteraction: () => true }));
+
+    act(() => {
+      // Pointer-only gesture (no touchstart): pointercancel is a genuine gesture end.
+      dispatchPointerEvent(scroller, "pointerdown", 200);
+      dispatchPointerEvent(scroller, "pointermove", 160);
+      scroller.scrollLeft = 30;
+      scroller.dispatchEvent(new Event("scroll"));
+      dispatchPointerEvent(scroller, "pointercancel", 160);
+    });
+    settleAfterMomentum();
+
+    expect(scroller.scrollLeft).toBe(COLUMN_WIDTH);
+  });
+
   it("does not snap on mount or programmatic scrolling", () => {
     const scroller = createScroller();
     renderHook(() => useColumnScrollSnap(scroller, { mobileOnly: true, isUserInteraction: () => true }));

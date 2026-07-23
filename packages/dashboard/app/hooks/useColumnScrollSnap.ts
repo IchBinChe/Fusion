@@ -233,6 +233,18 @@ export function useColumnScrollSnap(
 
     let interactionActive = false;
     let pointerHeld = false;
+    /*
+    FNXC:BoardNavigation 2026-07-22-20:10:
+    iOS/Android fire `pointercancel` when the native scroll pan claims a touch, but the TOUCH
+    stream (touchmove/touchend) keeps going. Treating that pointercancel as gesture end either
+    orphaned the gesture (early cancel, no movement yet → interactionActive false → the later
+    touchend no-ops and the board rests mid-column until the next tap) or armed the idle settle
+    while the finger was still down (slow drag with a brief pause hard-jumped/fought the finger,
+    worst at the edge columns where rubber-band makes WebKit claim the pan aggressively).
+    Track whether a touch sequence is live and ignore pointercancel while it is — touchend is
+    the real finger lift. touchcancel remains a genuine gesture cancel.
+    */
+    let touchSequenceActive = false;
     let gestureStartScrollLeft = scroller.scrollLeft;
     let lastScrollLeft = scroller.scrollLeft;
     let gestureStartClientX: number | null = null;
@@ -438,6 +450,7 @@ export function useColumnScrollSnap(
     const beginInteraction = (event: Event) => {
       if (!isUserInteraction(event)) return;
 
+      if (event.type === "touchstart") touchSequenceActive = true;
       clearPin();
 
       // Mid-momentum re-touch (or duplicate pointerdown+touchstart): cancel pending snap and re-baseline.
@@ -534,6 +547,8 @@ export function useColumnScrollSnap(
     };
 
     const handleFingerLift = (event: Event) => {
+      // Clear before any early return so a stale flag can't outlive the touch sequence.
+      if (event.type === "touchend") touchSequenceActive = false;
       if (!interactionActive || pinnedScrollLeft !== null) return;
       if ("isPrimary" in event && (event as PointerEvent).isPrimary === false) return;
 
@@ -550,7 +565,19 @@ export function useColumnScrollSnap(
       armIdleSettle();
     };
 
-    const handleGestureCancel = () => {
+    const handleGestureCancel = (event: Event) => {
+      if (event.type === "touchcancel") {
+        touchSequenceActive = false;
+      } else if (touchSequenceActive) {
+        /*
+        FNXC:BoardNavigation 2026-07-22-20:10:
+        pointercancel from native scroll takeover while the finger is still down: the gesture
+        continues on the touch stream. Only drop the (now dead) pointer capture; touchend or
+        touchcancel will end the gesture.
+        */
+        releasePointerCapture();
+        return;
+      }
       if (!interactionActive || pinnedScrollLeft !== null) return;
       pointerHeld = false;
       releasePointerCapture();

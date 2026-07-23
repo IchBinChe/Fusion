@@ -4,12 +4,16 @@ import {
   githubPmCommentIssueTool,
   githubPmCreateIssueTool,
   githubPmCreateLabelTool,
+  githubPmCreateMilestoneTool,
   githubPmDeleteLabelTool,
+  githubPmDeleteMilestoneTool,
   githubPmEditIssueTool,
   githubPmSetIssueStateTool,
+  githubPmSetMilestoneStateTool,
   githubPmStatusTool,
   githubPmTools,
   githubPmUpdateLabelTool,
+  githubPmUpdateMilestoneTool,
 } from "../tools.js";
 import { SELECTED_REPO_SETTING_ID } from "../repo-config.js";
 
@@ -45,7 +49,7 @@ function ctx(settings: Record<string, unknown> = {}): PluginContext {
 }
 
 describe("github-pm plugin tools", () => {
-  it("registers the status tool plus the FUSI-014 write tools and the KB-002 label tools", () => {
+  it("registers the status tool plus the FUSI-014 write tools, the KB-002 label tools, and the KB-003 milestone tools", () => {
     expect(githubPmTools.map((tool) => tool.name)).toEqual([
       "github_pm_status",
       "github_pm_create_issue",
@@ -55,6 +59,10 @@ describe("github-pm plugin tools", () => {
       "github_pm_create_label",
       "github_pm_update_label",
       "github_pm_delete_label",
+      "github_pm_create_milestone",
+      "github_pm_update_milestone",
+      "github_pm_set_milestone_state",
+      "github_pm_delete_milestone",
     ]);
   });
 
@@ -329,6 +337,119 @@ describe("github-pm label tools (KB-002)", () => {
   it("a mocked 403 permission error on a label tool yields isError:true without leaking the token", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ message: "Resource not accessible by integration secret-tok" }, 403)));
     const result = await githubPmCreateLabelTool.execute({ repo: "acme/widgets", name: "bug", color: "d73a4a" }, ctx({ personalAccessToken: "secret-tok", confirmWrites: false }));
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).not.toContain("secret-tok");
+    vi.unstubAllGlobals();
+  });
+});
+
+/*
+FNXC:GithubPmMilestones 2026-07-25-01:10:
+KB-003 milestone-tool tests: confirmation-gate + success/round-trip coverage mirroring the
+issue write-tool tests above.
+*/
+describe("github-pm milestone tools (KB-003)", () => {
+  it("github_pm_create_milestone performs the mutation and returns a non-error result (confirmWrites OFF)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ number: 3, title: "v3", state: "open", open_issues: 0, closed_issues: 0 })));
+    const result = await githubPmCreateMilestoneTool.execute({ repo: "acme/widgets", title: "v3" }, ctx({ personalAccessToken: "ghp_token", confirmWrites: false }));
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("#3");
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_create_milestone 400s (isError) on a missing title", async () => {
+    const result = await githubPmCreateMilestoneTool.execute({ repo: "acme/widgets" }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBe(true);
+  });
+
+  it("github_pm_create_milestone: confirmWrites ON + missing confirmed → isError, zero fetch calls", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const result = await githubPmCreateMilestoneTool.execute({ repo: "acme/widgets", title: "v3" }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_create_milestone: confirmWrites ON + confirmed:true → the write proceeds", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ number: 3, title: "v3", state: "open", open_issues: 0, closed_issues: 0 })));
+    const result = await githubPmCreateMilestoneTool.execute({ repo: "acme/widgets", title: "v3", confirmed: true }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBeFalsy();
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_update_milestone can clear the due date (confirmWrites OFF)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ number: 3, title: "v3", state: "open", open_issues: 0, closed_issues: 0, due_on: null })));
+    const result = await githubPmUpdateMilestoneTool.execute({ number: 3, dueOn: null }, ctx({ [SELECTED_REPO_SETTING_ID]: "acme/widgets", personalAccessToken: "ghp_token", confirmWrites: false }));
+    expect(result.isError).toBeFalsy();
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_update_milestone 400s (isError) when no field is supplied", async () => {
+    const result = await githubPmUpdateMilestoneTool.execute({ number: 3 }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBe(true);
+  });
+
+  it("github_pm_update_milestone: confirmWrites ON + missing confirmed → isError, zero fetch calls", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const result = await githubPmUpdateMilestoneTool.execute({ number: 3, title: "v3" }, ctx({ [SELECTED_REPO_SETTING_ID]: "acme/widgets", personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_set_milestone_state closes a milestone (confirmWrites OFF)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ number: 3, title: "v3", state: "closed", open_issues: 0, closed_issues: 2 })));
+    const result = await githubPmSetMilestoneStateTool.execute({ repo: "acme/widgets", number: 3, state: "closed" }, ctx({ personalAccessToken: "ghp_token", confirmWrites: false }));
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("closed");
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_set_milestone_state: confirmWrites ON + missing confirmed → isError, zero fetch calls", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const result = await githubPmSetMilestoneStateTool.execute({ repo: "acme/widgets", number: 3, state: "closed" }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_set_milestone_state: confirmWrites ON + confirmed:true → the write proceeds", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ number: 3, title: "v3", state: "closed", open_issues: 0, closed_issues: 2 })));
+    const result = await githubPmSetMilestoneStateTool.execute({ repo: "acme/widgets", number: 3, state: "closed", confirmed: true }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBeFalsy();
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_delete_milestone tolerates a 204 with no body (confirmWrites OFF)", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    const result = await githubPmDeleteMilestoneTool.execute({ repo: "acme/widgets", number: 3 }, ctx({ personalAccessToken: "ghp_token", confirmWrites: false }));
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toContain("Deleted");
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_delete_milestone: confirmWrites ON + missing confirmed → isError, zero fetch calls", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const result = await githubPmDeleteMilestoneTool.execute({ repo: "acme/widgets", number: 3 }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("github_pm_delete_milestone: confirmWrites ON + confirmed:true → the write proceeds", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 204 })));
+    const result = await githubPmDeleteMilestoneTool.execute({ repo: "acme/widgets", number: 3, confirmed: true }, ctx({ personalAccessToken: "ghp_token" }));
+    expect(result.isError).toBeFalsy();
+    vi.unstubAllGlobals();
+  });
+
+  it("a mocked 403 permission error yields isError:true without leaking the token", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ message: "Resource not accessible by integration secret-tok" }, 403)));
+    const result = await githubPmCreateMilestoneTool.execute({ repo: "acme/widgets", title: "v3", confirmed: true }, ctx({ personalAccessToken: "secret-tok" }));
     expect(result.isError).toBe(true);
     expect(result.content[0].text).not.toContain("secret-tok");
     vi.unstubAllGlobals();

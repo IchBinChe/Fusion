@@ -8,6 +8,7 @@ import { issueRoutes } from "./issue-routes.js";
 import { issuesRoutes } from "./issues-routes.js";
 import { issueWriteRoutes } from "./issue-write-routes.js";
 import { labelRoutes } from "./label-routes.js";
+import { milestoneRoutes } from "./milestone-routes.js";
 
 function response(status: number, body: Record<string, unknown>): PluginRouteResponse {
   return { status, body };
@@ -88,6 +89,12 @@ KB-002 adds the label-management routes (list-with-usage-counts + create/update/
 the same aggregated route list -- the plugin's second write surface after FUSI-014's issue
 writes, following the exact same one-registration-point pattern (no separate registration
 mechanism for label mutations).
+
+FNXC:GithubPmMilestones 2026-07-25-00:40:
+KB-003 adds the milestone management routes (list + create/update/state/delete/
+reassign-open-issues) onto the same aggregated route list -- same one-registration-point
+pattern, additive block kept separate from KB-002's sibling labels routes to avoid merge
+conflicts in this shared file.
 */
 export const githubPmRoutes: PluginRouteDefinition[] = [
   { method: "GET", path: "/status", handler: getGitHubPmStatus, description: "Report GitHub PM plugin configuration status from settings presence only." },
@@ -99,4 +106,5 @@ export const githubPmRoutes: PluginRouteDefinition[] = [
   ...issuesRoutes,
   ...issueWriteRoutes,
   ...labelRoutes,
+  ...milestoneRoutes,
 ];

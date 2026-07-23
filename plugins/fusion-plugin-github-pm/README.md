@@ -252,6 +252,46 @@ Each route: 401s with an actionable `not_authenticated` message when auth doesn'
 
 See `src/__tests__/github-client.test.ts`, `issue-write-routes.test.ts`, `tools.test.ts`, and `IssueWritePanel.test.tsx` for the mocked-fetch round-trip, validation, error-mapping, and optimistic-rollback coverage (including the required failed-create and failed-close rollback assertions and the notifyIssuesChanged emission/non-emission assertions).
 
+## Milestone management (KB-003)
+
+The **Milestones** tab (previously a placeholder) now renders `MilestonesPanel`, a full milestone-management screen mounted via `{ repo, context, confirmWrites }` — mirroring `IssuesPanel`/`IssueWritePanel`'s prop shape. This is the milestones half of the labels-and-milestones administration slice (KB-002 is the sibling labels half).
+
+**Client methods** (`src/github-client.ts`, additive to the FUSI-012 minimal `GitHubMilestone { number, title, state }` shape the issues-filter dropdown already consumes — those three fields keep their exact original meaning and position):
+
+- `listMilestones(owner, repo, { state?, sort?, direction? })` — now returns `openIssues`, `closedIssues` (both always numbers, never undefined), `description`, `dueOn`, `htmlUrl`, `createdAt`, `updatedAt`, `closedAt` alongside the original three fields, defaulting to `state=all&sort=due_on&direction=asc`.
+- `createMilestone(owner, repo, { title, description?, dueOn?, state? })` — `POST /repos/{owner}/{repo}/milestones`.
+- `updateMilestone(owner, repo, number, { title?, description?, dueOn? })` — `PATCH /repos/{owner}/{repo}/milestones/{number}` (title/description/due-date only; `dueOn: null` clears the due date). Close/reopen is a separate method, mirroring the issue-write split between editing content and changing lifecycle state.
+- `setMilestoneState(owner, repo, number, { state })` — same `PATCH` endpoint, close/reopen intent.
+- `deleteMilestone(owner, repo, number)` — `DELETE /repos/{owner}/{repo}/milestones/{number}`. GitHub returns `204 No Content`; this calls `fetchThrottled` directly (not `requestJson`, which unconditionally calls `response.json()` and would throw on the empty body) so the same typed-error/backoff behavior applies without a JSON parse.
+- `listOpenIssuesForMilestone(owner, repo, milestoneNumber)` — bounded, paginated lookup of a milestone's OPEN issues only (pull requests filtered out), feeding the close-with-open-issues reassignment flow.
+- `setIssueMilestone(owner, repo, issueNumber, milestoneNumber | null)` — `PATCH /repos/{owner}/{repo}/issues/{number}` with `{ milestone }`; `null` clears the issue's milestone.
+
+**Routes** (`src/milestone-routes.ts`, plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`), mirroring `issue-write-routes.ts`'s exact auth/confirm-gate/error-mapping pattern:
+
+- `GET /milestones/list?repo=&state=` — `{ ok, repo, items }`; degrades to an empty list (not an error) when no repo resolves, mirroring `getIssuesFilterOptions`.
+- `POST /milestones/create` — `{ repo?, title, description?, dueOn?, state? }` → `{ ok, repo, milestone }`.
+- `PUT /milestones/update` — `{ repo?, number, title?, description?, dueOn? }` (`dueOn: null` clears) → `{ ok, repo, milestone }`. 400 unless at least one field is supplied.
+- `PUT /milestones/state` — `{ repo?, number, state: "open"|"closed" }` → `{ ok, repo, milestone }`.
+- `POST /milestones/delete` — `{ repo?, number }` → `{ ok, repo, number }`. Implemented as a body-carried `POST`, not an HTTP `DELETE` route, per this plugin's proven GET-for-reads/POST-PUT-for-writes routing convention.
+- `POST /milestones/reassign-open-issues` — `{ repo?, number, target: number | null }` → `{ ok, repo, milestoneNumber, reassignedCount, targetMilestone }`. Iterates `listOpenIssuesForMilestone` and calls `setIssueMilestone` for each (GitHub has no bulk reassignment API); `target: null` clears the milestone from those issues, a positive integer moves them to that milestone. Feeds the close-with-open-issues UI flow below.
+
+Every write route resolves `confirmWrites` and requires `confirmed: true` in the body when it is ON — checked **before** auth resolution or any GitHub API call, the same invariant FUSI-017 established for issue writes.
+
+**Agent tools** (`src/tools.ts`): `github_pm_create_milestone`, `github_pm_update_milestone`, `github_pm_set_milestone_state` (close/reopen), `github_pm_delete_milestone`. Each mirrors the issue write tools' `requireToolConfirmation`-before-`resolveRepoAndClient` gate and returns the authoritative post-write milestone.
+
+**`MilestonesPanel`** (`src/MilestonesPanel.tsx` + `.css`), mounted in `GitHubPmView.tsx`'s `milestones` tabpanel, gated on a resolved repo:
+
+- Lists open and closed milestones (grouped), each with title, description, a progress bar, due date, and close/reopen/edit/delete actions. A create form sits above the list.
+- **Progress bar** — the percentage equals exactly `closedIssues / (openIssues + closedIssues)`, the same ratio GitHub's own milestone page uses. A milestone with zero issues renders a defined "No issues" / 0% state, never `NaN%`.
+- **Overdue flag** — a milestone is flagged overdue if and only if it is **open**, **has a due date**, and that due date **is in the past**. Closed milestones and milestones with no due date are never flagged, regardless of the date.
+- **Close-with-open-issues prompt (acceptance-critical)** — closing a milestone with open issues never closes silently. An inline prompt (anchored to the row, not a modal) states the open-issue count and offers: keep the open issues assigned (default, just close), clear the milestone from those open issues, or move them to another selected milestone. The latter two dispatch `POST /milestones/reassign-open-issues` before the close `PUT /milestones/state` call. A milestone with zero open issues closes directly, without the prompt.
+- Delete always shows an explicit confirm dialog, independent of the `confirmWrites` setting; all other writes are gated by `confirmWrites` exactly like the issue-write panel (the request body includes `confirmed: true` when it resolves ON).
+- Styling uses design tokens only (`MilestonesPanel.css`), reuses `.btn`/`.btn-icon`/`.btn-primary` primitives, and reflows at the existing `@media (max-width: 48rem)` breakpoint.
+
+The pre-existing `milestones` placeholder-copy entry in `TAB_PLACEHOLDER_COPY` is retained (unused, for symmetry/rollback) exactly as FUSI-012 retained the unused `issues` entry.
+
+`scripts/copy-css.mjs` now globs every `*.css` file directly under `src/` (KB-004), so `MilestonesPanel.css` ships to `dist/` automatically without an explicit list entry.
+
 ## Write confirmation (`confirmWrites`) (FUSI-017)
 
 A 2026-07-23 security audit found ZERO confirm/dryRun/requireConfirm gating anywhere in this plugin's write surfaces. `confirmWrites` closes that gap with one default-ON setting enforced identically across all three write layers (the same contract FUSI-015's future write routes/tools/UI must inherit):
@@ -331,12 +371,14 @@ Plugin-scoped under `/api/plugins/fusion-plugin-github-pm/*`:
 - `GET /issues/list`, `GET /issues/filter-options` — issue list/search/filter-dropdown reads (FUSI-012); see the section above.
 - `POST /issues/create`, `PUT /issues/update`, `PUT /issues/state`, `POST /issues/comments`, `PUT /issues/comments` — issue create/edit/comment/close-reopen writes (FUSI-014); each requires `confirmed: true` in the body when `confirmWrites` is ON (FUSI-017); see the section above.
 - `GET /labels/list` — label list with open-issue usage counts (KB-002); not gated. `POST /labels/create`, `PUT /labels/update`, `POST /labels/delete` — label create/update/delete (KB-002); each requires `confirmed: true` in the body when `confirmWrites` is ON; see the section above.
+- `GET /milestones/list`, `POST /milestones/create`, `PUT /milestones/update`, `PUT /milestones/state`, `POST /milestones/delete`, `POST /milestones/reassign-open-issues` — milestone list/create/edit/close-reopen/delete and close-with-open-issues reassignment (KB-003); each write requires `confirmed: true` in the body when `confirmWrites` is ON; see the section above.
 
 ## Agent tools
 
 - `github_pm_status` — returns configured/not-configured text derived from settings.
 - `github_pm_create_issue`, `github_pm_edit_issue`, `github_pm_comment_issue`, `github_pm_set_issue_state` — issue write operations (FUSI-014); each requires a `confirmed: true` parameter when `confirmWrites` is ON (FUSI-017); see the section above.
 - `github_pm_create_label`, `github_pm_update_label`, `github_pm_delete_label` — label write operations (KB-002); each requires a `confirmed: true` parameter when `confirmWrites` is ON; see the section above.
+- `github_pm_create_milestone`, `github_pm_update_milestone`, `github_pm_set_milestone_state`, `github_pm_delete_milestone` — milestone write operations (KB-003); each requires a `confirmed: true` parameter when `confirmWrites` is ON; see the Milestone management section above.
 
 ## Limitations and non-goals (FUSI-001/FUSI-002)
 

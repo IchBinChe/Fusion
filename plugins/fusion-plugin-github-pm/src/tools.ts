@@ -340,6 +340,155 @@ export const githubPmDeleteLabelTool: PluginToolDefinition = {
   },
 };
 
+/*
+FNXC:GithubPmMilestones 2026-07-25-01:00:
+KB-003 agent-write tools mirroring the issue write tools above: create/update/set-state
+(close/reopen)/delete. Each resolves repo+auth exactly like the issue tools
+(resolveRepoAndClient) and gates confirmation BEFORE resolving repo/auth
+(requireToolConfirmation), so an unconfirmed call performs ZERO auth resolution and ZERO
+GitHub API calls -- same invariant the issue tools establish.
+*/
+export const githubPmCreateMilestoneTool: PluginToolDefinition = {
+  name: "github_pm_create_milestone",
+  description: "Create a new GitHub milestone with a title, optional description, due date, and state.",
+  parameters: {
+    type: "object",
+    properties: {
+      repo: { type: "string", description: "owner/repo. Omit to use the currently selected repo." },
+      title: { type: "string", description: "Milestone title (required)." },
+      description: { type: "string", description: "Milestone description." },
+      dueOn: { type: "string", description: "ISO-8601 due date." },
+      state: { type: "string", enum: ["open", "closed"], description: "Initial state; defaults to open." },
+      confirmed: { type: "boolean", description: "Set true to confirm this write. Required when the plugin's 'Confirm writes' setting is on." },
+    },
+    required: ["title"],
+  },
+  execute: async (params, ctx: PluginContext) => {
+    const p = params as Record<string, unknown>;
+    const title = typeof p.title === "string" ? p.title.trim() : "";
+    if (!title) return textResult("A non-empty 'title' is required to create a milestone.", undefined, true);
+    const confirmationBlocked = requireToolConfirmation(ctx, p.confirmed);
+    if (confirmationBlocked) return confirmationBlocked;
+    const resolved = await resolveRepoAndClient(ctx, p.repo);
+    if (isToolResult(resolved)) return resolved;
+    try {
+      const milestone = await resolved.client.createMilestone(resolved.owner, resolved.repo, {
+        title,
+        description: typeof p.description === "string" ? p.description : undefined,
+        dueOn: typeof p.dueOn === "string" ? p.dueOn : undefined,
+        state: p.state === "open" || p.state === "closed" ? p.state : undefined,
+      });
+      return textResult(`Created milestone #${milestone.number}: ${milestone.title}`, { milestone });
+    } catch (error) {
+      if (isGitHubApiError(error)) return textResult(error.message, { code: error.code }, true);
+      return textResult("Milestone creation failed unexpectedly.", undefined, true);
+    }
+  },
+};
+
+export const githubPmUpdateMilestoneTool: PluginToolDefinition = {
+  name: "github_pm_update_milestone",
+  description: "Edit an existing GitHub milestone's title, description, and/or due date.",
+  parameters: {
+    type: "object",
+    properties: {
+      repo: { type: "string", description: "owner/repo. Omit to use the currently selected repo." },
+      number: { type: "number", description: "Milestone number to edit (required)." },
+      title: { type: "string", description: "New title." },
+      description: { type: "string", description: "New description." },
+      dueOn: { type: "string", description: "New ISO-8601 due date. Pass an explicit JSON null to clear it." },
+      confirmed: { type: "boolean", description: "Set true to confirm this write. Required when the plugin's 'Confirm writes' setting is on." },
+    },
+    required: ["number"],
+  },
+  execute: async (params, ctx: PluginContext) => {
+    const p = params as Record<string, unknown>;
+    const number = typeof p.number === "number" ? p.number : NaN;
+    if (!Number.isFinite(number) || number <= 0) return textResult("A positive integer 'number' is required to edit a milestone.", undefined, true);
+    const hasDueOn = Object.prototype.hasOwnProperty.call(p, "dueOn");
+    if (typeof p.title !== "string" && typeof p.description !== "string" && !hasDueOn) {
+      return textResult("At least one of 'title', 'description', or 'dueOn' must be supplied.", undefined, true);
+    }
+    const confirmationBlocked = requireToolConfirmation(ctx, p.confirmed);
+    if (confirmationBlocked) return confirmationBlocked;
+    const resolved = await resolveRepoAndClient(ctx, p.repo);
+    if (isToolResult(resolved)) return resolved;
+    try {
+      const milestone = await resolved.client.updateMilestone(resolved.owner, resolved.repo, number, {
+        title: typeof p.title === "string" ? p.title : undefined,
+        description: typeof p.description === "string" ? p.description : undefined,
+        dueOn: p.dueOn === null ? null : typeof p.dueOn === "string" ? p.dueOn : undefined,
+      });
+      return textResult(`Updated milestone #${milestone.number}: ${milestone.title}`, { milestone });
+    } catch (error) {
+      if (isGitHubApiError(error)) return textResult(error.message, { code: error.code }, true);
+      return textResult("Milestone update failed unexpectedly.", undefined, true);
+    }
+  },
+};
+
+export const githubPmSetMilestoneStateTool: PluginToolDefinition = {
+  name: "github_pm_set_milestone_state",
+  description: "Close or reopen a GitHub milestone.",
+  parameters: {
+    type: "object",
+    properties: {
+      repo: { type: "string", description: "owner/repo. Omit to use the currently selected repo." },
+      number: { type: "number", description: "Milestone number (required)." },
+      state: { type: "string", enum: ["open", "closed"], description: "Target state (required)." },
+      confirmed: { type: "boolean", description: "Set true to confirm this write. Required when the plugin's 'Confirm writes' setting is on." },
+    },
+    required: ["number", "state"],
+  },
+  execute: async (params, ctx: PluginContext) => {
+    const p = params as Record<string, unknown>;
+    const number = typeof p.number === "number" ? p.number : NaN;
+    const state = p.state === "open" || p.state === "closed" ? p.state : undefined;
+    if (!Number.isFinite(number) || number <= 0 || !state) return textResult("A positive integer 'number' and state 'open' or 'closed' are required.", undefined, true);
+    const confirmationBlocked = requireToolConfirmation(ctx, p.confirmed);
+    if (confirmationBlocked) return confirmationBlocked;
+    const resolved = await resolveRepoAndClient(ctx, p.repo);
+    if (isToolResult(resolved)) return resolved;
+    try {
+      const milestone = await resolved.client.setMilestoneState(resolved.owner, resolved.repo, number, { state });
+      return textResult(`Milestone #${milestone.number} is now ${milestone.state}.`, { milestone });
+    } catch (error) {
+      if (isGitHubApiError(error)) return textResult(error.message, { code: error.code }, true);
+      return textResult("Milestone state change failed unexpectedly.", undefined, true);
+    }
+  },
+};
+
+export const githubPmDeleteMilestoneTool: PluginToolDefinition = {
+  name: "github_pm_delete_milestone",
+  description: "Delete a GitHub milestone. This detaches it from any issues; it does not delete the issues.",
+  parameters: {
+    type: "object",
+    properties: {
+      repo: { type: "string", description: "owner/repo. Omit to use the currently selected repo." },
+      number: { type: "number", description: "Milestone number to delete (required)." },
+      confirmed: { type: "boolean", description: "Set true to confirm this write. Required when the plugin's 'Confirm writes' setting is on." },
+    },
+    required: ["number"],
+  },
+  execute: async (params, ctx: PluginContext) => {
+    const p = params as Record<string, unknown>;
+    const number = typeof p.number === "number" ? p.number : NaN;
+    if (!Number.isFinite(number) || number <= 0) return textResult("A positive integer 'number' is required to delete a milestone.", undefined, true);
+    const confirmationBlocked = requireToolConfirmation(ctx, p.confirmed);
+    if (confirmationBlocked) return confirmationBlocked;
+    const resolved = await resolveRepoAndClient(ctx, p.repo);
+    if (isToolResult(resolved)) return resolved;
+    try {
+      await resolved.client.deleteMilestone(resolved.owner, resolved.repo, number);
+      return textResult(`Deleted milestone #${number}.`, { number });
+    } catch (error) {
+      if (isGitHubApiError(error)) return textResult(error.message, { code: error.code }, true);
+      return textResult("Milestone delete failed unexpectedly.", undefined, true);
+    }
+  },
+};
+
 export const githubPmTools: PluginToolDefinition[] = [
   githubPmStatusTool,
   githubPmCreateIssueTool,
@@ -349,4 +498,8 @@ export const githubPmTools: PluginToolDefinition[] = [
   githubPmCreateLabelTool,
   githubPmUpdateLabelTool,
   githubPmDeleteLabelTool,
+  githubPmCreateMilestoneTool,
+  githubPmUpdateMilestoneTool,
+  githubPmSetMilestoneStateTool,
+  githubPmDeleteMilestoneTool,
 ];

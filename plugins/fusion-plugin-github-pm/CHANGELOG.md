@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Milestone management screen (KB-003)
+
+- `GitHubClient.listMilestones` gains an additive shape and options object: `openIssues`/`closedIssues` (always numbers), `description`, `dueOn`, `htmlUrl`, `createdAt`, `updatedAt`, `closedAt`, plus `{ state?, sort?, direction? }`. The original `number`/`title`/`state` fields the issues-filter dropdown consumes are unchanged.
+- New client write methods: `createMilestone`, `updateMilestone`, `setMilestoneState` (close/reopen), `deleteMilestone` (204-tolerant), `listOpenIssuesForMilestone`, and `setIssueMilestone` (clear/move a single issue's milestone).
+- New `src/milestone-routes.ts`: `GET /milestones/list`, `POST /milestones/create`, `PUT /milestones/update`, `PUT /milestones/state`, `POST /milestones/delete`, `POST /milestones/reassign-open-issues` — all writes gated by the existing `confirmWrites` contract, checked before auth resolution.
+- New agent tools: `github_pm_create_milestone`, `github_pm_update_milestone`, `github_pm_set_milestone_state`, `github_pm_delete_milestone`.
+- New `MilestonesPanel` component (list with progress bars matching GitHub's `closed/(open+closed)` ratio, overdue flags for open past-due milestones, create/edit/close/reopen/delete, and a close-with-open-issues prompt offering keep/clear/move) mounted into the `milestones` tabpanel of `GitHubPmView.tsx`, replacing its placeholder.
+- `scripts/copy-css.mjs` now also copies `IssueWritePanel.css` (a pre-existing gap) and `MilestonesPanel.css`.
+
 ### Issue detail view with comments and timeline (FUSI-013)
 
 - `GitHubClient` gains three read-only issue-detail methods: `getIssue` (full issue detail, rejects PR-shaped payloads), `listIssueComments` (page-at-a-time, derives `nextPage` from the `Link` header — lazy-loads by design), and `listIssueTimeline` (filtered to closed/reopened/labeled/unlabeled/referenced/cross-referenced key events).

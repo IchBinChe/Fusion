@@ -1,0 +1,303 @@
+/*
+FNXC:GithubPmMilestones 2026-07-25-01:40:
+Component-scoped CSS for MilestonesPanel.tsx. Tokens only (space/radius/color/status/
+transition), reusing `.btn`/`.btn-icon`/`.btn-primary` primitives rather than forking new
+button variants -- mirrors IssuesPanel.css/IssueWritePanel.css conventions. Responsive at both
+desktop and mobile widths via the same 48rem breakpoint those files use.
+*/
+
+.milestones-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+}
+
+.milestones-panel__empty-state {
+  margin: 0;
+  color: var(--text-muted);
+  padding: var(--space-md) 0;
+}
+
+.milestones-panel__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: var(--space-md);
+}
+
+.milestones-panel__section-title {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--font-size-md);
+}
+
+.milestones-panel__form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.milestones-panel__form--inline {
+  padding: var(--space-sm);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface) 96%, var(--accent) 4%);
+}
+
+.milestones-panel__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  font-size: var(--font-size-sm);
+}
+
+.milestones-panel__field input,
+.milestones-panel__field textarea,
+.milestones-panel__field select {
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: var(--space-xs) var(--space-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.milestones-panel__field input:focus-visible,
+.milestones-panel__field textarea:focus-visible,
+.milestones-panel__field select:focus-visible {
+  box-shadow: var(--focus-ring-strong);
+  outline: none;
+}
+
+.milestones-panel__field textarea {
+  min-height: 3.5rem;
+  resize: vertical;
+}
+
+.milestones-panel__spinner {
+  animation: milestones-panel-spin 1s linear infinite;
+}
+
+@keyframes milestones-panel-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.milestones-panel__status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.milestones-panel__status--error {
+  color: var(--color-error);
+}
+
+.milestones-panel__error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  margin: 0;
+  color: var(--color-error);
+  font-weight: 600;
+}
+
+.milestones-panel__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.milestones-panel__group-title {
+  margin: 0;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-size: var(--font-size-2xs);
+  letter-spacing: 0.04em;
+}
+
+.milestones-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.milestones-panel__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm);
+  border: var(--border-width) solid var(--border-color);
+  border-radius: var(--radius-md);
+  min-width: 0;
+}
+
+.milestones-panel__row-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.milestones-panel__row-number {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.milestones-panel__row-title {
+  font-weight: 600;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.milestones-panel__row-description {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+/*
+FNXC:GithubPmMilestones 2026-07-25-01:40:
+Overdue badge: OPEN + has a due date + due date in the past ONLY (never closed milestones,
+never milestones with no due date). Token-based warning treatment via color-mix, matching
+the project's translucency convention.
+*/
+.milestones-panel__overdue-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 16%, transparent);
+  border-radius: var(--radius-pill);
+  padding: 0 var(--space-sm);
+  font-size: var(--font-size-2xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.milestones-panel__progress {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.milestones-panel__progress-track {
+  flex: 1 1 auto;
+  height: var(--space-xs);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--border-color) 60%, transparent);
+  overflow: hidden;
+}
+
+.milestones-panel__progress-fill {
+  height: 100%;
+  background: var(--color-success);
+  border-radius: var(--radius-pill);
+  transition: width var(--duration-normal) var(--transition-ease);
+}
+
+.milestones-panel__progress-label {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  white-space: nowrap;
+}
+
+.milestones-panel__due-date {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.milestones-panel__due-date--none {
+  font-style: italic;
+}
+
+.milestones-panel__row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.milestones-panel__close-button {
+  color: var(--color-error);
+}
+
+.milestones-panel__reopen-button {
+  color: var(--color-success);
+}
+
+.milestones-panel__delete-button {
+  color: var(--color-error);
+}
+
+/*
+FNXC:GithubPmMilestones 2026-07-25-01:40:
+Close-with-open-issues prompt: rendered inline (not a modal) directly beneath the row it
+belongs to, so the reassignment choice stays visually anchored to the milestone being closed.
+*/
+.milestones-panel__close-prompt {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  border: var(--border-width) solid var(--color-warning);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm);
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
+}
+
+.milestones-panel__close-prompt-heading {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--color-warning);
+  font-size: var(--font-size-sm);
+}
+
+.milestones-panel__close-prompt-copy {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.milestones-panel__reassign-options {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  border: none;
+  margin: 0;
+  padding: 0;
+}
+
+.milestones-panel__reassign-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: var(--font-size-sm);
+}
+
+@media (max-width: 48rem) {
+  .milestones-panel__row-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .milestones-panel__row-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .milestones-panel__progress {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

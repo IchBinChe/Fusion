@@ -558,22 +558,130 @@ describe("GitHubClient.searchIssues (FUSI-012)", () => {
 });
 
 describe("GitHubClient.listMilestones (FUSI-012)", () => {
-  it("maps milestone fields correctly", async () => {
+  it("maps milestone fields correctly, including the KB-003 additive progress/due-date fields", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse([
-      { number: 1, title: "v1", state: "open", extraneous: true },
-      { number: 2, title: "v2", state: "closed" },
+      { number: 1, title: "v1", state: "open", open_issues: 3, closed_issues: 1, due_on: "2026-08-01T00:00:00Z", html_url: "https://x/1", extraneous: true },
+      { number: 2, title: "v2", state: "closed", open_issues: 0, closed_issues: 5 },
     ])) as unknown as typeof fetch;
     const client = new GitHubClient("token", fetchImpl);
 
     const milestones = await client.listMilestones("acme", "widgets");
 
-    expect(milestones).toEqual([
-      { number: 1, title: "v1", state: "open" },
-      { number: 2, title: "v2", state: "closed" },
-    ]);
+    // FNXC:GithubPmMilestones 2026-07-25-00:20: the original number/title/state fields the
+    // issues-filter-dropdown consumer relies on stay unchanged; new fields are additive.
+    expect(milestones[0]).toMatchObject({ number: 1, title: "v1", state: "open", openIssues: 3, closedIssues: 1, dueOn: "2026-08-01T00:00:00Z", htmlUrl: "https://x/1" });
+    expect(milestones[1]).toMatchObject({ number: 2, title: "v2", state: "closed", openIssues: 0, closedIssues: 5, dueOn: null });
     const url = String(fetchImpl.mock.calls[0][0]);
     expect(url).toContain("/repos/acme/widgets/milestones");
     expect(url).toContain("state=all");
+  });
+
+  it("defaults open/closed issue counts to 0 when GitHub omits them (never NaN)", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse([{ number: 3, title: "v3", state: "open" }])) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const milestones = await client.listMilestones("acme", "widgets");
+
+    expect(milestones[0]).toMatchObject({ openIssues: 0, closedIssues: 0 });
+  });
+
+  it("accepts a state filter option", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse([])) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    await client.listMilestones("acme", "widgets", { state: "open" });
+
+    const url = String(fetchImpl.mock.calls[0][0]);
+    expect(url).toContain("state=open");
+  });
+});
+
+describe("GitHubClient milestone writes (KB-003)", () => {
+  it("createMilestone round-trips GitHub's authoritative created milestone", async () => {
+    const fetchImpl = vi.fn(async (url, init) => {
+      expect(init?.method).toBe("POST");
+      expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({ title: "v3", due_on: "2026-09-01T00:00:00Z" });
+      return jsonResponse({ number: 3, title: "v3", state: "open", open_issues: 0, closed_issues: 0, due_on: "2026-09-01T00:00:00Z" });
+    }) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const milestone = await client.createMilestone("acme", "widgets", { title: "v3", dueOn: "2026-09-01T00:00:00Z" });
+
+    expect(milestone).toMatchObject({ number: 3, title: "v3", state: "open", openIssues: 0, closedIssues: 0 });
+  });
+
+  it("updateMilestone round-trips and can clear the due date with dueOn:null", async () => {
+    const fetchImpl = vi.fn(async (url, init) => {
+      expect(init?.method).toBe("PATCH");
+      expect(JSON.parse(String((init as RequestInit).body))).toMatchObject({ due_on: null });
+      return jsonResponse({ number: 3, title: "v3", state: "open", open_issues: 1, closed_issues: 2, due_on: null });
+    }) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const milestone = await client.updateMilestone("acme", "widgets", 3, { dueOn: null });
+
+    expect(milestone).toMatchObject({ number: 3, dueOn: null });
+  });
+
+  it("setMilestoneState closes a milestone via PATCH state", async () => {
+    const fetchImpl = vi.fn(async (url, init) => {
+      expect(JSON.parse(String((init as RequestInit).body))).toEqual({ state: "closed" });
+      return jsonResponse({ number: 3, title: "v3", state: "closed", open_issues: 0, closed_issues: 2, closed_at: "2026-07-25T00:00:00Z" });
+    }) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const milestone = await client.setMilestoneState("acme", "widgets", 3, { state: "closed" });
+
+    expect(milestone).toMatchObject({ state: "closed", closedAt: "2026-07-25T00:00:00Z" });
+  });
+
+  it("deleteMilestone tolerates a 204 with no response body", async () => {
+    const fetchImpl = vi.fn(async (url, init) => {
+      expect(init?.method).toBe("DELETE");
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    await expect(client.deleteMilestone("acme", "widgets", 3)).resolves.toBeUndefined();
+  });
+
+  it("listOpenIssuesForMilestone paginates and drops pull requests", async () => {
+    let call = 0;
+    const fetchImpl = vi.fn(async () => {
+      call += 1;
+      if (call === 1) {
+        return jsonResponse(
+          [
+            { number: 1, title: "Bug", state: "open", html_url: "https://x/1" },
+            { number: 2, title: "A PR", state: "open", html_url: "https://x/2", pull_request: {} },
+          ],
+          200,
+          { Link: '<https://api.github.com/repos/acme/widgets/issues?milestone=3&state=open&page=2>; rel="next"' },
+        );
+      }
+      return jsonResponse([{ number: 3, title: "Feature", state: "open", html_url: "https://x/3" }]);
+    }) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const items = await client.listOpenIssuesForMilestone("acme", "widgets", 3, 50);
+
+    expect(items.map((issue) => issue.number)).toEqual([1, 3]);
+    const firstUrl = String(fetchImpl.mock.calls[0][0]);
+    expect(firstUrl).toContain("milestone=3");
+    expect(firstUrl).toContain("state=open");
+  });
+
+  it("setIssueMilestone PATCHes the issue's milestone field, including clearing with null", async () => {
+    const fetchImpl = vi.fn(async (url, init) => {
+      expect(init?.method).toBe("PATCH");
+      expect(JSON.parse(String((init as RequestInit).body))).toEqual({ milestone: null });
+      return jsonResponse({ number: 7, title: "X", state: "open", html_url: "https://x", milestone: null });
+    }) as unknown as typeof fetch;
+    const client = new GitHubClient("token", fetchImpl);
+
+    const issue = await client.setIssueMilestone("acme", "widgets", 7, null);
+
+    expect(issue.milestone).toBeNull();
   });
 });
 

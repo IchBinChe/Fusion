@@ -133,7 +133,10 @@ describe("github-pm issues routes", () => {
     const result = await getIssuesFilterOptions({ query: { repo: "acme/widgets" } }, ctx);
     expect(result.status).toBe(200);
     expect((result.body as any).labels).toEqual([{ id: "L1", name: "bug", color: "red" }]);
-    expect((result.body as any).milestones).toEqual([{ number: 1, title: "v1", state: "open" }]);
+    // FNXC:GithubPmMilestones 2026-07-25-02:00: KB-003 additive-shape check -- the original
+    // number/title/state fields this consumer relies on stay unchanged; new progress/due-date
+    // fields are additive and do not break this filter-dropdown reader.
+    expect((result.body as any).milestones).toEqual([expect.objectContaining({ number: 1, title: "v1", state: "open" })]);
     vi.unstubAllGlobals();
   });
 

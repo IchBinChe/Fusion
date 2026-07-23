@@ -113,6 +113,23 @@ describe("GitHubPmView", () => {
     expect(issuesPanelAgain.getAttribute("data-probe")).toBe("still-here");
   });
 
+  it("mounts the real MilestonesPanel for the milestones tab (KB-003)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetch({
+        status: { ok: true, configured: true, autonomy: "approve-all", defaultRepo: "acme/widgets" },
+      }),
+    );
+    render(<GitHubPmView context={{ projectId: "proj-1" } as any} />);
+    await screen.findByText("GitHub PM configured");
+
+    fireEvent.click(screen.getByRole("tab", { name: /milestones/i }));
+    expect(screen.getByRole("tab", { name: /milestones/i })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByTestId("milestones-panel")).toBeInTheDocument();
+    // The retained placeholder-copy text is never rendered for the now-real milestones tab.
+    expect(screen.queryByText(/Milestone management arrives alongside Issues Core\./)).not.toBeInTheDocument();
+  });
+
   it("keeps inactive tab panels mounted (hidden, not removed) so no orphaned state is lost", async () => {
     vi.stubGlobal(
       "fetch",

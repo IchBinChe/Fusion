@@ -7,6 +7,7 @@ import { GITHUB_PM_TABS, GitHubPmTabs, githubPmTabButtonId, githubPmTabPanelId, 
 import { IssuesPanel } from "./IssuesPanel.js";
 import { IssueWritePanel } from "./IssueWritePanel.js";
 import { LabelsPanel } from "./LabelsPanel.js";
+import { MilestonesPanel } from "./MilestonesPanel.js";
 import { useRepoCapabilities } from "./useRepoCapabilities.js";
 import { mapRepoCapabilitiesToTabs, type TabGating } from "./tab-capabilities.js";
 import { TabCapabilityNotice } from "./TabCapabilityNotice.js";
@@ -135,8 +136,9 @@ acceptance criteria explicitly forbid.
 FNXC:GithubPmIssues 2026-07-24-03:35:
 FUSI-012 fills the `issues` tabpanel with the real `IssuesPanel` (list + filters + search +
 sort + pagination), replacing its `TabPlaceholderPanel`. This is the ONLY structural change
-FUSI-012 makes here: the other five tabs (labels/milestones/discussions/projects/triage) keep
-their placeholder body, `TAB_PLACEHOLDER_COPY` stays intact (including its now-unused `issues`
+FUSI-012 makes here: the other five tabs (labels/milestones/discussions/projects/triage) kept
+their placeholder body at the time (KB-003 later fills `milestones` too -- see its own FNXC
+note below), `TAB_PLACEHOLDER_COPY` stays intact (including its now-unused `issues`
 entry, left in place for symmetry/rollback rather than deleted), and the tablist/repo-context
 header/repo-picker slot/status badge/AuthDiagnosticsPanel are untouched. `IssuesPanel` renders
 inside the SAME `github-pm-view__panel card` tabpanel div -- no second card wrapper.
@@ -194,9 +196,21 @@ function GitHubPmTabPanelBody({
   this task makes here. The other four tabs (milestones/discussions/projects/triage) keep their
   placeholder body untouched, and LabelsPanel renders inside the SAME `github-pm-view__panel
   card` tabpanel div -- no second card wrapper.
+
+  FNXC:GithubPmMilestones 2026-07-25-01:45:
+  KB-003 fills the `milestones` tabpanel with the real `MilestonesPanel` (list + progress bars
+  + overdue flags + create/edit/close/reopen/delete + the close-with-open-issues prompt),
+  replacing its `TabPlaceholderPanel`. This is the ONLY structural change KB-003 makes here:
+  the other four tabs (labels/discussions/projects/triage) keep their placeholder body,
+  `TAB_PLACEHOLDER_COPY` stays intact (including its now-unused `milestones` entry, left in
+  place for symmetry/rollback rather than deleted), and the tablist/repo-context header/status
+  badge/AuthDiagnosticsPanel are untouched.
   */
   if (tabId === "labels") {
     return <LabelsPanel repo={repo} context={context} confirmWrites={confirmWrites} />;
+  }
+  if (tabId === "milestones") {
+    return <MilestonesPanel repo={repo} context={context} confirmWrites={confirmWrites} />;
   }
   return <TabPlaceholderPanel tabId={tabId} />;
 }

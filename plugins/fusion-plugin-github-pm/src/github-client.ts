@@ -257,10 +257,60 @@ export interface GitHubIssueSearchPage extends GitHubIssueListPage {
   cappedAtLimit: boolean;
 }
 
+/*
+FNXC:GithubPmMilestones 2026-07-25-00:00:
+KB-003 extends the FUSI-012 minimal milestone shape ADDITIVELY: `number`/`title`/`state`
+keep their exact original meaning and position (issues-routes.ts getIssuesFilterOptions and
+IssuesPanel.tsx's milestone filter dropdown consume ONLY those three fields and must keep
+compiling/behaving identically). New fields (`description`, `openIssues`, `closedIssues`,
+`dueOn`, `htmlUrl`, `createdAt`, `updatedAt`, `closedAt`) feed the milestones management panel's
+progress bar and overdue flag -- `openIssues`/`closedIssues` are always numbers (defaulted to
+0), never undefined, so `closedIssues / (openIssues + closedIssues)` is always a defined ratio.
+*/
 export interface GitHubMilestone {
   number: number;
   title: string;
   state: string;
+  description?: string | null;
+  openIssues: number;
+  closedIssues: number;
+  dueOn?: string | null;
+  htmlUrl?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  closedAt?: string | null;
+}
+
+/*
+FNXC:GithubPmMilestones 2026-07-25-00:00:
+KB-003 list-options: mirrors GitHub's own milestones-list query params exactly (state/sort/
+direction) so the panel's progress/overdue numbers come straight off the same payload GitHub's
+milestone page renders from. Defaults (state=all, sort=due_on, direction=asc) preserve
+listMilestones' prior no-options behavior for the FUSI-012 filter-dropdown caller.
+*/
+export interface GitHubListMilestonesOptions {
+  state?: "open" | "closed" | "all";
+  sort?: "due_on" | "completeness";
+  direction?: "asc" | "desc";
+}
+
+export interface CreateMilestoneInput {
+  title: string;
+  description?: string;
+  /** ISO-8601 due date, or omitted for no due date. */
+  dueOn?: string;
+  state?: "open" | "closed";
+}
+
+export interface UpdateMilestoneInput {
+  title?: string;
+  description?: string;
+  /** ISO-8601 due date; `null` clears the due date; `undefined` leaves it unchanged. */
+  dueOn?: string | null;
+}
+
+export interface SetMilestoneStateInput {
+  state: "open" | "closed";
 }
 
 export interface GitHubLabel {
@@ -685,12 +735,115 @@ export class GitHubClient {
    * FNXC:GithubPmIssues 2026-07-24-03:00:
    * Bounded milestones lookup for the issue-list filter dropdown (single page, capped at 100 --
    * sufficient for a dropdown; not intended for exhaustive milestone enumeration).
+   *
+   * FNXC:GithubPmMilestones 2026-07-25-00:05:
+   * KB-003 adds an options object (state/sort/direction, defaulting to the FUSI-012 no-options
+   * behavior: state=all) and maps GitHub's `open_issues`/`closed_issues`/`due_on`/`html_url`/
+   * `closed_at` fields into the milestones management panel's progress+due-date shape via
+   * `mapRestMilestone` -- the SAME mapper `createMilestone`/`updateMilestone`/`setMilestoneState`
+   * use, so list/read and write results are shaped identically.
    */
-  async listMilestones(owner: string, repo: string): Promise<GitHubMilestone[]> {
-    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/milestones?state=all&per_page=100`;
-    const { data } = await this.requestJson<Array<{ number: number; title: string; state: string }>>(url);
+  async listMilestones(owner: string, repo: string, options: GitHubListMilestonesOptions = {}): Promise<GitHubMilestone[]> {
+    const params = new URLSearchParams({
+      state: options.state ?? "all",
+      sort: options.sort ?? "due_on",
+      direction: options.direction ?? "asc",
+      per_page: "100",
+    });
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/milestones?${params.toString()}`;
+    const { data } = await this.requestJson<GitHubRestMilestoneFull[]>(url);
     const raw = Array.isArray(data) ? data : [];
-    return raw.map((milestone) => ({ number: milestone.number, title: milestone.title, state: milestone.state }));
+    return raw.map(mapRestMilestone);
+  }
+
+  /**
+   * FNXC:GithubPmMilestones 2026-07-25-00:10:
+   * KB-003: `POST /repos/{owner}/{repo}/milestones` -- returns GitHub's authoritative created
+   * milestone object, mapped through the same shape `listMilestones` returns.
+   */
+  async createMilestone(owner: string, repo: string, input: CreateMilestoneInput): Promise<GitHubMilestone> {
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/milestones`;
+    const body: Record<string, unknown> = { title: input.title };
+    if (input.description !== undefined) body.description = input.description;
+    if (input.dueOn !== undefined) body.due_on = input.dueOn;
+    if (input.state !== undefined) body.state = input.state;
+    const milestone = await this.writeJson<GitHubRestMilestoneFull>(url, "POST", body);
+    return mapRestMilestone(milestone);
+  }
+
+  /**
+   * FNXC:GithubPmMilestones 2026-07-25-00:10:
+   * KB-003: `PATCH /repos/{owner}/{repo}/milestones/{number}` for title/description/due-date only
+   * -- close/reopen is a SEPARATE method (`setMilestoneState`), mirroring the issue write split
+   * between editing content and changing lifecycle state. `dueOn: null` clears the due date.
+   */
+  async updateMilestone(owner: string, repo: string, number: number, patch: UpdateMilestoneInput): Promise<GitHubMilestone> {
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/milestones/${encodeURIComponent(String(number))}`;
+    const body: Record<string, unknown> = {};
+    if (patch.title !== undefined) body.title = patch.title;
+    if (patch.description !== undefined) body.description = patch.description;
+    if (patch.dueOn !== undefined) body.due_on = patch.dueOn;
+    const milestone = await this.writeJson<GitHubRestMilestoneFull>(url, "PATCH", body);
+    return mapRestMilestone(milestone);
+  }
+
+  /**
+   * FNXC:GithubPmMilestones 2026-07-25-00:10:
+   * KB-003: close/reopen intent via the same `PATCH .../milestones/{number}` endpoint
+   * `updateMilestone` uses, kept as a distinct method so callers state lifecycle intent
+   * explicitly (mirrors `setIssueState`).
+   */
+  async setMilestoneState(owner: string, repo: string, number: number, input: SetMilestoneStateInput): Promise<GitHubMilestone> {
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/milestones/${encodeURIComponent(String(number))}`;
+    const milestone = await this.writeJson<GitHubRestMilestoneFull>(url, "PATCH", { state: input.state });
+    return mapRestMilestone(milestone);
+  }
+
+  /**
+   * FNXC:GithubPmMilestones 2026-07-25-00:15:
+   * KB-003: `DELETE /repos/{owner}/{repo}/milestones/{number}` -- GitHub returns 204 No Content
+   * with an EMPTY body. This deliberately calls `fetchThrottled` directly (not `requestJson`,
+   * which unconditionally calls `response.json()` and would throw on the empty 204 body) so the
+   * same typed-error classification + rate-limit backoff still applies without a JSON parse.
+   */
+  async deleteMilestone(owner: string, repo: string, number: number): Promise<void> {
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/milestones/${encodeURIComponent(String(number))}`;
+    await this.fetchThrottled(url, { method: "DELETE" });
+  }
+
+  /**
+   * FNXC:GithubPmMilestones 2026-07-25-00:15:
+   * KB-003: bounded page-accumulating (via `paginateRest`) lookup of a milestone's OPEN issues
+   * only, filtering out pull requests -- feeds the close-with-open-issues reassignment flow
+   * (`postMilestoneReassignOpenIssues` iterates this result and PATCHes each issue's milestone).
+   */
+  async listOpenIssuesForMilestone(owner: string, repo: string, milestoneNumber: number, maxItems = REST_PAGE_SIZE): Promise<GitHubIssueListItem[]> {
+    const params = new URLSearchParams({ milestone: String(milestoneNumber), state: "open", per_page: String(REST_PAGE_SIZE) });
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues?${params.toString()}`;
+    const raw = await this.paginateRest<GitHubRestIssue>(url, maxItems);
+    return raw
+      .filter((issue) => !issue.pull_request)
+      .map((issue) => ({
+        number: issue.number,
+        title: issue.title,
+        state: issue.state,
+        htmlUrl: issue.html_url,
+        labels: (issue.labels ?? []).map((label) => (typeof label === "string" ? label : label.name)).filter((name): name is string => Boolean(name)),
+        createdAt: issue.created_at,
+        updatedAt: issue.updated_at,
+      }));
+  }
+
+  /**
+   * FNXC:GithubPmMilestones 2026-07-25-00:15:
+   * KB-003: sets (or clears, when `milestoneNumber` is null) a single issue's milestone via the
+   * same `PATCH .../issues/{number}` endpoint `updateIssue`/`setIssueState` use, kept distinct so
+   * the reassignment flow states its narrow intent explicitly without touching title/body/state.
+   */
+  async setIssueMilestone(owner: string, repo: string, number: number, milestoneNumber: number | null): Promise<GitHubIssueDetail> {
+    const url = `${GITHUB_REST_BASE_URL}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${encodeURIComponent(String(number))}`;
+    const issue = await this.writeJson<GitHubRestIssueDetail>(url, "PATCH", { milestone: milestoneNumber });
+    return mapRestIssueToDetail(issue, number);
   }
 
   /**
@@ -1100,6 +1253,26 @@ interface GitHubRestLabelFull {
   description?: string | null;
 }
 
+/*
+FNXC:GithubPmMilestones 2026-07-25-00:00:
+KB-003: full REST milestone payload shape (superset of `GitHubRestMilestone` above, which stays
+unchanged since it is embedded inline on an issue's `milestone` field, not the milestones-list
+/write endpoints this interface backs).
+*/
+interface GitHubRestMilestoneFull {
+  number: number;
+  title: string;
+  state: string;
+  description?: string | null;
+  open_issues?: number;
+  closed_issues?: number;
+  due_on?: string | null;
+  html_url?: string;
+  created_at?: string;
+  updated_at?: string;
+  closed_at?: string | null;
+}
+
 interface GitHubRestIssueDetail {
   number: number;
   title: string;
@@ -1192,6 +1365,29 @@ function mapRestComment(comment: GitHubRestComment): GitHubIssueComment {
     bodyMarkdown: comment.body ?? "",
     createdAt: comment.created_at,
     updatedAt: comment.updated_at,
+  };
+}
+
+/*
+FNXC:GithubPmMilestones 2026-07-25-00:00:
+Shared REST-milestone -> `GitHubMilestone` mapper used by `listMilestones`/`createMilestone`/
+`updateMilestone`/`setMilestoneState` so every read AND write result is shaped identically --
+the round-trip proof this task requires. `openIssues`/`closedIssues` always default to 0
+(never undefined) so the panel's `closed/(open+closed)` ratio is always a defined number.
+*/
+function mapRestMilestone(milestone: GitHubRestMilestoneFull): GitHubMilestone {
+  return {
+    number: milestone.number,
+    title: milestone.title,
+    state: milestone.state,
+    description: milestone.description ?? null,
+    openIssues: typeof milestone.open_issues === "number" ? milestone.open_issues : 0,
+    closedIssues: typeof milestone.closed_issues === "number" ? milestone.closed_issues : 0,
+    dueOn: milestone.due_on ?? null,
+    htmlUrl: milestone.html_url,
+    createdAt: milestone.created_at,
+    updatedAt: milestone.updated_at,
+    closedAt: milestone.closed_at ?? null,
   };
 }
 

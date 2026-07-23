@@ -239,3 +239,26 @@ export {
   githubPmUpdateLabelTool,
   githubPmDeleteLabelTool,
 } from "./tools.js";
+/*
+FNXC:GithubPmMilestones 2026-07-25-00:45:
+KB-003 re-exports: the milestone write-input types, the milestone routes array + handlers, and
+the milestone agent tools. Same one-export-block-per-feature precedent as every earlier block
+in this file; kept as its own block (rather than merged into the FUSI-014 issue block above) so
+KB-002's sibling labels re-export block lands without a merge conflict here.
+*/
+export type { GitHubListMilestonesOptions, CreateMilestoneInput, UpdateMilestoneInput, SetMilestoneStateInput } from "./github-client.js";
+export {
+  milestoneRoutes,
+  getMilestonesList,
+  postMilestoneCreate,
+  putMilestoneUpdate,
+  putMilestoneState,
+  postMilestoneDelete,
+  postMilestoneReassignOpenIssues,
+} from "./milestone-routes.js";
+export {
+  githubPmCreateMilestoneTool,
+  githubPmUpdateMilestoneTool,
+  githubPmSetMilestoneStateTool,
+  githubPmDeleteMilestoneTool,
+} from "./tools.js";
